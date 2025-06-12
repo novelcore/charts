@@ -1,0 +1,79 @@
+name: Release Charts
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'charts/**'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure Git
+        run: |
+          git config user.name "$GITHUB_ACTOR"
+          git config user.email "$GITHUB_ACTOR@users.noreply.github.com"
+
+      - name: Install Helm
+        uses: azure/setup-helm@v3
+        with:
+          version: 'v3.13.0'
+
+      - name: Add Helm repositories for dependencies
+        run: |
+          helm repo add stable https://charts.helm.sh/stable
+          helm repo add bitnami https://charts.bitnami.com/bitnami
+          helm repo update
+
+      - name: Package custom charts
+        run: |
+          mkdir -p .deploy
+          for chart in charts/custom/*/; do
+            if [ -f "$chart/Chart.yaml" ]; then
+              echo "Packaging $chart"
+              helm dependency update "$chart"
+              helm package "$chart" -d .deploy
+            fi
+          done
+
+      - name: Package external charts
+        run: |
+          for chart in charts/external/*/; do
+            if [ -f "$chart/Chart.yaml" ]; then
+              echo "Packaging $chart"
+              helm dependency update "$chart"
+              helm package "$chart" -d .deploy
+            fi
+          done
+
+      - name: Checkout gh-pages branch
+        uses: actions/checkout@v4
+        with:
+          ref: gh-pages
+          path: gh-pages
+
+      - name: Copy packages and update index
+        run: |
+          cp .deploy/*.tgz gh-pages/ || true
+          cd gh-pages
+          helm repo index . --url https://novelcore.github.io/charts/
+          
+      - name: Commit and push to gh-pages
+        run: |
+          cd gh-pages
+          git add .
+          git diff --staged --quiet || git commit -m "Update Helm repository"
+          git push

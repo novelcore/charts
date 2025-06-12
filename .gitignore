@@ -1,0 +1,59 @@
+# Helm files
+*.tgz
+*.tar.gz
+.helmignore
+charts/*/charts/
+charts/*/tmpcharts/
+
+# Lock files
+Chart.lock
+requirements.lock
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Temporary files
+*.tmp
+*.temp
+.tmp/
+.temp/
+
+# Build artifacts
+dist/
+build/
+.deploy/
+
+# Test files
+*.test
+*.out
+coverage/
+
+# Credentials (never commit these!)
+*.pem
+*.key
+secrets.yaml
+*-secrets.yaml
+.env
+
+# Helm plugin cache
+.helm/plugins/
+
+# Python
+__pycache__/
+*.py[cod]
+.Python
+venv/
+.venv/
+
+# Node.js (if using any npm tools)
+node_modules/
+package-lock.json
+yarn.lock
