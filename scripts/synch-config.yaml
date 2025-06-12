@@ -1,0 +1,65 @@
+# External Helm Chart Sync Configuration
+# This file defines which external charts to sync to our repository
+
+repositories:
+- name: bitnami
+  url: https://charts.bitnami.com/bitnami
+- name: ingress-nginx
+  url: https://kubernetes.github.io/ingress-nginx
+- name: jetstack
+  url: https://charts.jetstack.io
+- name: prometheus-community
+  url: https://prometheus-community.github.io/helm-charts
+- name: grafana
+  url: https://grafana.github.io/helm-charts
+- name: crossplane-stable
+  url: https://charts.crossplane.io/stable
+
+# Charts to sync from external repositories
+# Leave version empty to always get the latest version
+charts:
+# Crossplane
+- name: crossplane
+  repository: crossplane-stable
+  version: "1.20.0" # Specific version as requested
+
+# Bitnami charts
+# - name: postgresql
+#   repository: bitnami
+#   version: "" # Latest
+
+# - name: redis
+#   repository: bitnami
+#   version: ""
+
+# - name: nginx
+#   repository: bitnami
+#   version: ""
+
+# # Ingress controller
+# - name: ingress-nginx
+#   repository: ingress-nginx
+#   version: ""
+
+# # Cert-manager for TLS
+# - name: cert-manager
+#   repository: jetstack
+#   version: ""
+
+# # Monitoring stack
+# - name: kube-prometheus-stack
+#   repository: prometheus-community
+#   version: ""
+
+# - name: grafana
+#   repository: grafana
+#   version: ""
+
+# Sync schedule and options
+sync:
+  # Preserve local modifications
+  preserveLocal: true
+  # Create PR instead of direct commit
+  createPR: true
+  # Auto-merge PR if all checks pass
+  autoMerge: false
