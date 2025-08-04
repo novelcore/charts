@@ -236,18 +236,65 @@ controllerConfiguration:
   enabled: true
   # Configuration name
   name: controller-configuration
-
+  
   # Requeue durations
-  argocdCommitStatusRequeueDuration: "5m"
+  argocdCommitStatusRequeueDuration: "120s"
   changeTransferPolicyRequeueDuration: "5m"
   promotionStrategyRequeueDuration: "5m"
   pullRequestRequeueDuration: "5m"
-
+  
   # Pull Request template configuration
   pullRequest:
     template:
-      title: "Promote {{ trunc 5 .ChangeTransferPolicy.Status.Proposed.Dry.Sha }} to `{{ .ChangeTransferPolicy.Spec.ActiveBranch }}`"
-      description: "This PR is promoting the environment branch `{{ .ChangeTransferPolicy.Spec.ActiveBranch }}` which is currently on dry sha {{ .ChangeTransferPolicy.Status.Active.Dry.Sha }} to dry sha {{ .ChangeTransferPolicy.Status.Proposed.Dry.Sha }}."
+      title: "Promote {{ trunc 7 .ChangeTransferPolicy.Status.Proposed.Dry.Sha }} to `{{ .ChangeTransferPolicy.Spec.ActiveBranch }}`"
+      description: |
+        ## 🚀 Promotion Summary
+        This PR promotes changes from **{{ .ChangeTransferPolicy.Spec.ProposedBranch }}** to **{{ .ChangeTransferPolicy.Spec.ActiveBranch }}**.
+
+        ## 📊 Branch Details
+        | | Active | Proposed |
+        |---|---|---|
+        | **Branch** | `{{ .ChangeTransferPolicy.Spec.ActiveBranch }}` | `{{ .ChangeTransferPolicy.Spec.ProposedBranch }}` |
+        | **Dry SHA** | `{{ trunc 7 .ChangeTransferPolicy.Status.Active.Dry.Sha }}` | `{{ trunc 7 .ChangeTransferPolicy.Status.Proposed.Dry.Sha }}` |
+        | **Hydrated SHA** | `{{ trunc 7 .ChangeTransferPolicy.Status.Active.Hydrated.Sha }}` | `{{ trunc 7 .ChangeTransferPolicy.Status.Proposed.Hydrated.Sha }}` |
+        | **Commit Time** | {{ .ChangeTransferPolicy.Status.Active.Dry.CommitTime }} | {{ .ChangeTransferPolicy.Status.Proposed.Dry.CommitTime }} |
+
+        ## 💡 Change Links
+        * [View Active Branch](https://github.com/[[OWNER]]/[[REPO]]/tree/{{ .ChangeTransferPolicy.Spec.ActiveBranch }})
+        * [View Proposed Branch](https://github.com/[[OWNER]]/[[REPO]]/tree/{{ .ChangeTransferPolicy.Spec.ProposedBranch }})
+        * [View Active Commit](https://github.com/[[OWNER]]/[[REPO]]/commit/{{ .ChangeTransferPolicy.Status.Active.Dry.Sha }})
+        * [View Proposed Commit](https://github.com/[[OWNER]]/[[REPO]]/commit/{{ .ChangeTransferPolicy.Status.Proposed.Dry.Sha }})
+        * [Compare Changes](https://github.com/[[OWNER]]/[[REPO]]/compare/{{ .ChangeTransferPolicy.Status.Active.Dry.Sha }}...{{ .ChangeTransferPolicy.Status.Proposed.Dry.Sha }})
+
+        ## 🔍 Current Status Checks
+
+        ### ❗Active commit statuses
+        {{ range .ChangeTransferPolicy.Status.Active.CommitStatuses }}
+        * {{ .Key }}: **{{ .Phase }}**
+        {{- end }}
+
+        ### 👀 Proposed commit statuses
+        {{ range .ChangeTransferPolicy.Status.Proposed.CommitStatuses }}
+        * {{ .Key }}: **{{ .Phase }}**
+        {{- end }}
+
+        ## ✅ Acceptance Criteria
+        This promotion can be merged when all of the following checks pass:
+        {{ range .ChangeTransferPolicy.Spec.ActiveCommitStatuses }}
+        - [ ] {{ .Key }} status is successful on active branch
+        {{- end }}
+        {{ range .ChangeTransferPolicy.Spec.ProposedCommitStatuses }}
+        - [ ] {{ .Key }} status is successful on proposed branch
+        {{- end }}
+        - [ ] Code review approval from at least one team member
+
+        ## 👥 Reviewers
+        @[[OWNER]]/[[REPO]]-ops
+        
+        ## Additional Information
+        * **Auto-Merge**: {{ .ChangeTransferPolicy.Spec.AutoMerge }}
+        * **Full Active Dry SHA**: `{{ .ChangeTransferPolicy.Status.Active.Dry.Sha }}`
+        * **Full Proposed Dry SHA**: `{{ .ChangeTransferPolicy.Status.Proposed.Dry.Sha }}`
 
 # Custom Resource Definitions
 crds:
@@ -279,6 +326,36 @@ monitoring:
     labels: {}
     # Additional annotations for PodMonitor
     annotations: {}
+
+# Ingress configuration for webhook receiver
+ingress:
+  # Enable ingress
+  enabled: false
+  # Ingress class name
+  ingressClassName: "traefik-system"
+  # Hostname for the webhook receiver
+  hostname: "promoter-webhook.example.com"
+  # Path configuration
+  path: "/"
+  pathType: "Prefix"
+  # TLS configuration
+  tls:
+    # Enable TLS
+    enabled: true
+    # Secret name for TLS certificate
+    secretName: ""  # If empty, defaults to hostname
+  # Additional annotations
+  annotations:
+    # Example annotations for different ingress controllers:
+    # For cert-manager
+    cert-manager.io/cluster-issuer: "sys-prod-issuer"
+    # For nginx-ingress:
+    # nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    # nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
+    # For traefik:
+    # traefik.ingress.kubernetes.io/router.entrypoints: "websecure"
+  # Additional labels
+  labels: {}
 
 # Network Policy
 networkPolicy:

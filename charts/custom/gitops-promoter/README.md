@@ -51,6 +51,9 @@ The following table lists the configurable parameters and their default values:
 | `rbac.create` | Create RBAC resources | `true` |
 | `services.metrics.enabled` | Enable metrics service | `true` |
 | `services.webhookReceiver.enabled` | Enable webhook receiver service | `true` |
+| `ingress.enabled` | Enable ingress for webhook receiver | `false` |
+| `ingress.hostname` | Hostname for webhook ingress | `promoter-webhook.example.com` |
+| `ingress.ingressClassName` | Ingress class name | `traefik-system` |
 
 ### Advanced Configuration
 
@@ -140,14 +143,33 @@ monitoring:
 ```yaml
 controllerConfiguration:
   enabled: true
-  argocdCommitStatusRequeueDuration: "5m"
+  argocdCommitStatusRequeueDuration: "120s"
   changeTransferPolicyRequeueDuration: "5m"
   promotionStrategyRequeueDuration: "5m"
   pullRequestRequeueDuration: "5m"
   pullRequest:
     template:
-      title: "Promote {{ trunc 5 .ChangeTransferPolicy.Status.Proposed.Dry.Sha }} to `{{ .ChangeTransferPolicy.Spec.ActiveBranch }}`"
-      description: "Custom promotion description template"
+      title: "Promote {{ trunc 7 .ChangeTransferPolicy.Status.Proposed.Dry.Sha }} to `{{ .ChangeTransferPolicy.Spec.ActiveBranch }}`"
+      description: |
+        ## 🚀 Promotion Summary
+        This PR promotes changes from **{{ .ChangeTransferPolicy.Spec.ProposedBranch }}** to **{{ .ChangeTransferPolicy.Spec.ActiveBranch }}**.
+        # ... (enhanced template with tables, links, and status checks)
+```
+
+#### Ingress Configuration
+
+```yaml
+ingress:
+  enabled: true
+  ingressClassName: "traefik-system"
+  hostname: "promoter-webhook.kubecore.eu"
+  path: "/"
+  pathType: "Prefix"
+  tls:
+    enabled: true
+    secretName: ""  # Defaults to hostname if empty
+  annotations:
+    cert-manager.io/cluster-issuer: "sys-prod-issuer"
 ```
 
 ## Usage Examples
@@ -234,11 +256,22 @@ monitoring:
     labels:
       prometheus: kube-prometheus
 
-services:
-  webhookReceiver:
-    type: LoadBalancer
-    annotations:
-      service.beta.kubernetes.io/aws-load-balancer-type: nlb
+# Ingress for webhook receiver
+ingress:
+  enabled: true
+  ingressClassName: "traefik-system"
+  hostname: "promoter-webhook.kubecore.eu"
+  tls:
+    enabled: true
+  annotations:
+    cert-manager.io/cluster-issuer: "sys-prod-issuer"
+
+# Enhanced controller configuration
+controllerConfiguration:
+  argocdCommitStatusRequeueDuration: "120s"
+  pullRequest:
+    template:
+      title: "Promote {{ trunc 7 .ChangeTransferPolicy.Status.Proposed.Dry.Sha }} to `{{ .ChangeTransferPolicy.Spec.ActiveBranch }}`"
 
 pod:
   nodeSelector:

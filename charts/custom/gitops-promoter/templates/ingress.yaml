@@ -1,0 +1,37 @@
+{{- if .Values.ingress.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "gitops-promoter.ingressName" . }}
+  namespace: {{ include "gitops-promoter.namespace" . }}
+  labels:
+    {{- include "gitops-promoter.labels" . | nindent 4 }}
+    {{- with .Values.ingress.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  {{- with (mergeOverwrite (deepCopy .Values.commonAnnotations) .Values.ingress.annotations) }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- if .Values.ingress.ingressClassName }}
+  ingressClassName: {{ .Values.ingress.ingressClassName }}
+  {{- end }}
+  {{- if and .Values.ingress.tls.enabled .Values.ingress.hostname }}
+  tls:
+  - hosts:
+    - {{ include "gitops-promoter.ingressHostname" . }}
+    secretName: {{ include "gitops-promoter.tlsSecretName" . }}
+  {{- end }}
+  rules:
+  - host: {{ include "gitops-promoter.ingressHostname" . }}
+    http:
+      paths:
+      - path: {{ .Values.ingress.path }}
+        pathType: {{ .Values.ingress.pathType }}
+        backend:
+          service:
+            name: {{ include "gitops-promoter.webhookReceiverServiceName" . }}
+            port:
+              number: {{ .Values.services.webhookReceiver.port }}
+{{- end }}

@@ -18,5 +18,6 @@ spec:
   pullRequest:
     template:
       title: {{ .Values.controllerConfiguration.pullRequest.template.title | quote }}
-      description: {{ .Values.controllerConfiguration.pullRequest.template.description | quote }}
+      description: |
+        {{- .Values.controllerConfiguration.pullRequest.template.description | nindent 8 }}
 {{- end }}

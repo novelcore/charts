@@ -168,6 +168,31 @@ Common annotations
 {{- end }}
 
 {{/*
+Create the ingress name
+*/}}
+{{- define "gitops-promoter.ingressName" -}}
+{{- printf "%s-webhook-receiver" (include "gitops-promoter.fullname" .) }}
+{{- end }}
+
+{{/*
+Create the ingress hostname
+*/}}
+{{- define "gitops-promoter.ingressHostname" -}}
+{{- .Values.ingress.hostname }}
+{{- end }}
+
+{{/*
+Create the TLS secret name
+*/}}
+{{- define "gitops-promoter.tlsSecretName" -}}
+{{- if .Values.ingress.tls.secretName }}
+{{- .Values.ingress.tls.secretName }}
+{{- else }}
+{{- .Values.ingress.hostname }}
+{{- end }}
+{{- end }}
+
+{{/*
 Validate required values
 */}}
 {{- define "gitops-promoter.validateValues" -}}
@@ -182,5 +207,8 @@ Validate required values
 {{- end }}
 {{- if not .Values.kubeRbacProxy.image.tag }}
 {{- fail "kubeRbacProxy.image.tag is required" }}
+{{- end }}
+{{- if and .Values.ingress.enabled (not .Values.ingress.hostname) }}
+{{- fail "ingress.hostname is required when ingress is enabled" }}
 {{- end }}
 {{- end }}

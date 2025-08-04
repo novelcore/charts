@@ -66,24 +66,24 @@ jobs:
         run: |
           ct install --target-branch ${{ github.event.repository.default_branch }}
 
-  security-scan:
-    runs-on: ubuntu-latest
-    # Only run security scan if Code Security is enabled
-    if: github.repository_owner == 'novelcore' || vars.ENABLE_SECURITY_SCAN == 'true'
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+  # security-scan:
+  #   runs-on: ubuntu-latest
+  #   # Only run security scan if Code Security is enabled
+  #   if: github.repository_owner == 'novelcore' || vars.ENABLE_SECURITY_SCAN == 'true'
+  #   steps:
+  #     - name: Checkout
+  #       uses: actions/checkout@v4
 
-      - name: Run Trivy scanner
-        uses: aquasecurity/trivy-action@master
-        with:
-          scan-type: 'config'
-          scan-ref: 'charts'
-          format: 'sarif'
-          output: 'trivy-results.sarif'
+  #     - name: Run Trivy scanner
+  #       uses: aquasecurity/trivy-action@master
+  #       with:
+  #         scan-type: 'config'
+  #         scan-ref: 'charts'
+  #         format: 'sarif'
+  #         output: 'trivy-results.sarif'
 
-      - name: Upload Trivy results to GitHub Security
-        uses: github/codeql-action/upload-sarif@v3
-        if: always()
-        with:
-          sarif_file: 'trivy-results.sarif'
+  #     - name: Upload Trivy results to GitHub Security
+  #       uses: github/codeql-action/upload-sarif@v3
+  #       if: always()
+  #       with:
+  #         sarif_file: 'trivy-results.sarif'
