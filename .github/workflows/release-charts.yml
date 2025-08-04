@@ -74,6 +74,8 @@ jobs:
       - name: Commit and push to gh-pages
         run: |
           cd gh-pages
+          git config user.name "AbstractVersion"
+          git config user.email "g.fiotakis@hotmail.com"
           git add .
           git diff --staged --quiet || git commit -m "Update Helm repository"
           git push

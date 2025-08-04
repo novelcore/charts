@@ -38,6 +38,11 @@ jobs:
         run: |
           helm repo add stable https://charts.helm.sh/stable
           helm repo add bitnami https://charts.bitnami.com/bitnami
+          helm repo add crossplane-stable https://charts.crossplane.io/stable
+          helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx
+          helm repo add jetstack https://charts.jetstack.io
+          helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+          helm repo add grafana https://grafana.github.io/helm-charts
           helm repo update
 
       - name: Run chart-testing (list-changed)
@@ -50,7 +55,7 @@ jobs:
 
       - name: Run chart-testing (lint)
         run: |
-          ct lint --config ct.yaml --target-branch ${{ github.event.repository.default_branch }}
+          ct lint --target-branch ${{ github.event.repository.default_branch }}
 
       - name: Create kind cluster
         if: steps.list-changed.outputs.changed == 'true'
@@ -59,10 +64,12 @@ jobs:
       - name: Run chart-testing (install)
         if: steps.list-changed.outputs.changed == 'true'
         run: |
-          ct install --config ct.yaml --target-branch ${{ github.event.repository.default_branch }}
+          ct install --target-branch ${{ github.event.repository.default_branch }}
 
   security-scan:
     runs-on: ubuntu-latest
+    # Only run security scan if Code Security is enabled
+    if: github.repository_owner == 'novelcore' || vars.ENABLE_SECURITY_SCAN == 'true'
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -76,7 +83,7 @@ jobs:
           output: 'trivy-results.sarif'
 
       - name: Upload Trivy results to GitHub Security
-        uses: github/codeql-action/upload-sarif@v2
+        uses: github/codeql-action/upload-sarif@v3
         if: always()
         with:
           sarif_file: 'trivy-results.sarif'

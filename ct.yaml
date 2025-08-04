@@ -1,0 +1,47 @@
+# Chart Testing Configuration
+# Configuration for the chart-testing tool (ct)
+
+# Target branch for comparison
+target-branch: main
+
+# Chart directories to lint and test
+chart-dirs:
+- charts/custom
+- charts/external
+
+# Excluded charts (if any)
+excluded-charts: []
+
+# Helm extra arguments
+helm-extra-args: --timeout 600s
+
+# Check version increment
+check-version-increment: true
+
+# Validate maintainers
+validate-maintainers: false
+
+# Additional Helm repositories for dependencies
+helm-repos:
+- stable=https://charts.helm.sh/stable
+- bitnami=https://charts.bitnami.com/bitnami
+- crossplane-stable=https://charts.crossplane.io/stable
+- ingress-nginx=https://kubernetes.github.io/ingress-nginx
+- jetstack=https://charts.jetstack.io
+- prometheus-community=https://prometheus-community.github.io/helm-charts
+- grafana=https://grafana.github.io/helm-charts
+
+# Chart schema validation
+validate-chart-schema: true
+
+# YAML schema validation
+validate-yaml-schema: true
+
+# Lint configuration
+lint-conf: .yamllint.yaml
+
+# Additional linters
+additional-commands: []
+
+# Debug mode
+debug: false

@@ -1,0 +1,48 @@
+# YAML Lint Configuration for Chart Testing
+
+extends: default
+
+rules:
+  # Allow longer lines for Helm templates
+  line-length:
+    max: 120
+    level: warning
+
+  # Allow empty values in YAML (common in Helm values.yaml)
+  empty-values:
+    forbid-in-block-mappings: false
+    forbid-in-flow-mappings: false
+
+  # Allow truthy values (yes/no, on/off, etc.)
+  truthy:
+    allowed-values: [ 'true', 'false', 'yes', 'no', 'on', 'off' ]
+    check-keys: false
+
+  # Allow quoted strings
+  quoted-strings:
+    quote-type: any
+    required: false
+
+  # Indentation rules
+  indentation:
+    spaces: 2
+    indent-sequences: true
+    check-multi-line-strings: false
+
+  # Comments
+  comments:
+    min-spaces-from-content: 1
+
+  # Document start
+  document-start:
+    present: false
+
+  # Brackets
+  brackets:
+    min-spaces-inside: 0
+    max-spaces-inside: 1
+
+  # Braces
+  braces:
+    min-spaces-inside: 0
+    max-spaces-inside: 1
