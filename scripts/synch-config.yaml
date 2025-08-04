@@ -16,6 +16,8 @@ repositories:
   url: https://charts.crossplane.io/stable
 - name: argo
   url: https://argoproj.github.io/argo-helm
+- name: ariga
+  url: oci://ghcr.io/ariga/charts
 
 # Charts to sync from external repositories
 # Leave version empty to always get the latest version
@@ -57,6 +59,11 @@ charts:
 - name: argo-rollouts
   repository: argo
   version: "2.40.3"
+
+# Atlas Operator
+- name: atlas-operator
+  repository: ariga
+  version: "0.7.7"
 
 # # Monitoring stack
 # - name: kube-prometheus-stack
