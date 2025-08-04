@@ -1,4 +1,4 @@
-{{- if .Values.crds.install }}
+{{- if false }}
 {{- $crdContent := .Files.Get "crds/promoter-crds.yaml" }}
 {{- if $crdContent }}
 {{- $resourcePolicy := "keep" }}
