@@ -5,9 +5,10 @@
 {{- if not .Values.crds.keep }}
 {{- $resourcePolicy = "delete" }}
 {{- end }}
-{{- /* Process CRDs with dynamic resource policy and before-hook-creation for graceful handling */ -}}
+{{- /* Process CRDs with dynamic resource policy */ -}}
 {{- $processedContent := $crdContent | replace "helm.sh/resource-policy: keep" (printf "helm.sh/resource-policy: %s" $resourcePolicy) }}
-{{- $processedContent = $processedContent | replace "helm.sh/hook: pre-install,pre-upgrade" "helm.sh/hook: pre-install,pre-upgrade\n    helm.sh/hook-delete-policy: before-hook-creation" }}
+{{- /* Add hook-delete-policy for graceful handling of existing CRDs */ -}}
+{{- $processedContent = $processedContent | replace "    helm.sh/hook-weight: \"-5\"" "    helm.sh/hook-weight: \"-5\"\n    helm.sh/hook-delete-policy: before-hook-creation" }}
 {{ $processedContent }}
 {{- else }}
 # CRDs will be installed from the upstream install.yaml
