@@ -3,11 +3,11 @@ entries:
   crossplane:
   - apiVersion: v1
     appVersion: 1.20.0
-    created: "2025-06-12T09:52:10.09621+03:00"
+    created: "2025-08-04T09:34:23.297990827Z"
     description: Crossplane is an open source Kubernetes add-on that enables platform
       teams to assemble infrastructure from multiple vendors, and expose higher level
       self-service APIs for application teams to consume.
-    digest: 9a1a6628c4f93889b20edad9ed4614bdc1a0a12b04339548e5bab7c7af4754bf
+    digest: 712c193cca306cb77b7d29e27bbcff31e505ce218ed2cf08d571c415fb277391
     home: https://crossplane.io
     icon: https://docs.crossplane.io/android-chrome-192x192.png
     keywords:
@@ -40,43 +40,51 @@ entries:
     urls:
     - https://novelcore.github.io/charts/crossplane-1.20.0.tgz
     version: 1.20.0
-  - apiVersion: v1
-    appVersion: 1.20.0
-    created: "2025-06-12T09:52:10.096813+03:00"
-    description: Crossplane is an open source Kubernetes add-on that enables platform
-      teams to assemble infrastructure from multiple vendors, and expose higher level
-      self-service APIs for application teams to consume.
-    digest: 9a1a6628c4f93889b20edad9ed4614bdc1a0a12b04339548e5bab7c7af4754bf
-    home: https://crossplane.io
-    icon: https://docs.crossplane.io/android-chrome-192x192.png
+  gitops-promoter:
+  - annotations:
+      artifacthub.io/category: integration-delivery
+      artifacthub.io/changes: |
+        - kind: added
+          description: Initial Helm chart for GitOps Promoter v0.10.2
+        - kind: added
+          description: Comprehensive configuration options for all components
+        - kind: added
+          description: Support for custom resource limits and requests
+        - kind: added
+          description: Configurable RBAC and security contexts
+      artifacthub.io/images: |
+        - name: gitops-promoter
+          image: quay.io/argoprojlabs/gitops-promoter:v0.10.2
+        - name: kube-rbac-proxy
+          image: quay.io/brancz/kube-rbac-proxy:v0.17.0
+      artifacthub.io/license: Apache-2.0
+      artifacthub.io/links: |
+        - name: GitOps Promoter Documentation
+          url: https://github.com/argoproj-labs/gitops-promoter/blob/main/README.md
+        - name: Release Notes
+          url: https://github.com/argoproj-labs/gitops-promoter/releases/tag/v0.10.2
+    apiVersion: v2
+    appVersion: 0.10.2
+    created: "2025-08-04T09:34:23.298955311Z"
+    description: A Helm chart for GitOps Promoter - A tool for promoting changes between
+      environments in GitOps workflows
+    digest: ce25747621432432c87cf6b212b13facb34f4c8a32ba57cfedb88c6d0fb2107d
+    home: https://github.com/argoproj-labs/gitops-promoter
     keywords:
-    - cloud
-    - infrastructure
-    - services
-    - application
-    - database
-    - cache
-    - bucket
-    - infra
-    - app
-    - ops
-    - gcp
-    - azure
-    - aws
-    - alibaba
-    - cloudsql
-    - rds
-    - s3
-    - azuredatabase
-    - asparadb
-    - gke
-    - aks
-    - eks
+    - gitops
+    - promotion
+    - argocd
+    - continuous-deployment
+    - environment-promotion
+    kubeVersion: '>=1.20.0-0'
     maintainers:
-    - email: info@crossplane.io
-      name: Crossplane Maintainers
-    name: crossplane
+    - email: platform@novelcore.io
+      name: Novelcore Platform Team
+    name: gitops-promoter
+    sources:
+    - https://github.com/argoproj-labs/gitops-promoter
+    type: application
     urls:
-    - https://novelcore.github.io/charts/.deploy/crossplane-1.20.0.tgz
-    version: 1.20.0
-generated: "2025-06-12T09:52:10.095112+03:00"
+    - https://novelcore.github.io/charts/gitops-promoter-0.1.0.tgz
+    version: 0.1.0
+generated: "2025-08-04T09:34:23.296986687Z"
