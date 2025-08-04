@@ -37,7 +37,7 @@ helm install argocd-with-rollouts novelcore/argo-cd-with-rollouts \
 ```yaml
 rollouts:
   enabled: true  # Enable Argo Rollouts
-  controller:
+controller:
     enabled: true  # Enable Rollouts controller
   dashboard:
     enabled: true  # Enable Rollouts dashboard
@@ -48,7 +48,7 @@ rollouts:
 ```yaml
 rollouts:
   enabled: true
-  controller:
+controller:
     # All argo-rollouts controller values can be configured here
     replicaCount: 1
     resources:
@@ -61,8 +61,8 @@ rollouts:
   dashboard:
     # All argo-rollouts dashboard values can be configured here
     replicaCount: 1
-    ingress:
-      enabled: true
+  ingress:
+    enabled: true
       className: nginx
 ```
 
