@@ -14,6 +14,8 @@ repositories:
   url: https://grafana.github.io/helm-charts
 - name: crossplane-stable
   url: https://charts.crossplane.io/stable
+- name: argo
+  url: https://argoproj.github.io/argo-helm
 
 # Charts to sync from external repositories
 # Leave version empty to always get the latest version
@@ -45,6 +47,11 @@ charts:
 - name: cert-manager
   repository: jetstack
   version: "v1.17.1"
+
+# Argo Events
+- name: argo-events
+  repository: argo
+  version: "2.4.15"
 
 # # Monitoring stack
 # - name: kube-prometheus-stack
