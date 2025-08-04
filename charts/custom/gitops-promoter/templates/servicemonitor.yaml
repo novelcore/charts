@@ -1,0 +1,30 @@
+{{- if and .Values.monitoring.serviceMonitor.enabled .Values.services.metrics.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "gitops-promoter.fullname" . }}
+  namespace: {{ include "gitops-promoter.namespace" . }}
+  labels:
+    {{- include "gitops-promoter.labels" . | nindent 4 }}
+    {{- with .Values.monitoring.serviceMonitor.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  {{- with (mergeOverwrite (deepCopy .Values.commonAnnotations) .Values.monitoring.serviceMonitor.annotations) }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "gitops-promoter.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: kube-rbac-proxy
+  endpoints:
+  - path: {{ .Values.monitoring.serviceMonitor.path }}
+    port: https
+    interval: {{ .Values.monitoring.serviceMonitor.interval }}
+    scrapeTimeout: {{ .Values.monitoring.serviceMonitor.scrapeTimeout }}
+    scheme: https
+    tlsConfig:
+      insecureSkipVerify: true
+    bearerTokenFile: /var/run/secrets/kubernetes.io/serviceaccount/token
+{{- end }}

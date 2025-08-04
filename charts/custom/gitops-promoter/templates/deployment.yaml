@@ -1,0 +1,103 @@
+{{- include "gitops-promoter.validateValues" . }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "gitops-promoter.controllerManagerName" . }}
+  namespace: {{ include "gitops-promoter.namespace" . }}
+  labels:
+    {{- include "gitops-promoter.controllerManagerLabels" . | nindent 4 }}
+  {{- with (mergeOverwrite (deepCopy .Values.commonAnnotations) .Values.pod.annotations) }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  replicas: {{ .Values.controllerManager.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "gitops-promoter.controllerManagerSelectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        kubectl.kubernetes.io/default-container: manager
+        {{- with (mergeOverwrite (deepCopy .Values.commonAnnotations) .Values.pod.annotations) }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      labels:
+        {{- include "gitops-promoter.controllerManagerSelectorLabels" . | nindent 8 }}
+        {{- with .Values.pod.labels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- include "gitops-promoter.imagePullSecrets" . | nindent 6 }}
+      serviceAccountName: {{ include "gitops-promoter.serviceAccountName" . }}
+      terminationGracePeriodSeconds: {{ .Values.pod.terminationGracePeriodSeconds }}
+      securityContext:
+        {{- toYaml .Values.pod.securityContext | nindent 8 }}
+      {{- with .Values.pod.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.pod.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.pod.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+      - name: kube-rbac-proxy
+        image: {{ include "gitops-promoter.kubeRbacProxyImage" . }}
+        imagePullPolicy: {{ .Values.kubeRbacProxy.image.pullPolicy }}
+        args:
+        - --secure-listen-address={{ .Values.kubeRbacProxy.args.secureListenAddress }}
+        - --upstream={{ .Values.kubeRbacProxy.args.upstream }}
+        - --logtostderr={{ .Values.kubeRbacProxy.args.logtostderr }}
+        - --v={{ .Values.kubeRbacProxy.args.v }}
+        ports:
+        - containerPort: 8443
+          name: https
+          protocol: TCP
+        resources:
+          {{- toYaml .Values.kubeRbacProxy.resources | nindent 10 }}
+        securityContext:
+          {{- toYaml .Values.kubeRbacProxy.securityContext | nindent 10 }}
+      - name: manager
+        image: {{ include "gitops-promoter.controllerManagerImage" . }}
+        imagePullPolicy: {{ .Values.controllerManager.image.pullPolicy }}
+        command:
+        - /gitops-promoter
+        - controller
+        args:
+        - --health-probe-bind-address={{ .Values.controllerManager.args.healthProbeBindAddress }}
+        - --metrics-bind-address={{ .Values.controllerManager.args.metricsBindAddress }}
+        {{- if .Values.controllerManager.args.leaderElect }}
+        - --leader-elect
+        {{- end }}
+        {{- with .Values.controllerManager.env }}
+        env:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+        ports:
+        - containerPort: 8081
+          name: health
+          protocol: TCP
+        - containerPort: 3333
+          name: webhook
+          protocol: TCP
+        livenessProbe:
+          {{- toYaml .Values.controllerManager.livenessProbe | nindent 10 }}
+        readinessProbe:
+          {{- toYaml .Values.controllerManager.readinessProbe | nindent 10 }}
+        resources:
+          {{- toYaml .Values.controllerManager.resources | nindent 10 }}
+        securityContext:
+          {{- toYaml .Values.controllerManager.securityContext | nindent 10 }}
+        {{- with .Values.controllerManager.volumeMounts }}
+        volumeMounts:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+      {{- with .Values.pod.volumes }}
+      volumes:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

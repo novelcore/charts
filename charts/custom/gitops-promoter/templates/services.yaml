@@ -1,0 +1,53 @@
+{{- if .Values.services.metrics.enabled }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "gitops-promoter.metricsServiceName" . }}
+  namespace: {{ include "gitops-promoter.namespace" . }}
+  labels:
+    {{- include "gitops-promoter.labels" . | nindent 4 }}
+    app.kubernetes.io/component: kube-rbac-proxy
+    {{- with .Values.services.metrics.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  {{- with (mergeOverwrite (deepCopy .Values.commonAnnotations) .Values.services.metrics.annotations) }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ .Values.services.metrics.type }}
+  ports:
+  - name: https
+    port: {{ .Values.services.metrics.port }}
+    protocol: TCP
+    targetPort: {{ .Values.services.metrics.targetPort }}
+  selector:
+    {{- include "gitops-promoter.controllerManagerSelectorLabels" . | nindent 4 }}
+{{- end }}
+
+{{- if .Values.services.webhookReceiver.enabled }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "gitops-promoter.webhookReceiverServiceName" . }}
+  namespace: {{ include "gitops-promoter.namespace" . }}
+  labels:
+    {{- include "gitops-promoter.labels" . | nindent 4 }}
+    {{- with .Values.services.webhookReceiver.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  {{- with (mergeOverwrite (deepCopy .Values.commonAnnotations) .Values.services.webhookReceiver.annotations) }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ .Values.services.webhookReceiver.type }}
+  ports:
+  - port: {{ .Values.services.webhookReceiver.port }}
+    protocol: TCP
+    targetPort: {{ .Values.services.webhookReceiver.targetPort }}
+  selector:
+    {{- include "gitops-promoter.controllerManagerSelectorLabels" . | nindent 4 }}
+{{- end }}

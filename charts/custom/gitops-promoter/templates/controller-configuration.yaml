@@ -1,0 +1,22 @@
+{{- if .Values.controllerConfiguration.enabled }}
+apiVersion: promoter.argoproj.io/v1alpha1
+kind: ControllerConfiguration
+metadata:
+  name: {{ include "gitops-promoter.controllerConfigurationName" . }}
+  namespace: {{ include "gitops-promoter.namespace" . }}
+  labels:
+    {{- include "gitops-promoter.labels" . | nindent 4 }}
+  {{- with .Values.commonAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  argocdCommitStatusRequeueDuration: {{ .Values.controllerConfiguration.argocdCommitStatusRequeueDuration }}
+  changeTransferPolicyRequeueDuration: {{ .Values.controllerConfiguration.changeTransferPolicyRequeueDuration }}
+  promotionStrategyRequeueDuration: {{ .Values.controllerConfiguration.promotionStrategyRequeueDuration }}
+  pullRequestRequeueDuration: {{ .Values.controllerConfiguration.pullRequestRequeueDuration }}
+  pullRequest:
+    template:
+      title: {{ .Values.controllerConfiguration.pullRequest.template.title | quote }}
+      description: {{ .Values.controllerConfiguration.pullRequest.template.description | quote }}
+{{- end }}

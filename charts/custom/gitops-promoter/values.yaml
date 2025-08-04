@@ -1,0 +1,318 @@
+# GitOps Promoter Helm Chart Values
+# This file contains all configurable parameters for the GitOps Promoter deployment
+
+# Name overrides
+nameOverride: ""
+fullnameOverride: ""
+
+# Global settings
+global:
+  # Image pull secrets for private registries
+  imagePullSecrets: []
+  # Example:
+  # - name: regcred
+
+  # Namespace configuration
+namespace:
+  # Create namespace if it doesn't exist
+  create: true
+  # Namespace name (if not specified, defaults to release namespace)
+  name: ""
+  # Additional labels for the namespace
+  labels: {}
+  # Additional annotations for the namespace
+  annotations: {}
+
+# Controller manager configuration
+controllerManager:
+  # Image configuration
+  image:
+    repository: quay.io/argoprojlabs/gitops-promoter
+    tag: "v0.10.2"
+    pullPolicy: IfNotPresent
+
+  # Replica count
+  replicaCount: 1
+
+  # Command line arguments
+  args:
+    healthProbeBindAddress: ":8081"
+    metricsBindAddress: "127.0.0.1:8080"
+    leaderElect: true
+
+  # Resource limits and requests
+  resources:
+    limits:
+      cpu: 500m
+      memory: 128Mi
+    requests:
+      cpu: 10m
+      memory: 64Mi
+
+  # Liveness probe configuration
+  livenessProbe:
+    httpGet:
+      path: /healthz
+      port: 8081
+    initialDelaySeconds: 15
+    periodSeconds: 20
+    timeoutSeconds: 1
+    failureThreshold: 3
+    successThreshold: 1
+
+  # Readiness probe configuration
+  readinessProbe:
+    httpGet:
+      path: /readyz
+      port: 8081
+    initialDelaySeconds: 5
+    periodSeconds: 10
+    timeoutSeconds: 1
+    failureThreshold: 3
+    successThreshold: 1
+
+  # Security context for the container
+  securityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+      - ALL
+    readOnlyRootFilesystem: true
+    runAsNonRoot: true
+    runAsUser: 65532
+
+  # Environment variables
+  env: []
+  # Example:
+  # - name: LOG_LEVEL
+  #   value: "info"
+
+  # Volume mounts
+  volumeMounts: []
+  # Example:
+  # - name: config
+  #   mountPath: /etc/promoter
+  #   readOnly: true
+
+  # Kube RBAC Proxy configuration (sidecar container)
+kubeRbacProxy:
+  # Image configuration
+  image:
+    repository: quay.io/brancz/kube-rbac-proxy
+    tag: "v0.17.0"
+    pullPolicy: IfNotPresent
+
+  # Command line arguments
+  args:
+    secureListenAddress: "0.0.0.0:8443"
+    upstream: "http://127.0.0.1:8080/"
+    logtostderr: true
+    v: "0"
+
+  # Resource limits and requests
+  resources:
+    limits:
+      cpu: 500m
+      memory: 128Mi
+    requests:
+      cpu: 5m
+      memory: 64Mi
+
+  # Security context for the container
+  securityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+      - ALL
+    readOnlyRootFilesystem: true
+    runAsNonRoot: true
+    runAsUser: 65532
+
+# Pod configuration
+pod:
+  # Security context for the pod
+  securityContext:
+    runAsNonRoot: true
+    seccompProfile:
+      type: RuntimeDefault
+    fsGroup: 65532
+
+  # Termination grace period
+  terminationGracePeriodSeconds: 10
+
+  # Pod annotations
+  annotations: {}
+
+  # Pod labels
+  labels: {}
+
+  # Node selector
+  nodeSelector: {}
+
+  # Tolerations
+  tolerations: []
+
+  # Affinity configuration
+  affinity:
+    podAntiAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        podAffinityTerm:
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/component: manager
+          topologyKey: kubernetes.io/hostname
+      - weight: 5
+        podAffinityTerm:
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: deployment
+          topologyKey: kubernetes.io/hostname
+
+  # Volumes
+  volumes: []
+  # Example:
+  # - name: config
+  #   configMap:
+  #     name: promoter-config
+
+  # Service Account configuration
+serviceAccount:
+  # Create service account
+  create: true
+  # Service account name (if not specified, defaults to fullname)
+  name: ""
+  # Additional labels
+  labels: {}
+  # Additional annotations
+  annotations: {}
+
+# RBAC configuration
+rbac:
+  # Create RBAC resources
+  create: true
+  # Additional rules for the ClusterRole
+  additionalRules: []
+
+# Services configuration
+services:
+  # Metrics service configuration
+  metrics:
+    # Enable metrics service
+    enabled: true
+    # Service name
+    name: controller-manager-metrics-service
+    # Service type
+    type: ClusterIP
+    # Service port
+    port: 8443
+    # Target port
+    targetPort: https
+    # Additional labels
+    labels: {}
+    # Additional annotations
+    annotations: {}
+
+  # Webhook receiver service configuration
+  webhookReceiver:
+    # Enable webhook receiver service
+    enabled: true
+    # Service name
+    name: webhook-receiver
+    # Service type
+    type: ClusterIP
+    # Service port
+    port: 3333
+    # Target port
+    targetPort: 3333
+    # Additional labels
+    labels: {}
+    # Additional annotations
+    annotations: {}
+
+# Controller Configuration (GitOps Promoter specific settings)
+controllerConfiguration:
+  # Enable controller configuration
+  enabled: true
+  # Configuration name
+  name: controller-configuration
+
+  # Requeue durations
+  argocdCommitStatusRequeueDuration: "5m"
+  changeTransferPolicyRequeueDuration: "5m"
+  promotionStrategyRequeueDuration: "5m"
+  pullRequestRequeueDuration: "5m"
+
+  # Pull Request template configuration
+  pullRequest:
+    template:
+      title: "Promote {{ trunc 5 .ChangeTransferPolicy.Status.Proposed.Dry.Sha }} to `{{ .ChangeTransferPolicy.Spec.ActiveBranch }}`"
+      description: "This PR is promoting the environment branch `{{ .ChangeTransferPolicy.Spec.ActiveBranch }}` which is currently on dry sha {{ .ChangeTransferPolicy.Status.Active.Dry.Sha }} to dry sha {{ .ChangeTransferPolicy.Status.Proposed.Dry.Sha }}."
+
+# Custom Resource Definitions
+crds:
+  # Install CRDs
+  install: true
+  # Keep CRDs on uninstall
+  keep: true
+
+# Monitoring configuration
+monitoring:
+  # Enable ServiceMonitor for Prometheus
+  serviceMonitor:
+    enabled: false
+    # Additional labels for ServiceMonitor
+    labels: {}
+    # Additional annotations for ServiceMonitor
+    annotations: {}
+    # Scrape interval
+    interval: 30s
+    # Scrape timeout
+    scrapeTimeout: 10s
+    # Metrics path
+    path: /metrics
+
+  # Enable PodMonitor for Prometheus
+  podMonitor:
+    enabled: false
+    # Additional labels for PodMonitor
+    labels: {}
+    # Additional annotations for PodMonitor
+    annotations: {}
+
+# Network Policy
+networkPolicy:
+  # Enable network policy
+  enabled: false
+  # Ingress rules
+  ingress: []
+  # Egress rules
+  egress: []
+
+# Pod Disruption Budget
+podDisruptionBudget:
+  # Enable PDB
+  enabled: false
+  # Minimum available pods
+  minAvailable: 1
+  # Maximum unavailable pods
+  # maxUnavailable: 1
+
+  # Horizontal Pod Autoscaler
+hpa:
+  # Enable HPA
+  enabled: false
+  # Minimum replicas
+  minReplicas: 1
+  # Maximum replicas
+  maxReplicas: 3
+  # Target CPU utilization percentage
+  targetCPUUtilizationPercentage: 80
+  # Target memory utilization percentage
+  # targetMemoryUtilizationPercentage: 80
+
+  # Additional labels to apply to all resources
+commonLabels: {}
+
+# Additional annotations to apply to all resources
+commonAnnotations: {}

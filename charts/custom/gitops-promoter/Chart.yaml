@@ -1,0 +1,66 @@
+apiVersion: v2
+name: gitops-promoter
+description: A Helm chart for GitOps Promoter - A tool for promoting changes between environments in GitOps workflows
+type: application
+
+# Chart version - follows semantic versioning
+version: 0.1.0
+
+# Application version - matches the GitOps Promoter version
+appVersion: "0.10.2"
+
+# Maintainers
+maintainers:
+- name: Novelcore Platform Team
+  email: platform@novelcore.io
+
+# Keywords for chart discovery
+keywords:
+- gitops
+- promotion
+- argocd
+- continuous-deployment
+- environment-promotion
+
+# Home page
+home: https://github.com/argoproj-labs/gitops-promoter
+
+# Source code
+sources:
+- https://github.com/argoproj-labs/gitops-promoter
+
+# Annotations for additional metadata
+annotations:
+  # Category for Artifact Hub
+  artifacthub.io/category: integration-delivery
+
+  # Links for Artifact Hub
+  artifacthub.io/links: |
+    - name: GitOps Promoter Documentation
+      url: https://github.com/argoproj-labs/gitops-promoter/blob/main/README.md
+    - name: Release Notes
+      url: https://github.com/argoproj-labs/gitops-promoter/releases/tag/v0.10.2
+
+  # Changes for this chart version
+  artifacthub.io/changes: |
+    - kind: added
+      description: Initial Helm chart for GitOps Promoter v0.10.2
+    - kind: added
+      description: Comprehensive configuration options for all components
+    - kind: added
+      description: Support for custom resource limits and requests
+    - kind: added
+      description: Configurable RBAC and security contexts
+
+  # License
+  artifacthub.io/license: Apache-2.0
+
+  # Images used by this chart
+  artifacthub.io/images: |
+    - name: gitops-promoter
+      image: quay.io/argoprojlabs/gitops-promoter:v0.10.2
+    - name: kube-rbac-proxy
+      image: quay.io/brancz/kube-rbac-proxy:v0.17.0
+
+# Kubernetes version compatibility
+kubeVersion: ">=1.20.0-0"

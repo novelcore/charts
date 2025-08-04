@@ -1,0 +1,120 @@
+🎉 GitOps Promoter has been successfully installed!
+
+📋 Installation Summary:
+  - Release Name: {{ .Release.Name }}
+  - Namespace: {{ include "gitops-promoter.namespace" . }}
+  - Chart Version: {{ .Chart.Version }}
+  - App Version: {{ .Chart.AppVersion }}
+
+🚀 Components Deployed:
+  ✅ Controller Manager Deployment: {{ include "gitops-promoter.controllerManagerName" . }}
+  ✅ Service Account: {{ include "gitops-promoter.serviceAccountName" . }}
+  ✅ RBAC Resources: ClusterRoles and Bindings
+{{- if .Values.services.metrics.enabled }}
+  ✅ Metrics Service: {{ include "gitops-promoter.metricsServiceName" . }}
+{{- end }}
+{{- if .Values.services.webhookReceiver.enabled }}
+  ✅ Webhook Receiver Service: {{ include "gitops-promoter.webhookReceiverServiceName" . }}
+{{- end }}
+{{- if .Values.controllerConfiguration.enabled }}
+  ✅ Controller Configuration: {{ include "gitops-promoter.controllerConfigurationName" . }}
+{{- end }}
+{{- if .Values.monitoring.serviceMonitor.enabled }}
+  ✅ ServiceMonitor for Prometheus
+{{- end }}
+{{- if .Values.hpa.enabled }}
+  ✅ Horizontal Pod Autoscaler
+{{- end }}
+{{- if .Values.podDisruptionBudget.enabled }}
+  ✅ Pod Disruption Budget
+{{- end }}
+
+🔍 Getting Started:
+
+1. Check the deployment status:
+   kubectl get deployment {{ include "gitops-promoter.controllerManagerName" . }} -n {{ include "gitops-promoter.namespace" . }}
+
+2. View the controller logs:
+   kubectl logs -f deployment/{{ include "gitops-promoter.controllerManagerName" . }} -n {{ include "gitops-promoter.namespace" . }} -c manager
+
+3. Check the Custom Resource Definitions:
+   kubectl get crd | grep promoter.argoproj.io
+
+4. Verify the controller configuration:
+   kubectl get controllerconfigurations -n {{ include "gitops-promoter.namespace" . }}
+
+📚 Next Steps:
+
+To start using GitOps Promoter, you'll need to create:
+
+1. **SCM Provider** - Configure your Git provider (GitHub, GitLab, etc.):
+   ```yaml
+   apiVersion: promoter.argoproj.io/v1alpha1
+   kind: SCMProvider
+   metadata:
+     name: github-provider
+     namespace: {{ include "gitops-promoter.namespace" . }}
+   spec:
+     github:
+       domain: github.com
+       tokenRef:
+         secretName: github-token
+         key: token
+   ```
+
+2. **Git Repository** - Define your GitOps repository:
+   ```yaml
+   apiVersion: promoter.argoproj.io/v1alpha1
+   kind: GitRepository
+   metadata:
+     name: my-gitops-repo
+     namespace: {{ include "gitops-promoter.namespace" . }}
+   spec:
+     url: https://github.com/your-org/gitops-repo
+     scmProviderRef:
+       name: github-provider
+   ```
+
+3. **Promotion Strategy** - Define how promotions work:
+   ```yaml
+   apiVersion: promoter.argoproj.io/v1alpha1
+   kind: PromotionStrategy
+   metadata:
+     name: my-promotion-strategy
+     namespace: {{ include "gitops-promoter.namespace" . }}
+   spec:
+     repository:
+       name: my-gitops-repo
+     environments:
+     - name: staging
+       branch: staging
+     - name: production
+       branch: main
+   ```
+
+🔗 Useful Resources:
+
+- Documentation: https://github.com/argoproj-labs/gitops-promoter/blob/main/README.md
+- Examples: https://github.com/argoproj-labs/gitops-promoter/tree/main/examples
+- Issues: https://github.com/argoproj-labs/gitops-promoter/issues
+
+{{- if .Values.services.metrics.enabled }}
+
+📊 Monitoring:
+{{- if .Values.monitoring.serviceMonitor.enabled }}
+- Prometheus metrics are available via ServiceMonitor
+{{- else }}
+- Metrics endpoint: http://{{ include "gitops-promoter.metricsServiceName" . }}:{{ .Values.services.metrics.port }}/metrics
+{{- end }}
+{{- end }}
+
+{{- if .Values.services.webhookReceiver.enabled }}
+
+🪝 Webhook Receiver:
+- Webhook endpoint: http://{{ include "gitops-promoter.webhookReceiverServiceName" . }}:{{ .Values.services.webhookReceiver.port }}
+- Configure your SCM provider to send webhooks to this endpoint
+{{- end }}
+
+💡 Tip: Use 'helm get values {{ .Release.Name }}' to see your current configuration.
+
+Happy GitOps promoting! 🚀

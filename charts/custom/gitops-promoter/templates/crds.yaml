@@ -1,0 +1,10 @@
+{{- if .Values.crds.install }}
+{{- $crdContent := .Files.Get "crds/promoter-crds.yaml" }}
+{{- if $crdContent }}
+{{ $crdContent }}
+{{- else }}
+# CRDs will be installed from the upstream install.yaml
+# This template serves as a placeholder for when CRDs are extracted
+# to a separate file for better management
+{{- end }}
+{{- end }}
