@@ -1,5 +1,33 @@
 apiVersion: v1
 entries:
+  argo-events:
+  - annotations:
+      artifacthub.io/changes: |
+        - kind: changed
+          description: Bump argo-events to v1.9.6
+      artifacthub.io/signKey: |
+        fingerprint: 2B8F22F57260EFA67BE1C5824B11F800CD9D2252
+        url: https://argoproj.github.io/argo-helm/pgp_keys.asc
+    apiVersion: v2
+    appVersion: v1.9.6
+    created: "2025-08-04T16:07:14.436337755Z"
+    description: A Helm chart for Argo Events, the event-driven workflow automation
+      framework
+    digest: 80f6f8b72e6c2aaaf45451edad98b74d585fd96bcd54f6659316875ba9b6ebe4
+    home: https://github.com/argoproj/argo-helm
+    icon: https://avatars.githubusercontent.com/u/30269780?s=200&v=4
+    keywords:
+    - argoproj
+    - argo-events
+    maintainers:
+    - name: argoproj
+      url: https://argoproj.github.io/
+    name: argo-events
+    sources:
+    - https://github.com/argoproj/argo-events
+    urls:
+    - https://novelcore.github.io/charts/argo-events-2.4.15.tgz
+    version: 2.4.15
   cert-manager:
   - annotations:
       artifacthub.io/category: security
@@ -10,9 +38,9 @@ entries:
         url: https://cert-manager.io/public-keys/cert-manager-keyring-2021-09-20-1020CF3C033D4F35BAE1C19E1226061C665DF13E.gpg
     apiVersion: v2
     appVersion: v1.17.1
-    created: "2025-08-04T16:02:21.083385149Z"
+    created: "2025-08-04T16:07:14.442358064Z"
     description: A Helm chart for cert-manager
-    digest: 6c137e0a9be964ece3b0c86a9fac67de1305cb97a656c4e2ebcf91cc6b4a39e2
+    digest: 4ef29fe21ade9fff29a108c79a528f07ce63d63ae3c3884fc06ddc4e7d7efb65
     home: https://cert-manager.io
     icon: https://raw.githubusercontent.com/cert-manager/community/4d35a69437d21b76322157e6284be4cd64e6d2b7/logo/logo-small.png
     keywords:
@@ -34,11 +62,11 @@ entries:
   crossplane:
   - apiVersion: v1
     appVersion: 1.20.0
-    created: "2025-08-04T16:02:21.084261966Z"
+    created: "2025-08-04T16:07:14.443208099Z"
     description: Crossplane is an open source Kubernetes add-on that enables platform
       teams to assemble infrastructure from multiple vendors, and expose higher level
       self-service APIs for application teams to consume.
-    digest: 212dcc120920f8ed62845fb5c97ab45003f348ba22f9f1f1f8187e70f6617bed
+    digest: 16593aadcb61c2939ff250e22a9f09b2157c038d088d70c4be934de7eceabea4
     home: https://crossplane.io
     icon: https://docs.crossplane.io/android-chrome-192x192.png
     keywords:
@@ -104,10 +132,10 @@ entries:
           url: https://github.com/argoproj-labs/gitops-promoter/releases/tag/v0.10.2
     apiVersion: v2
     appVersion: 0.10.2
-    created: "2025-08-04T16:02:21.090476207Z"
+    created: "2025-08-04T16:07:14.449280757Z"
     description: A Helm chart for GitOps Promoter - A tool for promoting changes between
       environments in GitOps workflows
-    digest: 8bf697bffdf72d78b9acb0dfb7084486bcbd1f452bf65bfdafcc30a37aed369e
+    digest: 6277e42fa91020500439437550b12c56ffc6d87608fc07e5622b5e578b4a1a76
     home: https://github.com/argoproj-labs/gitops-promoter
     keywords:
     - gitops
@@ -158,7 +186,7 @@ entries:
           url: https://github.com/argoproj-labs/gitops-promoter/releases/tag/v0.10.2
     apiVersion: v2
     appVersion: 0.10.2
-    created: "2025-08-04T16:02:21.089122702Z"
+    created: "2025-08-04T16:07:14.447911239Z"
     description: A Helm chart for GitOps Promoter - A tool for promoting changes between
       environments in GitOps workflows
     digest: 7c6449efd739bf17fa0e4912207482cf2246cab2e240941d0ccccda728df042c
@@ -212,7 +240,7 @@ entries:
           url: https://github.com/argoproj-labs/gitops-promoter/releases/tag/v0.10.2
     apiVersion: v2
     appVersion: 0.10.2
-    created: "2025-08-04T16:02:21.087706476Z"
+    created: "2025-08-04T16:07:14.446561069Z"
     description: A Helm chart for GitOps Promoter - A tool for promoting changes between
       environments in GitOps workflows
     digest: ec14be04c19e41ba9232a5043e6ee976a835bd349e2627a41f2d7c69f314a8d1
@@ -258,7 +286,7 @@ entries:
           url: https://github.com/argoproj-labs/gitops-promoter/releases/tag/v0.10.2
     apiVersion: v2
     appVersion: 0.10.2
-    created: "2025-08-04T16:02:21.086304307Z"
+    created: "2025-08-04T16:07:14.445250253Z"
     description: A Helm chart for GitOps Promoter - A tool for promoting changes between
       environments in GitOps workflows
     digest: 2de6b82a5eda5ae9c4359b63505f00d41c22c1352847572ea57229b0efac9651
@@ -304,7 +332,7 @@ entries:
           url: https://github.com/argoproj-labs/gitops-promoter/releases/tag/v0.10.2
     apiVersion: v2
     appVersion: 0.10.2
-    created: "2025-08-04T16:02:21.085236742Z"
+    created: "2025-08-04T16:07:14.444167984Z"
     description: A Helm chart for GitOps Promoter - A tool for promoting changes between
       environments in GitOps workflows
     digest: ce25747621432432c87cf6b212b13facb34f4c8a32ba57cfedb88c6d0fb2107d
@@ -326,4 +354,4 @@ entries:
     urls:
     - https://novelcore.github.io/charts/gitops-promoter-0.1.0.tgz
     version: 0.1.0
-generated: "2025-08-04T16:02:21.077145792Z"
+generated: "2025-08-04T16:07:14.435021459Z"
