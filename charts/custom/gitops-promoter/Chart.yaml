@@ -4,7 +4,7 @@ description: A Helm chart for GitOps Promoter - A tool for promoting changes bet
 type: application
 
 # Chart version - follows semantic versioning
-version: 0.2.0
+version: 0.3.0
 
 # Application version - matches the GitOps Promoter version
 appVersion: "0.10.2"
@@ -43,6 +43,14 @@ annotations:
 
   # Changes for this chart version
   artifacthub.io/changes: |
+    - kind: added
+      description: Integrated Custom Resource Definitions (CRDs) installation
+    - kind: added
+      description: CRDs are now installed as pre-install/pre-upgrade hooks
+    - kind: added
+      description: CRDs are preserved on chart uninstall (configurable)
+    - kind: changed
+      description: Enhanced chart to include all 10 GitOps Promoter CRDs
     - kind: added
       description: Initial Helm chart for GitOps Promoter v0.10.2
     - kind: added

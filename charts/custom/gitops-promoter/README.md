@@ -54,8 +54,43 @@ The following table lists the configurable parameters and their default values:
 | `ingress.enabled` | Enable ingress for webhook receiver | `false` |
 | `ingress.hostname` | Hostname for webhook ingress | `promoter-webhook.example.com` |
 | `ingress.ingressClassName` | Ingress class name | `traefik-system` |
+| `crds.install` | Install Custom Resource Definitions | `true` |
+| `crds.keep` | Preserve CRDs on chart uninstall | `true` |
 
 ### Advanced Configuration
+
+#### Custom Resource Definitions (CRDs)
+
+The chart includes all 10 Custom Resource Definitions required by GitOps Promoter:
+
+- `argocdcommitstatuses.promoter.argoproj.io`
+- `changetransferpolicies.promoter.argoproj.io`
+- `clusterscmproviders.promoter.argoproj.io`
+- `commitstatuses.promoter.argoproj.io`
+- `controllerconfigurations.promoter.argoproj.io`
+- `gitrepositories.promoter.argoproj.io`
+- `promotionstrategies.promoter.argoproj.io`
+- `pullrequests.promoter.argoproj.io`
+- `revertcommits.promoter.argoproj.io`
+- `scmproviders.promoter.argoproj.io`
+
+CRDs are installed as pre-install/pre-upgrade hooks with a weight of -5, ensuring they are created before any other resources. By default, CRDs are preserved when the chart is uninstalled to prevent data loss.
+
+```yaml
+crds:
+  # Install CRDs (disable if managing CRDs separately)
+  install: true
+  # Keep CRDs on uninstall (prevents data loss)
+  keep: true
+```
+
+To manually remove CRDs after uninstalling the chart:
+
+```bash
+kubectl delete crd -l controller-gen.kubebuilder.io/version=v0.16.3
+# or delete specific CRDs
+kubectl delete crd argocdcommitstatuses.promoter.argoproj.io changetransferpolicies.promoter.argoproj.io # ... etc
+```
 
 #### Resource Management
 
