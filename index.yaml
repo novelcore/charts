@@ -3,11 +3,11 @@ entries:
   crossplane:
   - apiVersion: v1
     appVersion: 1.20.0
-    created: "2025-08-04T13:12:19.71286076Z"
+    created: "2025-08-04T14:05:52.349733385Z"
     description: Crossplane is an open source Kubernetes add-on that enables platform
       teams to assemble infrastructure from multiple vendors, and expose higher level
       self-service APIs for application teams to consume.
-    digest: 134f18f1da448095cdd714c83f681448fe485cc3aca595b5058e69b0264dfa71
+    digest: 03fe2974578df55aa234ddc63655b8d3d18f1fd48f83b5cbbe93956e170f0d94
     home: https://crossplane.io
     icon: https://docs.crossplane.io/android-chrome-192x192.png
     keywords:
@@ -73,7 +73,61 @@ entries:
           url: https://github.com/argoproj-labs/gitops-promoter/releases/tag/v0.10.2
     apiVersion: v2
     appVersion: 0.10.2
-    created: "2025-08-04T13:12:19.716232052Z"
+    created: "2025-08-04T14:05:52.356072296Z"
+    description: A Helm chart for GitOps Promoter - A tool for promoting changes between
+      environments in GitOps workflows
+    digest: 7c6449efd739bf17fa0e4912207482cf2246cab2e240941d0ccccda728df042c
+    home: https://github.com/argoproj-labs/gitops-promoter
+    keywords:
+    - gitops
+    - promotion
+    - argocd
+    - continuous-deployment
+    - environment-promotion
+    kubeVersion: '>=1.20.0-0'
+    maintainers:
+    - email: platform@novelcore.io
+      name: Novelcore Platform Team
+    name: gitops-promoter
+    sources:
+    - https://github.com/argoproj-labs/gitops-promoter
+    type: application
+    urls:
+    - https://novelcore.github.io/charts/gitops-promoter-0.3.1.tgz
+    version: 0.3.1
+  - annotations:
+      artifacthub.io/category: integration-delivery
+      artifacthub.io/changes: |
+        - kind: added
+          description: Integrated Custom Resource Definitions (CRDs) installation
+        - kind: added
+          description: CRDs are now installed as pre-install/pre-upgrade hooks
+        - kind: added
+          description: CRDs are preserved on chart uninstall (configurable)
+        - kind: changed
+          description: Enhanced chart to include all 10 GitOps Promoter CRDs
+        - kind: added
+          description: Initial Helm chart for GitOps Promoter v0.10.2
+        - kind: added
+          description: Comprehensive configuration options for all components
+        - kind: added
+          description: Support for custom resource limits and requests
+        - kind: added
+          description: Configurable RBAC and security contexts
+      artifacthub.io/images: |
+        - name: gitops-promoter
+          image: quay.io/argoprojlabs/gitops-promoter:v0.10.2
+        - name: kube-rbac-proxy
+          image: quay.io/brancz/kube-rbac-proxy:v0.17.0
+      artifacthub.io/license: Apache-2.0
+      artifacthub.io/links: |
+        - name: GitOps Promoter Documentation
+          url: https://github.com/argoproj-labs/gitops-promoter/blob/main/README.md
+        - name: Release Notes
+          url: https://github.com/argoproj-labs/gitops-promoter/releases/tag/v0.10.2
+    apiVersion: v2
+    appVersion: 0.10.2
+    created: "2025-08-04T14:05:52.353203377Z"
     description: A Helm chart for GitOps Promoter - A tool for promoting changes between
       environments in GitOps workflows
     digest: ec14be04c19e41ba9232a5043e6ee976a835bd349e2627a41f2d7c69f314a8d1
@@ -119,7 +173,7 @@ entries:
           url: https://github.com/argoproj-labs/gitops-promoter/releases/tag/v0.10.2
     apiVersion: v2
     appVersion: 0.10.2
-    created: "2025-08-04T13:12:19.714907071Z"
+    created: "2025-08-04T14:05:52.351848336Z"
     description: A Helm chart for GitOps Promoter - A tool for promoting changes between
       environments in GitOps workflows
     digest: 2de6b82a5eda5ae9c4359b63505f00d41c22c1352847572ea57229b0efac9651
@@ -165,7 +219,7 @@ entries:
           url: https://github.com/argoproj-labs/gitops-promoter/releases/tag/v0.10.2
     apiVersion: v2
     appVersion: 0.10.2
-    created: "2025-08-04T13:12:19.713834413Z"
+    created: "2025-08-04T14:05:52.350729916Z"
     description: A Helm chart for GitOps Promoter - A tool for promoting changes between
       environments in GitOps workflows
     digest: ce25747621432432c87cf6b212b13facb34f4c8a32ba57cfedb88c6d0fb2107d
@@ -187,4 +241,4 @@ entries:
     urls:
     - https://novelcore.github.io/charts/gitops-promoter-0.1.0.tgz
     version: 0.1.0
-generated: "2025-08-04T13:12:19.711838216Z"
+generated: "2025-08-04T14:05:52.348721054Z"
