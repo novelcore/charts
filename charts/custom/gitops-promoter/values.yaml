@@ -300,7 +300,8 @@ controllerConfiguration:
 crds:
   # Install CRDs
   install: true
-  # Keep CRDs on uninstall
+  # Keep CRDs on uninstall (true for production, false for development)
+  # When false, CRDs will be deleted on helm uninstall to prevent conflicts on reinstall
   keep: true
 
 # Monitoring configuration

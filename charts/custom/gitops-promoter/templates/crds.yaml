@@ -1,7 +1,12 @@
 {{- if .Values.crds.install }}
 {{- $crdContent := .Files.Get "crds/promoter-crds.yaml" }}
 {{- if $crdContent }}
+{{- if .Values.crds.keep }}
 {{ $crdContent }}
+{{- else }}
+{{- /* Replace resource-policy: keep with resource-policy: delete for development */ -}}
+{{ $crdContent | replace "helm.sh/resource-policy: keep" "helm.sh/resource-policy: delete" }}
+{{- end }}
 {{- else }}
 # CRDs will be installed from the upstream install.yaml
 # This template serves as a placeholder for when CRDs are extracted
