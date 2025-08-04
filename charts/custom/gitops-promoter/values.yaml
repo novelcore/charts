@@ -236,13 +236,13 @@ controllerConfiguration:
   enabled: true
   # Configuration name
   name: controller-configuration
-  
+
   # Requeue durations
   argocdCommitStatusRequeueDuration: "120s"
   changeTransferPolicyRequeueDuration: "5m"
   promotionStrategyRequeueDuration: "5m"
   pullRequestRequeueDuration: "5m"
-  
+
   # Pull Request template configuration
   pullRequest:
     template:
@@ -290,7 +290,7 @@ controllerConfiguration:
 
         ## 👥 Reviewers
         @[[OWNER]]/[[REPO]]-ops
-        
+
         ## Additional Information
         * **Auto-Merge**: {{ .ChangeTransferPolicy.Spec.AutoMerge }}
         * **Full Active Dry SHA**: `{{ .ChangeTransferPolicy.Status.Active.Dry.Sha }}`
@@ -343,7 +343,7 @@ ingress:
     # Enable TLS
     enabled: true
     # Secret name for TLS certificate
-    secretName: ""  # If empty, defaults to hostname
+    secretName: "" # If empty, defaults to hostname
   # Additional annotations
   annotations:
     # Example annotations for different ingress controllers:
@@ -354,7 +354,7 @@ ingress:
     # nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
     # For traefik:
     # traefik.ingress.kubernetes.io/router.entrypoints: "websecure"
-  # Additional labels
+    # Additional labels
   labels: {}
 
 # Network Policy
