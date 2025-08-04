@@ -4,7 +4,7 @@ description: A Helm chart for GitOps Promoter - A tool for promoting changes bet
 type: application
 
 # Chart version - follows semantic versioning
-version: 0.3.1
+version: 0.3.2
 
 # Application version - matches the GitOps Promoter version
 appVersion: "0.10.2"
@@ -43,22 +43,22 @@ annotations:
 
   # Changes for this chart version
   artifacthub.io/changes: |
+    - kind: fixed
+      description: Enhanced CRD lifecycle management with graceful handling of existing CRDs
+    - kind: added
+      description: Added helm.sh/hook-delete-policy before-hook-creation for conflict-free reinstalls
+    - kind: added
+      description: Configurable CRD retention policy (keep/delete) based on environment
+    - kind: changed
+      description: Improved CRD template processing with dynamic resource policies
+    - kind: added
+      description: Environment-aware CRD management (production vs development)
     - kind: added
       description: Integrated Custom Resource Definitions (CRDs) installation
     - kind: added
       description: CRDs are now installed as pre-install/pre-upgrade hooks
     - kind: added
-      description: CRDs are preserved on chart uninstall (configurable)
-    - kind: changed
-      description: Enhanced chart to include all 10 GitOps Promoter CRDs
-    - kind: added
       description: Initial Helm chart for GitOps Promoter v0.10.2
-    - kind: added
-      description: Comprehensive configuration options for all components
-    - kind: added
-      description: Support for custom resource limits and requests
-    - kind: added
-      description: Configurable RBAC and security contexts
 
   # License
   artifacthub.io/license: Apache-2.0
