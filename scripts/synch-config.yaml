@@ -26,6 +26,8 @@ repositories:
   url: https://kedacore.github.io/charts
 - name: zilliztech
   url: https://zilliztech.github.io/milvus-operator/
+- name: community-charts
+  url: https://community-charts.github.io/helm-charts
 
 # Charts to sync from external repositories
 # Leave version empty to always get the latest version
@@ -102,6 +104,11 @@ charts:
 - name: minio-operator
   repository: bitnami
   version: "0.1.5"
+
+# MLflow
+- name: mlflow
+  repository: community-charts
+  version: "1.1.0"
 
 # # Monitoring stack
 # - name: kube-prometheus-stack
