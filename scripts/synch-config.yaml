@@ -20,6 +20,8 @@ repositories:
   url: oci://ghcr.io/ariga/charts
 - name: elastic
   url: https://helm.elastic.co
+- name: percona
+  url: https://percona.github.io/percona-helm-charts
 
 # Charts to sync from external repositories
 # Leave version empty to always get the latest version
@@ -71,6 +73,11 @@ charts:
 - name: eck-operator
   repository: elastic
   version: "3.0.0"
+
+# Everest
+- name: everest
+  repository: percona
+  version: "1.6.0"
 
 # # Monitoring stack
 # - name: kube-prometheus-stack
