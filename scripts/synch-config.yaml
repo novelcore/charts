@@ -22,6 +22,8 @@ repositories:
   url: https://helm.elastic.co
 - name: percona
   url: https://percona.github.io/percona-helm-charts
+- name: kedacore
+  url: https://kedacore.github.io/charts
 
 # Charts to sync from external repositories
 # Leave version empty to always get the latest version
@@ -83,6 +85,11 @@ charts:
 - name: grafana-operator
   repository: grafana
   version: "5.17.1"
+
+# KEDA
+- name: keda
+  repository: kedacore
+  version: "2.17.0"
 
 # # Monitoring stack
 # - name: kube-prometheus-stack
