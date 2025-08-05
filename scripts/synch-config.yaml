@@ -28,6 +28,8 @@ repositories:
   url: https://zilliztech.github.io/milvus-operator/
 - name: community-charts
   url: https://community-charts.github.io/helm-charts
+- name: strimzi
+  url: https://strimzi.io/charts/
 - name: victoria-metrics
   url: https://victoriametrics.github.io/helm-charts
 
@@ -131,6 +133,11 @@ charts:
 - name: pg-operator
   repository: percona
   version: "2.6.0"
+
+# Strimzi Kafka Operator
+- name: strimzi-kafka-operator
+  repository: strimzi
+  version: "0.46.0"
 
 # # Monitoring stack
 # - name: kube-prometheus-stack
