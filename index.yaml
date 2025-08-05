@@ -10,7 +10,7 @@ entries:
         url: https://argoproj.github.io/argo-helm/pgp_keys.asc
     apiVersion: v2
     appVersion: v3.0.12
-    created: "2025-08-05T09:29:51.098957837Z"
+    created: "2025-08-05T09:31:46.890919684Z"
     dependencies:
     - condition: redis-ha.enabled
       name: redis-ha
@@ -46,7 +46,7 @@ entries:
         url: https://argoproj.github.io/argo-helm/pgp_keys.asc
     apiVersion: v2
     appVersion: v3.0.12
-    created: "2025-08-05T09:29:51.109350769Z"
+    created: "2025-08-05T09:31:46.902122305Z"
     dependencies:
     - condition: redis-ha.enabled
       name: redis-ha
@@ -58,7 +58,7 @@ entries:
       version: 2.40.3
     description: A Helm chart for Argo CD with Argo Rollouts included, a declarative,
       GitOps continuous delivery tool for Kubernetes.
-    digest: 55cb6f387cfa67d25eb7eb9b0543dadde9d68acb1c4d447ec56c47a683cb6d3b
+    digest: 3ce05514c7c6e9d02fa8592db2a555c77e5982c331cea0956c376e3303932d5c
     home: https://github.com/argoproj/argo-helm
     icon: https://argo-cd.readthedocs.io/en/stable/assets/logo.png
     keywords:
@@ -86,10 +86,10 @@ entries:
         url: https://argoproj.github.io/argo-helm/pgp_keys.asc
     apiVersion: v2
     appVersion: v1.9.6
-    created: "2025-08-05T09:29:51.110449639Z"
+    created: "2025-08-05T09:31:46.903225941Z"
     description: A Helm chart for Argo Events, the event-driven workflow automation
       framework
-    digest: 9f65bc466ffc9dc671af4a53c6572df2e50dad3ccae6bd847c554bd4a48a378b
+    digest: 1850416a8eb91c61ed96ad8a2f44bbd22fdc423e82a381e52c32e45ccd431546
     home: https://github.com/argoproj/argo-helm
     icon: https://avatars.githubusercontent.com/u/30269780?s=200&v=4
     keywords:
@@ -114,9 +114,9 @@ entries:
         url: https://argoproj.github.io/argo-helm/pgp_keys.asc
     apiVersion: v2
     appVersion: v1.8.3
-    created: "2025-08-05T09:29:51.114009695Z"
+    created: "2025-08-05T09:31:46.907739431Z"
     description: A Helm chart for Argo Rollouts
-    digest: 0e745e3efb49ece618de4fa12c22ea3666fbacf7f0383180cd82e4021c0cb4e7
+    digest: 9b34b9ec6c14569c318de32763604e7d5ec6a6e0897826d597ddf9db3d68f15c
     home: https://github.com/argoproj/argo-helm
     icon: https://argoproj.github.io/argo-rollouts/assets/logo.png
     keywords:
@@ -134,9 +134,9 @@ entries:
   atlas-operator:
   - apiVersion: v2
     appVersion: 0.7.7
-    created: "2025-08-05T09:29:51.114657166Z"
+    created: "2025-08-05T09:31:46.908230531Z"
     description: The Atlas Kubernetes Operator
-    digest: 8a29d91c4afda79f1dd4b3bf51023ddba29c4aca84ed0d57c34844e554b79591
+    digest: a9c7978af3e7ec493cc292707dd0d3e11670cb4d570bf679780d4afa27b8021f
     name: atlas-operator
     type: application
     urls:
@@ -152,9 +152,9 @@ entries:
         url: https://cert-manager.io/public-keys/cert-manager-keyring-2021-09-20-1020CF3C033D4F35BAE1C19E1226061C665DF13E.gpg
     apiVersion: v2
     appVersion: v1.17.1
-    created: "2025-08-05T09:29:51.119735549Z"
+    created: "2025-08-05T09:31:46.91305866Z"
     description: A Helm chart for cert-manager
-    digest: 9933151fdd7ad05b1cab9e29afc563df9888278927685a3d99e910db7efccd1e
+    digest: c420694c092384f29492cbc3fbafaaaaf1b951a1fe53913f9c5b7abfc70ec2b7
     home: https://cert-manager.io
     icon: https://raw.githubusercontent.com/cert-manager/community/4d35a69437d21b76322157e6284be4cd64e6d2b7/logo/logo-small.png
     keywords:
@@ -176,11 +176,11 @@ entries:
   crossplane:
   - apiVersion: v1
     appVersion: 1.20.0
-    created: "2025-08-05T09:29:51.121455448Z"
+    created: "2025-08-05T09:31:46.913895056Z"
     description: Crossplane is an open source Kubernetes add-on that enables platform
       teams to assemble infrastructure from multiple vendors, and expose higher level
       self-service APIs for application teams to consume.
-    digest: 7d74d25b5bc8a74cbbb1461bffaba2b55e69d60b00eeb3da0f6dc3032a884f01
+    digest: 1643395e9ed5309256574394cb2ee8b56c044c2d5805d085aa0a749846765276
     home: https://crossplane.io
     icon: https://docs.crossplane.io/android-chrome-192x192.png
     keywords:
@@ -216,14 +216,14 @@ entries:
   eck-operator:
   - apiVersion: v2
     appVersion: 3.0.0
-    created: "2025-08-05T09:29:51.125897667Z"
+    created: "2025-08-05T09:31:46.919183389Z"
     dependencies:
     - condition: installCRDs
       name: eck-operator-crds
       repository: ""
       version: 3.0.0
     description: Elastic Cloud on Kubernetes (ECK) operator
-    digest: 68e9343e4b29e4d63173429929906e2529f951295f9d7117cfcd2afe8a20c347
+    digest: 59cfc1ee106171f31131f576f9cc07184694f127d50469e75e62ee75f4f557ea
     home: https://github.com/elastic/cloud-on-k8s
     icon: https://helm.elastic.co/icons/eck.png
     keywords:
@@ -247,7 +247,7 @@ entries:
   everest:
   - apiVersion: v2
     appVersion: 1.6.0
-    created: "2025-08-05T09:29:51.163272971Z"
+    created: "2025-08-05T09:31:46.954201116Z"
     dependencies:
     - name: common
       repository: file://charts/common
@@ -271,7 +271,7 @@ entries:
       repository: https://percona.github.io/percona-helm-charts
       version: 1.3.*
     description: A cloud-native database platform
-    digest: 5cf59bc27f4876fcb2dfee5e1191f5df0a18eaa8a1cddc5282bf772b8fad713c
+    digest: 2430bb597ed1cc642a5b4e409b263afa89a046bd15c455180fb9f1344fa8acd3
     kubeVersion: '>= 1.27.0-0'
     maintainers:
     - email: mayank.shah@percona.com
@@ -318,10 +318,10 @@ entries:
           url: https://github.com/argoproj-labs/gitops-promoter/releases/tag/v0.10.2
     apiVersion: v2
     appVersion: 0.10.2
-    created: "2025-08-05T09:29:51.176442718Z"
+    created: "2025-08-05T09:31:46.966351053Z"
     description: A Helm chart for GitOps Promoter - A tool for promoting changes between
       environments in GitOps workflows
-    digest: 26825d5a51866a947e8a53c59a9310077a619c55eac5ad6485e03fe4d93f4a74
+    digest: 2acaa15c0e9a8a6e16818583a4da5ce517cf27d1c44b6b6bb085ad81f691b80a
     home: https://github.com/argoproj-labs/gitops-promoter
     keywords:
     - gitops
@@ -372,7 +372,7 @@ entries:
           url: https://github.com/argoproj-labs/gitops-promoter/releases/tag/v0.10.2
     apiVersion: v2
     appVersion: 0.10.2
-    created: "2025-08-05T09:29:51.174688127Z"
+    created: "2025-08-05T09:31:46.965028266Z"
     description: A Helm chart for GitOps Promoter - A tool for promoting changes between
       environments in GitOps workflows
     digest: 85ff354e021406706ab74f8009547a97d387a29f1acfceeecacf4c9d96a7239b
@@ -426,7 +426,7 @@ entries:
           url: https://github.com/argoproj-labs/gitops-promoter/releases/tag/v0.10.2
     apiVersion: v2
     appVersion: 0.10.2
-    created: "2025-08-05T09:29:51.173369775Z"
+    created: "2025-08-05T09:31:46.963582239Z"
     description: A Helm chart for GitOps Promoter - A tool for promoting changes between
       environments in GitOps workflows
     digest: 00971acf297b6b35776c53d2a8e34e34b605603fa7183b348598e9a8b5f0de52
@@ -480,7 +480,7 @@ entries:
           url: https://github.com/argoproj-labs/gitops-promoter/releases/tag/v0.10.2
     apiVersion: v2
     appVersion: 0.10.2
-    created: "2025-08-05T09:29:51.171760978Z"
+    created: "2025-08-05T09:31:46.962279209Z"
     description: A Helm chart for GitOps Promoter - A tool for promoting changes between
       environments in GitOps workflows
     digest: cf60f9422a3aac115492ede04e21526dccee0cb26fab8630ad519da2e786460a
@@ -534,7 +534,7 @@ entries:
           url: https://github.com/argoproj-labs/gitops-promoter/releases/tag/v0.10.2
     apiVersion: v2
     appVersion: 0.10.2
-    created: "2025-08-05T09:29:51.170328883Z"
+    created: "2025-08-05T09:31:46.96094426Z"
     description: A Helm chart for GitOps Promoter - A tool for promoting changes between
       environments in GitOps workflows
     digest: 6277e42fa91020500439437550b12c56ffc6d87608fc07e5622b5e578b4a1a76
@@ -588,7 +588,7 @@ entries:
           url: https://github.com/argoproj-labs/gitops-promoter/releases/tag/v0.10.2
     apiVersion: v2
     appVersion: 0.10.2
-    created: "2025-08-05T09:29:51.16898913Z"
+    created: "2025-08-05T09:31:46.959476973Z"
     description: A Helm chart for GitOps Promoter - A tool for promoting changes between
       environments in GitOps workflows
     digest: 7c6449efd739bf17fa0e4912207482cf2246cab2e240941d0ccccda728df042c
@@ -642,7 +642,7 @@ entries:
           url: https://github.com/argoproj-labs/gitops-promoter/releases/tag/v0.10.2
     apiVersion: v2
     appVersion: 0.10.2
-    created: "2025-08-05T09:29:51.167509225Z"
+    created: "2025-08-05T09:31:46.957869093Z"
     description: A Helm chart for GitOps Promoter - A tool for promoting changes between
       environments in GitOps workflows
     digest: ec14be04c19e41ba9232a5043e6ee976a835bd349e2627a41f2d7c69f314a8d1
@@ -688,7 +688,7 @@ entries:
           url: https://github.com/argoproj-labs/gitops-promoter/releases/tag/v0.10.2
     apiVersion: v2
     appVersion: 0.10.2
-    created: "2025-08-05T09:29:51.165473648Z"
+    created: "2025-08-05T09:31:46.956259609Z"
     description: A Helm chart for GitOps Promoter - A tool for promoting changes between
       environments in GitOps workflows
     digest: 2de6b82a5eda5ae9c4359b63505f00d41c22c1352847572ea57229b0efac9651
@@ -734,7 +734,7 @@ entries:
           url: https://github.com/argoproj-labs/gitops-promoter/releases/tag/v0.10.2
     apiVersion: v2
     appVersion: 0.10.2
-    created: "2025-08-05T09:29:51.164327909Z"
+    created: "2025-08-05T09:31:46.955178436Z"
     description: A Helm chart for GitOps Promoter - A tool for promoting changes between
       environments in GitOps workflows
     digest: ce25747621432432c87cf6b212b13facb34f4c8a32ba57cfedb88c6d0fb2107d
@@ -759,9 +759,9 @@ entries:
   grafana-operator:
   - apiVersion: v2
     appVersion: v5.17.1
-    created: "2025-08-05T09:29:51.181447112Z"
+    created: "2025-08-05T09:31:46.970331575Z"
     description: Helm chart for the Grafana Operator
-    digest: 0a8848f70a57353cd9a0534d88dd95741d2d9558377b84d3c879afb17fe48ba3
+    digest: ae2dab7c60c86c518cdc6eff4ca2755d4a10b552edc60dd1d1e5570cadcbedaa
     name: grafana-operator
     type: application
     urls:
@@ -770,9 +770,9 @@ entries:
   keda:
   - apiVersion: v2
     appVersion: 2.17.0
-    created: "2025-08-05T09:29:51.187107268Z"
+    created: "2025-08-05T09:31:46.974770595Z"
     description: Event-based autoscaler for workloads on Kubernetes
-    digest: ba4b958cda96c01b477116dd4436046bff114b925bbc2f96907a676873962798
+    digest: 12ebfbc66a154b30cc5527966ccbb5b1c6e5a10f38461a755d7e9af6f9d52020
     home: https://github.com/kedacore/keda
     icon: https://raw.githubusercontent.com/kedacore/keda/main/images/keda-logo-500x500-white.png
     kubeVersion: '>=v1.23.0-0'
@@ -792,7 +792,7 @@ entries:
   milvus-operator:
   - apiVersion: v2
     appVersion: 1.2.5
-    created: "2025-08-05T09:29:51.201762751Z"
+    created: "2025-08-05T09:31:46.989437494Z"
     dependencies:
     - condition: cert-manager.enabled
       name: cert-manager
@@ -801,7 +801,7 @@ entries:
       - cert-manager
       version: 1.5.3
     description: A Helm chart for deploying Milvus Operator
-    digest: 5f73339aea74bedcbd6e9fc445ea586fb2d9445284a50df966d173478927836a
+    digest: 311566e31d315c375f5e0788ef7f0e7dda9ddce2ca364fd0b4956104076ba655
     home: https://github.com/zilliztech/milvus-operator
     kubeVersion: '>= 1.16.0-0'
     maintainers:
@@ -813,4 +813,46 @@ entries:
     urls:
     - https://novelcore.github.io/charts/milvus-operator-1.2.5.tgz
     version: 1.2.5
-generated: "2025-08-05T09:29:51.083510593Z"
+  minio-operator:
+  - annotations:
+      category: Infrastructure
+      images: |
+        - name: kes
+          image: docker.io/bitnami/kes:2025.3.12-debian-12-r5
+        - name: minio
+          image: docker.io/bitnami/minio:2025.4.8-debian-12-r0
+        - name: minio-operator
+          image: docker.io/bitnami/minio-operator:7.0.1-debian-12-r4
+        - name: minio-operator-sidecar
+          image: docker.io/bitnami/minio-operator-sidecar:7.0.1-debian-12-r4
+      licenses: Apache-2.0
+      tanzuCategory: service
+    apiVersion: v2
+    appVersion: 7.0.1
+    created: "2025-08-05T09:31:46.992469981Z"
+    dependencies:
+    - name: common
+      repository: oci://registry-1.docker.io/bitnamicharts
+      tags:
+      - bitnami-common
+      version: 2.x.x
+    description: MinIO(R) Operator is a Kubernetes-native tool for deploying and managing
+      high-performance, S3-compatible MinIO(R) object storage across hybrid cloud
+      infrastructures.
+    digest: 96268af71a999fc5d874f31c059205e3d6fc183a27eb8966f4777965738b65c7
+    home: https://bitnami.com
+    icon: https://bitnami.com/assets/stacks/minio-operator/img/minio-operator-stack-220x234.png
+    keywords:
+    - minio-operator
+    - operator
+    - postgresql
+    maintainers:
+    - name: Broadcom, Inc. All Rights Reserved.
+      url: https://github.com/bitnami/charts
+    name: minio-operator
+    sources:
+    - https://github.com/bitnami/charts/tree/main/bitnami/minio-operator
+    urls:
+    - https://novelcore.github.io/charts/minio-operator-0.1.5.tgz
+    version: 0.1.5
+generated: "2025-08-05T09:31:46.874488841Z"
