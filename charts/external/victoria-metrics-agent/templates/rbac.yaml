@@ -1,0 +1,69 @@
+{{- if .Values.rbac.create -}}
+{{- $ctx := dict "helm" . }}
+{{- $fullname := include "vm.plain.fullname" $ctx }}
+{{- $namespaced := .Values.rbac.namespaced }}
+{{- $ns := include "vm.namespace" $ctx }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: {{ ternary "RoleBinding" "ClusterRoleBinding" $namespaced }}
+metadata:
+  name: {{ $fullname }}
+  {{- if $namespaced }}
+  namespace: {{ $ns }}
+  {{- end }}
+  {{- $_ := set $ctx "extraLabels" .Values.rbac.extraLabels }}
+  labels: {{ include "vm.labels" $ctx | nindent 4 }}
+  {{- $_ := unset $ctx "extraLabels" }}
+  {{- with .Values.rbac.annotations }}
+  annotations: {{ toYaml . | nindent 4 }}
+  {{- end }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: {{ ternary "Role" "ClusterRole" $namespaced }}
+  name: {{ $fullname }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ (.Values.serviceAccount).name | default $fullname }}
+    namespace: {{ $ns }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: {{ ternary "Role" "ClusterRole" $namespaced }}
+metadata:
+  name: {{ $fullname }}
+  {{- if $namespaced }}
+  namespace: {{ include "vm.namespace" $ctx }}
+  {{- end }}
+  {{- $_ := set $ctx "extraLabels" .Values.rbac.extraLabels }}
+  labels: {{ include "vm.labels" $ctx | nindent 4 }}
+  {{- $_ := unset $ctx "extraLabels" }}
+  {{- with .Values.rbac.annotations }}
+  annotations: {{ toYaml . | nindent 4 }}
+  {{- end }}
+rules:
+- apiGroups:
+  - discovery.k8s.io
+  resources:
+  - endpointslices
+  verbs: ["get", "list", "watch"]
+- apiGroups: [""]
+  resources:
+  - services
+  - endpoints
+  - pods
+  verbs: ["get", "list", "watch"]
+- apiGroups:
+  - networking.k8s.io
+  resources:
+  - ingresses
+  verbs: ["get", "list", "watch"]
+{{- if not $namespaced }}
+- apiGroups: [""]
+  resources:
+  - nodes
+  - nodes/proxy
+  - nodes/metrics
+  verbs: ["get", "list", "watch"]
+- nonResourceURLs: {{ toYaml .Values.allowedMetricsEndpoints | nindent 2 }}
+  verbs: ["get"]
+{{- end }}
+{{- end -}}

@@ -1,0 +1,39 @@
+{{- $ctx := dict "helm" . }}
+{{- $fullname := include "vm.plain.fullname" $ctx }}
+{{- $ns := include "vm.namespace" $ctx }}
+{{- if empty .Values.configMap }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "vmagent.scrape.config.name" $ctx }}
+  namespace: {{ $ns }}
+  labels: {{ include "vm.labels" $ctx | nindent 4 }}
+data:
+  scrape.yml: |
+    {{- range $k, $v := .Values.config }}
+    {{- if and (eq $k "scrape_configs") ($.Values.extraScrapeConfigs) }}
+    {{ dict $k (concat $v $.Values.extraScrapeConfigs) | toYaml | nindent 4 }}
+    {{- else }}
+    {{ dict $k $v | toYaml | nindent 4 }}
+    {{- end }}
+    {{- end }}
+{{- end }}
+{{- $rwcm := default dict }}
+{{- range $i, $rw := .Values.remoteWrite }}
+  {{- range $rwKey, $rwValue := $rw }}
+    {{- if or (kindIs "slice" $rwValue) (kindIs "map" $rwValue) }}
+      {{- $_ := set $rwcm (printf "%d-%s.yaml" $i $rwKey) (toYaml $rwValue) }}
+    {{- end -}}
+  {{- end -}}
+{{- end -}}
+{{- with (include "vmagent.rw.config" .) }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $fullname }}-rw
+  namespace: {{ $ns }}
+  labels: {{ include "vm.labels" $ctx | nindent 4 }}
+data: {{ . | nindent 2 }}
+{{- end }}

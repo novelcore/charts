@@ -1,0 +1,89 @@
+{{- $app := .Values }}
+{{- $service := $app.service }}
+{{- if $service.enabled -}}
+{{- $ctx := dict "helm" . }}
+{{- $fullname := include "vm.plain.fullname" $ctx }}
+{{- $ns := include "vm.namespace" $ctx }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  {{- with $service.annotations }}
+  annotations: {{ toYaml . | nindent 4}}
+  {{- end }}
+  {{- $_ := set $ctx "extraLabels" .Values.service.extraLabels }}
+  labels: {{ include "vm.labels" $ctx | nindent 4 }}
+  {{- $_ := unset $ctx "extraLabels" }}
+  name: {{ $fullname }}
+  namespace: {{ $ns }}
+spec:
+  {{- with $service.clusterIP }}
+  clusterIP: {{ . }}
+  {{- end }}
+  {{- with $service.externalIPs }}
+  externalIPs: {{ toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with $service.loadBalancerIP }}
+  loadBalancerIP: {{ . }}
+  {{- end }}
+  {{- with $service.loadBalancerSourceRanges }}
+  loadBalancerSourceRanges: {{ toYaml . | nindent 4 }}
+  {{- end }}
+  type: {{ $service.type }}
+  {{- with $service.healthCheckNodePort }}
+  healthCheckNodePort: {{ . }}
+  {{- end }}
+  {{- with $service.externalTrafficPolicy }}
+  externalTrafficPolicy: {{ . }}
+  {{- end }}
+  {{- with $service.ipFamilyPolicy }}
+  ipFamilyPolicy: {{ . }}
+  {{- end }}
+  {{- with $service.ipFamilies }}
+  ipFamilies: {{ toYaml . | nindent 4 }}
+  {{- end }}
+  ports:
+    - name: http
+      port: {{ $service.servicePort }}
+      protocol: TCP
+      targetPort: {{ $service.targetPort }}
+      {{- with $service.nodePort }}
+      nodePort: {{ . }}
+      {{- end }}
+    {{- with .Values.extraArgs.graphiteListenAddr }}
+    - name: graphite-tcp
+      protocol: TCP
+      port: {{ include "vm.port.from.flag" (dict "flag" .) }}
+      targetPort: graphite-tcp
+    - name: graphite-udp
+      protocol: UDP
+      port: {{ include "vm.port.from.flag" (dict "flag" .) }}
+      targetPort: graphite-udp
+    {{- end }}
+    {{- with .Values.extraArgs.influxListenAddr }}
+    - name: influx-tcp
+      protocol: TCP
+      port: {{ include "vm.port.from.flag" (dict "flag" .) }}
+      targetPort: influx-tcp
+    - name: influx-udp
+      protocol: UDP
+      port: {{ include "vm.port.from.flag" (dict "flag" .) }}
+      targetPort: influx-udp
+    {{- end }}
+    {{- with .Values.extraArgs.opentsdbHTTPListenAddr }}
+    - name: opentsdbhttp
+      port: {{ include "vm.port.from.flag" (dict "flag" .) }}
+      targetPort: opentsdbhttp
+    {{- end }}
+    {{- with .Values.extraArgs.opentsdbListenAddr }}
+    - name: opentsdb-udp
+      protocol: UDP
+      port: {{ include "vm.port.from.flag" (dict "flag" .) }}
+      targetPort: opentsdb-udp
+    - name: opentsdb-tcp
+      protocol: TCP
+      port: {{ include "vm.port.from.flag" (dict "flag" .) }}
+      targetPort: opentsdb-tcp
+    {{- end }}
+  selector: {{ include "vm.selectorLabels" $ctx | nindent 4 }}
+{{- end }}

@@ -28,6 +28,8 @@ repositories:
   url: https://zilliztech.github.io/milvus-operator/
 - name: community-charts
   url: https://community-charts.github.io/helm-charts
+- name: victoria-metrics
+  url: https://victoriametrics.github.io/helm-charts
 
 # Charts to sync from external repositories
 # Leave version empty to always get the latest version
@@ -109,6 +111,21 @@ charts:
 - name: mlflow
   repository: community-charts
   version: "1.1.0"
+
+# VictoriaMetrics Agent
+- name: victoria-metrics-agent
+  repository: victoria-metrics
+  version: "0.18.2"
+
+# VictoriaMetrics Cluster
+- name: victoria-metrics-cluster
+  repository: victoria-metrics
+  version: "0.20.1"
+
+# Prometheus Node Exporter
+- name: prometheus-node-exporter
+  repository: prometheus-community
+  version: "4.45.2"
 
 # # Monitoring stack
 # - name: kube-prometheus-stack
