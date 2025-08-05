@@ -32,6 +32,8 @@ repositories:
   url: https://strimzi.io/charts/
 - name: teleport
   url: https://charts.releases.teleport.dev
+- name: traefik
+  url: https://traefik.github.io/charts
 - name: victoria-metrics
   url: https://victoriametrics.github.io/helm-charts
 
@@ -150,6 +152,11 @@ charts:
 - name: teleport-cluster
   repository: teleport
   version: "17.5.2"
+
+# Traefik
+- name: traefik
+  repository: traefik
+  version: "35.0.0"
 
 # # Monitoring stack
 # - name: kube-prometheus-stack
