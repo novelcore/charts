@@ -8,9 +8,11 @@ metadata:
     {{- with .Values.namespace.labels }}
     {{- toYaml . | nindent 4 }}
     {{- end }}
-  {{- with .Values.namespace.annotations }}
   annotations:
+    meta.helm.sh/release-name: {{ .Release.Name }}
+    meta.helm.sh/release-namespace: {{ .Release.Namespace }}
     {{- include "gitops-promoter.annotations" . | nindent 4 }}
+    {{- with .Values.namespace.annotations }}
     {{- toYaml . | nindent 4 }}
-  {{- end }}
+    {{- end }}
 {{- end }}
