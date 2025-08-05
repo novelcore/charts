@@ -30,6 +30,8 @@ repositories:
   url: https://community-charts.github.io/helm-charts
 - name: strimzi
   url: https://strimzi.io/charts/
+- name: teleport
+  url: https://charts.releases.teleport.dev
 - name: victoria-metrics
   url: https://victoriametrics.github.io/helm-charts
 
@@ -138,6 +140,11 @@ charts:
 - name: strimzi-kafka-operator
   repository: strimzi
   version: "0.46.0"
+
+# Teleport Kube Agent
+- name: teleport-kube-agent
+  repository: teleport
+  version: "17.5.2"
 
 # # Monitoring stack
 # - name: kube-prometheus-stack
