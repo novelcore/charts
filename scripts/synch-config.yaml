@@ -18,6 +18,8 @@ repositories:
   url: https://argoproj.github.io/argo-helm
 - name: ariga
   url: oci://ghcr.io/ariga/charts
+- name: elastic
+  url: https://helm.elastic.co
 
 # Charts to sync from external repositories
 # Leave version empty to always get the latest version
@@ -64,6 +66,11 @@ charts:
 - name: atlas-operator
   repository: ariga
   version: "0.7.7"
+
+# ECK Operator
+- name: eck-operator
+  repository: elastic
+  version: "3.0.0"
 
 # # Monitoring stack
 # - name: kube-prometheus-stack
