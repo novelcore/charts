@@ -24,6 +24,8 @@ repositories:
   url: https://percona.github.io/percona-helm-charts
 - name: kedacore
   url: https://kedacore.github.io/charts
+- name: zilliztech
+  url: https://zilliztech.github.io/milvus-operator/
 
 # Charts to sync from external repositories
 # Leave version empty to always get the latest version
@@ -90,6 +92,11 @@ charts:
 - name: keda
   repository: kedacore
   version: "2.17.0"
+
+# Milvus Operator
+- name: milvus-operator
+  repository: zilliztech
+  version: "1.2.5"
 
 # # Monitoring stack
 # - name: kube-prometheus-stack
