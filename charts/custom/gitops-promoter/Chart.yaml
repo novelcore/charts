@@ -4,10 +4,10 @@ description: A Helm chart for GitOps Promoter - A tool for promoting changes bet
 type: application
 
 # Chart version - follows semantic versioning
-version: 0.3.6
+version: 0.4.0
 
 # Application version - matches the GitOps Promoter version
-appVersion: "0.10.2"
+appVersion: "0.14.0"
 
 # Maintainers
 maintainers:
@@ -39,26 +39,20 @@ annotations:
     - name: GitOps Promoter Documentation
       url: https://github.com/argoproj-labs/gitops-promoter/blob/main/README.md
     - name: Release Notes
-      url: https://github.com/argoproj-labs/gitops-promoter/releases/tag/v0.10.2
+      url: https://github.com/argoproj-labs/gitops-promoter/releases/tag/v0.14.0
 
   # Changes for this chart version
   artifacthub.io/changes: |
-    - kind: fixed
-      description: Enhanced CRD lifecycle management with graceful handling of existing CRDs
-    - kind: added
-      description: Added helm.sh/hook-delete-policy before-hook-creation for conflict-free reinstalls
-    - kind: added
-      description: Configurable CRD retention policy (keep/delete) based on environment
     - kind: changed
-      description: Improved CRD template processing with dynamic resource policies
+      description: Upgraded GitOps Promoter from v0.10.2 to v0.14.0
+    - kind: fixed
+      description: Added emptyDir volume mount for /tmp to fix read-only filesystem errors during git operations
     - kind: added
-      description: Environment-aware CRD management (production vs development)
-    - kind: added
-      description: Integrated Custom Resource Definitions (CRDs) installation
-    - kind: added
-      description: CRDs are now installed as pre-install/pre-upgrade hooks
-      - kind: fixed
-    description: Resolved CRD installation conflicts by removing problematic Helm hooks
+      description: Added default /tmp volume configuration for repository cloning operations
+    - kind: changed
+      description: Updated RBAC permissions to include events resource for controller event emission
+    - kind: changed
+      description: Updated chart version to 0.4.0 with backward-compatible changes
   # - kind: changed
   #   description: CRDs now installed from crds/ directory for proper Helm lifecycle management
   # - kind: removed
@@ -72,7 +66,7 @@ annotations:
   # Images used by this chart
   artifacthub.io/images: |
     - name: gitops-promoter
-      image: quay.io/argoprojlabs/gitops-promoter:v0.10.2
+      image: quay.io/argoprojlabs/gitops-promoter:v0.14.0
     - name: kube-rbac-proxy
       image: quay.io/brancz/kube-rbac-proxy:v0.17.0
 

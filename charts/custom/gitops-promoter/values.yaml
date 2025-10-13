@@ -28,7 +28,7 @@ controllerManager:
   # Image configuration
   image:
     repository: quay.io/argoprojlabs/gitops-promoter
-    tag: "v0.10.2"
+    tag: "v0.14.0"
     pullPolicy: IfNotPresent
 
   # Replica count
@@ -88,8 +88,11 @@ controllerManager:
   #   value: "info"
 
   # Volume mounts
-  volumeMounts: []
-  # Example:
+  # Default includes /tmp mount for git operations (required due to readOnlyRootFilesystem)
+  volumeMounts:
+  - name: tmp
+    mountPath: /tmp
+  # Additional volume mounts can be added:
   # - name: config
   #   mountPath: /etc/promoter
   #   readOnly: true
@@ -170,8 +173,11 @@ pod:
           topologyKey: kubernetes.io/hostname
 
   # Volumes
-  volumes: []
-  # Example:
+  # Default includes emptyDir for /tmp (required for git clone operations with readOnlyRootFilesystem)
+  volumes:
+  - name: tmp
+    emptyDir: {}
+  # Additional volumes can be added:
   # - name: config
   #   configMap:
   #     name: promoter-config
