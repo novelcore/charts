@@ -126,7 +126,7 @@ Create the controller configuration name
 */}}
 {{- define "gitops-promoter.controllerConfigurationName" -}}
 {{- if .Values.controllerConfiguration.name }}
-{{- printf "%s-%s" (include "gitops-promoter.fullname" .) .Values.controllerConfiguration.name }}
+{{- .Values.controllerConfiguration.name }}
 {{- else }}
 {{- printf "%s-controller-configuration" (include "gitops-promoter.fullname" .) }}
 {{- end }}

@@ -240,8 +240,10 @@ services:
 controllerConfiguration:
   # Enable controller configuration
   enabled: true
-  # Configuration name
-  name: controller-configuration
+  # Configuration name (uses upstream default: promoter-controller-configuration)
+  # IMPORTANT: The GitOps Promoter controller expects this specific name.
+  # Only change this if you know what you're doing.
+  name: promoter-controller-configuration
 
   # Requeue durations
   argocdCommitStatusRequeueDuration: "120s"

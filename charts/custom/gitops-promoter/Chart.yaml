@@ -4,7 +4,7 @@ description: A Helm chart for GitOps Promoter - A tool for promoting changes bet
 type: application
 
 # Chart version - follows semantic versioning
-version: 0.4.0
+version: 0.4.1
 
 # Application version - matches the GitOps Promoter version
 appVersion: "0.14.0"
@@ -43,16 +43,12 @@ annotations:
 
   # Changes for this chart version
   artifacthub.io/changes: |
-    - kind: changed
-      description: Upgraded GitOps Promoter from v0.10.2 to v0.14.0
     - kind: fixed
-      description: Added emptyDir volume mount for /tmp to fix read-only filesystem errors during git operations
-    - kind: added
-      description: Added default /tmp volume configuration for repository cloning operations
+      description: Fixed ControllerConfiguration naming to use hardcoded 'promoter-controller-configuration' name expected by the controller
     - kind: changed
-      description: Updated RBAC permissions to include events resource for controller event emission
+      description: Modified helper template to not prefix controller configuration name when explicitly set in values
     - kind: changed
-      description: Updated chart version to 0.4.0 with backward-compatible changes
+      description: Updated default controllerConfiguration.name to 'promoter-controller-configuration' to match upstream expectation
   # - kind: changed
   #   description: CRDs now installed from crds/ directory for proper Helm lifecycle management
   # - kind: removed
