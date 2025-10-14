@@ -11,13 +11,24 @@ metadata:
     {{- toYaml . | nindent 4 }}
   {{- end }}
 spec:
-  argocdCommitStatusRequeueDuration: {{ .Values.controllerConfiguration.argocdCommitStatusRequeueDuration }}
-  changeTransferPolicyRequeueDuration: {{ .Values.controllerConfiguration.changeTransferPolicyRequeueDuration }}
-  promotionStrategyRequeueDuration: {{ .Values.controllerConfiguration.promotionStrategyRequeueDuration }}
-  pullRequestRequeueDuration: {{ .Values.controllerConfiguration.pullRequestRequeueDuration }}
+  {{- with .Values.controllerConfiguration.argocdCommitStatus }}
+  argocdCommitStatus:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with .Values.controllerConfiguration.changeTransferPolicy }}
+  changeTransferPolicy:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with .Values.controllerConfiguration.commitStatus }}
+  commitStatus:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with .Values.controllerConfiguration.promotionStrategy }}
+  promotionStrategy:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with .Values.controllerConfiguration.pullRequest }}
   pullRequest:
-    template:
-      title: {{ .Values.controllerConfiguration.pullRequest.template.title | quote }}
-      description: |
-        {{- .Values.controllerConfiguration.pullRequest.template.description | nindent 8 }}
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
 {{- end }}

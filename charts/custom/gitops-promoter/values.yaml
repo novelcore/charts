@@ -236,7 +236,9 @@ services:
     # Additional annotations
     annotations: {}
 
-# Controller Configuration (GitOps Promoter specific settings)
+# Controller Configuration (GitOps Promoter v0.14.0+ configuration)
+# NOTE: This configuration structure changed significantly in v0.14.0
+# For migration from older versions, see the chart README
 controllerConfiguration:
   # Enable controller configuration
   enabled: true
@@ -245,14 +247,81 @@ controllerConfiguration:
   # Only change this if you know what you're doing.
   name: promoter-controller-configuration
 
-  # Requeue durations
-  argocdCommitStatusRequeueDuration: "120s"
-  changeTransferPolicyRequeueDuration: "5m"
-  promotionStrategyRequeueDuration: "5m"
-  pullRequestRequeueDuration: "5m"
+  # ArgoCDCommitStatus controller configuration
+  argocdCommitStatus:
+    # Watch local Argo CD applications in the same cluster
+    watchLocalApplications: true
+    # Work queue configuration for the ArgoCD commit status controller
+    workQueue:
+      # Maximum number of concurrent reconciles
+      maxConcurrentReconciles: 10
+      # Rate limiter configuration
+      rateLimiter:
+        # Use the maximum of these rate limiters
+        maxOf:
+          - bucket:
+              # Token bucket size (burst capacity)
+              bucket: 100
+              # Queries per second (sustained rate)
+              qps: 10
+          - fastSlow:
+              # Fast delay for first few retries
+              fastDelay: 1s
+              # Number of fast retry attempts
+              maxFastAttempts: 3
+              # Slow delay after fast attempts exhausted
+              slowDelay: 5m
+      # How often to requeue for reconciliation
+      requeueDuration: 5m
 
-  # Pull Request template configuration
+  # ChangeTransferPolicy controller configuration
+  changeTransferPolicy:
+    workQueue:
+      maxConcurrentReconciles: 10
+      rateLimiter:
+        maxOf:
+          - bucket:
+              bucket: 100
+              qps: 10
+          - fastSlow:
+              fastDelay: 1s
+              maxFastAttempts: 3
+              slowDelay: 5m
+      requeueDuration: 5m
+
+  # CommitStatus controller configuration
+  commitStatus:
+    workQueue:
+      maxConcurrentReconciles: 10
+      rateLimiter:
+        maxOf:
+          - bucket:
+              bucket: 100
+              qps: 10
+          - fastSlow:
+              fastDelay: 1s
+              maxFastAttempts: 3
+              slowDelay: 5m
+      requeueDuration: 5m
+
+  # PromotionStrategy controller configuration
+  promotionStrategy:
+    workQueue:
+      maxConcurrentReconciles: 10
+      rateLimiter:
+        maxOf:
+          - bucket:
+              bucket: 100
+              qps: 10
+          - fastSlow:
+              fastDelay: 1s
+              maxFastAttempts: 3
+              slowDelay: 5m
+      requeueDuration: 5m
+
+  # PullRequest controller configuration
   pullRequest:
+    # Pull request template configuration
     template:
       title: "Promote {{ trunc 7 .ChangeTransferPolicy.Status.Proposed.Dry.Sha }} to `{{ .ChangeTransferPolicy.Spec.ActiveBranch }}`"
       description: |
@@ -303,6 +372,19 @@ controllerConfiguration:
         * **Auto-Merge**: {{ .ChangeTransferPolicy.Spec.AutoMerge }}
         * **Full Active Dry SHA**: `{{ .ChangeTransferPolicy.Status.Active.Dry.Sha }}`
         * **Full Proposed Dry SHA**: `{{ .ChangeTransferPolicy.Status.Proposed.Dry.Sha }}`
+    # Work queue configuration for the PullRequest controller
+    workQueue:
+      maxConcurrentReconciles: 10
+      rateLimiter:
+        maxOf:
+          - bucket:
+              bucket: 100
+              qps: 10
+          - fastSlow:
+              fastDelay: 1s
+              maxFastAttempts: 3
+              slowDelay: 5m
+      requeueDuration: 5m
 
 # Custom Resource Definitions
 crds:

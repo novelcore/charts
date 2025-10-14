@@ -1,8 +1,7 @@
-apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.16.3
+    controller-gen.kubebuilder.io/version: v0.19.0
   name: argocdcommitstatuses.promoter.argoproj.io
 spec:
   group: promoter.argoproj.io
@@ -96,6 +95,49 @@ spec:
                 required:
                 - name
                 type: object
+              url:
+                description: URL generates the URL to use in the CommitStatus, for
+                  example a link to the Argo CD UI.
+                properties:
+                  options:
+                    description: "Options sets options for the template. Options are
+                      described by\nstrings, either a simple string or \"key=value\".
+                      There can be at\nmost one equals sign in an option string. If
+                      the option string\nis unrecognized or otherwise invalid, Option
+                      panics.\n\nKnown options:\n\nmissingkey: Control the behavior
+                      during execution if a map is\nindexed with a key that is not
+                      present in the map.\n\n\t\"missingkey=default\" or \"missingkey=invalid\"\n\t\tThe
+                      default behavior: Do nothing and continue execution.\n\t\tIf
+                      printed, the result of the index operation is the string\n\t\t\"<no
+                      value>\".\n\t\"missingkey=zero\"\n\t\tThe operation returns
+                      the zero value for the map type's element.\n\t\"missingkey=error\"\n\t\tExecution
+                      stops immediately with an error."
+                    items:
+                      type: string
+                    type: array
+                  template:
+                    description: |-
+                      Template is a go text template and receives .Environment and .ArgoCDCommitStatus variables. A function called urlQueryEscape
+                      is available to escape url query parameters. The template can be configured with options to control the behavior
+                      during execution if a variable is not present.
+
+                      Example:
+
+                        {{- $baseURL := "https://dev.argocd.local" -}}
+                        {{- if eq .Environment "environment/development" -}}
+                        {{- $baseURL = "https://dev.argocd.local" -}}
+                        {{- else if eq .Environment "environment/staging" -}}
+                        {{- $baseURL = "https://staging.argocd.local" -}}
+                        {{- else if eq .Environment "environment/production" -}}
+                        {{- $baseURL = "https://prod.argocd.local" -}}
+                        {{- end -}}
+                        {{- $labels := "" -}}
+                        {{- range $key, $value := .ArgoCDCommitStatus.Spec.ApplicationSelector.MatchLabels -}}
+                        {{- $labels = printf "%s%s=%s," $labels $key $value -}}
+                        {{- end -}}
+                        {{ printf "%s/applications?labels=%s" $baseURL (urlQueryEscape $labels) }}
+                    type: string
+                type: object
             required:
             - applicationSelector
             - promotionStrategyRef
@@ -111,6 +153,10 @@ spec:
                   description: ApplicationsSelected represents the Argo CD applications
                     that are selected by the commit status.
                   properties:
+                    clusterName:
+                      description: ClusterName is the name of the cluster that the
+                        application manifest is deployed to.
+                      type: string
                     environment:
                       description: Environment is the syncSource.targetBranch of the
                         Argo CD application (in effect, its environment).
@@ -133,6 +179,7 @@ spec:
                         with.
                       type: string
                   required:
+                  - clusterName
                   - name
                   - namespace
                   - phase
@@ -211,7 +258,7 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.16.3
+    controller-gen.kubebuilder.io/version: v0.19.0
   name: changetransferpolicies.promoter.argoproj.io
 spec:
   group: promoter.argoproj.io
@@ -266,7 +313,9 @@ spec:
                     by their key.
                   properties:
                     key:
-                      pattern: (([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])?
+                      maxLength: 63
+                      minLength: 1
+                      pattern: ([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9]
                       type: string
                   required:
                   - key
@@ -298,7 +347,9 @@ spec:
                     by their key.
                   properties:
                     key:
-                      pattern: (([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])?
+                      maxLength: 63
+                      minLength: 1
+                      pattern: ([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9]
                       type: string
                   required:
                   - key
@@ -328,6 +379,9 @@ spec:
                       properties:
                         key:
                           description: Key staging hydrated branch
+                          maxLength: 63
+                          minLength: 1
+                          pattern: ([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9]
                           type: string
                         phase:
                           description: Phase what phase is the status in
@@ -386,16 +440,16 @@ spec:
                                     as by `git show -s --format=%aI`.
                                   format: date-time
                                   type: string
-                                message:
-                                  description: Subject is the subject line of the
-                                    commit message, i.e. `git show --format=%s`.
-                                  type: string
                                 repoURL:
                                   description: RepoURL is the URL of the repository
                                     where the commit is located.
                                   type: string
                                 sha:
                                   description: Sha is the commit hash.
+                                  type: string
+                                subject:
+                                  description: Subject is the subject line of the
+                                    commit message, i.e. `git show --format=%s`.
                                   type: string
                               type: object
                           type: object
@@ -450,16 +504,16 @@ spec:
                                     as by `git show -s --format=%aI`.
                                   format: date-time
                                   type: string
-                                message:
-                                  description: Subject is the subject line of the
-                                    commit message, i.e. `git show --format=%s`.
-                                  type: string
                                 repoURL:
                                   description: RepoURL is the URL of the repository
                                     where the commit is located.
                                   type: string
                                 sha:
                                   description: Sha is the commit hash.
+                                  type: string
+                                subject:
+                                  description: Subject is the subject line of the
+                                    commit message, i.e. `git show --format=%s`.
                                   type: string
                               type: object
                           type: object
@@ -537,6 +591,314 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
+              history:
+                description: |-
+                  History defines the history of promoted changes done by the ChangeTransferPolicy. You can think of
+                  it as a list of PRs merged by GitOps Promoter. It will not include changes that were manually merged.
+                  The history length is hard-coded to be at most 5 entries. This may change in the future.
+                  History is constructed on a best-effort basis and should be used for informational purposes only.
+                  History is in reverse chronological order (newest is first).
+                items:
+                  description: History describes a particular change that was promoted
+                    by the ChangeTransferPolicy.
+                  properties:
+                    active:
+                      description: Active is the state of the active branch at the
+                        time the PR was merged.
+                      properties:
+                        commitStatuses:
+                          description: CommitStatuses is a list of commit statuses
+                            that are being monitored for this branch.
+                          items:
+                            description: ChangeRequestPolicyCommitStatusPhase defines
+                              the phase of a commit status in a ChangeTransferPolicy.
+                            properties:
+                              key:
+                                description: Key staging hydrated branch
+                                maxLength: 63
+                                minLength: 1
+                                pattern: ([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9]
+                                type: string
+                              phase:
+                                description: Phase what phase is the status in
+                                enum:
+                                - pending
+                                - success
+                                - failure
+                                type: string
+                              url:
+                                description: Url is the URL of the commit status
+                                type: string
+                            required:
+                            - key
+                            - phase
+                            type: object
+                          type: array
+                          x-kubernetes-list-map-keys:
+                          - key
+                          x-kubernetes-list-type: map
+                        dry:
+                          description: Dry is the dry state of the branch, which is
+                            the commit that is being proposed.
+                          properties:
+                            author:
+                              description: Author is the author of the commit
+                              type: string
+                            body:
+                              description: Body is the body of the commit message
+                                without the subject line
+                              type: string
+                            commitTime:
+                              description: CommitTime is the time the commit was made
+                              format: date-time
+                              type: string
+                            references:
+                              description: References are the references to other
+                                commits, that went into the hydration of the branch
+                              items:
+                                description: |-
+                                  RevisionReference contains a reference to a some information that is related in some way to another commit. For now,
+                                  it supports only references to a commit. In the future, it may support other types of references.
+                                properties:
+                                  commit:
+                                    description: Commit contains metadata about the
+                                      commit that is related in some way to another
+                                      commit.
+                                    properties:
+                                      author:
+                                        description: Author is the author of the commit.
+                                        type: string
+                                      body:
+                                        description: Body is the body of the commit
+                                          message, excluding the subject line, i.e.
+                                          `git show --format=%b`.
+                                        type: string
+                                      date:
+                                        description: Date is the date of the commit,
+                                          formatted as by `git show -s --format=%aI`.
+                                        format: date-time
+                                        type: string
+                                      repoURL:
+                                        description: RepoURL is the URL of the repository
+                                          where the commit is located.
+                                        type: string
+                                      sha:
+                                        description: Sha is the commit hash.
+                                        type: string
+                                      subject:
+                                        description: Subject is the subject line of
+                                          the commit message, i.e. `git show --format=%s`.
+                                        type: string
+                                    type: object
+                                type: object
+                              type: array
+                            repoURL:
+                              description: RepoURL is the URL of the repository where
+                                the commit is located
+                              type: string
+                            sha:
+                              description: Sha is the SHA of the commit in the branch
+                              type: string
+                            subject:
+                              description: Subject is the subject line of the commit
+                                message
+                              type: string
+                          type: object
+                        hydrated:
+                          description: Hydrated is the hydrated state of the branch,
+                            which is the commit that is currently being worked on.
+                          properties:
+                            author:
+                              description: Author is the author of the commit
+                              type: string
+                            body:
+                              description: Body is the body of the commit message
+                                without the subject line
+                              type: string
+                            commitTime:
+                              description: CommitTime is the time the commit was made
+                              format: date-time
+                              type: string
+                            references:
+                              description: References are the references to other
+                                commits, that went into the hydration of the branch
+                              items:
+                                description: |-
+                                  RevisionReference contains a reference to a some information that is related in some way to another commit. For now,
+                                  it supports only references to a commit. In the future, it may support other types of references.
+                                properties:
+                                  commit:
+                                    description: Commit contains metadata about the
+                                      commit that is related in some way to another
+                                      commit.
+                                    properties:
+                                      author:
+                                        description: Author is the author of the commit.
+                                        type: string
+                                      body:
+                                        description: Body is the body of the commit
+                                          message, excluding the subject line, i.e.
+                                          `git show --format=%b`.
+                                        type: string
+                                      date:
+                                        description: Date is the date of the commit,
+                                          formatted as by `git show -s --format=%aI`.
+                                        format: date-time
+                                        type: string
+                                      repoURL:
+                                        description: RepoURL is the URL of the repository
+                                          where the commit is located.
+                                        type: string
+                                      sha:
+                                        description: Sha is the commit hash.
+                                        type: string
+                                      subject:
+                                        description: Subject is the subject line of
+                                          the commit message, i.e. `git show --format=%s`.
+                                        type: string
+                                    type: object
+                                type: object
+                              type: array
+                            repoURL:
+                              description: RepoURL is the URL of the repository where
+                                the commit is located
+                              type: string
+                            sha:
+                              description: Sha is the SHA of the commit in the branch
+                              type: string
+                            subject:
+                              description: Subject is the subject line of the commit
+                                message
+                              type: string
+                          type: object
+                      type: object
+                    proposed:
+                      description: Proposed is the state of the proposed branch at
+                        the time the PR was merged.
+                      properties:
+                        commitStatuses:
+                          description: |-
+                            CommitStatuses is a list of commit statuses that were being monitored for this branch.
+                            This contains the state frozen at the moment the PR was merged.
+                          items:
+                            description: ChangeRequestPolicyCommitStatusPhase defines
+                              the phase of a commit status in a ChangeTransferPolicy.
+                            properties:
+                              key:
+                                description: Key staging hydrated branch
+                                maxLength: 63
+                                minLength: 1
+                                pattern: ([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9]
+                                type: string
+                              phase:
+                                description: Phase what phase is the status in
+                                enum:
+                                - pending
+                                - success
+                                - failure
+                                type: string
+                              url:
+                                description: Url is the URL of the commit status
+                                type: string
+                            required:
+                            - key
+                            - phase
+                            type: object
+                          type: array
+                        hydrated:
+                          description: Hydrated is the hydrated state of the branch,
+                            which is the commit that is currently being worked on.
+                          properties:
+                            author:
+                              description: Author is the author of the commit
+                              type: string
+                            body:
+                              description: Body is the body of the commit message
+                                without the subject line
+                              type: string
+                            commitTime:
+                              description: CommitTime is the time the commit was made
+                              format: date-time
+                              type: string
+                            references:
+                              description: References are the references to other
+                                commits, that went into the hydration of the branch
+                              items:
+                                description: |-
+                                  RevisionReference contains a reference to a some information that is related in some way to another commit. For now,
+                                  it supports only references to a commit. In the future, it may support other types of references.
+                                properties:
+                                  commit:
+                                    description: Commit contains metadata about the
+                                      commit that is related in some way to another
+                                      commit.
+                                    properties:
+                                      author:
+                                        description: Author is the author of the commit.
+                                        type: string
+                                      body:
+                                        description: Body is the body of the commit
+                                          message, excluding the subject line, i.e.
+                                          `git show --format=%b`.
+                                        type: string
+                                      date:
+                                        description: Date is the date of the commit,
+                                          formatted as by `git show -s --format=%aI`.
+                                        format: date-time
+                                        type: string
+                                      repoURL:
+                                        description: RepoURL is the URL of the repository
+                                          where the commit is located.
+                                        type: string
+                                      sha:
+                                        description: Sha is the commit hash.
+                                        type: string
+                                      subject:
+                                        description: Subject is the subject line of
+                                          the commit message, i.e. `git show --format=%s`.
+                                        type: string
+                                    type: object
+                                type: object
+                              type: array
+                            repoURL:
+                              description: RepoURL is the URL of the repository where
+                                the commit is located
+                              type: string
+                            sha:
+                              description: Sha is the SHA of the commit in the branch
+                              type: string
+                            subject:
+                              description: Subject is the subject line of the commit
+                                message
+                              type: string
+                          type: object
+                      type: object
+                    pullRequest:
+                      description: PullRequest is the state of the pull request that
+                        was created for this ChangeTransferPolicy.
+                      properties:
+                        id:
+                          description: ID is the unique identifier of the pull request,
+                            set by the SCM.
+                          type: string
+                        prCreationTime:
+                          description: PRCreationTime is the time when the pull request
+                            was created.
+                          format: date-time
+                          type: string
+                        state:
+                          description: State is the state of the pull request.
+                          enum:
+                          - closed
+                          - merged
+                          - open
+                          type: string
+                        url:
+                          description: Url is the URL of the pull request.
+                          type: string
+                      type: object
+                  type: object
+                type: array
               proposed:
                 description: Proposed is the state of the proposed branch.
                 properties:
@@ -549,6 +911,9 @@ spec:
                       properties:
                         key:
                           description: Key staging hydrated branch
+                          maxLength: 63
+                          minLength: 1
+                          pattern: ([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9]
                           type: string
                         phase:
                           description: Phase what phase is the status in
@@ -607,16 +972,16 @@ spec:
                                     as by `git show -s --format=%aI`.
                                   format: date-time
                                   type: string
-                                message:
-                                  description: Subject is the subject line of the
-                                    commit message, i.e. `git show --format=%s`.
-                                  type: string
                                 repoURL:
                                   description: RepoURL is the URL of the repository
                                     where the commit is located.
                                   type: string
                                 sha:
                                   description: Sha is the commit hash.
+                                  type: string
+                                subject:
+                                  description: Subject is the subject line of the
+                                    commit message, i.e. `git show --format=%s`.
                                   type: string
                               type: object
                           type: object
@@ -671,16 +1036,16 @@ spec:
                                     as by `git show -s --format=%aI`.
                                   format: date-time
                                   type: string
-                                message:
-                                  description: Subject is the subject line of the
-                                    commit message, i.e. `git show --format=%s`.
-                                  type: string
                                 repoURL:
                                   description: RepoURL is the URL of the repository
                                     where the commit is located.
                                   type: string
                                 sha:
                                   description: Sha is the commit hash.
+                                  type: string
+                                subject:
+                                  description: Subject is the subject line of the
+                                    commit message, i.e. `git show --format=%s`.
                                   type: string
                               type: object
                           type: object
@@ -732,7 +1097,7 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.16.3
+    controller-gen.kubebuilder.io/version: v0.19.0
   name: clusterscmproviders.promoter.argoproj.io
 spec:
   group: promoter.argoproj.io
@@ -806,12 +1171,15 @@ spec:
                         the field blank
                       rule: self != "github.com"
                   installationID:
-                    description: InstallationID is the GitHub App Installation ID.
+                    description: |-
+                      InstallationID is the GitHub App Installation ID. If you want to use this ScmProvider for multiple
+                      GitHub orgs, do not specify this field. The installation ID will be inferred from the repo owner
+                      when needed.
                     format: int64
+                    minimum: 0
                     type: integer
                 required:
                 - appID
-                - installationID
                 type: object
               gitlab:
                 description: GitLab required configuration for GitLab as the SCM provider
@@ -851,7 +1219,7 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.16.3
+    controller-gen.kubebuilder.io/version: v0.19.0
   name: commitstatuses.promoter.argoproj.io
 spec:
   group: promoter.argoproj.io
@@ -921,6 +1289,7 @@ spec:
               url:
                 description: Url is a URL that the user can follow to see more details
                   about the status
+                pattern: ^https?://.*$
                 type: string
             required:
             - description
@@ -928,7 +1297,6 @@ spec:
             - name
             - phase
             - sha
-            - url
             type: object
           status:
             description: CommitStatusStatus defines the observed state of CommitStatus
@@ -1010,7 +1378,6 @@ spec:
                 type: string
             required:
             - id
-            - phase
             - sha
             type: object
         type: object
@@ -1023,7 +1390,7 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.16.3
+    controller-gen.kubebuilder.io/version: v0.19.0
   name: controllerconfigurations.promoter.argoproj.io
 spec:
   group: promoter.argoproj.io
@@ -1058,63 +1425,1067 @@ spec:
           metadata:
             type: object
           spec:
-            description: ControllerConfigurationSpec defines the desired state of
-              ControllerConfiguration.
+            description: |-
+              ControllerConfigurationSpec defines the desired state of ControllerConfiguration.
+
+              This spec contains the global configuration for all controllers in the promoter system.
+              Each controller has its own configuration section that specifies WorkQueue settings,
+              rate limiters, and other controller-specific parameters. All fields should be required,
+              with defaults set in manifests rather than in code.
             properties:
-              argocdCommitStatusRequeueDuration:
+              argocdCommitStatus:
                 description: |-
-                  How frequently to requeue commit status resources for auto reconciliation. Default: "15s".
-                  Format is go's time.Duration, e.g. "5m" for 5 minutes.
-                type: string
-              changeTransferPolicyRequeueDuration:
+                  ArgoCDCommitStatus contains the configuration for the ArgoCDCommitStatus controller,
+                  including WorkQueue settings that control reconciliation behavior.
+                properties:
+                  watchLocalApplications:
+                    default: true
+                    description: |-
+                      WatchLocalApplications controls whether the controller monitors Argo CD Applications
+                      in the local cluster. When false, the controller will only watch Applications in remote clusters
+                      configured via kubeconfig secrets. This is useful when the Argo CD Application CRD is not installed
+                      in the local cluster or when all Applications are deployed to remote clusters.
+                    type: boolean
+                  workQueue:
+                    description: |-
+                      WorkQueue contains the work queue configuration for the ArgoCDCommitStatus controller.
+                      This includes requeue duration, maximum concurrent reconciles, and rate limiter settings.
+                    properties:
+                      maxConcurrentReconciles:
+                        description: |-
+                          MaxConcurrentReconciles defines the maximum number of concurrent reconcile operations
+                          that can run for this controller. Higher values increase throughput but consume more
+                          resources. Must be at least 1.
+                        type: integer
+                      rateLimiter:
+                        description: |-
+                          RateLimiter defines the rate limiting strategy for the controller's work queue.
+                          Rate limiting controls how quickly failed reconciliations are retried and helps
+                          prevent overwhelming external APIs or systems.
+                        properties:
+                          bucket:
+                            description: |-
+                              Bucket rate limiter uses a token bucket algorithm to control request rate.
+                              Allows bursts while maintaining an average rate limit.
+                            properties:
+                              bucket:
+                                description: |-
+                                  Bucket is the maximum number of tokens that can be accumulated in the bucket.
+                                  This defines the maximum burst size - how many operations can occur in rapid
+                                  succession before rate limiting takes effect. Must be non-negative.
+                                type: integer
+                              qps:
+                                description: |-
+                                  Qps (queries per second) is the rate at which tokens are added to the bucket.
+                                  This defines the sustained rate limit for operations. Must be non-negative.
+                                type: integer
+                            required:
+                            - bucket
+                            - qps
+                            type: object
+                          exponentialFailure:
+                            description: |-
+                              ExponentialFailure rate limiter increases delay exponentially with each failure.
+                              Standard approach for backing off when operations fail repeatedly.
+                            properties:
+                              baseDelay:
+                                description: |-
+                                  BaseDelay is the initial delay after the first failure. Subsequent failures will exponentially
+                                  increase this delay (2x, 4x, 8x, etc.) until MaxDelay is reached.
+                                  Format follows Go's time.Duration syntax (e.g., "1s" for 1 second).
+                                type: string
+                              maxDelay:
+                                description: |-
+                                  MaxDelay is the maximum delay between retry attempts. Once the exponential backoff reaches
+                                  this value, all subsequent retries will use this delay.
+                                  Format follows Go's time.Duration syntax (e.g., "1m" for 1 minute).
+                                type: string
+                            required:
+                            - baseDelay
+                            - maxDelay
+                            type: object
+                          fastSlow:
+                            description: |-
+                              FastSlow rate limiter provides fast retries initially, then switches to slow retries.
+                              Useful for quickly retrying transient errors while backing off for persistent failures.
+                            properties:
+                              fastDelay:
+                                description: |-
+                                  FastDelay is the delay used for the first MaxFastAttempts retry attempts.
+                                  Format follows Go's time.Duration syntax (e.g., "100ms" for 100 milliseconds).
+                                type: string
+                              maxFastAttempts:
+                                description: |-
+                                  MaxFastAttempts is the number of retry attempts that use FastDelay before switching to SlowDelay.
+                                  Must be at least 1.
+                                type: integer
+                              slowDelay:
+                                description: |-
+                                  SlowDelay is the delay used for retry attempts after MaxFastAttempts have been exhausted.
+                                  Format follows Go's time.Duration syntax (e.g., "10s" for 10 seconds).
+                                type: string
+                            required:
+                            - fastDelay
+                            - maxFastAttempts
+                            - slowDelay
+                            type: object
+                          maxOf:
+                            description: |-
+                              MaxOf allows combining multiple rate limiters, where the maximum delay from all
+                              limiters is used. This enables sophisticated rate limiting that respects multiple
+                              constraints simultaneously (e.g., both per-item exponential backoff and global rate limits).
+                            items:
+                              description: |-
+                                RateLimiterTypes defines the different algorithms available for rate limiting.
+
+                                Exactly one of the three rate limiter types must be specified:
+                                  - FastSlow: Quick retry for transient errors, then slower retry for persistent failures
+                                  - ExponentialFailure: Standard exponential backoff for repeated failures
+                                  - Bucket: Token bucket algorithm for controlling overall request rate
+
+                                See https://pkg.go.dev/k8s.io/client-go/util/workqueue for implementation details.
+                              properties:
+                                bucket:
+                                  description: |-
+                                    Bucket rate limiter uses a token bucket algorithm to control request rate.
+                                    Allows bursts while maintaining an average rate limit.
+                                  properties:
+                                    bucket:
+                                      description: |-
+                                        Bucket is the maximum number of tokens that can be accumulated in the bucket.
+                                        This defines the maximum burst size - how many operations can occur in rapid
+                                        succession before rate limiting takes effect. Must be non-negative.
+                                      type: integer
+                                    qps:
+                                      description: |-
+                                        Qps (queries per second) is the rate at which tokens are added to the bucket.
+                                        This defines the sustained rate limit for operations. Must be non-negative.
+                                      type: integer
+                                  required:
+                                  - bucket
+                                  - qps
+                                  type: object
+                                exponentialFailure:
+                                  description: |-
+                                    ExponentialFailure rate limiter increases delay exponentially with each failure.
+                                    Standard approach for backing off when operations fail repeatedly.
+                                  properties:
+                                    baseDelay:
+                                      description: |-
+                                        BaseDelay is the initial delay after the first failure. Subsequent failures will exponentially
+                                        increase this delay (2x, 4x, 8x, etc.) until MaxDelay is reached.
+                                        Format follows Go's time.Duration syntax (e.g., "1s" for 1 second).
+                                      type: string
+                                    maxDelay:
+                                      description: |-
+                                        MaxDelay is the maximum delay between retry attempts. Once the exponential backoff reaches
+                                        this value, all subsequent retries will use this delay.
+                                        Format follows Go's time.Duration syntax (e.g., "1m" for 1 minute).
+                                      type: string
+                                  required:
+                                  - baseDelay
+                                  - maxDelay
+                                  type: object
+                                fastSlow:
+                                  description: |-
+                                    FastSlow rate limiter provides fast retries initially, then switches to slow retries.
+                                    Useful for quickly retrying transient errors while backing off for persistent failures.
+                                  properties:
+                                    fastDelay:
+                                      description: |-
+                                        FastDelay is the delay used for the first MaxFastAttempts retry attempts.
+                                        Format follows Go's time.Duration syntax (e.g., "100ms" for 100 milliseconds).
+                                      type: string
+                                    maxFastAttempts:
+                                      description: |-
+                                        MaxFastAttempts is the number of retry attempts that use FastDelay before switching to SlowDelay.
+                                        Must be at least 1.
+                                      type: integer
+                                    slowDelay:
+                                      description: |-
+                                        SlowDelay is the delay used for retry attempts after MaxFastAttempts have been exhausted.
+                                        Format follows Go's time.Duration syntax (e.g., "10s" for 10 seconds).
+                                      type: string
+                                  required:
+                                  - fastDelay
+                                  - maxFastAttempts
+                                  - slowDelay
+                                  type: object
+                              type: object
+                              x-kubernetes-validations:
+                              - message: at most one of the fields in [fastSlow exponentialFailure
+                                  bucket] may be set
+                                rule: '[has(self.fastSlow),has(self.exponentialFailure),has(self.bucket)].filter(x,x==true).size()
+                                  <= 1'
+                            maxItems: 3
+                            type: array
+                        type: object
+                        x-kubernetes-validations:
+                        - message: at most one of the fields in [fastSlow exponentialFailure
+                            bucket maxOf] may be set
+                          rule: '[has(self.fastSlow),has(self.exponentialFailure),has(self.bucket),has(self.maxOf)].filter(x,x==true).size()
+                            <= 1'
+                        - message: at most one of the fields in [fastSlow exponentialFailure
+                            bucket] may be set
+                          rule: '[has(self.fastSlow),has(self.exponentialFailure),has(self.bucket)].filter(x,x==true).size()
+                            <= 1'
+                      requeueDuration:
+                        description: |-
+                          RequeueDuration specifies how frequently resources should be requeued for automatic reconciliation.
+                          This creates a periodic reconciliation loop that ensures the desired state is maintained even
+                          without external triggers. Format follows Go's time.Duration syntax (e.g., "5m" for 5 minutes).
+                        type: string
+                    required:
+                    - maxConcurrentReconciles
+                    - rateLimiter
+                    - requeueDuration
+                    type: object
+                required:
+                - watchLocalApplications
+                - workQueue
+                type: object
+              changeTransferPolicy:
                 description: |-
-                  How frequently to requeue proposed commit resources for auto reconciliation. Default: "5m".
-                  Format is go's time.Duration, e.g. "5m" for 5 minutes.
-                type: string
-              promotionStrategyRequeueDuration:
+                  ChangeTransferPolicy contains the configuration for the ChangeTransferPolicy controller,
+                  including WorkQueue settings that control reconciliation behavior.
+                properties:
+                  workQueue:
+                    description: |-
+                      WorkQueue contains the work queue configuration for the ChangeTransferPolicy controller.
+                      This includes requeue duration, maximum concurrent reconciles, and rate limiter settings.
+                    properties:
+                      maxConcurrentReconciles:
+                        description: |-
+                          MaxConcurrentReconciles defines the maximum number of concurrent reconcile operations
+                          that can run for this controller. Higher values increase throughput but consume more
+                          resources. Must be at least 1.
+                        type: integer
+                      rateLimiter:
+                        description: |-
+                          RateLimiter defines the rate limiting strategy for the controller's work queue.
+                          Rate limiting controls how quickly failed reconciliations are retried and helps
+                          prevent overwhelming external APIs or systems.
+                        properties:
+                          bucket:
+                            description: |-
+                              Bucket rate limiter uses a token bucket algorithm to control request rate.
+                              Allows bursts while maintaining an average rate limit.
+                            properties:
+                              bucket:
+                                description: |-
+                                  Bucket is the maximum number of tokens that can be accumulated in the bucket.
+                                  This defines the maximum burst size - how many operations can occur in rapid
+                                  succession before rate limiting takes effect. Must be non-negative.
+                                type: integer
+                              qps:
+                                description: |-
+                                  Qps (queries per second) is the rate at which tokens are added to the bucket.
+                                  This defines the sustained rate limit for operations. Must be non-negative.
+                                type: integer
+                            required:
+                            - bucket
+                            - qps
+                            type: object
+                          exponentialFailure:
+                            description: |-
+                              ExponentialFailure rate limiter increases delay exponentially with each failure.
+                              Standard approach for backing off when operations fail repeatedly.
+                            properties:
+                              baseDelay:
+                                description: |-
+                                  BaseDelay is the initial delay after the first failure. Subsequent failures will exponentially
+                                  increase this delay (2x, 4x, 8x, etc.) until MaxDelay is reached.
+                                  Format follows Go's time.Duration syntax (e.g., "1s" for 1 second).
+                                type: string
+                              maxDelay:
+                                description: |-
+                                  MaxDelay is the maximum delay between retry attempts. Once the exponential backoff reaches
+                                  this value, all subsequent retries will use this delay.
+                                  Format follows Go's time.Duration syntax (e.g., "1m" for 1 minute).
+                                type: string
+                            required:
+                            - baseDelay
+                            - maxDelay
+                            type: object
+                          fastSlow:
+                            description: |-
+                              FastSlow rate limiter provides fast retries initially, then switches to slow retries.
+                              Useful for quickly retrying transient errors while backing off for persistent failures.
+                            properties:
+                              fastDelay:
+                                description: |-
+                                  FastDelay is the delay used for the first MaxFastAttempts retry attempts.
+                                  Format follows Go's time.Duration syntax (e.g., "100ms" for 100 milliseconds).
+                                type: string
+                              maxFastAttempts:
+                                description: |-
+                                  MaxFastAttempts is the number of retry attempts that use FastDelay before switching to SlowDelay.
+                                  Must be at least 1.
+                                type: integer
+                              slowDelay:
+                                description: |-
+                                  SlowDelay is the delay used for retry attempts after MaxFastAttempts have been exhausted.
+                                  Format follows Go's time.Duration syntax (e.g., "10s" for 10 seconds).
+                                type: string
+                            required:
+                            - fastDelay
+                            - maxFastAttempts
+                            - slowDelay
+                            type: object
+                          maxOf:
+                            description: |-
+                              MaxOf allows combining multiple rate limiters, where the maximum delay from all
+                              limiters is used. This enables sophisticated rate limiting that respects multiple
+                              constraints simultaneously (e.g., both per-item exponential backoff and global rate limits).
+                            items:
+                              description: |-
+                                RateLimiterTypes defines the different algorithms available for rate limiting.
+
+                                Exactly one of the three rate limiter types must be specified:
+                                  - FastSlow: Quick retry for transient errors, then slower retry for persistent failures
+                                  - ExponentialFailure: Standard exponential backoff for repeated failures
+                                  - Bucket: Token bucket algorithm for controlling overall request rate
+
+                                See https://pkg.go.dev/k8s.io/client-go/util/workqueue for implementation details.
+                              properties:
+                                bucket:
+                                  description: |-
+                                    Bucket rate limiter uses a token bucket algorithm to control request rate.
+                                    Allows bursts while maintaining an average rate limit.
+                                  properties:
+                                    bucket:
+                                      description: |-
+                                        Bucket is the maximum number of tokens that can be accumulated in the bucket.
+                                        This defines the maximum burst size - how many operations can occur in rapid
+                                        succession before rate limiting takes effect. Must be non-negative.
+                                      type: integer
+                                    qps:
+                                      description: |-
+                                        Qps (queries per second) is the rate at which tokens are added to the bucket.
+                                        This defines the sustained rate limit for operations. Must be non-negative.
+                                      type: integer
+                                  required:
+                                  - bucket
+                                  - qps
+                                  type: object
+                                exponentialFailure:
+                                  description: |-
+                                    ExponentialFailure rate limiter increases delay exponentially with each failure.
+                                    Standard approach for backing off when operations fail repeatedly.
+                                  properties:
+                                    baseDelay:
+                                      description: |-
+                                        BaseDelay is the initial delay after the first failure. Subsequent failures will exponentially
+                                        increase this delay (2x, 4x, 8x, etc.) until MaxDelay is reached.
+                                        Format follows Go's time.Duration syntax (e.g., "1s" for 1 second).
+                                      type: string
+                                    maxDelay:
+                                      description: |-
+                                        MaxDelay is the maximum delay between retry attempts. Once the exponential backoff reaches
+                                        this value, all subsequent retries will use this delay.
+                                        Format follows Go's time.Duration syntax (e.g., "1m" for 1 minute).
+                                      type: string
+                                  required:
+                                  - baseDelay
+                                  - maxDelay
+                                  type: object
+                                fastSlow:
+                                  description: |-
+                                    FastSlow rate limiter provides fast retries initially, then switches to slow retries.
+                                    Useful for quickly retrying transient errors while backing off for persistent failures.
+                                  properties:
+                                    fastDelay:
+                                      description: |-
+                                        FastDelay is the delay used for the first MaxFastAttempts retry attempts.
+                                        Format follows Go's time.Duration syntax (e.g., "100ms" for 100 milliseconds).
+                                      type: string
+                                    maxFastAttempts:
+                                      description: |-
+                                        MaxFastAttempts is the number of retry attempts that use FastDelay before switching to SlowDelay.
+                                        Must be at least 1.
+                                      type: integer
+                                    slowDelay:
+                                      description: |-
+                                        SlowDelay is the delay used for retry attempts after MaxFastAttempts have been exhausted.
+                                        Format follows Go's time.Duration syntax (e.g., "10s" for 10 seconds).
+                                      type: string
+                                  required:
+                                  - fastDelay
+                                  - maxFastAttempts
+                                  - slowDelay
+                                  type: object
+                              type: object
+                              x-kubernetes-validations:
+                              - message: at most one of the fields in [fastSlow exponentialFailure
+                                  bucket] may be set
+                                rule: '[has(self.fastSlow),has(self.exponentialFailure),has(self.bucket)].filter(x,x==true).size()
+                                  <= 1'
+                            maxItems: 3
+                            type: array
+                        type: object
+                        x-kubernetes-validations:
+                        - message: at most one of the fields in [fastSlow exponentialFailure
+                            bucket maxOf] may be set
+                          rule: '[has(self.fastSlow),has(self.exponentialFailure),has(self.bucket),has(self.maxOf)].filter(x,x==true).size()
+                            <= 1'
+                        - message: at most one of the fields in [fastSlow exponentialFailure
+                            bucket] may be set
+                          rule: '[has(self.fastSlow),has(self.exponentialFailure),has(self.bucket)].filter(x,x==true).size()
+                            <= 1'
+                      requeueDuration:
+                        description: |-
+                          RequeueDuration specifies how frequently resources should be requeued for automatic reconciliation.
+                          This creates a periodic reconciliation loop that ensures the desired state is maintained even
+                          without external triggers. Format follows Go's time.Duration syntax (e.g., "5m" for 5 minutes).
+                        type: string
+                    required:
+                    - maxConcurrentReconciles
+                    - rateLimiter
+                    - requeueDuration
+                    type: object
+                required:
+                - workQueue
+                type: object
+              commitStatus:
                 description: |-
-                  How frequently to requeue promotion strategy resources for auto reconciliation. Default: "5m".
-                  Format is go's time.Duration, e.g. "5m" for 5 minutes.
-                type: string
+                  CommitStatus contains the configuration for the CommitStatus controller,
+                  including WorkQueue settings that control reconciliation behavior.
+                properties:
+                  workQueue:
+                    description: |-
+                      WorkQueue contains the work queue configuration for the CommitStatus controller.
+                      This includes requeue duration, maximum concurrent reconciles, and rate limiter settings.
+                    properties:
+                      maxConcurrentReconciles:
+                        description: |-
+                          MaxConcurrentReconciles defines the maximum number of concurrent reconcile operations
+                          that can run for this controller. Higher values increase throughput but consume more
+                          resources. Must be at least 1.
+                        type: integer
+                      rateLimiter:
+                        description: |-
+                          RateLimiter defines the rate limiting strategy for the controller's work queue.
+                          Rate limiting controls how quickly failed reconciliations are retried and helps
+                          prevent overwhelming external APIs or systems.
+                        properties:
+                          bucket:
+                            description: |-
+                              Bucket rate limiter uses a token bucket algorithm to control request rate.
+                              Allows bursts while maintaining an average rate limit.
+                            properties:
+                              bucket:
+                                description: |-
+                                  Bucket is the maximum number of tokens that can be accumulated in the bucket.
+                                  This defines the maximum burst size - how many operations can occur in rapid
+                                  succession before rate limiting takes effect. Must be non-negative.
+                                type: integer
+                              qps:
+                                description: |-
+                                  Qps (queries per second) is the rate at which tokens are added to the bucket.
+                                  This defines the sustained rate limit for operations. Must be non-negative.
+                                type: integer
+                            required:
+                            - bucket
+                            - qps
+                            type: object
+                          exponentialFailure:
+                            description: |-
+                              ExponentialFailure rate limiter increases delay exponentially with each failure.
+                              Standard approach for backing off when operations fail repeatedly.
+                            properties:
+                              baseDelay:
+                                description: |-
+                                  BaseDelay is the initial delay after the first failure. Subsequent failures will exponentially
+                                  increase this delay (2x, 4x, 8x, etc.) until MaxDelay is reached.
+                                  Format follows Go's time.Duration syntax (e.g., "1s" for 1 second).
+                                type: string
+                              maxDelay:
+                                description: |-
+                                  MaxDelay is the maximum delay between retry attempts. Once the exponential backoff reaches
+                                  this value, all subsequent retries will use this delay.
+                                  Format follows Go's time.Duration syntax (e.g., "1m" for 1 minute).
+                                type: string
+                            required:
+                            - baseDelay
+                            - maxDelay
+                            type: object
+                          fastSlow:
+                            description: |-
+                              FastSlow rate limiter provides fast retries initially, then switches to slow retries.
+                              Useful for quickly retrying transient errors while backing off for persistent failures.
+                            properties:
+                              fastDelay:
+                                description: |-
+                                  FastDelay is the delay used for the first MaxFastAttempts retry attempts.
+                                  Format follows Go's time.Duration syntax (e.g., "100ms" for 100 milliseconds).
+                                type: string
+                              maxFastAttempts:
+                                description: |-
+                                  MaxFastAttempts is the number of retry attempts that use FastDelay before switching to SlowDelay.
+                                  Must be at least 1.
+                                type: integer
+                              slowDelay:
+                                description: |-
+                                  SlowDelay is the delay used for retry attempts after MaxFastAttempts have been exhausted.
+                                  Format follows Go's time.Duration syntax (e.g., "10s" for 10 seconds).
+                                type: string
+                            required:
+                            - fastDelay
+                            - maxFastAttempts
+                            - slowDelay
+                            type: object
+                          maxOf:
+                            description: |-
+                              MaxOf allows combining multiple rate limiters, where the maximum delay from all
+                              limiters is used. This enables sophisticated rate limiting that respects multiple
+                              constraints simultaneously (e.g., both per-item exponential backoff and global rate limits).
+                            items:
+                              description: |-
+                                RateLimiterTypes defines the different algorithms available for rate limiting.
+
+                                Exactly one of the three rate limiter types must be specified:
+                                  - FastSlow: Quick retry for transient errors, then slower retry for persistent failures
+                                  - ExponentialFailure: Standard exponential backoff for repeated failures
+                                  - Bucket: Token bucket algorithm for controlling overall request rate
+
+                                See https://pkg.go.dev/k8s.io/client-go/util/workqueue for implementation details.
+                              properties:
+                                bucket:
+                                  description: |-
+                                    Bucket rate limiter uses a token bucket algorithm to control request rate.
+                                    Allows bursts while maintaining an average rate limit.
+                                  properties:
+                                    bucket:
+                                      description: |-
+                                        Bucket is the maximum number of tokens that can be accumulated in the bucket.
+                                        This defines the maximum burst size - how many operations can occur in rapid
+                                        succession before rate limiting takes effect. Must be non-negative.
+                                      type: integer
+                                    qps:
+                                      description: |-
+                                        Qps (queries per second) is the rate at which tokens are added to the bucket.
+                                        This defines the sustained rate limit for operations. Must be non-negative.
+                                      type: integer
+                                  required:
+                                  - bucket
+                                  - qps
+                                  type: object
+                                exponentialFailure:
+                                  description: |-
+                                    ExponentialFailure rate limiter increases delay exponentially with each failure.
+                                    Standard approach for backing off when operations fail repeatedly.
+                                  properties:
+                                    baseDelay:
+                                      description: |-
+                                        BaseDelay is the initial delay after the first failure. Subsequent failures will exponentially
+                                        increase this delay (2x, 4x, 8x, etc.) until MaxDelay is reached.
+                                        Format follows Go's time.Duration syntax (e.g., "1s" for 1 second).
+                                      type: string
+                                    maxDelay:
+                                      description: |-
+                                        MaxDelay is the maximum delay between retry attempts. Once the exponential backoff reaches
+                                        this value, all subsequent retries will use this delay.
+                                        Format follows Go's time.Duration syntax (e.g., "1m" for 1 minute).
+                                      type: string
+                                  required:
+                                  - baseDelay
+                                  - maxDelay
+                                  type: object
+                                fastSlow:
+                                  description: |-
+                                    FastSlow rate limiter provides fast retries initially, then switches to slow retries.
+                                    Useful for quickly retrying transient errors while backing off for persistent failures.
+                                  properties:
+                                    fastDelay:
+                                      description: |-
+                                        FastDelay is the delay used for the first MaxFastAttempts retry attempts.
+                                        Format follows Go's time.Duration syntax (e.g., "100ms" for 100 milliseconds).
+                                      type: string
+                                    maxFastAttempts:
+                                      description: |-
+                                        MaxFastAttempts is the number of retry attempts that use FastDelay before switching to SlowDelay.
+                                        Must be at least 1.
+                                      type: integer
+                                    slowDelay:
+                                      description: |-
+                                        SlowDelay is the delay used for retry attempts after MaxFastAttempts have been exhausted.
+                                        Format follows Go's time.Duration syntax (e.g., "10s" for 10 seconds).
+                                      type: string
+                                  required:
+                                  - fastDelay
+                                  - maxFastAttempts
+                                  - slowDelay
+                                  type: object
+                              type: object
+                              x-kubernetes-validations:
+                              - message: at most one of the fields in [fastSlow exponentialFailure
+                                  bucket] may be set
+                                rule: '[has(self.fastSlow),has(self.exponentialFailure),has(self.bucket)].filter(x,x==true).size()
+                                  <= 1'
+                            maxItems: 3
+                            type: array
+                        type: object
+                        x-kubernetes-validations:
+                        - message: at most one of the fields in [fastSlow exponentialFailure
+                            bucket maxOf] may be set
+                          rule: '[has(self.fastSlow),has(self.exponentialFailure),has(self.bucket),has(self.maxOf)].filter(x,x==true).size()
+                            <= 1'
+                        - message: at most one of the fields in [fastSlow exponentialFailure
+                            bucket] may be set
+                          rule: '[has(self.fastSlow),has(self.exponentialFailure),has(self.bucket)].filter(x,x==true).size()
+                            <= 1'
+                      requeueDuration:
+                        description: |-
+                          RequeueDuration specifies how frequently resources should be requeued for automatic reconciliation.
+                          This creates a periodic reconciliation loop that ensures the desired state is maintained even
+                          without external triggers. Format follows Go's time.Duration syntax (e.g., "5m" for 5 minutes).
+                        type: string
+                    required:
+                    - maxConcurrentReconciles
+                    - rateLimiter
+                    - requeueDuration
+                    type: object
+                required:
+                - workQueue
+                type: object
+              promotionStrategy:
+                description: |-
+                  PromotionStrategy contains the configuration for the PromotionStrategy controller,
+                  including WorkQueue settings that control reconciliation behavior.
+                properties:
+                  workQueue:
+                    description: |-
+                      WorkQueue contains the work queue configuration for the PromotionStrategy controller.
+                      This includes requeue duration, maximum concurrent reconciles, and rate limiter settings.
+                    properties:
+                      maxConcurrentReconciles:
+                        description: |-
+                          MaxConcurrentReconciles defines the maximum number of concurrent reconcile operations
+                          that can run for this controller. Higher values increase throughput but consume more
+                          resources. Must be at least 1.
+                        type: integer
+                      rateLimiter:
+                        description: |-
+                          RateLimiter defines the rate limiting strategy for the controller's work queue.
+                          Rate limiting controls how quickly failed reconciliations are retried and helps
+                          prevent overwhelming external APIs or systems.
+                        properties:
+                          bucket:
+                            description: |-
+                              Bucket rate limiter uses a token bucket algorithm to control request rate.
+                              Allows bursts while maintaining an average rate limit.
+                            properties:
+                              bucket:
+                                description: |-
+                                  Bucket is the maximum number of tokens that can be accumulated in the bucket.
+                                  This defines the maximum burst size - how many operations can occur in rapid
+                                  succession before rate limiting takes effect. Must be non-negative.
+                                type: integer
+                              qps:
+                                description: |-
+                                  Qps (queries per second) is the rate at which tokens are added to the bucket.
+                                  This defines the sustained rate limit for operations. Must be non-negative.
+                                type: integer
+                            required:
+                            - bucket
+                            - qps
+                            type: object
+                          exponentialFailure:
+                            description: |-
+                              ExponentialFailure rate limiter increases delay exponentially with each failure.
+                              Standard approach for backing off when operations fail repeatedly.
+                            properties:
+                              baseDelay:
+                                description: |-
+                                  BaseDelay is the initial delay after the first failure. Subsequent failures will exponentially
+                                  increase this delay (2x, 4x, 8x, etc.) until MaxDelay is reached.
+                                  Format follows Go's time.Duration syntax (e.g., "1s" for 1 second).
+                                type: string
+                              maxDelay:
+                                description: |-
+                                  MaxDelay is the maximum delay between retry attempts. Once the exponential backoff reaches
+                                  this value, all subsequent retries will use this delay.
+                                  Format follows Go's time.Duration syntax (e.g., "1m" for 1 minute).
+                                type: string
+                            required:
+                            - baseDelay
+                            - maxDelay
+                            type: object
+                          fastSlow:
+                            description: |-
+                              FastSlow rate limiter provides fast retries initially, then switches to slow retries.
+                              Useful for quickly retrying transient errors while backing off for persistent failures.
+                            properties:
+                              fastDelay:
+                                description: |-
+                                  FastDelay is the delay used for the first MaxFastAttempts retry attempts.
+                                  Format follows Go's time.Duration syntax (e.g., "100ms" for 100 milliseconds).
+                                type: string
+                              maxFastAttempts:
+                                description: |-
+                                  MaxFastAttempts is the number of retry attempts that use FastDelay before switching to SlowDelay.
+                                  Must be at least 1.
+                                type: integer
+                              slowDelay:
+                                description: |-
+                                  SlowDelay is the delay used for retry attempts after MaxFastAttempts have been exhausted.
+                                  Format follows Go's time.Duration syntax (e.g., "10s" for 10 seconds).
+                                type: string
+                            required:
+                            - fastDelay
+                            - maxFastAttempts
+                            - slowDelay
+                            type: object
+                          maxOf:
+                            description: |-
+                              MaxOf allows combining multiple rate limiters, where the maximum delay from all
+                              limiters is used. This enables sophisticated rate limiting that respects multiple
+                              constraints simultaneously (e.g., both per-item exponential backoff and global rate limits).
+                            items:
+                              description: |-
+                                RateLimiterTypes defines the different algorithms available for rate limiting.
+
+                                Exactly one of the three rate limiter types must be specified:
+                                  - FastSlow: Quick retry for transient errors, then slower retry for persistent failures
+                                  - ExponentialFailure: Standard exponential backoff for repeated failures
+                                  - Bucket: Token bucket algorithm for controlling overall request rate
+
+                                See https://pkg.go.dev/k8s.io/client-go/util/workqueue for implementation details.
+                              properties:
+                                bucket:
+                                  description: |-
+                                    Bucket rate limiter uses a token bucket algorithm to control request rate.
+                                    Allows bursts while maintaining an average rate limit.
+                                  properties:
+                                    bucket:
+                                      description: |-
+                                        Bucket is the maximum number of tokens that can be accumulated in the bucket.
+                                        This defines the maximum burst size - how many operations can occur in rapid
+                                        succession before rate limiting takes effect. Must be non-negative.
+                                      type: integer
+                                    qps:
+                                      description: |-
+                                        Qps (queries per second) is the rate at which tokens are added to the bucket.
+                                        This defines the sustained rate limit for operations. Must be non-negative.
+                                      type: integer
+                                  required:
+                                  - bucket
+                                  - qps
+                                  type: object
+                                exponentialFailure:
+                                  description: |-
+                                    ExponentialFailure rate limiter increases delay exponentially with each failure.
+                                    Standard approach for backing off when operations fail repeatedly.
+                                  properties:
+                                    baseDelay:
+                                      description: |-
+                                        BaseDelay is the initial delay after the first failure. Subsequent failures will exponentially
+                                        increase this delay (2x, 4x, 8x, etc.) until MaxDelay is reached.
+                                        Format follows Go's time.Duration syntax (e.g., "1s" for 1 second).
+                                      type: string
+                                    maxDelay:
+                                      description: |-
+                                        MaxDelay is the maximum delay between retry attempts. Once the exponential backoff reaches
+                                        this value, all subsequent retries will use this delay.
+                                        Format follows Go's time.Duration syntax (e.g., "1m" for 1 minute).
+                                      type: string
+                                  required:
+                                  - baseDelay
+                                  - maxDelay
+                                  type: object
+                                fastSlow:
+                                  description: |-
+                                    FastSlow rate limiter provides fast retries initially, then switches to slow retries.
+                                    Useful for quickly retrying transient errors while backing off for persistent failures.
+                                  properties:
+                                    fastDelay:
+                                      description: |-
+                                        FastDelay is the delay used for the first MaxFastAttempts retry attempts.
+                                        Format follows Go's time.Duration syntax (e.g., "100ms" for 100 milliseconds).
+                                      type: string
+                                    maxFastAttempts:
+                                      description: |-
+                                        MaxFastAttempts is the number of retry attempts that use FastDelay before switching to SlowDelay.
+                                        Must be at least 1.
+                                      type: integer
+                                    slowDelay:
+                                      description: |-
+                                        SlowDelay is the delay used for retry attempts after MaxFastAttempts have been exhausted.
+                                        Format follows Go's time.Duration syntax (e.g., "10s" for 10 seconds).
+                                      type: string
+                                  required:
+                                  - fastDelay
+                                  - maxFastAttempts
+                                  - slowDelay
+                                  type: object
+                              type: object
+                              x-kubernetes-validations:
+                              - message: at most one of the fields in [fastSlow exponentialFailure
+                                  bucket] may be set
+                                rule: '[has(self.fastSlow),has(self.exponentialFailure),has(self.bucket)].filter(x,x==true).size()
+                                  <= 1'
+                            maxItems: 3
+                            type: array
+                        type: object
+                        x-kubernetes-validations:
+                        - message: at most one of the fields in [fastSlow exponentialFailure
+                            bucket maxOf] may be set
+                          rule: '[has(self.fastSlow),has(self.exponentialFailure),has(self.bucket),has(self.maxOf)].filter(x,x==true).size()
+                            <= 1'
+                        - message: at most one of the fields in [fastSlow exponentialFailure
+                            bucket] may be set
+                          rule: '[has(self.fastSlow),has(self.exponentialFailure),has(self.bucket)].filter(x,x==true).size()
+                            <= 1'
+                      requeueDuration:
+                        description: |-
+                          RequeueDuration specifies how frequently resources should be requeued for automatic reconciliation.
+                          This creates a periodic reconciliation loop that ensures the desired state is maintained even
+                          without external triggers. Format follows Go's time.Duration syntax (e.g., "5m" for 5 minutes).
+                        type: string
+                    required:
+                    - maxConcurrentReconciles
+                    - rateLimiter
+                    - requeueDuration
+                    type: object
+                required:
+                - workQueue
+                type: object
               pullRequest:
-                description: PullRequestConfiguration defines the configuration for
-                  pull requests.
+                description: |-
+                  PullRequest contains the configuration for the PullRequest controller,
+                  including WorkQueue settings and pull request template configuration.
                 properties:
                   template:
-                    description: Template is the template used to generate pull requests.
+                    description: |-
+                      Template is the template configuration used to generate pull request titles and descriptions.
+                      Uses Go template syntax with Sprig functions available.
                     properties:
                       description:
                         description: |-
-                          Description used to generate the description of the pull request.
-                          Uses Go template syntax and Sprig functions are available.
+                          Description is the template used to generate the body/description of the pull request.
+                          Uses Go template syntax with Sprig functions available for string manipulation.
                         type: string
                       title:
                         description: |-
-                          Title used to generate the title of the pull request.
-                          Uses Go template syntax and Sprig functions are available.
+                          Title is the template used to generate the title of the pull request.
+                          Uses Go template syntax with Sprig functions available for string manipulation.
                         type: string
                     required:
                     - description
                     - title
                     type: object
+                  workQueue:
+                    description: |-
+                      WorkQueue contains the work queue configuration for the PullRequest controller.
+                      This includes requeue duration, maximum concurrent reconciles, and rate limiter settings.
+                    properties:
+                      maxConcurrentReconciles:
+                        description: |-
+                          MaxConcurrentReconciles defines the maximum number of concurrent reconcile operations
+                          that can run for this controller. Higher values increase throughput but consume more
+                          resources. Must be at least 1.
+                        type: integer
+                      rateLimiter:
+                        description: |-
+                          RateLimiter defines the rate limiting strategy for the controller's work queue.
+                          Rate limiting controls how quickly failed reconciliations are retried and helps
+                          prevent overwhelming external APIs or systems.
+                        properties:
+                          bucket:
+                            description: |-
+                              Bucket rate limiter uses a token bucket algorithm to control request rate.
+                              Allows bursts while maintaining an average rate limit.
+                            properties:
+                              bucket:
+                                description: |-
+                                  Bucket is the maximum number of tokens that can be accumulated in the bucket.
+                                  This defines the maximum burst size - how many operations can occur in rapid
+                                  succession before rate limiting takes effect. Must be non-negative.
+                                type: integer
+                              qps:
+                                description: |-
+                                  Qps (queries per second) is the rate at which tokens are added to the bucket.
+                                  This defines the sustained rate limit for operations. Must be non-negative.
+                                type: integer
+                            required:
+                            - bucket
+                            - qps
+                            type: object
+                          exponentialFailure:
+                            description: |-
+                              ExponentialFailure rate limiter increases delay exponentially with each failure.
+                              Standard approach for backing off when operations fail repeatedly.
+                            properties:
+                              baseDelay:
+                                description: |-
+                                  BaseDelay is the initial delay after the first failure. Subsequent failures will exponentially
+                                  increase this delay (2x, 4x, 8x, etc.) until MaxDelay is reached.
+                                  Format follows Go's time.Duration syntax (e.g., "1s" for 1 second).
+                                type: string
+                              maxDelay:
+                                description: |-
+                                  MaxDelay is the maximum delay between retry attempts. Once the exponential backoff reaches
+                                  this value, all subsequent retries will use this delay.
+                                  Format follows Go's time.Duration syntax (e.g., "1m" for 1 minute).
+                                type: string
+                            required:
+                            - baseDelay
+                            - maxDelay
+                            type: object
+                          fastSlow:
+                            description: |-
+                              FastSlow rate limiter provides fast retries initially, then switches to slow retries.
+                              Useful for quickly retrying transient errors while backing off for persistent failures.
+                            properties:
+                              fastDelay:
+                                description: |-
+                                  FastDelay is the delay used for the first MaxFastAttempts retry attempts.
+                                  Format follows Go's time.Duration syntax (e.g., "100ms" for 100 milliseconds).
+                                type: string
+                              maxFastAttempts:
+                                description: |-
+                                  MaxFastAttempts is the number of retry attempts that use FastDelay before switching to SlowDelay.
+                                  Must be at least 1.
+                                type: integer
+                              slowDelay:
+                                description: |-
+                                  SlowDelay is the delay used for retry attempts after MaxFastAttempts have been exhausted.
+                                  Format follows Go's time.Duration syntax (e.g., "10s" for 10 seconds).
+                                type: string
+                            required:
+                            - fastDelay
+                            - maxFastAttempts
+                            - slowDelay
+                            type: object
+                          maxOf:
+                            description: |-
+                              MaxOf allows combining multiple rate limiters, where the maximum delay from all
+                              limiters is used. This enables sophisticated rate limiting that respects multiple
+                              constraints simultaneously (e.g., both per-item exponential backoff and global rate limits).
+                            items:
+                              description: |-
+                                RateLimiterTypes defines the different algorithms available for rate limiting.
+
+                                Exactly one of the three rate limiter types must be specified:
+                                  - FastSlow: Quick retry for transient errors, then slower retry for persistent failures
+                                  - ExponentialFailure: Standard exponential backoff for repeated failures
+                                  - Bucket: Token bucket algorithm for controlling overall request rate
+
+                                See https://pkg.go.dev/k8s.io/client-go/util/workqueue for implementation details.
+                              properties:
+                                bucket:
+                                  description: |-
+                                    Bucket rate limiter uses a token bucket algorithm to control request rate.
+                                    Allows bursts while maintaining an average rate limit.
+                                  properties:
+                                    bucket:
+                                      description: |-
+                                        Bucket is the maximum number of tokens that can be accumulated in the bucket.
+                                        This defines the maximum burst size - how many operations can occur in rapid
+                                        succession before rate limiting takes effect. Must be non-negative.
+                                      type: integer
+                                    qps:
+                                      description: |-
+                                        Qps (queries per second) is the rate at which tokens are added to the bucket.
+                                        This defines the sustained rate limit for operations. Must be non-negative.
+                                      type: integer
+                                  required:
+                                  - bucket
+                                  - qps
+                                  type: object
+                                exponentialFailure:
+                                  description: |-
+                                    ExponentialFailure rate limiter increases delay exponentially with each failure.
+                                    Standard approach for backing off when operations fail repeatedly.
+                                  properties:
+                                    baseDelay:
+                                      description: |-
+                                        BaseDelay is the initial delay after the first failure. Subsequent failures will exponentially
+                                        increase this delay (2x, 4x, 8x, etc.) until MaxDelay is reached.
+                                        Format follows Go's time.Duration syntax (e.g., "1s" for 1 second).
+                                      type: string
+                                    maxDelay:
+                                      description: |-
+                                        MaxDelay is the maximum delay between retry attempts. Once the exponential backoff reaches
+                                        this value, all subsequent retries will use this delay.
+                                        Format follows Go's time.Duration syntax (e.g., "1m" for 1 minute).
+                                      type: string
+                                  required:
+                                  - baseDelay
+                                  - maxDelay
+                                  type: object
+                                fastSlow:
+                                  description: |-
+                                    FastSlow rate limiter provides fast retries initially, then switches to slow retries.
+                                    Useful for quickly retrying transient errors while backing off for persistent failures.
+                                  properties:
+                                    fastDelay:
+                                      description: |-
+                                        FastDelay is the delay used for the first MaxFastAttempts retry attempts.
+                                        Format follows Go's time.Duration syntax (e.g., "100ms" for 100 milliseconds).
+                                      type: string
+                                    maxFastAttempts:
+                                      description: |-
+                                        MaxFastAttempts is the number of retry attempts that use FastDelay before switching to SlowDelay.
+                                        Must be at least 1.
+                                      type: integer
+                                    slowDelay:
+                                      description: |-
+                                        SlowDelay is the delay used for retry attempts after MaxFastAttempts have been exhausted.
+                                        Format follows Go's time.Duration syntax (e.g., "10s" for 10 seconds).
+                                      type: string
+                                  required:
+                                  - fastDelay
+                                  - maxFastAttempts
+                                  - slowDelay
+                                  type: object
+                              type: object
+                              x-kubernetes-validations:
+                              - message: at most one of the fields in [fastSlow exponentialFailure
+                                  bucket] may be set
+                                rule: '[has(self.fastSlow),has(self.exponentialFailure),has(self.bucket)].filter(x,x==true).size()
+                                  <= 1'
+                            maxItems: 3
+                            type: array
+                        type: object
+                        x-kubernetes-validations:
+                        - message: at most one of the fields in [fastSlow exponentialFailure
+                            bucket maxOf] may be set
+                          rule: '[has(self.fastSlow),has(self.exponentialFailure),has(self.bucket),has(self.maxOf)].filter(x,x==true).size()
+                            <= 1'
+                        - message: at most one of the fields in [fastSlow exponentialFailure
+                            bucket] may be set
+                          rule: '[has(self.fastSlow),has(self.exponentialFailure),has(self.bucket)].filter(x,x==true).size()
+                            <= 1'
+                      requeueDuration:
+                        description: |-
+                          RequeueDuration specifies how frequently resources should be requeued for automatic reconciliation.
+                          This creates a periodic reconciliation loop that ensures the desired state is maintained even
+                          without external triggers. Format follows Go's time.Duration syntax (e.g., "5m" for 5 minutes).
+                        type: string
+                    required:
+                    - maxConcurrentReconciles
+                    - rateLimiter
+                    - requeueDuration
+                    type: object
                 required:
                 - template
+                - workQueue
                 type: object
-              pullRequestRequeueDuration:
-                description: |-
-                  How frequently to requeue pull request resources for auto reconciliation. Default: "5m".
-                  Format is go's time.Duration, e.g. "5m" for 5 minutes.
-                type: string
             required:
-            - argocdCommitStatusRequeueDuration
-            - changeTransferPolicyRequeueDuration
-            - promotionStrategyRequeueDuration
+            - argocdCommitStatus
+            - changeTransferPolicy
+            - commitStatus
+            - promotionStrategy
             - pullRequest
-            - pullRequestRequeueDuration
             type: object
           status:
-            description: ControllerConfigurationStatus defines the observed state
-              of ControllerConfiguration.
+            description: |-
+              ControllerConfigurationStatus defines the observed state of ControllerConfiguration.
+
+              Currently, this resource does not maintain any status information as it is a configuration-only
+              resource. Status fields may be added in the future to track configuration validation or
+              controller health metrics.
             type: object
         type: object
     served: true
@@ -1126,7 +2497,7 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.16.3
+    controller-gen.kubebuilder.io/version: v0.19.0
   name: gitrepositories.promoter.argoproj.io
 spec:
   group: promoter.argoproj.io
@@ -1264,7 +2635,7 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.16.3
+    controller-gen.kubebuilder.io/version: v0.19.0
   name: promotionstrategies.promoter.argoproj.io
 spec:
   group: promoter.argoproj.io
@@ -1319,7 +2690,9 @@ spec:
                     by their key.
                   properties:
                     key:
-                      pattern: (([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])?
+                      maxLength: 63
+                      minLength: 1
+                      pattern: ([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9]
                       type: string
                   required:
                   - key
@@ -1347,7 +2720,9 @@ spec:
                           statuses by their key.
                         properties:
                           key:
-                            pattern: (([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])?
+                            maxLength: 63
+                            minLength: 1
+                            pattern: ([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9]
                             type: string
                         required:
                         - key
@@ -1379,7 +2754,9 @@ spec:
                           statuses by their key.
                         properties:
                           key:
-                            pattern: (([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])?
+                            maxLength: 63
+                            minLength: 1
+                            pattern: ([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9]
                             type: string
                         required:
                         - key
@@ -1419,7 +2796,9 @@ spec:
                     by their key.
                   properties:
                     key:
-                      pattern: (([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])?
+                      maxLength: 63
+                      minLength: 1
+                      pattern: ([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9]
                       type: string
                   required:
                   - key
@@ -1516,6 +2895,9 @@ spec:
                             properties:
                               key:
                                 description: Key staging hydrated branch
+                                maxLength: 63
+                                minLength: 1
+                                pattern: ([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9]
                                 type: string
                               phase:
                                 description: Phase what phase is the status in
@@ -1576,16 +2958,16 @@ spec:
                                           formatted as by `git show -s --format=%aI`.
                                         format: date-time
                                         type: string
-                                      message:
-                                        description: Subject is the subject line of
-                                          the commit message, i.e. `git show --format=%s`.
-                                        type: string
                                       repoURL:
                                         description: RepoURL is the URL of the repository
                                           where the commit is located.
                                         type: string
                                       sha:
                                         description: Sha is the commit hash.
+                                        type: string
+                                      subject:
+                                        description: Subject is the subject line of
+                                          the commit message, i.e. `git show --format=%s`.
                                         type: string
                                     type: object
                                 type: object
@@ -1643,16 +3025,16 @@ spec:
                                           formatted as by `git show -s --format=%aI`.
                                         format: date-time
                                         type: string
-                                      message:
-                                        description: Subject is the subject line of
-                                          the commit message, i.e. `git show --format=%s`.
-                                        type: string
                                       repoURL:
                                         description: RepoURL is the URL of the repository
                                           where the commit is located.
                                         type: string
                                       sha:
                                         description: Sha is the commit hash.
+                                        type: string
+                                      subject:
+                                        description: Subject is the subject line of
+                                          the commit message, i.e. `git show --format=%s`.
                                         type: string
                                     type: object
                                 type: object
@@ -1674,6 +3056,336 @@ spec:
                       description: Branch is the name of the active branch for the
                         environment.
                       type: string
+                    history:
+                      description: |-
+                        History defines the history of promoted changes done by the PromotionStrategy for each environment.
+                        You can think of it as a list of PRs merged by GitOps Promoter. It will not include changes that were
+                        manually merged. The history length is hard-coded to be at most 5 entries. This may change in the future.
+                        History is constructed on a best-effort basis and should be used for informational purposes only.
+                        History is in reverse chronological order (newest is first).
+                      items:
+                        description: History describes a particular change that was
+                          promoted by the ChangeTransferPolicy.
+                        properties:
+                          active:
+                            description: Active is the state of the active branch
+                              at the time the PR was merged.
+                            properties:
+                              commitStatuses:
+                                description: CommitStatuses is a list of commit statuses
+                                  that are being monitored for this branch.
+                                items:
+                                  description: ChangeRequestPolicyCommitStatusPhase
+                                    defines the phase of a commit status in a ChangeTransferPolicy.
+                                  properties:
+                                    key:
+                                      description: Key staging hydrated branch
+                                      maxLength: 63
+                                      minLength: 1
+                                      pattern: ([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9]
+                                      type: string
+                                    phase:
+                                      description: Phase what phase is the status
+                                        in
+                                      enum:
+                                      - pending
+                                      - success
+                                      - failure
+                                      type: string
+                                    url:
+                                      description: Url is the URL of the commit status
+                                      type: string
+                                  required:
+                                  - key
+                                  - phase
+                                  type: object
+                                type: array
+                                x-kubernetes-list-map-keys:
+                                - key
+                                x-kubernetes-list-type: map
+                              dry:
+                                description: Dry is the dry state of the branch, which
+                                  is the commit that is being proposed.
+                                properties:
+                                  author:
+                                    description: Author is the author of the commit
+                                    type: string
+                                  body:
+                                    description: Body is the body of the commit message
+                                      without the subject line
+                                    type: string
+                                  commitTime:
+                                    description: CommitTime is the time the commit
+                                      was made
+                                    format: date-time
+                                    type: string
+                                  references:
+                                    description: References are the references to
+                                      other commits, that went into the hydration
+                                      of the branch
+                                    items:
+                                      description: |-
+                                        RevisionReference contains a reference to a some information that is related in some way to another commit. For now,
+                                        it supports only references to a commit. In the future, it may support other types of references.
+                                      properties:
+                                        commit:
+                                          description: Commit contains metadata about
+                                            the commit that is related in some way
+                                            to another commit.
+                                          properties:
+                                            author:
+                                              description: Author is the author of
+                                                the commit.
+                                              type: string
+                                            body:
+                                              description: Body is the body of the
+                                                commit message, excluding the subject
+                                                line, i.e. `git show --format=%b`.
+                                              type: string
+                                            date:
+                                              description: Date is the date of the
+                                                commit, formatted as by `git show
+                                                -s --format=%aI`.
+                                              format: date-time
+                                              type: string
+                                            repoURL:
+                                              description: RepoURL is the URL of the
+                                                repository where the commit is located.
+                                              type: string
+                                            sha:
+                                              description: Sha is the commit hash.
+                                              type: string
+                                            subject:
+                                              description: Subject is the subject
+                                                line of the commit message, i.e. `git
+                                                show --format=%s`.
+                                              type: string
+                                          type: object
+                                      type: object
+                                    type: array
+                                  repoURL:
+                                    description: RepoURL is the URL of the repository
+                                      where the commit is located
+                                    type: string
+                                  sha:
+                                    description: Sha is the SHA of the commit in the
+                                      branch
+                                    type: string
+                                  subject:
+                                    description: Subject is the subject line of the
+                                      commit message
+                                    type: string
+                                type: object
+                              hydrated:
+                                description: Hydrated is the hydrated state of the
+                                  branch, which is the commit that is currently being
+                                  worked on.
+                                properties:
+                                  author:
+                                    description: Author is the author of the commit
+                                    type: string
+                                  body:
+                                    description: Body is the body of the commit message
+                                      without the subject line
+                                    type: string
+                                  commitTime:
+                                    description: CommitTime is the time the commit
+                                      was made
+                                    format: date-time
+                                    type: string
+                                  references:
+                                    description: References are the references to
+                                      other commits, that went into the hydration
+                                      of the branch
+                                    items:
+                                      description: |-
+                                        RevisionReference contains a reference to a some information that is related in some way to another commit. For now,
+                                        it supports only references to a commit. In the future, it may support other types of references.
+                                      properties:
+                                        commit:
+                                          description: Commit contains metadata about
+                                            the commit that is related in some way
+                                            to another commit.
+                                          properties:
+                                            author:
+                                              description: Author is the author of
+                                                the commit.
+                                              type: string
+                                            body:
+                                              description: Body is the body of the
+                                                commit message, excluding the subject
+                                                line, i.e. `git show --format=%b`.
+                                              type: string
+                                            date:
+                                              description: Date is the date of the
+                                                commit, formatted as by `git show
+                                                -s --format=%aI`.
+                                              format: date-time
+                                              type: string
+                                            repoURL:
+                                              description: RepoURL is the URL of the
+                                                repository where the commit is located.
+                                              type: string
+                                            sha:
+                                              description: Sha is the commit hash.
+                                              type: string
+                                            subject:
+                                              description: Subject is the subject
+                                                line of the commit message, i.e. `git
+                                                show --format=%s`.
+                                              type: string
+                                          type: object
+                                      type: object
+                                    type: array
+                                  repoURL:
+                                    description: RepoURL is the URL of the repository
+                                      where the commit is located
+                                    type: string
+                                  sha:
+                                    description: Sha is the SHA of the commit in the
+                                      branch
+                                    type: string
+                                  subject:
+                                    description: Subject is the subject line of the
+                                      commit message
+                                    type: string
+                                type: object
+                            type: object
+                          proposed:
+                            description: Proposed is the state of the proposed branch
+                              at the time the PR was merged.
+                            properties:
+                              commitStatuses:
+                                description: |-
+                                  CommitStatuses is a list of commit statuses that were being monitored for this branch.
+                                  This contains the state frozen at the moment the PR was merged.
+                                items:
+                                  description: ChangeRequestPolicyCommitStatusPhase
+                                    defines the phase of a commit status in a ChangeTransferPolicy.
+                                  properties:
+                                    key:
+                                      description: Key staging hydrated branch
+                                      maxLength: 63
+                                      minLength: 1
+                                      pattern: ([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9]
+                                      type: string
+                                    phase:
+                                      description: Phase what phase is the status
+                                        in
+                                      enum:
+                                      - pending
+                                      - success
+                                      - failure
+                                      type: string
+                                    url:
+                                      description: Url is the URL of the commit status
+                                      type: string
+                                  required:
+                                  - key
+                                  - phase
+                                  type: object
+                                type: array
+                              hydrated:
+                                description: Hydrated is the hydrated state of the
+                                  branch, which is the commit that is currently being
+                                  worked on.
+                                properties:
+                                  author:
+                                    description: Author is the author of the commit
+                                    type: string
+                                  body:
+                                    description: Body is the body of the commit message
+                                      without the subject line
+                                    type: string
+                                  commitTime:
+                                    description: CommitTime is the time the commit
+                                      was made
+                                    format: date-time
+                                    type: string
+                                  references:
+                                    description: References are the references to
+                                      other commits, that went into the hydration
+                                      of the branch
+                                    items:
+                                      description: |-
+                                        RevisionReference contains a reference to a some information that is related in some way to another commit. For now,
+                                        it supports only references to a commit. In the future, it may support other types of references.
+                                      properties:
+                                        commit:
+                                          description: Commit contains metadata about
+                                            the commit that is related in some way
+                                            to another commit.
+                                          properties:
+                                            author:
+                                              description: Author is the author of
+                                                the commit.
+                                              type: string
+                                            body:
+                                              description: Body is the body of the
+                                                commit message, excluding the subject
+                                                line, i.e. `git show --format=%b`.
+                                              type: string
+                                            date:
+                                              description: Date is the date of the
+                                                commit, formatted as by `git show
+                                                -s --format=%aI`.
+                                              format: date-time
+                                              type: string
+                                            repoURL:
+                                              description: RepoURL is the URL of the
+                                                repository where the commit is located.
+                                              type: string
+                                            sha:
+                                              description: Sha is the commit hash.
+                                              type: string
+                                            subject:
+                                              description: Subject is the subject
+                                                line of the commit message, i.e. `git
+                                                show --format=%s`.
+                                              type: string
+                                          type: object
+                                      type: object
+                                    type: array
+                                  repoURL:
+                                    description: RepoURL is the URL of the repository
+                                      where the commit is located
+                                    type: string
+                                  sha:
+                                    description: Sha is the SHA of the commit in the
+                                      branch
+                                    type: string
+                                  subject:
+                                    description: Subject is the subject line of the
+                                      commit message
+                                    type: string
+                                type: object
+                            type: object
+                          pullRequest:
+                            description: PullRequest is the state of the pull request
+                              that was created for this ChangeTransferPolicy.
+                            properties:
+                              id:
+                                description: ID is the unique identifier of the pull
+                                  request, set by the SCM.
+                                type: string
+                              prCreationTime:
+                                description: PRCreationTime is the time when the pull
+                                  request was created.
+                                format: date-time
+                                type: string
+                              state:
+                                description: State is the state of the pull request.
+                                enum:
+                                - closed
+                                - merged
+                                - open
+                                type: string
+                              url:
+                                description: Url is the URL of the pull request.
+                                type: string
+                            type: object
+                        type: object
+                      type: array
                     lastHealthyDryShas:
                       description: LastHealthyDryShas is a list of dry commits that
                         were observed to be healthy in the environment.
@@ -1708,6 +3420,9 @@ spec:
                             properties:
                               key:
                                 description: Key staging hydrated branch
+                                maxLength: 63
+                                minLength: 1
+                                pattern: ([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9]
                                 type: string
                               phase:
                                 description: Phase what phase is the status in
@@ -1768,16 +3483,16 @@ spec:
                                           formatted as by `git show -s --format=%aI`.
                                         format: date-time
                                         type: string
-                                      message:
-                                        description: Subject is the subject line of
-                                          the commit message, i.e. `git show --format=%s`.
-                                        type: string
                                       repoURL:
                                         description: RepoURL is the URL of the repository
                                           where the commit is located.
                                         type: string
                                       sha:
                                         description: Sha is the commit hash.
+                                        type: string
+                                      subject:
+                                        description: Subject is the subject line of
+                                          the commit message, i.e. `git show --format=%s`.
                                         type: string
                                     type: object
                                 type: object
@@ -1835,16 +3550,16 @@ spec:
                                           formatted as by `git show -s --format=%aI`.
                                         format: date-time
                                         type: string
-                                      message:
-                                        description: Subject is the subject line of
-                                          the commit message, i.e. `git show --format=%s`.
-                                        type: string
                                       repoURL:
                                         description: RepoURL is the URL of the repository
                                           where the commit is located.
                                         type: string
                                       sha:
                                         description: Sha is the commit hash.
+                                        type: string
+                                      subject:
+                                        description: Subject is the subject line of
+                                          the commit message, i.e. `git show --format=%s`.
                                         type: string
                                     type: object
                                 type: object
@@ -1908,7 +3623,7 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.16.3
+    controller-gen.kubebuilder.io/version: v0.19.0
   name: pullrequests.promoter.argoproj.io
 spec:
   group: promoter.argoproj.io
@@ -1951,6 +3666,17 @@ spec:
           spec:
             description: PullRequestSpec defines the desired state of PullRequest
             properties:
+              commit:
+                description: Commit contains configuration for how we will merge/squash/etc
+                  the pull request.
+                properties:
+                  message:
+                    description: Message is the commit message that will be written
+                      for the commit that's made when merging the PR.
+                    type: string
+                required:
+                - message
+                type: object
               description:
                 description: Description is the description body of the pull/merge
                   request
@@ -2090,7 +3816,7 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.16.3
+    controller-gen.kubebuilder.io/version: v0.19.0
   name: revertcommits.promoter.argoproj.io
 spec:
   group: promoter.argoproj.io
@@ -2142,119 +3868,3 @@ spec:
 ---
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
-metadata:
-  annotations:
-    controller-gen.kubebuilder.io/version: v0.16.3
-  name: scmproviders.promoter.argoproj.io
-spec:
-  group: promoter.argoproj.io
-  names:
-    kind: ScmProvider
-    listKind: ScmProviderList
-    plural: scmproviders
-    singular: scmprovider
-  scope: Namespaced
-  versions:
-  - name: v1alpha1
-    schema:
-      openAPIV3Schema:
-        description: ScmProvider is the Schema for the scmproviders API
-        properties:
-          apiVersion:
-            description: |-
-              APIVersion defines the versioned schema of this representation of an object.
-              Servers should convert recognized schemas to the latest internal value, and
-              may reject unrecognized values.
-              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
-            type: string
-          kind:
-            description: |-
-              Kind is a string value representing the REST resource this object represents.
-              Servers may infer this from the endpoint the client submits requests to.
-              Cannot be updated.
-              In CamelCase.
-              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
-            type: string
-          metadata:
-            type: object
-          spec:
-            description: ScmProviderSpec defines the desired state of ScmProvider
-            properties:
-              fake:
-                description: Fake required configuration for Fake as the SCM provider
-                properties:
-                  domain:
-                    description: Domain is the domain of the fake SCM provider. This
-                      is used for testing purposes.
-                    type: string
-                type: object
-              forgejo:
-                description: Forgejo required configuration for Forgejo as the SCM
-                  provider
-                properties:
-                  domain:
-                    description: |-
-                      Domain is the Forgejo domain, such as "codeberg.org" or "forgejo.mycompany.com".
-                      There is no default domain since Forgejo is not a service like Gitlab or Github.
-                    type: string
-                required:
-                - domain
-                type: object
-              github:
-                description: GitHub required configuration for GitHub as the SCM provider
-                properties:
-                  appID:
-                    description: AppID is the GitHub App ID.
-                    format: int64
-                    type: integer
-                  domain:
-                    description: |-
-                      Domain is the GitHub domain, such as "github.mycompany.com". If using the default GitHub domain, leave this field
-                      empty.
-                    type: string
-                    x-kubernetes-validations:
-                    - message: Instead of setting the domain to github.com, leave
-                        the field blank
-                      rule: self != "github.com"
-                  installationID:
-                    description: InstallationID is the GitHub App Installation ID.
-                    format: int64
-                    type: integer
-                required:
-                - appID
-                - installationID
-                type: object
-              gitlab:
-                description: GitLab required configuration for GitLab as the SCM provider
-                properties:
-                  domain:
-                    description: |-
-                      Domain is the GitLab domain, such as "gitlab.mycompany.com". If using the default GitLab domain, leave this field
-                      empty.
-                    type: string
-                type: object
-              secretRef:
-                description: SecretRef contains the credentials required to auth to
-                  a specific provider
-                properties:
-                  name:
-                    default: ""
-                    description: |-
-                      Name of the referent.
-                      This field is effectively required, but due to backwards compatibility is
-                      allowed to be empty. Instances of this type with an empty value here are
-                      almost certainly wrong.
-                      More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
-                    type: string
-                type: object
-                x-kubernetes-map-type: atomic
-            type: object
-          status:
-            description: ScmProviderStatus defines the observed state of ScmProvider
-            type: object
-        type: object
-    served: true
-    storage: true
-    subresources:
-      status: {}
----

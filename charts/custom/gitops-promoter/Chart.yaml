@@ -4,7 +4,7 @@ description: A Helm chart for GitOps Promoter - A tool for promoting changes bet
 type: application
 
 # Chart version - follows semantic versioning
-version: 0.4.1
+version: 0.5.0
 
 # Application version - matches the GitOps Promoter version
 appVersion: "0.14.0"
@@ -43,12 +43,18 @@ annotations:
 
   # Changes for this chart version
   artifacthub.io/changes: |
+    - kind: changed
+      description: "BREAKING: Updated ControllerConfiguration spec to v0.14.0 format with workQueue configurations for all controllers"
+    - kind: changed
+      description: "BREAKING: Replaced old duration-based config with new nested workQueue structure (maxConcurrentReconciles, rateLimiter, requeueDuration)"
     - kind: fixed
-      description: Fixed ControllerConfiguration naming to use hardcoded 'promoter-controller-configuration' name expected by the controller
+      description: Fixed PullRequest controller crash by adding required workQueue configuration section
     - kind: changed
-      description: Modified helper template to not prefix controller configuration name when explicitly set in values
+      description: Updated CRDs to v0.14.0 schema with new controller-gen v0.19.0 definitions
     - kind: changed
-      description: Updated default controllerConfiguration.name to 'promoter-controller-configuration' to match upstream expectation
+      description: Simplified controller-configuration.yaml template to use toYaml for nested structures
+    - kind: added
+      description: Added workQueue configuration for argocdCommitStatus, changeTransferPolicy, commitStatus, promotionStrategy, and pullRequest controllers
   # - kind: changed
   #   description: CRDs now installed from crds/ directory for proper Helm lifecycle management
   # - kind: removed
