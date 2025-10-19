@@ -97,7 +97,92 @@ spec:
         volumeMounts:
           {{- toYaml . | nindent 10 }}
         {{- end }}
-      {{- with .Values.pod.volumes }}
+      {{- if .Values.gitFetchDaemon.enabled }}
+      {{- if not .Values.gitFetchDaemon.secret.name }}
+      {{- fail "gitFetchDaemon.secret.name is required when gitFetchDaemon.enabled is true. This should be the name of the secret created by External Secrets Operator." }}
+      {{- end }}
+      - name: git-fetch-daemon
+        image: {{ .Values.gitFetchDaemon.image.repository }}:{{ .Values.gitFetchDaemon.image.tag }}
+        imagePullPolicy: {{ .Values.gitFetchDaemon.image.pullPolicy }}
+        command:
+        - /bin/sh
+        - -c
+        - >
+          set -e;
+          FETCH_INTERVAL="${GIT_FETCH_INTERVAL:-300}";
+          TOKEN_FILE="/etc/git-token/{{ .Values.gitFetchDaemon.secret.tokenKey }}";
+          echo "[INIT] Git Fetch Daemon starting...";
+          echo "[INIT] Fetch interval: ${FETCH_INTERVAL}s";
+          echo "[INIT] Token file: ${TOKEN_FILE}";
+          if [ ! -f "${TOKEN_FILE}" ]; then
+            echo "[ERROR] Token file not found: ${TOKEN_FILE}";
+            echo "[ERROR] Ensure External Secrets Operator has created the secret: {{ .Values.gitFetchDaemon.secret.name }}";
+            exit 1;
+          fi;
+          echo "[INIT] Token file verified";
+          echo "[INIT] Starting fetch loop...";
+          echo "[INFO] Note: Credentials provided per-fetch (read-only filesystem prevents git config)";
+          while true; do
+            echo "";
+            echo "[$(date '+%Y-%m-%d %H:%M:%S')] ===== Starting git fetch cycle =====";
+            REPO_COUNT=0;
+            FETCH_SUCCESS=0;
+            FETCH_FAILED=0;
+            find /tmp -type d -name ".git" 2>/dev/null | while read gitdir; do
+              repodir="$(dirname "$gitdir")";
+              REPO_COUNT=$((REPO_COUNT + 1));
+              echo "[$(date '+%H:%M:%S')] Repository #${REPO_COUNT}: ${repodir}";
+              if cd "$repodir" 2>/dev/null; then
+                current_branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown");
+                remote_url=$(git remote get-url origin 2>/dev/null || echo "unknown");
+                echo "  Branch: ${current_branch}";
+                echo "  Remote: ${remote_url}";
+                TOKEN=$(cat "${TOKEN_FILE}");
+                echo "  Fetching...";
+                if git -c "credential.helper=!f() { echo username=x-access-token; echo password=${TOKEN}; }; f" fetch --all --prune 2>&1 | sed 's/^/    /'; then
+                  FETCH_SUCCESS=$((FETCH_SUCCESS + 1));
+                  echo "  ✓ Fetch successful";
+                else
+                  FETCH_FAILED=$((FETCH_FAILED + 1));
+                  echo "  ✗ Fetch failed (see errors above)";
+                fi;
+                unset TOKEN;
+              else
+                echo "  ⚠ Skipping (cannot access directory)";
+              fi;
+            done;
+            echo "[$(date '+%Y-%m-%d %H:%M:%S')] Cycle complete";
+            echo "  Success: ${FETCH_SUCCESS} | Failed: ${FETCH_FAILED}";
+            echo "[$(date '+%H:%M:%S')] Next fetch in ${FETCH_INTERVAL}s...";
+            echo "";
+            sleep "${FETCH_INTERVAL}";
+          done
+        env:
+        - name: GIT_FETCH_INTERVAL
+          value: "{{ .Values.gitFetchDaemon.fetchIntervalSeconds }}"
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+        - name: git-fetch-token
+          mountPath: /etc/git-token
+          readOnly: true
+        resources:
+          {{- toYaml .Values.gitFetchDaemon.resources | nindent 10 }}
+        securityContext:
+          {{- toYaml .Values.gitFetchDaemon.securityContext | nindent 10 }}
+      {{- end }}
+      {{- if or .Values.pod.volumes .Values.gitFetchDaemon.enabled }}
       volumes:
-        {{- toYaml . | nindent 8 }}
+      {{- with .Values.pod.volumes }}
+        {{- toYaml . | nindent 6 }}
+      {{- end }}
+      {{- if .Values.gitFetchDaemon.enabled }}
+      - name: git-fetch-token
+        secret:
+          secretName: {{ .Values.gitFetchDaemon.secret.name }}
+          defaultMode: 0400
+          items:
+          - key: {{ .Values.gitFetchDaemon.secret.tokenKey }}
+            path: {{ .Values.gitFetchDaemon.secret.tokenKey }}
+      {{- end }}
       {{- end }}

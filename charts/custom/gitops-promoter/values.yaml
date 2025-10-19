@@ -484,3 +484,57 @@ commonLabels: {}
 
 # Additional annotations to apply to all resources
 commonAnnotations: {}
+
+# Git Fetch Daemon (Periodic repository sync with ESO-generated token)
+# NOTE: This requires External Secrets Operator to be installed and configured
+# to generate GitHub installation access tokens from your GitHub App credentials.
+# The ESO resources (GithubAccessToken generator and ExternalSecret) must be
+# created outside of this Helm chart (e.g., via Crossplane composition).
+gitFetchDaemon:
+  # Enable git fetch daemon sidecar
+  # When enabled, periodically runs 'git fetch --all --prune' on all cloned repositories
+  # to discover new branches created by ArgoCD hydrator or other tools
+  enabled: false  # Default disabled for backward compatibility
+
+  # ESO-generated secret configuration
+  # This secret should be created by an ExternalSecret that uses a GithubAccessToken generator
+  secret:
+    # Name of the secret created by External Secrets Operator
+    # Example: "gitops-promoter-github-token" (created by your ESO ExternalSecret)
+    # REQUIRED when gitFetchDaemon.enabled is true
+    name: ""
+
+    # Key in the secret that contains the GitHub installation access token
+    # Default matches ESO GithubAccessToken generator output
+    tokenKey: "token"
+
+  # Fetch interval in seconds
+  # How often to run git fetch on all cloned repositories
+  # Recommended: 300-600 seconds (5-10 minutes)
+  # Lower values = faster branch discovery, higher API usage
+  fetchIntervalSeconds: 300
+
+  # Image configuration for the git-fetch-daemon container
+  image:
+    repository: alpine/git
+    tag: "2.47.0"  # Pinned for reproducibility
+    pullPolicy: IfNotPresent
+
+  # Resource limits and requests
+  resources:
+    limits:
+      cpu: 100m
+      memory: 64Mi
+    requests:
+      cpu: 10m
+      memory: 32Mi
+
+  # Security context (matches existing containers)
+  securityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+      - ALL
+    readOnlyRootFilesystem: true
+    runAsNonRoot: true
+    runAsUser: 65532

@@ -4,7 +4,7 @@ description: A Helm chart for GitOps Promoter - A tool for promoting changes bet
 type: application
 
 # Chart version - follows semantic versioning
-version: 0.5.1
+version: 0.6.0
 
 # Application version - matches the GitOps Promoter version
 appVersion: "0.14.0"
@@ -43,12 +43,14 @@ annotations:
 
   # Changes for this chart version
   artifacthub.io/changes: |
-    - kind: fixed
-      description: "CRITICAL FIX: Added missing apiVersion declarations to all CRDs (was causing 'resource mapping not found' errors)"
-    - kind: fixed
-      description: Fixed CRD extraction to include complete CRD definitions from upstream v0.14.0
+    - kind: added
+      description: "Git fetch daemon sidecar for automatic branch discovery using ESO-generated GitHub tokens"
+    - kind: added
+      description: "Support for External Secrets Operator GithubAccessToken integration"
+    - kind: added
+      description: "Configurable git fetch interval via gitFetchDaemon.fetchIntervalSeconds"
     - kind: changed
-      description: Re-extracted CRDs from lines 15-4003 of upstream install.yaml to ensure all fields are present
+      description: "Git credential handling uses per-fetch credentials (compatible with read-only filesystem)"
   # - kind: changed
   #   description: CRDs now installed from crds/ directory for proper Helm lifecycle management
   # - kind: removed
@@ -65,6 +67,8 @@ annotations:
       image: quay.io/argoprojlabs/gitops-promoter:v0.14.0
     - name: kube-rbac-proxy
       image: quay.io/brancz/kube-rbac-proxy:v0.17.0
+    - name: git-fetch-daemon
+      image: alpine/git:2.47.0
 
 # Kubernetes version compatibility
 kubeVersion: ">=1.20.0-0"
