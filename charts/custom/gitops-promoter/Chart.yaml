@@ -4,10 +4,10 @@ description: A Helm chart for GitOps Promoter - A tool for promoting changes bet
 type: application
 
 # Chart version - follows semantic versioning
-version: 0.6.0
+version: 0.7.0
 
 # Application version - matches the GitOps Promoter version
-appVersion: "0.14.0"
+appVersion: "0.17.0"
 
 # Maintainers
 maintainers:
@@ -39,18 +39,16 @@ annotations:
     - name: GitOps Promoter Documentation
       url: https://github.com/argoproj-labs/gitops-promoter/blob/main/README.md
     - name: Release Notes
-      url: https://github.com/argoproj-labs/gitops-promoter/releases/tag/v0.14.0
+      url: https://github.com/argoproj-labs/gitops-promoter/releases/tag/v0.17.0
 
   # Changes for this chart version
   artifacthub.io/changes: |
-    - kind: added
-      description: "Git fetch daemon sidecar for automatic branch discovery using ESO-generated GitHub tokens"
-    - kind: added
-      description: "Support for External Secrets Operator GithubAccessToken integration"
-    - kind: added
-      description: "Configurable git fetch interval via gitFetchDaemon.fetchIntervalSeconds"
     - kind: changed
-      description: "Git credential handling uses per-fetch credentials (compatible with read-only filesystem)"
+      description: "Updated GitOps Promoter to v0.17.0"
+    - kind: changed
+      description: "Increased default memory limits to 2Gi (limit) and 1Gi (request) to prevent OOM issues with large projects"
+    - kind: fixed
+      description: "Fixed OOM crashes when managing multiple promotion strategies"
   # - kind: changed
   #   description: CRDs now installed from crds/ directory for proper Helm lifecycle management
   # - kind: removed
@@ -64,7 +62,7 @@ annotations:
   # Images used by this chart
   artifacthub.io/images: |
     - name: gitops-promoter
-      image: quay.io/argoprojlabs/gitops-promoter:v0.14.0
+      image: quay.io/argoprojlabs/gitops-promoter:v0.17.0
     - name: kube-rbac-proxy
       image: quay.io/brancz/kube-rbac-proxy:v0.17.0
     - name: git-fetch-daemon

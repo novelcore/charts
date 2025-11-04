@@ -28,7 +28,7 @@ controllerManager:
   # Image configuration
   image:
     repository: quay.io/argoprojlabs/gitops-promoter
-    tag: "v0.14.0"
+    tag: "v0.17.0"
     pullPolicy: IfNotPresent
 
   # Replica count
@@ -44,10 +44,10 @@ controllerManager:
   resources:
     limits:
       cpu: 500m
-      memory: 128Mi
+      memory: 2Gi
     requests:
       cpu: 10m
-      memory: 64Mi
+      memory: 1Gi
 
   # Liveness probe configuration
   livenessProbe:
