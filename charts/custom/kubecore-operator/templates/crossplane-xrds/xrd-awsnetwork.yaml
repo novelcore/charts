@@ -1,0 +1,173 @@
+{{- if .Values.crossplaneXRDs.enabled }}
+---
+apiVersion: apiextensions.crossplane.io/v2
+kind: CompositeResourceDefinition
+metadata:
+  name: xawsnetworks.platform.kubecore.io
+  labels:
+    {{- include "chart.labels" . | nindent 4 }}
+spec:
+  scope: Cluster
+  group: platform.kubecore.io
+  names:
+    kind: XAwsNetwork
+    plural: xawsnetworks
+  defaultCompositionRef:
+    name: awsnetwork
+  versions:
+  - name: v1alpha1
+    served: true
+    referenceable: true
+    schema:
+      openAPIV3Schema:
+        type: object
+        properties:
+          spec:
+            type: object
+            properties:
+              dns:
+                type: object
+                description: "DNS configuration for the network"
+                properties:
+                  enabled:
+                    type: boolean
+                    description: "Enable DNS (Route53 hosted zone) for the network"
+                    default: false
+                default:
+                  enabled: false
+              vpc:
+                type: object
+                description: "VPC configuration for the network"
+                properties:
+                  enabled:
+                    type: boolean
+                    description: "Enable VPC creation for the network"
+                    default: true
+                  natGateways:
+                    type: object
+                    description: "NAT Gateway configuration"
+                    properties:
+                      enabled:
+                        type: boolean
+                        description: "Enable NAT Gateways for private subnets"
+                        default: true
+                    default:
+                      enabled: true
+                default:
+                  enabled: true
+                  natGateways:
+                    enabled: true
+            default:
+              dns:
+                enabled: false
+              vpc:
+                enabled: true
+                natGateways:
+                  enabled: true
+          status:
+            type: object
+            properties:
+              vpc:
+                type: object
+                description: "VPC status information"
+                properties:
+                  id:
+                    type: string
+                    description: "VPC ID"
+                  state:
+                    type: string
+                    description: "VPC state (available, pending, etc.)"
+                  cidr:
+                    type: string
+                    description: "VPC CIDR block"
+              subnets:
+                type: object
+                description: "Subnet status information"
+                properties:
+                  public:
+                    type: array
+                    description: "Public subnet information"
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: string
+                          description: "Subnet ID"
+                        availabilityZone:
+                          type: string
+                          description: "Availability Zone"
+                        cidr:
+                          type: string
+                          description: "Subnet CIDR block"
+                        state:
+                          type: string
+                          description: "Subnet state"
+                  private:
+                    type: array
+                    description: "Private subnet information"
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: string
+                          description: "Subnet ID"
+                        availabilityZone:
+                          type: string
+                          description: "Availability Zone"
+                        cidr:
+                          type: string
+                          description: "Subnet CIDR block"
+                        state:
+                          type: string
+                          description: "Subnet state"
+              natGateways:
+                type: array
+                description: "NAT Gateway status information"
+                items:
+                  type: object
+                  properties:
+                    id:
+                      type: string
+                      description: "NAT Gateway ID"
+                    availabilityZone:
+                      type: string
+                      description: "Availability Zone"
+                    state:
+                      type: string
+                      description: "NAT Gateway state"
+                    publicIp:
+                      type: string
+                      description: "Public IP address"
+              dns:
+                type: object
+                description: "DNS status information"
+                properties:
+                  hostedZoneId:
+                    type: string
+                    description: "Route53 Hosted Zone ID"
+                  domain:
+                    type: string
+                    description: "DNS domain name"
+                  nameServers:
+                    type: array
+                    description: "Name servers for the hosted zone"
+                    items:
+                      type: string
+                  state:
+                    type: string
+                    description: "Hosted Zone state"
+              ready:
+                type: boolean
+                description: "Indicates if all resources are successfully provisioned and ready"
+              # Additional status fields for comprehensive tracking
+              childResources:
+                type: object
+                description: "Summary of all child resources managed by this composition"
+                properties:
+                  total:
+                    type: integer
+                    description: "Total number of child resources"
+                  resources:
+                    type: string
+                    description: "JSON array of resource metadata"
+{{- end }}

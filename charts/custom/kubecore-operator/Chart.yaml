@@ -2,7 +2,7 @@ apiVersion: v2
 name: kubecore-operator
 description: A sophisticated Kubernetes operator that implements a four-layer framework architecture for provisioning and managing cloud infrastructure through Crossplane compositions.
 type: application
-version: 0.1.5
+version: 0.1.6
 appVersion: "0.1.1"
 
 # Maintainers
@@ -49,15 +49,11 @@ annotations:
   # Changes for this chart version
   artifacthub.io/changes: |
     - kind: fixed
-      description: "Fixed kubesys-admin ServiceAccount creation in release namespace (kubecore-system) to fix provider-kubernetes pod failures"
-    - kind: fixed
-      description: "Added duplicate kubesys-admin ServiceAccount in crossplane-system namespace for backward compatibility"
-    - kind: fixed
-      description: "Removed Helm hooks from ProviderConfigs to fix Kubernetes ProviderConfig creation timing issue - ProviderConfigs now created as regular resources after provider CRDs are available"
-    - kind: changed
-      description: "Updated hook execution order: RuntimeConfig (weight 5), Functions (weight 10), Providers (weight 15)"
+      description: "Fixed XRD YAML parsing issue by splitting XRDs into separate template files (one per XRD) instead of a single merged file"
     - kind: added
-      description: "Added XRD template structure (temporarily disabled in this release due to YAML parsing issue, will be fixed in 0.1.6)"
+      description: "Added all 12 XRD definitions to Helm chart: XAWSProvider, XGitHubProvider, XAwsNetwork, XEKS, XKubeSystem, XGitHubProject, XKubEnv, XGitHubApp, XK8sApp, XKubeAppTemplate, XQualityGate, XQualityGateTemplate"
+    - kind: changed
+      description: "Enabled XRDs by default in values.yaml (crossplaneXRDs.enabled: true)"
 
 # Kubernetes version compatibility
 kubeVersion: ">=1.20.0-0"

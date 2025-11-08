@@ -1,0 +1,292 @@
+{{- if .Values.crossplaneXRDs.enabled }}
+---
+apiVersion: apiextensions.crossplane.io/v2
+kind: CompositeResourceDefinition
+metadata:
+  name: xqualitygates.platform.kubecore.io
+  labels:
+    {{- include "chart.labels" . | nindent 4 }}
+spec:
+  scope: Namespaced
+  group: platform.kubecore.io
+  names:
+    kind: XQualityGate
+    plural: xqualitygates
+  defaultCompositionRef:
+    name: xqualitygates.platform.kubecore.io
+  versions:
+  - name: v1alpha1
+    served: true
+    referenceable: true
+    schema:
+      openAPIV3Schema:
+        type: object
+        description: "Specification for a Quality Gate instance (per-app webhook and event handling)"
+        required:
+        - spec
+        properties:
+          spec:
+            type: object
+            required:
+            - appName
+            - projectName
+            - gateName
+            - templateRef
+            - targetCluster
+            - repositoryConfig
+            properties:
+              appName:
+                type: string
+                description: "Name of the KubeApp this gate instance is for"
+              projectName:
+                type: string
+                description: "Name of the KubeProject"
+              gateName:
+                type: string
+                description: "Name of the quality gate (must match a template)"
+              templateRef:
+                type: object
+                description: "Reference to the XQualityGateTemplate"
+                required:
+                - name
+                properties:
+                  name:
+                    type: string
+                    description: "Name of the XQualityGateTemplate"
+              targetCluster:
+                type: object
+                description: "Target Kubernetes cluster configuration"
+                required:
+                - name
+                - providerConfigName
+                - baseDomain
+                properties:
+                  name:
+                    type: string
+                    description: "Name of the target cluster"
+                  providerConfigName:
+                    type: string
+                    description: "Kubernetes provider config name"
+                  baseDomain:
+                    type: string
+                    description: "Base domain for webhook ingress (e.g., cluster.example.com)"
+                  namespace:
+                    type: string
+                    description: "Namespace for app-specific resources"
+              repositoryConfig:
+                type: object
+                description: "GitHub repository configuration for webhook events"
+                required:
+                - owner
+                - name
+                - fullName
+                properties:
+                  owner:
+                    type: string
+                    description: "GitHub repository owner"
+                  name:
+                    type: string
+                    description: "GitHub repository name"
+                  fullName:
+                    type: string
+                    description: "GitHub repository full name (owner/name)"
+              githubConfig:
+                type: object
+                description: "GitHub App authentication configuration"
+                properties:
+                  appId:
+                    type: string
+                    description: "GitHub App ID"
+                  installationId:
+                    type: string
+                    description: "GitHub App Installation ID"
+                  privateKeySecretName:
+                    type: string
+                    description: "Secret name containing GitHub App private key"
+                    default: "github-app-private-key"
+                  webhookSecretName:
+                    type: string
+                    description: "Secret name containing webhook secret"
+                    default: "github-webhook-secret"
+              eventTriggers:
+                type: array
+                description: "Array of event trigger configurations (event type mapping pattern)"
+                items:
+                  type: object
+                  required:
+                  - name
+                  - targetTemplate
+                  - events
+                  properties:
+                    name:
+                      type: string
+                      description: "Trigger identifier (e.g., create-trigger, cleanup-trigger)"
+                    targetTemplate:
+                      type: string
+                      description: "Which template in WorkflowTemplate to execute (e.g., create-preview, cleanup-preview)"
+                    events:
+                      type: array
+                      description: "Array of GitHub events to listen for"
+                      minItems: 1
+                      items:
+                        type: string
+                        enum:
+                        - deployment
+                        - deployment_status
+                        - pull_request
+                        - push
+                        - create
+                        - delete
+                        - issue_comment
+                        - status
+                        - check_run
+                        - check_suite
+                    filters:
+                      type: array
+                      description: "Event payload filters (Argo Events data filter format)"
+                      items:
+                        type: object
+                        required:
+                        - path
+                        - type
+                        - value
+                        properties:
+                          path:
+                            type: string
+                            description: "JSONPath to filter field (e.g., body.action)"
+                          type:
+                            type: string
+                            description: "Filter type (string, number, bool)"
+                            enum:
+                            - string
+                            - number
+                            - bool
+                          value:
+                            type: array
+                            description: "Allowed values"
+                            items:
+                              type: string
+                    filterExpression:
+                      type: string
+                      description: "Expr language filter expression (alternative to filters array)"
+                    parameterMapping:
+                      type: array
+                      description: "Map event payload to workflow parameters"
+                      items:
+                        type: object
+                        required:
+                        - from
+                        - to
+                        properties:
+                          from:
+                            type: string
+                            description: "Event payload path (e.g., body.deployment.sha, body.pull_request.number)"
+                          to:
+                            type: string
+                            description: "Workflow parameter name (e.g., commit-sha, pr-number)"
+          status:
+            type: object
+            properties:
+              conditions:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    type:
+                      type: string
+                    status:
+                      type: string
+                    reason:
+                      type: string
+                    message:
+                      type: string
+                    lastTransitionTime:
+                      type: string
+                      format: date-time
+              webhookUrl:
+                type: string
+                description: "Webhook URL for event ingress"
+              eventSourceReady:
+                type: boolean
+                description: "EventSource readiness status"
+              sensorReady:
+                type: boolean
+                description: "Sensor readiness status"
+              ingressReady:
+                type: boolean
+                description: "Ingress readiness status"
+              triggers:
+                type: array
+                description: "Status of each trigger"
+                items:
+                  type: object
+                  properties:
+                    name:
+                      type: string
+                    targetTemplate:
+                      type: string
+                    events:
+                      type: array
+                      items:
+                        type: string
+                    ready:
+                      type: boolean
+              resources:
+                type: object
+                description: "References to created resources"
+                properties:
+                  eventSource:
+                    type: object
+                    properties:
+                      name:
+                        type: string
+                      namespace:
+                        type: string
+                      eventConfigs:
+                        type: array
+                        description: "List of event config names in EventSource"
+                        items:
+                          type: string
+                  sensor:
+                    type: object
+                    properties:
+                      name:
+                        type: string
+                      namespace:
+                        type: string
+                      triggerCount:
+                        type: integer
+                        description: "Number of triggers configured"
+                  ingress:
+                    type: object
+                    properties:
+                      name:
+                        type: string
+                      namespace:
+                        type: string
+              ready:
+                type: boolean
+                description: "Overall readiness status"
+    additionalPrinterColumns:
+    - name: App
+      type: string
+      jsonPath: .spec.appName
+    - name: Project
+      type: string
+      jsonPath: .spec.projectName
+    - name: Gate
+      type: string
+      jsonPath: .spec.gateName
+    - name: Triggers
+      type: integer
+      jsonPath: .status.resources.sensor.triggerCount
+    - name: Webhook
+      type: string
+      jsonPath: .status.webhookUrl
+    - name: Ready
+      type: string
+      jsonPath: .status.conditions[?(@.type=='Ready')].status
+    - name: Age
+      type: date
+      jsonPath: .metadata.creationTimestamp
+{{- end }}

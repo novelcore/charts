@@ -1,0 +1,121 @@
+{{- if .Values.crossplaneXRDs.enabled }}
+---
+apiVersion: apiextensions.crossplane.io/v2
+kind: CompositeResourceDefinition
+metadata:
+  name: xgithubproviders.github.platform.kubecore.io
+  labels:
+    {{- include "chart.labels" . | nindent 4 }}
+spec:
+  scope: Cluster
+  group: github.platform.kubecore.io
+  names:
+    kind: XGithubProvider
+    plural: xgithubproviders
+  defaultCompositionRef:
+    name: githubprovider
+  versions:
+  - name: v1alpha1
+    served: true
+    referenceable: true
+    schema:
+      openAPIV3Schema:
+        type: object
+        properties:
+          spec:
+            type: object
+            properties:
+              organizationName:
+                type: string
+                description: "Name of the GitHub organization for provider configuration"
+                minLength: 1
+                maxLength: 63
+                pattern: "^[a-zA-Z0-9][a-zA-Z0-9-]*[a-zA-Z0-9]$"
+            required:
+            - organizationName
+          status:
+            type: object
+            properties:
+              providerConfigName:
+                type: string
+                description: "Name of the generated GitHub ProviderConfig"
+              providerConfigApiGroup:
+                type: string
+                description: "API group of the generated GitHub ProviderConfig"
+              externalSecretName:
+                type: string
+                description: "Name of the created ExternalSecret for GitHub credentials"
+              connectionSecretName:
+                type: string
+                description: "Name of the connection secret containing provider metadata"
+              githubCredentials:
+                type: object
+                description: "Status of GitHub credentials retrieval and management"
+                properties:
+                  secretReady:
+                    type: boolean
+                    description: "Whether the GitHub credentials secret is ready"
+                  lastRefresh:
+                    type: string
+                    format: date-time
+                    description: "Timestamp when credentials were last refreshed"
+                  nextRefresh:
+                    type: string
+                    format: date-time
+                    description: "Timestamp when credentials will be refreshed next"
+                  awsSecretId:
+                    type: string
+                    description: "AWS Secrets Manager secret ID containing GitHub App credentials"
+                  credentialsSecretKey:
+                    type: string
+                    description: "Key name in the Kubernetes secret containing formatted credentials"
+                  awsAttributeKeys:
+                    type: object
+                    description: "AWS Secrets Manager attribute keys for GitHub App credentials"
+                    properties:
+                      appIdKey:
+                        type: string
+                        description: "Attribute key for GitHub App ID in AWS Secrets Manager"
+                      installationIdKey:
+                        type: string
+                        description: "Attribute key for GitHub App Installation ID in AWS Secrets Manager"
+                      privateKeyKey:
+                        type: string
+                        description: "Attribute key for GitHub App private key in AWS Secrets Manager"
+              ready:
+                type: boolean
+                description: "Indicates if all resources are successfully provisioned and ready"
+              # Additional status fields for comprehensive tracking
+              childResources:
+                type: object
+                description: "Summary of all child resources managed by this composition"
+                properties:
+                  total:
+                    type: integer
+                    description: "Total number of child resources"
+                  resources:
+                    type: string
+                    description: "JSON array of resource metadata"
+              organization:
+                type: string
+                description: "GitHub organization name from environment config"
+              baseURL:
+                type: string
+                description: "GitHub API base URL"
+              isEnterprise:
+                type: boolean
+                description: "Whether this is a GitHub Enterprise Server instance"
+    additionalPrinterColumns:
+    - name: Organization
+      type: string
+      jsonPath: .spec.organizationName
+    - name: Provider
+      type: string
+      jsonPath: .status.providerConfigName
+    - name: Ready
+      type: boolean
+      jsonPath: .status.ready
+    - name: Age
+      type: date
+      jsonPath: .metadata.creationTimestamp
+{{- end }}

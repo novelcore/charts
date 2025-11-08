@@ -1,0 +1,117 @@
+{{- if .Values.crossplaneXRDs.enabled }}
+---
+apiVersion: apiextensions.crossplane.io/v2
+kind: CompositeResourceDefinition
+metadata:
+  name: xawsproviders.aws.provider.platform.kubecore.io
+  labels:
+    {{- include "chart.labels" . | nindent 4 }}
+spec:
+  scope: Cluster
+  group: aws.provider.platform.kubecore.io
+  names:
+    kind: XAWSProvider
+    plural: xawsproviders
+  defaultCompositionRef:
+    name: awsprovider
+  versions:
+  - name: v1alpha1
+    served: true
+    referenceable: true
+    schema:
+      openAPIV3Schema:
+        type: object
+        properties:
+          spec:
+            type: object
+            properties:
+              organizationName:
+                type: string
+                description: "Name of the organization for AWS resource provisioning"
+            required:
+            - organizationName
+          status:
+            type: object
+            properties:
+              registries:
+                type: string
+                description: "JSON array of ECR registries created across regions"
+              secretArn:
+                type: string
+                description: "ARN of the Secrets Manager secret containing registry credentials"
+              iamRoles:
+                type: object
+                description: "IAM roles created for the provider"
+                properties:
+                  esoRoleArn:
+                    type: string
+                    description: "ARN of the External Secrets Operator IAM role"
+              iamPolicies:
+                type: object
+                description: "IAM policies created for the provider"
+                properties:
+                  secretsManagerPolicyArn:
+                    type: string
+                    description: "ARN of the Secrets Manager access policy"
+                  ecrPolicyArn:
+                    type: string
+                    description: "ARN of the ECR access policy"
+              ready:
+                type: boolean
+                description: "Indicates if all resources are successfully provisioned and ready"
+              oidcProvider:
+                type: object
+                description: "OIDC provider information for IRSA"
+                properties:
+                  arn:
+                    type: string
+                    description: "ARN of the OIDC provider"
+                  url:
+                    type: string
+                    description: "URL of the OIDC provider"
+              # Additional status fields for comprehensive tracking
+              childResources:
+                type: object
+                description: "Summary of all child resources managed by this composition"
+                properties:
+                  total:
+                    type: integer
+                    description: "Total number of child resources"
+                  resources:
+                    type: string
+                    description: "JSON array of resource metadata"
+              ecrCredentials:
+                type: object
+                description: "Status of ECR credentials generation and management"
+                properties:
+                  generated:
+                    type: boolean
+                    description: "Whether ECR credentials have been generated"
+                  lastRefresh:
+                    type: string
+                    format: date-time
+                    description: "Timestamp when ECR credentials were last refreshed"
+                  nextRefresh:
+                    type: string
+                    format: date-time
+                    description: "Timestamp when ECR credentials will be refreshed next"
+                  tokenJobs:
+                    type: string
+                    description: "JSON string containing status of ECR token generation jobs"
+                  generators:
+                    type: string
+                    description: "JSON string containing status of ECRAuthorizationToken generators"
+                  generationMethod:
+                    type: string
+                    description: "Method used for ECR token generation (eso-native or lambda-based)"
+              clusterSecretStore:
+                type: object
+                description: "Status of ClusterSecretStore for External Secrets Operator"
+                properties:
+                  name:
+                    type: string
+                    description: "Name of the ClusterSecretStore"
+                  ready:
+                    type: boolean
+                    description: "Whether the ClusterSecretStore is ready"
+{{- end }}
