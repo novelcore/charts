@@ -1,0 +1,274 @@
+{
+  "$schema": "http://json-schema.org/schema#",
+  "type": "object",
+  "properties": {
+    "controllerManager": {
+      "type": "object",
+      "description": "Controller manager deployment configuration",
+      "properties": {
+        "replicas": {
+          "type": "integer",
+          "default": 1,
+          "minimum": 1,
+          "description": "Number of controller replicas"
+        },
+        "container": {
+          "type": "object",
+          "properties": {
+            "image": {
+              "type": "object",
+              "properties": {
+                "repository": {
+                  "type": "string",
+                  "default": "controller",
+                  "description": "Docker image repository"
+                },
+                "tag": {
+                  "type": "string",
+                  "default": "latest",
+                  "description": "Image tag/version"
+                },
+                "pullPolicy": {
+                  "type": "string",
+                  "enum": ["Always", "IfNotPresent", "Never"],
+                  "default": "IfNotPresent",
+                  "description": "Image pull policy"
+                }
+              }
+            },
+            "args": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Command line arguments"
+            },
+            "resources": {
+              "type": "object",
+              "properties": {
+                "limits": {
+                  "type": "object",
+                  "properties": {
+                    "cpu": {"type": "string"},
+                    "memory": {"type": "string"}
+                  }
+                },
+                "requests": {
+                  "type": "object",
+                  "properties": {
+                    "cpu": {"type": "string"},
+                    "memory": {"type": "string"}
+                  }
+                }
+              }
+            },
+            "livenessProbe": {
+              "type": "object",
+              "description": "Liveness probe configuration"
+            },
+            "readinessProbe": {
+              "type": "object",
+              "description": "Readiness probe configuration"
+            },
+            "securityContext": {
+              "type": "object",
+              "description": "Container security context"
+            }
+          }
+        },
+        "securityContext": {
+          "type": "object",
+          "description": "Pod security context"
+        },
+        "terminationGracePeriodSeconds": {
+          "type": "integer",
+          "default": 10,
+          "description": "Termination grace period in seconds"
+        },
+        "serviceAccountName": {
+          "type": "string",
+          "default": "kubecore-operator-controller-manager",
+          "description": "Service account name"
+        }
+      }
+    },
+    "rbac": {
+      "type": "object",
+      "properties": {
+        "enable": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable RBAC"
+        }
+      }
+    },
+    "crd": {
+      "type": "object",
+      "properties": {
+        "enable": {
+          "type": "boolean",
+          "default": true,
+          "description": "Install CRDs"
+        },
+        "keep": {
+          "type": "boolean",
+          "default": true,
+          "description": "Keep CRDs on uninstall"
+        }
+      }
+    },
+    "metrics": {
+      "type": "object",
+      "properties": {
+        "enable": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable metrics"
+        }
+      }
+    },
+    "prometheus": {
+      "type": "object",
+      "properties": {
+        "enable": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable Prometheus ServiceMonitor"
+        }
+      }
+    },
+    "certmanager": {
+      "type": "object",
+      "properties": {
+        "enable": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable cert-manager"
+        }
+      }
+    },
+    "networkPolicy": {
+      "type": "object",
+      "properties": {
+        "enable": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable NetworkPolicies"
+        }
+      }
+    },
+    "registry": {
+      "type": "object",
+      "description": "Container registry configuration",
+      "properties": {
+        "url": {
+          "type": "string",
+          "default": "",
+          "description": "Registry URL"
+        },
+        "username": {
+          "type": "string",
+          "default": "",
+          "description": "Registry username"
+        },
+        "password": {
+          "type": "string",
+          "default": "",
+          "description": "Registry password"
+        },
+        "project": {
+          "type": "string",
+          "default": "",
+          "description": "Project/namespace within registry"
+        }
+      }
+    },
+    "crossplane": {
+      "type": "object",
+      "description": "Crossplane dependency configuration",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable Crossplane installation"
+        },
+        "namespace": {
+          "type": "string",
+          "default": "crossplane-system",
+          "description": "Crossplane namespace"
+        }
+      }
+    },
+    "crossplaneFunctions": {
+      "type": "object",
+      "description": "Crossplane functions configuration",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable Crossplane functions installation"
+        },
+        "goTemplating": {
+          "type": "object",
+          "properties": {
+            "package": {
+              "type": "string",
+              "default": "xpkg.crossplane.io/crossplane-contrib/function-go-templating:v0.10.0"
+            },
+            "runtimeConfigRef": {"type": "object"}
+          }
+        },
+        "autoReady": {
+          "type": "object",
+          "properties": {
+            "package": {
+              "type": "string",
+              "default": "xpkg.upbound.io/crossplane-contrib/function-auto-ready:v0.5.0"
+            },
+            "runtimeConfigRef": {"type": "object"}
+          }
+        },
+        "patchAndTransform": {
+          "type": "object",
+          "properties": {
+            "package": {
+              "type": "string",
+              "default": "xpkg.upbound.io/upbound/function-patch-and-transform:v0.9.0"
+            },
+            "runtimeConfigRef": {"type": "object"}
+          }
+        },
+        "sequencer": {
+          "type": "object",
+          "properties": {
+            "package": {
+              "type": "string",
+              "default": "xpkg.upbound.io/crossplane-contrib/function-sequencer:v0.2.3"
+            },
+            "runtimeConfigRef": {"type": "object"}
+          }
+        },
+        "environmentConfigs": {
+          "type": "object",
+          "properties": {
+            "package": {
+              "type": "string",
+              "default": "xpkg.upbound.io/crossplane-contrib/function-environment-configs:v0.4.0"
+            },
+            "runtimeConfigRef": {"type": "object"}
+          }
+        },
+        "extraResources": {
+          "type": "object",
+          "properties": {
+            "package": {
+              "type": "string",
+              "default": "xpkg.upbound.io/crossplane-contrib/function-extra-resources:v0.2.0"
+            },
+            "runtimeConfigRef": {"type": "object"}
+          }
+        }
+      }
+    }
+  }
+}

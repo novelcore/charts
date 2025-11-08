@@ -1,0 +1,741 @@
+{{- if .Values.crd.enable }}
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  labels:
+    {{- include "chart.labels" . | nindent 4 }}
+  annotations:
+    {{- if .Values.crd.keep }}
+    "helm.sh/resource-policy": keep
+    {{- end }}
+    controller-gen.kubebuilder.io/version: v0.18.0
+  name: kubepools.schema.kubecore.io
+spec:
+  group: schema.kubecore.io
+  names:
+    kind: KubePool
+    listKind: KubePoolList
+    plural: kubepools
+    singular: kubepool
+  scope: Cluster
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    - jsonPath: .spec.kubeOrgRef
+      name: KubeOrg
+      type: string
+    - jsonPath: .spec.region
+      name: Region
+      type: string
+    - jsonPath: .spec.cluster.type
+      name: Cluster Type
+      type: string
+    - jsonPath: .spec.cluster.kubernetesVersion
+      name: K8s Version
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1beta1
+    schema:
+      openAPIV3Schema:
+        description: KubePool is the Schema for the kubepools API
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: KubePoolSpec defines the desired state of KubePool
+            properties:
+              cluster:
+                description: Cluster defines the EKS cluster configuration
+                properties:
+                  kubernetesVersion:
+                    description: KubernetesVersion specifies the Kubernetes version
+                      for the cluster
+                    pattern: ^[0-9]+\.[0-9]+$
+                    type: string
+                  tags:
+                    additionalProperties:
+                      type: string
+                    description: Tags are additional tags to apply to the EKS cluster
+                    type: object
+                  type:
+                    allOf:
+                    - enum:
+                      - shared
+                      - dedicated
+                    - enum:
+                      - shared
+                      - dedicated
+                    description: Type specifies whether this is a shared or dedicated
+                      cluster
+                    type: string
+                required:
+                - kubernetesVersion
+                - type
+                type: object
+              environmentTemplates:
+                description: |-
+                  EnvironmentTemplates define rich templates for KubEnv creation by KubeProject resources
+                  Platform teams manage these templates to provide pre-configured environments
+                items:
+                  description: EnvironmentTemplate defines a complete environment
+                    template for KubEnv creation
+                  properties:
+                    costControls:
+                      description: CostControls defines cost management policies for
+                        environments
+                      properties:
+                        maxMonthlyCost:
+                          description: MaxMonthlyCost specifies the maximum monthly
+                            cost in USD as a string
+                          type: string
+                        shutdownSchedule:
+                          description: ShutdownSchedule specifies when to shut down
+                            the environment (cron format)
+                          type: string
+                        startupSchedule:
+                          description: StartupSchedule specifies when to start up
+                            the environment (cron format)
+                          type: string
+                      type: object
+                    description:
+                      description: Description explains the purpose and characteristics
+                        of this template
+                      type: string
+                    displayName:
+                      description: DisplayName is a human-readable name for the template
+                      minLength: 1
+                      type: string
+                    environmentType:
+                      allOf:
+                      - enum:
+                        - dev
+                        - stage
+                        - prod
+                      - enum:
+                        - dev
+                        - stage
+                        - prod
+                      description: EnvironmentType specifies the type of environment
+                        (dev, stage, prod)
+                      type: string
+                    features:
+                      description: Features defines which features are enabled for
+                        environments using this template
+                      properties:
+                        autoScaling:
+                          default: false
+                          description: AutoScaling enables horizontal pod autoscaling
+                          type: boolean
+                        backups:
+                          default: false
+                          description: Backups enables backup capabilities for the
+                            environment
+                          type: boolean
+                        disasterRecovery:
+                          default: false
+                          description: DisasterRecovery enables disaster recovery
+                            capabilities
+                          type: boolean
+                        logging:
+                          default: true
+                          description: Logging enables logging stack for the environment
+                          type: boolean
+                        monitoring:
+                          default: true
+                          description: Monitoring enables monitoring stack for the
+                            environment
+                          type: boolean
+                        nodeGroupTaints:
+                          default: true
+                          description: NodeGroupTaints enables node group taints for
+                            environment isolation
+                          type: boolean
+                      type: object
+                    lifecycle:
+                      description: Lifecycle defines lifecycle management policies
+                        for environments
+                      properties:
+                        autoDestroy:
+                          default: false
+                          description: AutoDestroy enables automatic destruction of
+                            the environment
+                          type: boolean
+                        ttl:
+                          description: TTL specifies the time-to-live for the environment
+                            (e.g., "24h", "7d")
+                          type: string
+                      type: object
+                    name:
+                      description: Name of the environment template (e.g., "small-dev",
+                        "large-production")
+                      minLength: 1
+                      pattern: ^[a-z0-9][a-z0-9-]*[a-z0-9]$
+                      type: string
+                    networking:
+                      description: Networking defines network policies and configuration
+                        for environments
+                      properties:
+                        egressRules:
+                          description: EgressRules define allowed egress traffic patterns
+                          items:
+                            description: TemplateNetworkRule defines a network traffic
+                              rule
+                            properties:
+                              allow:
+                                description: Allow specifies what traffic to allow
+                                  (e.g., "internet", "cluster-dns")
+                                type: string
+                              from:
+                                description: From specifies the source for ingress
+                                  rules
+                                type: string
+                              to:
+                                description: To specifies the destination for egress
+                                  rules
+                                type: string
+                            required:
+                            - allow
+                            type: object
+                          type: array
+                        ingressRules:
+                          description: IngressRules define allowed ingress traffic
+                            patterns
+                          items:
+                            description: TemplateNetworkRule defines a network traffic
+                              rule
+                            properties:
+                              allow:
+                                description: Allow specifies what traffic to allow
+                                  (e.g., "internet", "cluster-dns")
+                                type: string
+                              from:
+                                description: From specifies the source for ingress
+                                  rules
+                                type: string
+                              to:
+                                description: To specifies the destination for egress
+                                  rules
+                                type: string
+                            required:
+                            - allow
+                            type: object
+                          type: array
+                        isolation:
+                          default: soft
+                          description: Isolation level for the environment
+                          enum:
+                          - soft
+                          - strict
+                          - none
+                          type: string
+                      type: object
+                    nodeGroup:
+                      description: NodeGroup defines the node group configuration
+                        for environments using this template
+                      properties:
+                        capacityType:
+                          description: CapacityType specifies the capacity type for
+                            nodes
+                          enum:
+                          - ON_DEMAND
+                          - SPOT
+                          type: string
+                        defaultInstanceType:
+                          description: DefaultInstanceType is the default instance
+                            type from the allowed list
+                          type: string
+                        diskSize:
+                          description: DiskSize specifies the disk size in GB for
+                            worker nodes
+                          maximum: 1000
+                          minimum: 10
+                          type: integer
+                        instanceTypes:
+                          description: InstanceTypes list of allowed EC2 instance
+                            types
+                          items:
+                            type: string
+                          minItems: 1
+                          type: array
+                        labels:
+                          additionalProperties:
+                            type: string
+                          description: Labels are key-value pairs to apply to all
+                            nodes
+                          type: object
+                        multiAZ:
+                          default: false
+                          description: MultiAZ determines if the node group should
+                            span multiple availability zones
+                          type: boolean
+                        scaling:
+                          description: Scaling defines the autoscaling configuration
+                          properties:
+                            default:
+                              description: Default is the default desired number of
+                                nodes
+                              minimum: 0
+                              type: integer
+                            max:
+                              description: Max is the maximum number of nodes
+                              minimum: 1
+                              type: integer
+                            min:
+                              description: Min is the minimum number of nodes
+                              minimum: 0
+                              type: integer
+                          required:
+                          - default
+                          - max
+                          - min
+                          type: object
+                        taints:
+                          description: Taints are taints to apply to all nodes in
+                            the node group
+                          items:
+                            description: TemplateTaintConfig defines taint configuration
+                              in templates
+                            properties:
+                              effect:
+                                description: Effect is the taint effect
+                                enum:
+                                - NoSchedule
+                                - PreferNoSchedule
+                                - NoExecute
+                                type: string
+                              key:
+                                description: Key is the taint key
+                                type: string
+                              value:
+                                description: Value is the taint value
+                                type: string
+                            required:
+                            - effect
+                            - key
+                            type: object
+                          type: array
+                      required:
+                      - capacityType
+                      - defaultInstanceType
+                      - diskSize
+                      - instanceTypes
+                      - scaling
+                      type: object
+                    priority:
+                      description: |-
+                        Priority defines the priority of this template within its environmentType
+                        Lower numbers indicate higher priority (1 is the highest priority)
+                        Templates with the same environmentType must have unique priorities
+                      maximum: 10
+                      minimum: 1
+                      type: integer
+                    resources:
+                      description: Resources defines resource quotas and limits for
+                        environments using this template
+                      properties:
+                        limits:
+                          description: Limits defines default and maximum resource
+                            limits for containers
+                          properties:
+                            defaultCpu:
+                              description: DefaultCPU is the default CPU limit for
+                                containers
+                              type: string
+                            defaultMemory:
+                              description: DefaultMemory is the default memory limit
+                                for containers
+                              type: string
+                            maxCpu:
+                              description: MaxCPU is the maximum CPU limit for containers
+                              type: string
+                            maxMemory:
+                              description: MaxMemory is the maximum memory limit for
+                                containers
+                              type: string
+                          type: object
+                        quota:
+                          description: Quota defines namespace-level resource quotas
+                          properties:
+                            cpu:
+                              description: CPU is the total CPU quota for the namespace
+                              type: string
+                            memory:
+                              description: Memory is the total memory quota for the
+                                namespace
+                              type: string
+                            persistentVolumeClaims:
+                              description: PersistentVolumeClaims is the maximum number
+                                of PVCs
+                              type: string
+                            pods:
+                              description: Pods is the maximum number of pods
+                              type: string
+                            services:
+                              description: Services is the maximum number of services
+                              type: string
+                          type: object
+                      type: object
+                    security:
+                      description: Security defines security policies and constraints
+                        for environments
+                      properties:
+                        networkPolicies:
+                          default: false
+                          description: NetworkPolicies specifies if network policies
+                            should be enabled
+                          type: boolean
+                        podSecurityStandard:
+                          default: restricted
+                          description: PodSecurityStandard specifies the Pod Security
+                            Standard to enforce
+                          enum:
+                          - privileged
+                          - baseline
+                          - restricted
+                          type: string
+                        readOnlyRootFilesystem:
+                          default: false
+                          description: ReadOnlyRootFilesystem specifies if containers
+                            should have read-only root filesystem
+                          type: boolean
+                        runAsNonRoot:
+                          default: true
+                          description: RunAsNonRoot specifies if containers should
+                            run as non-root users
+                          type: boolean
+                        serviceAccountName:
+                          default: default
+                          description: ServiceAccountName specifies the default service
+                            account to use
+                          type: string
+                      type: object
+                  required:
+                  - displayName
+                  - environmentType
+                  - name
+                  - nodeGroup
+                  - priority
+                  type: object
+                maxItems: 20
+                type: array
+              kubeOrgRef:
+                description: KubeOrgRef references the KubeOrg that provides AWS configuration
+                  and network
+                minLength: 1
+                type: string
+              nodeGroupTemplates:
+                description: |-
+                  NodeGroupTemplates define templates for future node group creation
+                  These are stored for later use and don't create actual node groups
+                items:
+                  description: NodeGroupTemplate defines a template for future node
+                    group creation
+                  properties:
+                    instanceTypes:
+                      description: InstanceTypes list of EC2 instance types for this
+                        node group
+                      items:
+                        type: string
+                      minItems: 1
+                      type: array
+                    maxSize:
+                      description: MaxSize maximum number of nodes
+                      minimum: 1
+                      type: integer
+                    minSize:
+                      description: MinSize minimum number of nodes
+                      minimum: 0
+                      type: integer
+                    name:
+                      description: Name of the node group template
+                      minLength: 1
+                      type: string
+                  required:
+                  - instanceTypes
+                  - maxSize
+                  - minSize
+                  - name
+                  type: object
+                type: array
+              region:
+                description: |-
+                  Region is the AWS region where the EKS cluster will be created
+                  Must match one of the regions configured in the referenced KubeOrg
+                pattern: ^[a-z]{2}-[a-z]+-[0-9]{1}$
+                type: string
+              tls:
+                description: TLS defines TLS configuration for the cluster platform
+                  system
+                properties:
+                  issuer:
+                    description: Issuer defines ClusterIssuer configuration
+                    properties:
+                      acmeServer:
+                        default: https://acme-v02.api.letsencrypt.org/directory
+                        description: ACMEServer URL for certificate authority
+                        type: string
+                      email:
+                        default: kaos@kubecore.io
+                        description: Email for ACME account registration
+                        type: string
+                      enabled:
+                        default: true
+                        description: Enabled determines if automatic ClusterIssuer
+                          should be created
+                        type: boolean
+                    required:
+                    - enabled
+                    type: object
+                type: object
+            required:
+            - cluster
+            - kubeOrgRef
+            - region
+            type: object
+          status:
+            description: KubePoolStatus defines the observed state of KubePool
+            properties:
+              availableTemplates:
+                description: AvailableTemplates contains summary information about
+                  environment templates
+                items:
+                  description: TemplateStatus contains summary information about environment
+                    templates
+                  properties:
+                    displayName:
+                      description: DisplayName is the human-readable name of the template
+                      type: string
+                    name:
+                      description: Name of the template
+                      type: string
+                    ready:
+                      default: true
+                      description: Ready indicates if the template is ready for use
+                      type: boolean
+                    validationErrors:
+                      description: ValidationErrors contains any validation errors
+                        for the template
+                      items:
+                        type: string
+                      type: array
+                  required:
+                  - displayName
+                  - name
+                  type: object
+                type: array
+              clusterEndpoint:
+                description: ClusterEndpoint contains the endpoint URL of the EKS
+                  cluster
+                type: string
+              clusterStatus:
+                description: ClusterStatus contains the current status of the EKS
+                  cluster
+                type: string
+              conditions:
+                description: Conditions represent the latest available observations
+                  of the KubePool's current state
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
+              eksCluster:
+                description: EKSCluster contains a reference to the created XEKS resource
+                properties:
+                  apiVersion:
+                    description: API version of the resource
+                    type: string
+                  kind:
+                    description: Kind of the resource
+                    type: string
+                  name:
+                    description: Name of the resource
+                    type: string
+                  namespace:
+                    description: Namespace of the resource (if namespaced)
+                    type: string
+                  uid:
+                    description: UID of the resource
+                    type: string
+                type: object
+              environmentConfig:
+                description: EnvironmentConfig contains a reference to the created
+                  EnvironmentConfig resource
+                properties:
+                  apiVersion:
+                    description: API version of the resource
+                    type: string
+                  kind:
+                    description: Kind of the resource
+                    type: string
+                  name:
+                    description: Name of the resource
+                    type: string
+                  namespace:
+                    description: Namespace of the resource (if namespaced)
+                    type: string
+                  uid:
+                    description: UID of the resource
+                    type: string
+                type: object
+              iamRoles:
+                description: IAMRoles contains IAM roles created for this cluster
+                properties:
+                  ecrRole:
+                    description: ECRRole contains the ARN of the ECR credentials IAM
+                      role for this cluster
+                    type: string
+                type: object
+              lastTransitionTime:
+                description: LastTransitionTime records when the status was last updated
+                format: date-time
+                type: string
+              networkConfig:
+                description: NetworkConfig contains the network configuration allocated
+                  for this cluster
+                properties:
+                  allocatedFrom:
+                    description: AllocatedFrom shows the source VPC CIDR this allocation
+                      was derived from
+                    type: string
+                  availabilityZones:
+                    description: AvailabilityZones lists the AZs where subnets are
+                      created
+                    items:
+                      type: string
+                    type: array
+                  natGateways:
+                    additionalProperties:
+                      type: string
+                    description: NATGateways maps availability zones to NAT Gateway
+                      IDs for private subnet routing
+                    type: object
+                  subnetCIDRs:
+                    description: SubnetCIDRs are the CIDR blocks allocated for the
+                      cluster subnets
+                    items:
+                      type: string
+                    type: array
+                  vpcId:
+                    description: VPCID is the ID of the VPC where the cluster is deployed
+                    type: string
+                type: object
+              observedGeneration:
+                description: ObservedGeneration is the most recent generation observed
+                  by the controller
+                format: int64
+                type: integer
+              phase:
+                description: Phase indicates the current reconciliation phase
+                enum:
+                - Reconciling
+                - Syncing
+                - Reporting
+                - Ready
+                - Failed
+                - Deleting
+                type: string
+              reconciliationAttempts:
+                description: ReconciliationAttempts tracks the number of reconciliation
+                  attempts for backoff
+                type: integer
+              xKubeSystemResource:
+                description: XKubeSystemResource contains a reference to the created
+                  XKubeSystem resource
+                properties:
+                  apiVersion:
+                    description: API version of the resource
+                    type: string
+                  kind:
+                    description: Kind of the resource
+                    type: string
+                  name:
+                    description: Name of the resource
+                    type: string
+                  namespace:
+                    description: Namespace of the resource (if namespaced)
+                    type: string
+                  uid:
+                    description: UID of the resource
+                    type: string
+                type: object
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
+{{- end }}

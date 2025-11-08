@@ -1,0 +1,438 @@
+{{- if .Values.crd.enable }}
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  labels:
+    {{- include "chart.labels" . | nindent 4 }}
+  annotations:
+    {{- if .Values.crd.keep }}
+    "helm.sh/resource-policy": keep
+    {{- end }}
+    controller-gen.kubebuilder.io/version: v0.18.0
+  name: kubeorgs.schema.kubecore.io
+spec:
+  group: schema.kubecore.io
+  names:
+    kind: KubeOrg
+    listKind: KubeOrgList
+    plural: kubeorgs
+    singular: kubeorg
+  scope: Cluster
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    - jsonPath: .status.effectiveOrganizationName
+      name: Organization
+      type: string
+    - jsonPath: .status.activeConfiguration.ready
+      name: Ready
+      type: boolean
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1beta1
+    schema:
+      openAPIV3Schema:
+        description: KubeOrg is the Schema for the kubeorgs API
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: spec defines the desired state of KubeOrg
+            properties:
+              awsConfig:
+                description: |-
+                  AWSConfig contains the AWS configuration for the provider
+                  When not provided, only GitHub provider will be created
+                properties:
+                  accountId:
+                    description: AccountID is the AWS account ID where resources will
+                      be created
+                    pattern: ^[0-9]{12}$
+                    type: string
+                  primaryRegion:
+                    description: PrimaryRegion is the primary AWS region for resource
+                      creation
+                    minLength: 1
+                    type: string
+                  providerConfig:
+                    description: ProviderConfig references the Crossplane AWS ProviderConfig
+                      to use
+                    minLength: 1
+                    type: string
+                  regions:
+                    description: Regions is the list of AWS regions where resources
+                      will be created
+                    items:
+                      type: string
+                    minItems: 1
+                    type: array
+                  tags:
+                    additionalProperties:
+                      type: string
+                    description: Tags are additional tags to apply to AWS resources
+                    type: object
+                required:
+                - accountId
+                - primaryRegion
+                - providerConfig
+                - regions
+                type: object
+              githubConfig:
+                description: |-
+                  GithubConfig contains the GitHub provider configuration
+                  When provided, enables GitHub provider integration
+                properties:
+                  credentialsSecretRef:
+                    description: |-
+                      CredentialsSecretRef references the Kubernetes secret containing GitHub App credentials
+                      The secret must exist in the operator namespace (typically kubecore-system)
+                      Required keys in the secret: appId, installationId, privateKey
+                    properties:
+                      name:
+                        description: Name of the secret
+                        minLength: 1
+                        type: string
+                    required:
+                    - name
+                    type: object
+                required:
+                - credentialsSecretRef
+                type: object
+              network:
+                description: |-
+                  Network configuration for VPC provisioning
+                  Defaults to disabled. When enabled, awsConfig is required.
+                properties:
+                  dns:
+                    description: DNS configures DNS zone creation for the network
+                    properties:
+                      domain:
+                        description: |-
+                          Domain is the domain name for the hosted zone
+                          Required when DNS is enabled
+                        pattern: ^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)*$
+                        type: string
+                      enabled:
+                        default: false
+                        description: |-
+                          Enabled determines whether DNS zones should be created
+                          Only applied to the primary region network
+                        type: boolean
+                    type: object
+                  enabled:
+                    default: false
+                    description: |-
+                      Enabled determines whether network resources should be created
+                      Defaults to false. When enabled, awsConfig must be provided.
+                    type: boolean
+                  multizone:
+                    default: true
+                    description: Multizone determines whether to create multi-AZ networks
+                    type: boolean
+                type: object
+              organizationName:
+                description: |-
+                  OrganizationName specifies the name of the organization for AWS resource provisioning
+                  If not specified, defaults to the KubeOrg resource name (metadata.name)
+                maxLength: 63
+                minLength: 1
+                pattern: ^[a-z0-9][a-z0-9-]*[a-z0-9]$
+                type: string
+            type: object
+          status:
+            description: status defines the observed state of KubeOrg
+            properties:
+              activeConfiguration:
+                description: ActiveConfiguration contains the active configuration
+                  propagated from the XAWSProvider
+                properties:
+                  childResources:
+                    description: ChildResources contains summary of all child resources
+                      managed by the composition
+                    properties:
+                      resources:
+                        description: Resources contains JSON array of resource metadata
+                        type: string
+                      total:
+                        description: Total number of child resources
+                        type: integer
+                    type: object
+                  iamPolicies:
+                    description: IAMPolicies contains IAM policies created for the
+                      provider
+                    properties:
+                      ecrPolicy:
+                        description: ECRPolicy contains the ARN of the ECR access
+                          policy
+                        type: string
+                      secretsManagerPolicy:
+                        description: SecretsManagerPolicy contains the ARN of the
+                          Secrets Manager access policy
+                        type: string
+                    type: object
+                  iamRoles:
+                    description: IAMRoles contains IAM roles created for the provider
+                    properties:
+                      ecrRole:
+                        description: ECRRole contains the ARN of the ECR credentials
+                          IAM role
+                        type: string
+                      esoRole:
+                        description: ESORole contains the ARN of the External Secrets
+                          Operator IAM role
+                        type: string
+                    type: object
+                  oidcProvider:
+                    description: OIDCProvider contains OIDC provider information for
+                      IRSA
+                    properties:
+                      arn:
+                        description: ARN of the OIDC provider
+                        type: string
+                      url:
+                        description: URL of the OIDC provider
+                        type: string
+                    type: object
+                  ready:
+                    description: Ready indicates if all resources are successfully
+                      provisioned and ready
+                    type: boolean
+                  registries:
+                    description: Registries contains JSON array of ECR registries
+                      created across regions
+                    type: string
+                  secretArn:
+                    description: SecretArn contains the ARN of the Secrets Manager
+                      secret containing registry credentials
+                    type: string
+                type: object
+              awsProvider:
+                description: AWSProvider contains a reference to the created XAWSProvider
+                  resource
+                properties:
+                  apiVersion:
+                    description: API version of the resource
+                    type: string
+                  kind:
+                    description: Kind of the resource
+                    type: string
+                  name:
+                    description: Name of the resource
+                    type: string
+                  namespace:
+                    description: Namespace of the resource (if namespaced)
+                    type: string
+                  uid:
+                    description: UID of the resource
+                    type: string
+                type: object
+              conditions:
+                description: Conditions represent the latest available observations
+                  of the KubeOrg's current state
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
+              effectiveOrganizationName:
+                description: |-
+                  EffectiveOrganizationName contains the organization name being used
+                  (from spec.organizationName if set, otherwise metadata.name)
+                type: string
+              environmentConfig:
+                description: EnvironmentConfig contains a reference to the created
+                  EnvironmentConfig resource
+                properties:
+                  apiVersion:
+                    description: API version of the resource
+                    type: string
+                  kind:
+                    description: Kind of the resource
+                    type: string
+                  name:
+                    description: Name of the resource
+                    type: string
+                  namespace:
+                    description: Namespace of the resource (if namespaced)
+                    type: string
+                  uid:
+                    description: UID of the resource
+                    type: string
+                type: object
+              githubProvider:
+                description: GithubProvider contains a reference to the created XGithubProvider
+                  resource
+                properties:
+                  apiVersion:
+                    description: API version of the resource
+                    type: string
+                  kind:
+                    description: Kind of the resource
+                    type: string
+                  name:
+                    description: Name of the resource
+                    type: string
+                  namespace:
+                    description: Namespace of the resource (if namespaced)
+                    type: string
+                  uid:
+                    description: UID of the resource
+                    type: string
+                type: object
+              lastTransitionTime:
+                description: LastTransitionTime records when the status was last updated
+                format: date-time
+                type: string
+              networks:
+                description: Networks contains the status of network resources
+                properties:
+                  regional:
+                    description: Regional contains the status of network resources
+                      in each region
+                    items:
+                      description: RegionalNetworkStatus contains the status of network
+                        resources in a specific region
+                      properties:
+                        message:
+                          description: Message contains additional status information
+                          type: string
+                        name:
+                          description: Name of the network resource
+                          type: string
+                        region:
+                          description: Region where the network is deployed
+                          type: string
+                        state:
+                          description: State of the network resource
+                          type: string
+                        vpcCIDR:
+                          description: VpcCIDR of the provisioned VPC
+                          type: string
+                        vpcId:
+                          description: VPCId of the provisioned VPC
+                          type: string
+                      type: object
+                    type: array
+                  state:
+                    description: State represents the overall state of network resources
+                    type: string
+                  summary:
+                    description: Summary contains aggregated network statistics
+                    properties:
+                      baseCIDR:
+                        description: BaseCIDR is the base CIDR block for all networks
+                        type: string
+                      failed:
+                        description: Failed number of network resources
+                        type: integer
+                      pending:
+                        description: Pending number of network resources
+                        type: integer
+                      ready:
+                        description: Ready number of network resources
+                        type: integer
+                      total:
+                        description: Total number of network resources
+                        type: integer
+                    type: object
+                type: object
+              observedGeneration:
+                description: ObservedGeneration is the most recent generation observed
+                  by the controller
+                format: int64
+                type: integer
+              phase:
+                description: Phase indicates the current reconciliation phase
+                enum:
+                - Reconciling
+                - Syncing
+                - Reporting
+                - Ready
+                - Failed
+                - Deleting
+                type: string
+              reconciliationAttempts:
+                description: ReconciliationAttempts tracks the number of reconciliation
+                  attempts for backoff
+                type: integer
+            type: object
+        required:
+        - spec
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
+{{- end }}

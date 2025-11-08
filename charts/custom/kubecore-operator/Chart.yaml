@@ -1,0 +1,70 @@
+apiVersion: v2
+name: kubecore-operator
+description: A sophisticated Kubernetes operator that implements a four-layer framework architecture for provisioning and managing cloud infrastructure through Crossplane compositions.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+
+# Maintainers
+maintainers:
+- name: Novelcore Platform Team
+  email: platform@novelcore.io
+
+# Keywords for chart discovery
+keywords:
+- kubernetes
+- operator
+- crossplane
+- infrastructure
+- gitops
+- platform
+- kubecore
+- infrastructure-as-code
+
+# Home page
+home: https://github.com/novelcore/kubecore-operator
+
+# Source code
+sources:
+- https://github.com/novelcore/kubecore-operator
+
+# Icon
+icon: "https://github.com/novelcore/kubecore-operator/raw/main/docs/icon.png"
+
+# Annotations for additional metadata
+annotations:
+  # Category for Artifact Hub
+  artifacthub.io/category: automation
+  artifacthub.io/license: Apache-2.0
+  
+  # Links for Artifact Hub
+  artifacthub.io/links: |
+    - name: GitHub Repository
+      url: https://github.com/novelcore/kubecore-operator
+    - name: Documentation
+      url: https://github.com/novelcore/kubecore-operator/blob/main/README.md
+    - name: Release Notes
+      url: https://github.com/novelcore/kubecore-operator/releases
+
+  # Changes for this chart version
+  artifacthub.io/changes: |
+    - kind: added
+      description: "Initial Helm chart release for kubecore-operator"
+    - kind: added
+      description: "Crossplane and functions support included"
+    - kind: added
+      description: "Complete CRD support for KubeOrg, KubePool, KubeProject, and KubeApp"
+
+# Kubernetes version compatibility
+kubeVersion: ">=1.20.0-0"
+
+# Dependencies
+dependencies:
+- name: crossplane
+  version: "1.20.0"
+  repository: "https://novelcore.github.io/charts/"
+  condition: crossplane.enabled
+- name: external-secrets
+  version: "1.0.0"
+  repository: "https://charts.external-secrets.io"
+  condition: externalSecrets.enabled

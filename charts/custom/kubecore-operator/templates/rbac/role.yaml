@@ -1,0 +1,239 @@
+{{- if .Values.rbac.enable }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    {{- include "chart.labels" . | nindent 4 }}
+  name: kubecore-operator-manager-role
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - configmaps
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - ""
+  resources:
+  - events
+  verbs:
+  - create
+  - patch
+- apiGroups:
+  - apiextensions.crossplane.io
+  resources:
+  - environmentconfigs
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - apiextensions.crossplane.io
+  resources:
+  - environmentconfigs/status
+  verbs:
+  - get
+- apiGroups:
+  - aws.provider.platform.kubecore.io
+  resources:
+  - xawsproviders
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - aws.provider.platform.kubecore.io
+  resources:
+  - xawsproviders/status
+  verbs:
+  - get
+- apiGroups:
+  - coordination.k8s.io
+  resources:
+  - leases
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - ec2.aws.upbound.io
+  resources:
+  - natgateways
+  - vpcs
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - ec2.aws.upbound.io
+  resources:
+  - vpcs/status
+  verbs:
+  - get
+- apiGroups:
+  - eks.aws.crossplane.io
+  resources:
+  - xeks
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - eks.aws.crossplane.io
+  resources:
+  - xeks/status
+  verbs:
+  - get
+- apiGroups:
+  - github.platform.kubecore.io
+  resources:
+  - xgithubapps
+  - xgithubproviders
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - github.platform.kubecore.io
+  resources:
+  - xgithubprojects
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - github.platform.kubecore.io
+  resources:
+  - xgithubproviders/status
+  verbs:
+  - get
+- apiGroups:
+  - k8s.platform.kubecore.io
+  resources:
+  - xk8sapps
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - schema.kubecore.io
+  resources:
+  - kubeapps
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - schema.kubecore.io
+  resources:
+  - kubeapps/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - schema.kubecore.io
+  resources:
+  - kubeapps/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
+  - platform.kubecore.io
+  resources:
+  - xawsnetworks
+  - xeks
+  - xkubenvs
+  - xkubesystems
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - platform.kubecore.io
+  resources:
+  - xawsnetworks/status
+  - xeks/status
+  - xkubenvs/status
+  - xkubesystems/status
+  verbs:
+  - get
+- apiGroups:
+  - platform.kubecore.io
+  resources:
+  - xkubeapptemplates
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - schema.kubecore.io
+  resources:
+  - kubeorgs
+  - kubepools
+  - kubeprojects
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - schema.kubecore.io
+  resources:
+  - kubeorgs/finalizers
+  - kubepools/finalizers
+  - kubeprojects/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - schema.kubecore.io
+  resources:
+  - kubeorgs/status
+  - kubepools/status
+  - kubeprojects/status
+  verbs:
+  - get
+  - patch
+  - update
+{{- end -}}

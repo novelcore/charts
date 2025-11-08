@@ -1,0 +1,208 @@
+# [MANAGER]: Manager Deployment Configurations
+controllerManager:
+  replicas: 1
+  container:
+    image:
+      # Docker image repository
+      # Example: novelcore.azurecr.io/demo-project/kubecore-operator
+      repository: controller
+      # Image tag/version
+      tag: latest
+      # Image pull policy
+      pullPolicy: IfNotPresent
+    args:
+      - "--leader-elect"
+      - "--metrics-bind-address=:8443"
+      - "--health-probe-bind-address=:8081"
+    # Environment variables required by the operator
+    # Note: EKS_CLUSTER_ID must be exactly 32 characters
+    env:
+      EKS_CLUSTER_ID: "KINDCLUSTER123456789012345678901"
+      EKS_REGION: "us-east-1"
+      KUBERNETES_PROVIDER_CONFIG: "kubesys-enhanced"
+    resources:
+      limits:
+        cpu: 500m
+        memory: 128Mi
+      requests:
+        cpu: 10m
+        memory: 64Mi
+    livenessProbe:
+      initialDelaySeconds: 15
+      periodSeconds: 20
+      httpGet:
+        path: /healthz
+        port: 8081
+    readinessProbe:
+      initialDelaySeconds: 5
+      periodSeconds: 10
+      httpGet:
+        path: /readyz
+        port: 8081
+    securityContext:
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop:
+          - "ALL"
+      readOnlyRootFilesystem: true
+  securityContext:
+    runAsNonRoot: true
+    seccompProfile:
+      type: RuntimeDefault
+  terminationGracePeriodSeconds: 10
+  serviceAccountName: kubecore-operator-controller-manager
+
+# [RBAC]: To enable RBAC (Permissions) configurations
+rbac:
+  enable: true
+
+# [CRDs]: To enable the CRDs
+crd:
+  # This option determines whether the CRDs are included
+  # in the installation process.
+  enable: true
+
+  # Enabling this option adds the "helm.sh/resource-policy": keep
+  # annotation to the CRD, ensuring it remains installed even when
+  # the Helm release is uninstalled.
+  # NOTE: Removing the CRDs will also remove all cert-manager CR(s)
+  # (Certificates, Issuers, ...) due to garbage collection.
+  keep: true
+
+# [METRICS]: Set to true to generate manifests for exporting metrics.
+# To disable metrics export set false, and ensure that the
+# ControllerManager argument "--metrics-bind-address=:8443" is removed.
+metrics:
+  enable: true
+
+# [PROMETHEUS]: To enable a ServiceMonitor to export metrics to Prometheus set true
+prometheus:
+  enable: false
+
+# [CERT-MANAGER]: To enable cert-manager injection to webhooks set true
+certmanager:
+  enable: false
+
+# [NETWORK POLICIES]: To enable NetworkPolicies set true
+networkPolicy:
+  enable: false
+
+# [REGISTRY]: Container registry configuration
+registry:
+  # Registry URL (e.g., novelcore.azurecr.io)
+  url: "novelcore.azurecr.io"
+  # Registry username
+  username: "demo-project"
+  # Registry password (hardcoded for chart installation)
+  password: "tnInsKmaf1cE5pY7d51mSE06lswLEWLbKADM8MvoA8+ACRCyXbme"
+  # Project/namespace within the registry
+  project: "demo-project"
+  # Create imagePullSecret for private registry
+  createImagePullSecret: true
+  # Name of the imagePullSecret (will be created in the release namespace)
+  imagePullSecretName: "kubecore-operator-registry-secret"
+
+# [CROSSPLANE]: Crossplane dependency configuration
+crossplane:
+  # Enable Crossplane installation as a dependency
+  # Set to false if Crossplane is already installed in your cluster
+  enabled: true
+  # Namespace where Crossplane will be installed
+  namespace: crossplane-system
+  # Additional Crossplane values can be passed through
+  # These will be forwarded to the Crossplane subchart
+  # See charts/external/crossplane/values.yaml for available options
+
+# [EXTERNAL SECRETS OPERATOR]: ESO dependency configuration
+externalSecrets:
+  # Enable External Secrets Operator installation as a dependency
+  # Set to false if ESO is already installed in your cluster
+  enabled: true
+  # Additional ESO values can be passed through
+  # These will be forwarded to the external-secrets subchart
+  # See https://external-secrets.io/latest/introduction/getting-started/ for available options
+
+# [CROSSPLANE FUNCTIONS]: Crossplane functions configuration
+crossplaneFunctions:
+  # Enable installation of Crossplane functions
+  # Set to false if Crossplane functions are already installed in your cluster
+  enabled: true
+  
+  # Go Templating Function configuration
+  goTemplating:
+    # Function package
+    package: "xpkg.crossplane.io/crossplane-contrib/function-go-templating:v0.10.0"
+    # Optional runtime config reference
+    runtimeConfigRef: {}
+  
+  # Auto Ready Function configuration
+  autoReady:
+    # Function package
+    package: "xpkg.upbound.io/crossplane-contrib/function-auto-ready:v0.5.0"
+    # Optional runtime config reference
+    runtimeConfigRef: {}
+  
+  # Patch and Transform Function configuration
+  patchAndTransform:
+    # Function package
+    package: "xpkg.upbound.io/upbound/function-patch-and-transform:v0.9.0"
+    # Optional runtime config reference
+    runtimeConfigRef: {}
+  
+  # Sequencer Function configuration
+  sequencer:
+    # Function package
+    package: "xpkg.upbound.io/crossplane-contrib/function-sequencer:v0.2.3"
+    # Optional runtime config reference
+    runtimeConfigRef: {}
+  
+  # Environment Configs Function configuration
+  environmentConfigs:
+    # Function package
+    package: "xpkg.upbound.io/crossplane-contrib/function-environment-configs:v0.4.0"
+    # Optional runtime config reference
+    runtimeConfigRef: {}
+  
+  # Extra Resources Function configuration
+  extraResources:
+    # Function package
+    package: "xpkg.upbound.io/crossplane-contrib/function-extra-resources:v0.2.0"
+    # Optional runtime config reference
+    runtimeConfigRef: {}
+
+# [CROSSPLANE PROVIDERS]: Crossplane providers and provider configs configuration
+crossplaneProviders:
+  # Enable installation of Crossplane providers and provider configs
+  # Set to false if providers are already installed in your cluster
+  enabled: true
+  
+  # Kubernetes Provider configuration
+  kubernetes:
+    # Optional runtime config reference
+    runtimeConfigRef:
+      name: kubesys-admin-runtime
+  
+  # GitHub Provider configuration
+  github:
+    # Provider package
+    package: "ghcr.io/crossplane-contrib/provider-upjet-github:v0.19-provider-cache-testing-a3b6345"
+    # Optional runtime config reference
+    runtimeConfigRef: {}
+  
+  # Helm Provider configuration
+  helm:
+    # Optional runtime config reference
+    runtimeConfigRef: {}
+  
+  # Provider Configs configuration
+  providerConfigs:
+    # Kubernetes ProviderConfig name
+    kubernetes:
+      name: kubesys-enhanced
+    # AWS ProviderConfig configuration
+    aws:
+      name: aws-default
+      secretRef:
+        key: credentials
+        name: aws-secret
+        namespace: crossplane-system

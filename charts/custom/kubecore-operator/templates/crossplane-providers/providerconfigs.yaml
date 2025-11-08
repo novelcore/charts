@@ -1,0 +1,29 @@
+{{- if and .Values.crossplane.enabled .Values.crossplaneProviders.enabled }}
+---
+# Kubernetes ProviderConfig
+apiVersion: kubernetes.crossplane.io/v1alpha1
+kind: ProviderConfig
+metadata:
+  name: {{ .Values.crossplaneProviders.providerConfigs.kubernetes.name }}
+  labels:
+    {{- include "chart.labels" . | nindent 4 }}
+spec:
+  credentials:
+    source: InjectedIdentity
+---
+# AWS ProviderConfig
+apiVersion: aws.upbound.io/v1beta1
+kind: ProviderConfig
+metadata:
+  name: {{ .Values.crossplaneProviders.providerConfigs.aws.name }}
+  labels:
+    {{- include "chart.labels" . | nindent 4 }}
+spec:
+  credentials:
+    secretRef:
+      key: {{ .Values.crossplaneProviders.providerConfigs.aws.secretRef.key }}
+      name: {{ .Values.crossplaneProviders.providerConfigs.aws.secretRef.name }}
+      namespace: {{ .Values.crossplaneProviders.providerConfigs.aws.secretRef.namespace }}
+    source: Secret
+{{- end }}
+
