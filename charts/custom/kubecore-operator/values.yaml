@@ -4,10 +4,10 @@ controllerManager:
   container:
     image:
       # Docker image repository
-      # Example: novelcore.azurecr.io/demo-project/kubecore-operator
-      repository: controller
+      # Example: novelcore.azurecr.io/kubecore/kubecore-operator
+      repository: novelcore.azurecr.io/kubecore/kubecore-operator
       # Image tag/version
-      tag: latest
+      tag: 0.1.1
       # Image pull policy
       pullPolicy: IfNotPresent
     args:
@@ -91,12 +91,12 @@ networkPolicy:
 registry:
   # Registry URL (e.g., novelcore.azurecr.io)
   url: "novelcore.azurecr.io"
-  # Registry username
-  username: "demo-project"
-  # Registry password (hardcoded for chart installation)
-  password: "tnInsKmaf1cE5pY7d51mSE06lswLEWLbKADM8MvoA8+ACRCyXbme"
+  # Registry username (provide via values override)
+  username: ""
+  # Registry password (provide via values override)
+  password: ""
   # Project/namespace within the registry
-  project: "demo-project"
+  project: "kubecore"
   # Create imagePullSecret for private registry
   createImagePullSecret: true
   # Name of the imagePullSecret (will be created in the release namespace)
