@@ -10,7 +10,6 @@
 # - Weight 15: Providers
 #
 ---
----
 apiVersion: apiextensions.crossplane.io/v2
 kind: CompositeResourceDefinition
 metadata:
@@ -20,7 +19,6 @@ metadata:
   annotations:
     helm.sh/hook: post-install,post-upgrade
     helm.sh/hook-weight: "0"
-
 spec:
   scope: Cluster
   group: aws.provider.platform.kubecore.io
@@ -129,7 +127,6 @@ spec:
                   ready:
                     type: boolean
                     description: "Whether the ClusterSecretStore is ready"---
----
 apiVersion: apiextensions.crossplane.io/v2
 kind: CompositeResourceDefinition
 metadata:
@@ -139,7 +136,6 @@ metadata:
   annotations:
     helm.sh/hook: post-install,post-upgrade
     helm.sh/hook-weight: "0"
-
 spec:
   scope: Cluster
   group: github.platform.kubecore.io
@@ -253,7 +249,6 @@ spec:
       type: date
       jsonPath: .metadata.creationTimestamp
 ---
----
 apiVersion: apiextensions.crossplane.io/v2
 kind: CompositeResourceDefinition
 metadata:
@@ -263,7 +258,6 @@ metadata:
   annotations:
     helm.sh/hook: post-install,post-upgrade
     helm.sh/hook-weight: "0"
-
 spec:
   scope: Cluster
   group: platform.kubecore.io
@@ -428,7 +422,6 @@ spec:
                   resources:
                     type: string
                     description: "JSON array of resource metadata"---
----
 apiVersion: apiextensions.crossplane.io/v2
 kind: CompositeResourceDefinition
 metadata:
@@ -438,7 +431,6 @@ metadata:
   annotations:
     helm.sh/hook: post-install,post-upgrade
     helm.sh/hook-weight: "0"
-
 spec:
   scope: Cluster
   group: platform.kubecore.io
@@ -699,7 +691,6 @@ spec:
 
           # Note: Connection secrets are handled by ClusterAuth resource
           # No writeConnectionSecretToRef needed in spec---
----
 apiVersion: apiextensions.crossplane.io/v2
 kind: CompositeResourceDefinition
 metadata:
@@ -709,7 +700,6 @@ metadata:
   annotations:
     helm.sh/hook: post-install,post-upgrade
     helm.sh/hook-weight: "0"
-
 spec:
   group: platform.kubecore.io
   names:
@@ -1038,7 +1028,6 @@ spec:
                   lastUpdate:
                     type: string
                     description: "Last status update time"---
----
 apiVersion: apiextensions.crossplane.io/v2
 kind: CompositeResourceDefinition
 metadata:
@@ -1048,7 +1037,6 @@ metadata:
   annotations:
     helm.sh/hook: post-install,post-upgrade
     helm.sh/hook-weight: "0"
-
 spec:
   scope: Cluster
   group: github.platform.kubecore.io
@@ -1210,7 +1198,6 @@ spec:
     - name: Age
       type: date
       jsonPath: .metadata.creationTimestamp---
----
 apiVersion: apiextensions.crossplane.io/v2
 kind: CompositeResourceDefinition
 metadata:
@@ -1220,7 +1207,6 @@ metadata:
   annotations:
     helm.sh/hook: post-install,post-upgrade
     helm.sh/hook-weight: "0"
-
 spec:
   group: platform.kubecore.io
   names:
@@ -1552,7 +1538,6 @@ metadata:
   annotations:
     helm.sh/hook: post-install,post-upgrade
     helm.sh/hook-weight: "0"
-
 spec:
   scope: Cluster
   group: github.platform.kubecore.io
@@ -1946,7 +1931,6 @@ metadata:
   annotations:
     helm.sh/hook: post-install,post-upgrade
     helm.sh/hook-weight: "0"
-
 spec:
   scope: Cluster
   group: k8s.platform.kubecore.io
@@ -2279,7 +2263,6 @@ metadata:
   annotations:
     helm.sh/hook: post-install,post-upgrade
     helm.sh/hook-weight: "0"
-
 spec:
   scope: Cluster
   group: platform.kubecore.io
@@ -2542,7 +2525,6 @@ metadata:
   annotations:
     helm.sh/hook: post-install,post-upgrade
     helm.sh/hook-weight: "0"
-
 spec:
   scope: Namespaced
   group: platform.kubecore.io
@@ -2836,7 +2818,6 @@ metadata:
   annotations:
     helm.sh/hook: post-install,post-upgrade
     helm.sh/hook-weight: "0"
-
 spec:
   scope: Namespaced
   group: platform.kubecore.io
@@ -2982,5 +2963,4 @@ spec:
     - name: Age
       type: date
       jsonPath: .metadata.creationTimestamp
----
 {{- end }}

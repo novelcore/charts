@@ -48,8 +48,6 @@ annotations:
 
   # Changes for this chart version
   artifacthub.io/changes: |
-    - kind: added
-      description: "Added 12 Crossplane XRD definitions for KubeCore platform compositions (XAWSProvider, XGitHubProvider, XAWSNetwork, XEKS, XKubeSystem, XGitHubProject, XKubEnv, XGitHubApp, XK8sApp, XKubeAppTemplate, XQualityGateInstance, XQualityGateTemplate)"
     - kind: fixed
       description: "Fixed kubesys-admin ServiceAccount creation in release namespace (kubecore-system) to fix provider-kubernetes pod failures"
     - kind: fixed
@@ -57,9 +55,9 @@ annotations:
     - kind: fixed
       description: "Removed Helm hooks from ProviderConfigs to fix Kubernetes ProviderConfig creation timing issue - ProviderConfigs now created as regular resources after provider CRDs are available"
     - kind: changed
-      description: "XRDs now installed with hook weight 0 to ensure they're available before all other Crossplane resources"
-    - kind: changed
-      description: "Updated hook execution order: XRDs (weight 0), RuntimeConfig (weight 5), Functions (weight 10), Providers (weight 15)"
+      description: "Updated hook execution order: RuntimeConfig (weight 5), Functions (weight 10), Providers (weight 15)"
+    - kind: added
+      description: "Added XRD template structure (temporarily disabled in this release due to YAML parsing issue, will be fixed in 0.1.6)"
 
 # Kubernetes version compatibility
 kubeVersion: ">=1.20.0-0"
