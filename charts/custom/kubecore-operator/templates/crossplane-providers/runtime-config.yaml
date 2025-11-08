@@ -1,6 +1,15 @@
 {{- if and .Values.crossplane.enabled .Values.crossplaneProviders.enabled }}
 ---
-# ServiceAccount for KubeSystem operations
+# ServiceAccount for KubeSystem operations (in release namespace for provider pods)
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: kubesys-admin
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "chart.labels" . | nindent 4 }}
+---
+# ServiceAccount for KubeSystem operations (in crossplane namespace for legacy compatibility)
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -9,11 +18,27 @@ metadata:
   labels:
     {{- include "chart.labels" . | nindent 4 }}
 ---
-# ClusterRoleBinding to cluster-admin for platform management
+# ClusterRoleBinding to cluster-admin for platform management (release namespace)
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
+  name: kubesys-admin-{{ .Release.Namespace }}
+  labels:
+    {{- include "chart.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-admin
+subjects:
+- kind: ServiceAccount
   name: kubesys-admin
+  namespace: {{ .Release.Namespace }}
+---
+# ClusterRoleBinding to cluster-admin for platform management (crossplane namespace)
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: kubesys-admin-crossplane
   labels:
     {{- include "chart.labels" . | nindent 4 }}
 roleRef:

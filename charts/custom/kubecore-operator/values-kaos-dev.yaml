@@ -1,0 +1,80 @@
+# Custom values for kaos-dev EKS cluster deployment
+# Cluster: kaos-dev-eks
+# Region: eu-central-1
+# Cluster ID: AF009732404FA9DE00D7C06126A0DD0B
+
+controllerManager:
+  container:
+    image:
+      repository: novelcore.azurecr.io/kubecore/kubecore-operator
+      tag: 0.1.1
+      pullPolicy: IfNotPresent
+    # Environment variables configured for kaos-dev cluster
+    env:
+      EKS_CLUSTER_ID: "AF009732404FA9DE00D7C06126A0DD0B"
+      EKS_REGION: "eu-central-1"
+      KUBERNETES_PROVIDER_CONFIG: "kubesys-enhanced"
+
+# Enable all core components
+rbac:
+  enable: true
+
+crd:
+  enable: true
+  keep: true
+
+metrics:
+  enable: true
+
+prometheus:
+  enable: false
+
+certmanager:
+  enable: false
+
+networkPolicy:
+  enable: false
+
+# Registry configuration for private ACR access
+registry:
+  url: "novelcore.azurecr.io"
+  username: "novelcore"  # TODO: Add ACR username
+  password: "qdqz01rTFd5gTO2CQv9vyQS19mle7fJINN7raEClhq+ACRDpPMjb"  # TODO: Add ACR password
+  project: "kubecore"
+  createImagePullSecret: true
+  imagePullSecretName: "kubecore-operator-registry-secret"
+
+# Enable Crossplane and all its components
+crossplane:
+  enabled: true
+  namespace: crossplane-system
+
+# Enable External Secrets Operator
+externalSecrets:
+  enabled: true
+
+# Enable Crossplane Functions
+crossplaneFunctions:
+  enabled: true
+
+# Enable Crossplane Providers
+crossplaneProviders:
+  enabled: true
+  kubernetes:
+    runtimeConfigRef:
+      name: kubesys-admin-runtime
+  github:
+    package: "ghcr.io/crossplane-contrib/provider-upjet-github:v0.19-provider-cache-testing-a3b6345"
+  providerConfigs:
+    kubernetes:
+      name: kubesys-enhanced
+    aws:
+      name: aws-default
+      secretRef:
+        key: credentials
+        name: aws-secret
+        namespace: crossplane-system
+
+# Enable Crossplane XRDs
+crossplaneXRDs:
+  enabled: true

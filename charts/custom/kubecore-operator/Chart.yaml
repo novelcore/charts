@@ -2,7 +2,7 @@ apiVersion: v2
 name: kubecore-operator
 description: A sophisticated Kubernetes operator that implements a four-layer framework architecture for provisioning and managing cloud infrastructure through Crossplane compositions.
 type: application
-version: 0.1.4
+version: 0.1.5
 appVersion: "0.1.1"
 
 # Maintainers
@@ -48,22 +48,18 @@ annotations:
 
   # Changes for this chart version
   artifacthub.io/changes: |
-    - kind: fixed
-      description: "Removed hook-delete-policy to prevent cleanup errors on persistent Crossplane resources"
-    - kind: fixed
-      description: "Added Helm hooks to ensure Crossplane Functions and Providers install after Crossplane CRDs"
-    - kind: fixed
-      description: "Fixed installation order: RuntimeConfig (weight 5), Functions (weight 10), Providers (weight 15), ProviderConfigs (weight 20)"
-    - kind: changed
-      description: "Updated default image repository to novelcore.azurecr.io/kubecore/kubecore-operator:0.1.1"
-    - kind: security
-      description: "Removed hardcoded registry credentials from default values (must be provided via override)"
-    - kind: changed
-      description: "Changed default registry project from demo-project to kubecore"
-    - kind: fixed
-      description: "Updated Crossplane dependency to v2.1.0 from crossplane-stable"
     - kind: added
-      description: "Complete CRD support for KubeOrg, KubePool, KubeProject, and KubeApp"
+      description: "Added 12 Crossplane XRD definitions for KubeCore platform compositions (XAWSProvider, XGitHubProvider, XAWSNetwork, XEKS, XKubeSystem, XGitHubProject, XKubEnv, XGitHubApp, XK8sApp, XKubeAppTemplate, XQualityGateInstance, XQualityGateTemplate)"
+    - kind: fixed
+      description: "Fixed kubesys-admin ServiceAccount creation in release namespace (kubecore-system) to fix provider-kubernetes pod failures"
+    - kind: fixed
+      description: "Added duplicate kubesys-admin ServiceAccount in crossplane-system namespace for backward compatibility"
+    - kind: fixed
+      description: "Removed Helm hooks from ProviderConfigs to fix Kubernetes ProviderConfig creation timing issue - ProviderConfigs now created as regular resources after provider CRDs are available"
+    - kind: changed
+      description: "XRDs now installed with hook weight 0 to ensure they're available before all other Crossplane resources"
+    - kind: changed
+      description: "Updated hook execution order: XRDs (weight 0), RuntimeConfig (weight 5), Functions (weight 10), Providers (weight 15)"
 
 # Kubernetes version compatibility
 kubeVersion: ">=1.20.0-0"

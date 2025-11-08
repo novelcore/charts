@@ -1,0 +1,2986 @@
+{{- if .Values.crossplaneXRDs.enabled }}
+# Crossplane Composite Resource Definitions (XRDs)
+# These XRDs define the custom resource APIs used by the KubeCore platform compositions
+# Note: Using hooks to ensure XRDs are installed early, before compositions are applied
+#
+# Hook execution order:
+# - Weight 0: XRDs (this file)
+# - Weight 5: RuntimeConfig
+# - Weight 10: Functions
+# - Weight 15: Providers
+#
+---
+---
+apiVersion: apiextensions.crossplane.io/v2
+kind: CompositeResourceDefinition
+metadata:
+  name: xawsproviders.aws.provider.platform.kubecore.io
+  labels:
+    {{- include "chart.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "0"
+
+spec:
+  scope: Cluster
+  group: aws.provider.platform.kubecore.io
+  names:
+    kind: XAWSProvider
+    plural: xawsproviders
+  defaultCompositionRef:
+    name: awsprovider
+  versions:
+  - name: v1alpha1
+    served: true
+    referenceable: true
+    schema:
+      openAPIV3Schema:
+        type: object
+        properties:
+          spec:
+            type: object
+            properties:
+              organizationName:
+                type: string
+                description: "Name of the organization for AWS resource provisioning"
+            required:
+            - organizationName
+          status:
+            type: object
+            properties:
+              registries:
+                type: string
+                description: "JSON array of ECR registries created across regions"
+              secretArn:
+                type: string
+                description: "ARN of the Secrets Manager secret containing registry credentials"
+              iamRoles:
+                type: object
+                description: "IAM roles created for the provider"
+                properties:
+                  esoRoleArn:
+                    type: string
+                    description: "ARN of the External Secrets Operator IAM role"
+              iamPolicies:
+                type: object
+                description: "IAM policies created for the provider"
+                properties:
+                  secretsManagerPolicyArn:
+                    type: string
+                    description: "ARN of the Secrets Manager access policy"
+                  ecrPolicyArn:
+                    type: string
+                    description: "ARN of the ECR access policy"
+              ready:
+                type: boolean
+                description: "Indicates if all resources are successfully provisioned and ready"
+              oidcProvider:
+                type: object
+                description: "OIDC provider information for IRSA"
+                properties:
+                  arn:
+                    type: string
+                    description: "ARN of the OIDC provider"
+                  url:
+                    type: string
+                    description: "URL of the OIDC provider"
+              # Additional status fields for comprehensive tracking
+              childResources:
+                type: object
+                description: "Summary of all child resources managed by this composition"
+                properties:
+                  total:
+                    type: integer
+                    description: "Total number of child resources"
+                  resources:
+                    type: string
+                    description: "JSON array of resource metadata"
+              ecrCredentials:
+                type: object
+                description: "Status of ECR credentials generation and management"
+                properties:
+                  generated:
+                    type: boolean
+                    description: "Whether ECR credentials have been generated"
+                  lastRefresh:
+                    type: string
+                    format: date-time
+                    description: "Timestamp when ECR credentials were last refreshed"
+                  nextRefresh:
+                    type: string
+                    format: date-time
+                    description: "Timestamp when ECR credentials will be refreshed next"
+                  tokenJobs:
+                    type: string
+                    description: "JSON string containing status of ECR token generation jobs"
+                  generators:
+                    type: string
+                    description: "JSON string containing status of ECRAuthorizationToken generators"
+                  generationMethod:
+                    type: string
+                    description: "Method used for ECR token generation (eso-native or lambda-based)"
+              clusterSecretStore:
+                type: object
+                description: "Status of ClusterSecretStore for External Secrets Operator"
+                properties:
+                  name:
+                    type: string
+                    description: "Name of the ClusterSecretStore"
+                  ready:
+                    type: boolean
+                    description: "Whether the ClusterSecretStore is ready"---
+---
+apiVersion: apiextensions.crossplane.io/v2
+kind: CompositeResourceDefinition
+metadata:
+  name: xgithubproviders.github.platform.kubecore.io
+  labels:
+    {{- include "chart.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "0"
+
+spec:
+  scope: Cluster
+  group: github.platform.kubecore.io
+  names:
+    kind: XGithubProvider
+    plural: xgithubproviders
+  defaultCompositionRef:
+    name: githubprovider
+  versions:
+  - name: v1alpha1
+    served: true
+    referenceable: true
+    schema:
+      openAPIV3Schema:
+        type: object
+        properties:
+          spec:
+            type: object
+            properties:
+              organizationName:
+                type: string
+                description: "Name of the GitHub organization for provider configuration"
+                minLength: 1
+                maxLength: 63
+                pattern: "^[a-zA-Z0-9][a-zA-Z0-9-]*[a-zA-Z0-9]$"
+            required:
+            - organizationName
+          status:
+            type: object
+            properties:
+              providerConfigName:
+                type: string
+                description: "Name of the generated GitHub ProviderConfig"
+              providerConfigApiGroup:
+                type: string
+                description: "API group of the generated GitHub ProviderConfig"
+              externalSecretName:
+                type: string
+                description: "Name of the created ExternalSecret for GitHub credentials"
+              connectionSecretName:
+                type: string
+                description: "Name of the connection secret containing provider metadata"
+              githubCredentials:
+                type: object
+                description: "Status of GitHub credentials retrieval and management"
+                properties:
+                  secretReady:
+                    type: boolean
+                    description: "Whether the GitHub credentials secret is ready"
+                  lastRefresh:
+                    type: string
+                    format: date-time
+                    description: "Timestamp when credentials were last refreshed"
+                  nextRefresh:
+                    type: string
+                    format: date-time
+                    description: "Timestamp when credentials will be refreshed next"
+                  awsSecretId:
+                    type: string
+                    description: "AWS Secrets Manager secret ID containing GitHub App credentials"
+                  credentialsSecretKey:
+                    type: string
+                    description: "Key name in the Kubernetes secret containing formatted credentials"
+                  awsAttributeKeys:
+                    type: object
+                    description: "AWS Secrets Manager attribute keys for GitHub App credentials"
+                    properties:
+                      appIdKey:
+                        type: string
+                        description: "Attribute key for GitHub App ID in AWS Secrets Manager"
+                      installationIdKey:
+                        type: string
+                        description: "Attribute key for GitHub App Installation ID in AWS Secrets Manager"
+                      privateKeyKey:
+                        type: string
+                        description: "Attribute key for GitHub App private key in AWS Secrets Manager"
+              ready:
+                type: boolean
+                description: "Indicates if all resources are successfully provisioned and ready"
+              # Additional status fields for comprehensive tracking
+              childResources:
+                type: object
+                description: "Summary of all child resources managed by this composition"
+                properties:
+                  total:
+                    type: integer
+                    description: "Total number of child resources"
+                  resources:
+                    type: string
+                    description: "JSON array of resource metadata"
+              organization:
+                type: string
+                description: "GitHub organization name from environment config"
+              baseURL:
+                type: string
+                description: "GitHub API base URL"
+              isEnterprise:
+                type: boolean
+                description: "Whether this is a GitHub Enterprise Server instance"
+    additionalPrinterColumns:
+    - name: Organization
+      type: string
+      jsonPath: .spec.organizationName
+    - name: Provider
+      type: string
+      jsonPath: .status.providerConfigName
+    - name: Ready
+      type: boolean
+      jsonPath: .status.ready
+    - name: Age
+      type: date
+      jsonPath: .metadata.creationTimestamp
+---
+---
+apiVersion: apiextensions.crossplane.io/v2
+kind: CompositeResourceDefinition
+metadata:
+  name: xawsnetworks.platform.kubecore.io
+  labels:
+    {{- include "chart.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "0"
+
+spec:
+  scope: Cluster
+  group: platform.kubecore.io
+  names:
+    kind: XAwsNetwork
+    plural: xawsnetworks
+  defaultCompositionRef:
+    name: awsnetwork
+  versions:
+  - name: v1alpha1
+    served: true
+    referenceable: true
+    schema:
+      openAPIV3Schema:
+        type: object
+        properties:
+          spec:
+            type: object
+            properties:
+              dns:
+                type: object
+                description: "DNS configuration for the network"
+                properties:
+                  enabled:
+                    type: boolean
+                    description: "Enable DNS (Route53 hosted zone) for the network"
+                    default: false
+                default:
+                  enabled: false
+              vpc:
+                type: object
+                description: "VPC configuration for the network"
+                properties:
+                  enabled:
+                    type: boolean
+                    description: "Enable VPC creation for the network"
+                    default: true
+                  natGateways:
+                    type: object
+                    description: "NAT Gateway configuration"
+                    properties:
+                      enabled:
+                        type: boolean
+                        description: "Enable NAT Gateways for private subnets"
+                        default: true
+                    default:
+                      enabled: true
+                default:
+                  enabled: true
+                  natGateways:
+                    enabled: true
+            default:
+              dns:
+                enabled: false
+              vpc:
+                enabled: true
+                natGateways:
+                  enabled: true
+          status:
+            type: object
+            properties:
+              vpc:
+                type: object
+                description: "VPC status information"
+                properties:
+                  id:
+                    type: string
+                    description: "VPC ID"
+                  state:
+                    type: string
+                    description: "VPC state (available, pending, etc.)"
+                  cidr:
+                    type: string
+                    description: "VPC CIDR block"
+              subnets:
+                type: object
+                description: "Subnet status information"
+                properties:
+                  public:
+                    type: array
+                    description: "Public subnet information"
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: string
+                          description: "Subnet ID"
+                        availabilityZone:
+                          type: string
+                          description: "Availability Zone"
+                        cidr:
+                          type: string
+                          description: "Subnet CIDR block"
+                        state:
+                          type: string
+                          description: "Subnet state"
+                  private:
+                    type: array
+                    description: "Private subnet information"
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: string
+                          description: "Subnet ID"
+                        availabilityZone:
+                          type: string
+                          description: "Availability Zone"
+                        cidr:
+                          type: string
+                          description: "Subnet CIDR block"
+                        state:
+                          type: string
+                          description: "Subnet state"
+              natGateways:
+                type: array
+                description: "NAT Gateway status information"
+                items:
+                  type: object
+                  properties:
+                    id:
+                      type: string
+                      description: "NAT Gateway ID"
+                    availabilityZone:
+                      type: string
+                      description: "Availability Zone"
+                    state:
+                      type: string
+                      description: "NAT Gateway state"
+                    publicIp:
+                      type: string
+                      description: "Public IP address"
+              dns:
+                type: object
+                description: "DNS status information"
+                properties:
+                  hostedZoneId:
+                    type: string
+                    description: "Route53 Hosted Zone ID"
+                  domain:
+                    type: string
+                    description: "DNS domain name"
+                  nameServers:
+                    type: array
+                    description: "Name servers for the hosted zone"
+                    items:
+                      type: string
+                  state:
+                    type: string
+                    description: "Hosted Zone state"
+              ready:
+                type: boolean
+                description: "Indicates if all resources are successfully provisioned and ready"
+              # Additional status fields for comprehensive tracking
+              childResources:
+                type: object
+                description: "Summary of all child resources managed by this composition"
+                properties:
+                  total:
+                    type: integer
+                    description: "Total number of child resources"
+                  resources:
+                    type: string
+                    description: "JSON array of resource metadata"---
+---
+apiVersion: apiextensions.crossplane.io/v2
+kind: CompositeResourceDefinition
+metadata:
+  name: xeks.platform.kubecore.io
+  labels:
+    {{- include "chart.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "0"
+
+spec:
+  scope: Cluster
+  group: platform.kubecore.io
+  names:
+    kind: XEKS
+    plural: xeks
+  defaultCompositionRef:
+    name: eks
+  # Claims not supported in apiextensions.crossplane.io/v2 - use XR directly
+  # Connection secrets not supported in apiextensions.crossplane.io/v2 - handled by ClusterAuth
+  versions:
+  - name: v1alpha1
+    served: true
+    referenceable: true
+    schema:
+      openAPIV3Schema:
+        type: object
+        properties:
+          spec:
+            type: object
+            properties:
+              # Minimal user-facing spec - cluster name comes from metadata.name
+              features:
+                type: object
+                description: "EKS cluster feature toggles"
+                properties:
+                  logging:
+                    type: boolean
+                    description: "Enable EKS control plane logging"
+                    default: true
+                  encryption:
+                    type: boolean
+                    description: "Enable secrets encryption at rest"
+                    default: false
+                  publicEndpoint:
+                    type: boolean
+                    description: "Enable public API server endpoint"
+                    default: true
+                  privateEndpoint:
+                    type: boolean
+                    description: "Enable private API server endpoint"
+                    default: true
+                  addons:
+                    type: object
+                    description: "EKS addons configuration"
+                    properties:
+                      vpcCni:
+                        type: boolean
+                        description: "Enable VPC CNI addon"
+                        default: true
+                      coreDns:
+                        type: boolean
+                        description: "Enable CoreDNS addon"
+                        default: true
+                      kubeProxy:
+                        type: boolean
+                        description: "Enable kube-proxy addon"
+                        default: true
+                      ebsCsiDriver:
+                        type: boolean
+                        description: "Enable EBS CSI driver addon"
+                        default: false
+
+              # Note: Only the mandatory kubecoresys system node group is created
+              # Users must create additional node groups separately if needed
+
+              # Provider Configuration References
+              providerConfigRef:
+                type: object
+                description: "Reference to AWS provider configuration"
+                properties:
+                  name:
+                    type: string
+                    description: "Name of the AWS provider configuration to use"
+                    default: "aws-default"
+
+          status:
+            type: object
+            properties:
+              # Cluster Information
+              clusterName:
+                type: string
+                description: "EKS cluster name"
+              endpoint:
+                type: string
+                description: "Kubernetes API server endpoint"
+              version:
+                type: string
+                description: "Kubernetes version"
+              region:
+                type: string
+                description: "AWS region where cluster is deployed"
+              clusterStatus:
+                type: string
+                description: "EKS cluster status"
+              arn:
+                type: string
+                description: "EKS cluster ARN"
+
+              # Network Information
+              vpc:
+                type: object
+                description: "VPC configuration and status"
+                properties:
+                  vpcId:
+                    type: string
+                    description: "VPC ID used by the cluster"
+                  subnets:
+                    type: object
+                    properties:
+                      public:
+                        type: array
+                        description: "Public subnet IDs created for EKS"
+                        items:
+                          type: string
+                      private:
+                        type: array
+                        description: "Private subnet IDs created for EKS"
+                        items:
+                          type: string
+
+              # OIDC Provider Information
+              oidc:
+                type: object
+                description: "OIDC provider information for IRSA"
+                properties:
+                  issuerUrl:
+                    type: string
+                    description: "OIDC issuer URL"
+                  providerArn:
+                    type: string
+                    description: "OIDC provider ARN"
+                  providerName:
+                    type: string
+                    description: "OIDC provider resource name"
+                  clientId:
+                    type: string
+                    description: "OIDC client ID"
+
+              # System Node Groups Status
+              systemNodeGroups:
+                type: array
+                description: "Status of system node groups (kubecoresys)"
+                items:
+                  type: object
+                  properties:
+                    name:
+                      type: string
+                      description: "System node group name"
+                    status:
+                      type: string
+                      description: "System node group status"
+                    arn:
+                      type: string
+                      description: "System node group ARN"
+                    instanceTypes:
+                      type: array
+                      description: "Array of instance types"
+                      items:
+                        type: string
+                    scalingConfig:
+                      type: object
+                      properties:
+                        minSize:
+                          type: integer
+                        maxSize:
+                          type: integer
+                        desiredSize:
+                          type: integer
+
+              # Note: User-defined node groups are not managed by this composition
+              # Only systemNodeGroups (kubecoresys) status is provided
+
+              # Add-ons Status
+              addOns:
+                type: array
+                description: "Status of installed EKS add-ons"
+                items:
+                  type: object
+                  properties:
+                    name:
+                      type: string
+                      description: "Add-on name"
+                    version:
+                      type: string
+                      description: "Add-on version"
+                    status:
+                      type: string
+                      description: "Add-on status"
+                    arn:
+                      type: string
+                      description: "Add-on ARN"
+
+              # Provider Configurations Status
+              providerConfigs:
+                type: object
+                description: "Status of generated provider configurations"
+                properties:
+                  helm:
+                    type: object
+                    properties:
+                      name:
+                        type: string
+                        description: "Helm provider config name"
+                      ready:
+                        type: boolean
+                        description: "Whether Helm provider config is ready"
+                  kubernetes:
+                    type: object
+                    properties:
+                      name:
+                        type: string
+                        description: "Kubernetes provider config name"
+                      ready:
+                        type: boolean
+                        description: "Whether Kubernetes provider config is ready"
+
+              # Child Resources Summary
+              childResources:
+                type: object
+                description: "Summary of child resources created by this composition"
+                properties:
+                  total:
+                    type: integer
+                    description: "Total number of child resources"
+                  resources:
+                    type: string
+                    description: "JSON string of child resource information"
+
+              # Environment Configuration Reference
+              environmentConfig:
+                type: object
+                description: "Reference to the EnvironmentConfig used"
+                properties:
+                  name:
+                    type: string
+                    description: "Name of the EnvironmentConfig"
+                  matched:
+                    type: boolean
+                    description: "Whether EnvironmentConfig was found and loaded"
+
+              conditions:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    type:
+                      type: string
+                    status:
+                      type: string
+                    reason:
+                      type: string
+                    message:
+                      type: string
+                    lastTransitionTime:
+                      type: string
+                      format: date-time
+
+          # Note: Connection secrets are handled by ClusterAuth resource
+          # No writeConnectionSecretToRef needed in spec---
+---
+apiVersion: apiextensions.crossplane.io/v2
+kind: CompositeResourceDefinition
+metadata:
+  name: xkubesystems.platform.kubecore.io
+  labels:
+    {{- include "chart.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "0"
+
+spec:
+  group: platform.kubecore.io
+  names:
+    kind: XKubeSystem
+    plural: xkubesystems
+  # Claims not supported in apiextensions.crossplane.io/v2 - use XR directly
+  # Connection secrets not supported in apiextensions.crossplane.io/v2 - handled by individual resources
+  scope: Cluster
+  versions:
+  - name: v1alpha1
+    served: true
+    referenceable: true
+    schema:
+      openAPIV3Schema:
+        type: object
+        properties:
+          spec:
+            type: object
+            properties:
+              # Cluster Reference - simplified for v2
+              clusterRef:
+                type: object
+                description: "Reference to the target cluster for system deployment"
+                properties:
+                  name:
+                    type: string
+                    description: "Name of the cluster (matches EnvironmentConfig cluster-name label)"
+                required:
+                - name
+
+              # Feature Configuration - minimal user-facing spec
+              features:
+                type: object
+                description: "Platform system feature toggles"
+                properties:
+                  crossplane:
+                    type: boolean
+                    description: "Enable Crossplane installation"
+                    default: true
+                  argocd:
+                    type: boolean
+                    description: "Enable ArgoCD installation"
+                    default: true
+                  certManager:
+                    type: boolean
+                    description: "Enable cert-manager installation"
+                    default: true
+                  argoRollouts:
+                    type: boolean
+                    description: "Enable Argo Rollouts installation"
+                    default: true
+                  argoWorkflows:
+                    type: boolean
+                    description: "Enable Argo Workflows installation"
+                    default: true
+                  traefik:
+                    type: boolean
+                    description: "Enable Traefik installation"
+                    default: true
+                  externalSecrets:
+                    type: boolean
+                    description: "Enable External Secrets Operator installation"
+                    default: true
+                  gitopsPromoter:
+                    type: boolean
+                    description: "Enable GitOps Promoter installation"
+                    default: true
+                  externalDns:
+                    type: boolean
+                    description: "Enable ExternalDNS installation"
+                    default: true
+
+              # Provider Configuration References
+              providerConfigRef:
+                type: object
+                description: "Reference to provider configurations"
+                properties:
+                  helm:
+                    type: string
+                    description: "Name of the Helm provider configuration to use"
+                    default: "helm-default"
+                  kubernetes:
+                    type: string
+                    description: "Name of the Kubernetes provider configuration to use"
+                    default: "kubernetes-default"
+                  aws:
+                    type: string
+                    description: "Name of the AWS provider configuration to use"
+                    default: "aws-default"
+
+            required:
+            - clusterRef
+
+          status:
+            type: object
+            properties:
+              # System Information
+              clusterName:
+                type: string
+                description: "Target cluster name"
+              region:
+                type: string
+                description: "AWS region where cluster is deployed"
+              systemStatus:
+                type: string
+                description: "Overall system deployment status"
+                enum: ["Pending", "Deploying", "Ready", "Error"]
+
+              # IAM Roles
+              iamRoles:
+                type: object
+                description: "IAM roles created for this cluster"
+                properties:
+                  ecrRoleArn:
+                    type: string
+                    description: "ARN of the ECR credentials IAM role for this cluster"
+
+              # Individual Tool Status
+              tools:
+                type: object
+                description: "Status of individual platform tools"
+                properties:
+                  crossplane:
+                    type: object
+                    properties:
+                      enabled:
+                        type: boolean
+                      status:
+                        type: string
+                        enum: ["Pending", "Installing", "Ready", "Error"]
+                      version:
+                        type: string
+                      namespace:
+                        type: string
+                  argocd:
+                    type: object
+                    properties:
+                      enabled:
+                        type: boolean
+                      status:
+                        type: string
+                        enum: ["Pending", "Installing", "Ready", "Error"]
+                      version:
+                        type: string
+                      namespace:
+                        type: string
+                      serverUrl:
+                        type: string
+                        description: "ArgoCD server URL"
+                      url:
+                        type: string
+                        description: "ArgoCD ingress hostname (without protocol)"
+                  certManager:
+                    type: object
+                    properties:
+                      enabled:
+                        type: boolean
+                      status:
+                        type: string
+                        enum: ["Pending", "Installing", "Ready", "Error"]
+                      version:
+                        type: string
+                      namespace:
+                        type: string
+                  argoRollouts:
+                    type: object
+                    properties:
+                      enabled:
+                        type: boolean
+                      status:
+                        type: string
+                        enum: ["Pending", "Installing", "Ready", "Error"]
+                      version:
+                        type: string
+                      namespace:
+                        type: string
+                  argoWorkflows:
+                    type: object
+                    properties:
+                      enabled:
+                        type: boolean
+                      status:
+                        type: string
+                        enum: ["Pending", "Installing", "Ready", "Error"]
+                      version:
+                        type: string
+                      namespace:
+                        type: string
+                      serverUrl:
+                        type: string
+                        description: "Argo Workflows server URL"
+                      url:
+                        type: string
+                        description: "Argo Workflows ingress hostname (without protocol)"
+                  traefik:
+                    type: object
+                    properties:
+                      enabled:
+                        type: boolean
+                      status:
+                        type: string
+                        enum: ["Pending", "Installing", "Ready", "Error"]
+                      version:
+                        type: string
+                      namespace:
+                        type: string
+                  externalSecrets:
+                    type: object
+                    description: "External Secrets Operator status"
+                    properties:
+                      enabled:
+                        type: boolean
+                        description: "Whether External Secrets Operator is enabled"
+                      ready:
+                        type: boolean
+                        description: "Whether External Secrets Operator is ready"
+                      version:
+                        type: string
+                        description: "Installed External Secrets Operator version"
+                      namespace:
+                        type: string
+                        description: "Namespace where External Secrets Operator is installed"
+                  gitopsPromoter:
+                    type: object
+                    description: "GitOps Promoter status"
+                    properties:
+                      enabled:
+                        type: boolean
+                        description: "Whether GitOps Promoter is enabled"
+                      status:
+                        type: string
+                        description: "GitOps Promoter deployment status"
+                        enum: ["Pending", "Installing", "Ready", "Error"]
+                      version:
+                        type: string
+                        description: "Installed GitOps Promoter version"
+                      namespace:
+                        type: string
+                        description: "Namespace where GitOps Promoter is installed"
+                      webhookUrl:
+                        type: string
+                        description: "GitOps Promoter webhook receiver URL"
+                      url:
+                        type: string
+                        description: "GitOps Promoter ingress hostname (without protocol)"
+                      githubSecretName:
+                        type: string
+                        description: "Name of the GitHub authentication secret created for GitOps Promoter"
+                      clusterScmProviderName:
+                        type: string
+                        description: "Name of the ClusterScmProvider resource for GitHub integration"
+                  externalDns:
+                    type: object
+                    description: "ExternalDNS status"
+                    properties:
+                      enabled:
+                        type: boolean
+                        description: "Whether ExternalDNS is enabled"
+                      status:
+                        type: string
+                        description: "ExternalDNS deployment status"
+                        enum: ["Pending", "Installing", "Ready", "Error"]
+                      version:
+                        type: string
+                        description: "Installed ExternalDNS version"
+                      namespace:
+                        type: string
+                        description: "Namespace where ExternalDNS is installed"
+
+              # Environment Configuration
+              environmentConfig:
+                type: object
+                description: "Information about the associated EnvironmentConfig"
+                properties:
+                  name:
+                    type: string
+                    description: "Name of the EnvironmentConfig"
+                  found:
+                    type: boolean
+                    description: "Whether the EnvironmentConfig was found"
+                  validated:
+                    type: boolean
+                    description: "Whether the EnvironmentConfig passed validation"
+
+              # Conditions and Events
+              conditions:
+                type: array
+                description: "Status conditions"
+                items:
+                  type: object
+                  properties:
+                    type:
+                      type: string
+                    status:
+                      type: string
+                    reason:
+                      type: string
+                    message:
+                      type: string
+                    lastTransitionTime:
+                      type: string
+
+              # Resource Summary
+              resources:
+                type: object
+                description: "Summary of created resources"
+                properties:
+                  total:
+                    type: integer
+                    description: "Total number of resources created"
+                  ready:
+                    type: integer
+                    description: "Number of ready resources"
+                  pending:
+                    type: integer
+                    description: "Number of pending resources"
+
+              # Deployment Information
+              deployment:
+                type: object
+                description: "Deployment metadata"
+                properties:
+                  startTime:
+                    type: string
+                    description: "When deployment started"
+                  lastUpdate:
+                    type: string
+                    description: "Last status update time"---
+---
+apiVersion: apiextensions.crossplane.io/v2
+kind: CompositeResourceDefinition
+metadata:
+  name: xgithubprojects.github.platform.kubecore.io
+  labels:
+    {{- include "chart.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "0"
+
+spec:
+  scope: Cluster
+  group: github.platform.kubecore.io
+  names:
+    kind: XGitHubProject
+    plural: xgithubprojects
+  defaultCompositionRef:
+    name: githubproject
+  versions:
+  - name: v1alpha1
+    served: true
+    referenceable: true
+    schema:
+      openAPIV3Schema:
+        type: object
+        properties:
+          spec:
+            type: object
+            properties:
+              description:
+                type: string
+                description: "Description for the GitHub repository and project"
+                minLength: 1
+                maxLength: 500
+              visibility:
+                type: string
+                description: "Repository visibility setting"
+                enum: ["public", "private", "internal"]
+                default: "private"
+              features:
+                type: object
+                description: "Feature toggles for optional functionality"
+                properties:
+                  teams:
+                    type: object
+                    properties:
+                      enabled:
+                        type: boolean
+                        default: true
+                        description: "Enable team creation and management"
+                  repository:
+                    type: object
+                    properties:
+                      enabled:
+                        type: boolean
+                        default: true
+                        description: "Enable repository creation"
+                  applicationSets:
+                    type: object
+                    properties:
+                      enabled:
+                        type: boolean
+                        default: true
+                        description: "Enable ArgoCD ApplicationSet creation"
+                  webhooks:
+                    type: object
+                    properties:
+                      enabled:
+                        type: boolean
+                        default: false
+                        description: "Enable repository webhook creation"
+            required:
+            - description
+            - visibility
+          status:
+            type: object
+            properties:
+              providerConfigName:
+                type: string
+                description: "Name of the GitHub ProviderConfig being used"
+              repository:
+                type: object
+                description: "Repository status information"
+                properties:
+                  url:
+                    type: string
+                    description: "Repository HTML URL"
+                  fullName:
+                    type: string
+                    description: "Repository full name (owner/repo)"
+                  id:
+                    type: string
+                    description: "Repository ID"
+                  defaultBranch:
+                    type: string
+                    description: "Repository default branch"
+              teamIDs:
+                type: object
+                description: "Created team IDs for reference"
+                properties:
+                  main:
+                    type: string
+                    description: "Main team ID"
+                  software:
+                    type: string
+                    description: "Software team ID"
+                  ops:
+                    type: string
+                    description: "Operations team ID"
+                  business:
+                    type: string
+                    description: "Business team ID"
+              webhooks:
+                type: array
+                description: "Created webhook information"
+                items:
+                  type: object
+                  properties:
+                    name:
+                      type: string
+                      description: "Webhook name"
+                    id:
+                      type: string
+                      description: "GitHub webhook ID"
+                    url:
+                      type: string
+                      description: "Webhook endpoint URL"
+              ready:
+                type: boolean
+                description: "Indicates if all resources are successfully provisioned and ready"
+              childResources:
+                type: object
+                description: "Summary of all child resources managed by this composition"
+                properties:
+                  total:
+                    type: integer
+                    description: "Total number of child resources"
+                  healthy:
+                    type: integer
+                    description: "Number of healthy child resources"
+                  resources:
+                    type: array
+                    description: "List of resource metadata"
+                    items:
+                      type: object
+                      properties:
+                        name:
+                          type: string
+                        type:
+                          type: string
+                        status:
+                          type: string
+    additionalPrinterColumns:
+    - name: Description
+      type: string
+      jsonPath: .spec.description
+    - name: Visibility
+      type: string
+      jsonPath: .spec.visibility
+    - name: Provider
+      type: string
+      jsonPath: .status.providerConfigName
+    - name: Repository
+      type: string
+      jsonPath: .status.repository.fullName
+    - name: Ready
+      type: boolean
+      jsonPath: .status.ready
+    - name: Age
+      type: date
+      jsonPath: .metadata.creationTimestamp---
+---
+apiVersion: apiextensions.crossplane.io/v2
+kind: CompositeResourceDefinition
+metadata:
+  name: xkubenvs.platform.kubecore.io
+  labels:
+    {{- include "chart.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "0"
+
+spec:
+  group: platform.kubecore.io
+  names:
+    kind: XKubEnv
+    plural: xkubenvs
+  # Claims not supported in apiextensions.crossplane.io/v2 - use XR directly
+  # Connection secrets not supported in apiextensions.crossplane.io/v2 - handled by individual resources
+  scope: Cluster
+  defaultCompositionRef:
+    name: kubenv
+  versions:
+  - name: v1alpha1
+    served: true
+    referenceable: true
+    schema:
+      openAPIV3Schema:
+        type: object
+        properties:
+          spec:
+            type: object
+            properties:
+              # EKS Cluster Reference - simplified for v2
+              eksClusterName:
+                type: string
+                description: "Name of the EKS cluster to create the environment in"
+
+              # NodeGroup Configuration - user provides direct configuration
+              nodeGroup:
+                type: object
+                description: "NodeGroup configuration for this environment"
+                properties:
+                  instanceType:
+                    type: string
+                    description: "EC2 instance type for nodes (e.g., 'm5.2xlarge')"
+                  diskSize:
+                    type: integer
+                    description: "Disk size in GB for worker nodes"
+                    default: 20
+                  capacityType:
+                    type: string
+                    description: "Capacity type for the nodegroup"
+                    enum: ["ON_DEMAND", "SPOT"]
+                    default: "ON_DEMAND"
+                  scalingConfig:
+                    type: object
+                    description: "Auto scaling configuration"
+                    properties:
+                      minSize:
+                        type: integer
+                        description: "Minimum number of nodes"
+                        default: 1
+                      maxSize:
+                        type: integer
+                        description: "Maximum number of nodes"
+                        default: 3
+                      desiredSize:
+                        type: integer
+                        description: "Desired number of nodes"
+                        default: 1
+                    required:
+                    - minSize
+                    - maxSize
+                    - desiredSize
+                  multiAZ:
+                    type: boolean
+                    description: "Deploy nodegroup across multiple availability zones"
+                    default: false
+                required:
+                - instanceType
+
+              # Feature Configuration - minimal user-facing spec
+              features:
+                type: object
+                description: "Environment feature toggles"
+                properties:
+                  resourceQuota:
+                    type: boolean
+                    description: "Enable ResourceQuota for the namespace"
+                    default: true
+                  limitRange:
+                    type: boolean
+                    description: "Enable LimitRange for the namespace"
+                    default: true
+                  nodeGroupTaints:
+                    type: boolean
+                    description: "Apply environment-specific taints to nodegroup"
+                    default: true
+
+              # Provider Configuration References
+              providerConfigRef:
+                type: object
+                description: "Reference to provider configurations"
+                properties:
+                  aws:
+                    type: string
+                    description: "Name of the AWS provider configuration to use"
+                    default: "aws-default"
+                  kubernetes:
+                    type: string
+                    description: "Name of the Kubernetes provider configuration to use"
+                    default: "kubernetes-default"
+
+              envType:
+                type: string
+                description: "Environment type (dev, stage, prod) inherited from template"
+                enum: ["dev", "stage", "prod"]
+
+            required:
+            - eksClusterName
+            - nodeGroup
+            - envType
+
+          status:
+            type: object
+            properties:
+              # Environment Information
+              environmentName:
+                type: string
+                description: "Environment name (derived from metadata.name)"
+              eksClusterName:
+                type: string
+                description: "Target EKS cluster name"
+              region:
+                type: string
+                description: "AWS region where resources are deployed"
+              phase:
+                type: string
+                description: "Current environment deployment phase"
+                enum: ["Pending", "Provisioning", "Active", "Updating", "Deleting", "Failed"]
+
+              # Resource Status
+              namespace:
+                type: object
+                description: "Kubernetes namespace status"
+                properties:
+                  name:
+                    type: string
+                  status:
+                    type: string
+                    enum: ["Pending", "Ready", "Error"]
+                  resourceQuotaEnabled:
+                    type: boolean
+                  limitRangeEnabled:
+                    type: boolean
+
+              # NodeGroup Status
+              nodeGroup:
+                type: object
+                description: "NodeGroup deployment status"
+                properties:
+                  name:
+                    type: string
+                  status:
+                    type: string
+                    enum: ["Pending", "Creating", "Active", "Updating", "Error"]
+                  instanceType:
+                    type: string
+                  capacityType:
+                    type: string
+                  multiAZ:
+                    type: boolean
+                  scaling:
+                    type: object
+                    properties:
+                      desired:
+                        type: integer
+                      minimum:
+                        type: integer
+                      maximum:
+                        type: integer
+                  nodes:
+                    type: object
+                    properties:
+                      ready:
+                        type: integer
+                      total:
+                        type: integer
+                  # Node Scheduling Information
+                  nodeLabels:
+                    type: object
+                    description: "Labels applied to nodes in this NodeGroup"
+                    additionalProperties:
+                      type: string
+                  nodeTaints:
+                    type: array
+                    description: "Taints applied to nodes requiring tolerations"
+                    items:
+                      type: object
+                      properties:
+                        key:
+                          type: string
+                        value:
+                          type: string
+                        effect:
+                          type: string
+                  availabilityZones:
+                    type: array
+                    description: "Availability zones where nodes are deployed"
+                    items:
+                      type: string
+                  subnetIds:
+                    type: array
+                    description: "Subnet IDs used by the NodeGroup"
+                    items:
+                      type: string
+
+              # Network Status
+              networking:
+                type: object
+                description: "Networking configuration status"
+                properties:
+                  subnets:
+                    type: array
+                    description: "Created subnets for the nodegroup"
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: string
+                        cidr:
+                          type: string
+                        availabilityZone:
+                          type: string
+                        status:
+                          type: string
+
+              # Environment Configuration
+              environmentConfig:
+                type: object
+                description: "Information about the associated EnvironmentConfig"
+                properties:
+                  name:
+                    type: string
+                    description: "Name of the EnvironmentConfig"
+                  found:
+                    type: boolean
+                    description: "Whether the EnvironmentConfig was found"
+                  validated:
+                    type: boolean
+                    description: "Whether the EnvironmentConfig passed validation"
+
+              # Conditions and Events
+              conditions:
+                type: array
+                description: "Status conditions"
+                items:
+                  type: object
+                  properties:
+                    type:
+                      type: string
+                    status:
+                      type: string
+                    reason:
+                      type: string
+                    message:
+                      type: string
+                    lastTransitionTime:
+                      type: string
+
+              # Resource Summary
+              resources:
+                type: object
+                description: "Summary of created resources"
+                properties:
+                  total:
+                    type: integer
+                    description: "Total number of resources created"
+                  ready:
+                    type: integer
+                    description: "Number of ready resources"
+                  pending:
+                    type: integer
+                    description: "Number of pending resources"
+
+              # Deployment Information
+              deployment:
+                type: object
+                description: "Deployment metadata"
+                properties:
+                  startTime:
+                    type: string
+                    description: "When deployment started"
+                  lastUpdate:
+                    type: string
+                    description: "Last status update time"
+
+              # Application Scheduling Profile
+              schedulingProfile:
+                type: object
+                description: "Complete scheduling profile for applications to use"
+                properties:
+                  nodeSelectors:
+                    type: object
+                    description: "Recommended node selectors for pod placement"
+                    additionalProperties:
+                      type: string
+                  tolerations:
+                    type: array
+                    description: "Required tolerations for scheduling on this environment"
+                    items:
+                      type: object
+                      properties:
+                        key:
+                          type: string
+                        operator:
+                          type: string
+                        value:
+                          type: string
+                        effect:
+                          type: string
+                  affinity:
+                    type: object
+                    description: "Recommended affinity rules"
+                    properties:
+                      nodeAffinity:
+                        type: string
+                        description: "JSON-encoded node affinity configuration"
+                  availabilityZones:
+                    type: array
+                    description: "Available zones for pod distribution"
+                    items:
+                      type: string---
+apiVersion: apiextensions.crossplane.io/v2
+kind: CompositeResourceDefinition
+metadata:
+  name: xgithubapps.github.platform.kubecore.io
+  labels:
+    {{- include "chart.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "0"
+
+spec:
+  scope: Cluster
+  group: github.platform.kubecore.io
+  names:
+    kind: XGitHubApp
+    plural: xgithubapps
+  defaultCompositionRef:
+    name: githubapps-v2.github.platform.kubecore.io
+  versions:
+  - name: v1alpha1
+    served: true
+    referenceable: true
+    schema:
+      openAPIV3Schema:
+        type: object
+        properties:
+          spec:
+            type: object
+            properties:
+              appName:
+                type: string
+                description: "Name of the GitHub app/component"
+              description:
+                type: string
+                description: "Description of the GitHub app/component"
+                default: "GitHub app created by Crossplane"
+              visibility:
+                type: string
+                description: "Repository visibility (private, public, internal)"
+                default: "private"
+                enum:
+                - private
+                - public
+                - internal
+              repositoryName:
+                type: string
+                description: "Name of the repository (defaults to XGitHubApp name if not specified)"
+              repositorySource:
+                type: object
+                description: "How to source the repository: from a template or observe an existing one"
+                properties:
+                  type:
+                    type: string
+                    enum: [ "template", "existing" ]
+                    description: "Whether to create from a template or observe an existing repository"
+                  template:
+                    type: object
+                    properties:
+                      owner:
+                        type: string
+                      repository:
+                        type: string
+                      includeAllBranches:
+                        type: boolean
+                    required: [ owner, repository ]
+                  existing:
+                    type: object
+                    properties:
+                      owner:
+                        type: string
+                    required: [ owner ]
+                required: [ type ]
+
+              features:
+                type: object
+                description: "Feature toggles for this GitHub app"
+                properties:
+                  repository:
+                    type: object
+                    description: "Repository feature configuration"
+                    properties:
+                      enabled:
+                        type: boolean
+                        description: "Whether to create and manage the repository"
+                        default: true
+                  teams:
+                    type: object
+                    description: "Team management feature configuration"
+                    properties:
+                      enabled:
+                        type: boolean
+                        description: "Whether to create team repository bindings"
+                        default: true
+                  ciCd:
+                    type: object
+                    description: "CI/CD feature configuration"
+                    properties:
+                      enabled:
+                        type: boolean
+                        description: "Whether to create GitHub Actions variables and secrets"
+                        default: true
+                      branchStrategy:
+                        type: object
+                        description: "Branch strategy configuration"
+                        properties:
+                          enabled:
+                            type: boolean
+                            description: "Whether to enable branching strategy implementation"
+                            default: true
+                          type:
+                            type: string
+                            description: "Type of branching strategy to implement"
+                            default: "gitFlow"
+                            enum:
+                            - gitFlow
+                            - trunk
+                            - custom
+                  webhooks:
+                    type: object
+                    description: "Webhook feature configuration"
+                    properties:
+                      enabled:
+                        type: boolean
+                        description: "Whether to create webhooks from EnvironmentConfig"
+                        default: true
+              branchStrategy:
+                type: object
+                description: "Configuration for automatic branch creation and strategy after repository creation"
+                properties:
+                  enabled:
+                    type: boolean
+                    description: "Whether to enable branching strategy implementation"
+                    default: true
+                  type:
+                    type: string
+                    description: "Type of branching strategy to implement"
+                    default: "gitFlow"
+                    enum:
+                    - gitFlow
+                    - trunk
+                    - custom
+              webhooks:
+                type: object
+                description: "Webhook configuration for this GitHub app. If enabled is true, will create webhooks as specified. If not set, falls back to environment config."
+                properties:
+                  enabled:
+                    type: boolean
+                    description: "Whether to enable webhook creation for this app. Defaults to true."
+                    default: true
+                  items:
+                    type: array
+                    description: "List of webhooks to create for the repository. If not specified in the claim, will fallback to EnvironmentConfig."
+                    items:
+                      type: object
+                      properties:
+                        name:
+                          type: string
+                          description: "Name of the webhook resource (used for metadata.name)"
+                        events:
+                          type: array
+                          description: "List of GitHub events to trigger the webhook (e.g., push, pull_request)"
+                          items:
+                            type: string
+                        active:
+                          type: boolean
+                          description: "Whether the webhook is active"
+                          default: true
+                        configuration:
+                          type: object
+                          description: "Webhook configuration options"
+                          properties:
+                            contentType:
+                              type: string
+                              description: "Content type for webhook payloads (e.g., json)"
+                              default: "json"
+                            insecureSsl:
+                              type: boolean
+                              description: "Set to true if using self-signed certs on the webhook endpoint"
+                              default: false
+                            urlSecretRef:
+                              type: object
+                              description: "Reference to a secret containing the webhook URL"
+                              properties:
+                                name:
+                                  type: string
+                                namespace:
+                                  type: string
+                                key:
+                                  type: string
+                              required: [ name, key ]
+                            secretSecretRef:
+                              type: object
+                              description: "Reference to a secret containing the webhook secret (optional)"
+                              properties:
+                                name:
+                                  type: string
+                                namespace:
+                                  type: string
+                                key:
+                                  type: string
+                              required: [ name, key ]
+                      required: [ name, events, configuration ]
+            required: []
+          status:
+            type: object
+            properties:
+              # Basic Crossplane status fields
+              providerConfigName:
+                type: string
+                description: "GitHub ProviderConfig name"
+              repositoryUrl:
+                type: string
+                description: "Direct repository URL"
+              gitHubProviderConfig:
+                type: string
+                description: "GitHub provider configuration name"
+
+              # Repository status (CRITICAL for KubeApp integration)
+              repository:
+                type: object
+                description: "Repository status information"
+                properties:
+                  created:
+                    type: boolean
+                    description: "Repository creation status"
+                  name:
+                    type: string
+                    description: "Repository name"
+                  fullName:
+                    type: string
+                    description: "Repository full name (owner/repo)"
+                  url:
+                    type: string
+                    description: "Repository URL"
+                  visibility:
+                    type: string
+                    description: "Repository visibility"
+
+              # Teams status (CRITICAL for KubeApp integration)
+              teams:
+                type: object
+                description: "Teams configuration status"
+                properties:
+                  configured:
+                    type: boolean
+                    description: "Teams configuration status"
+                  teamCount:
+                    type: integer
+                    description: "Number of teams configured"
+                  teams:
+                    type: array
+                    items:
+                      type: string
+                    description: "List of team names"
+
+              # CI/CD status (CRITICAL for KubeApp integration)
+              ciCd:
+                type: object
+                description: "CI/CD configuration status"
+                properties:
+                  configured:
+                    type: boolean
+                    description: "CI/CD configuration status"
+                  actionsConfigured:
+                    type: boolean
+                    description: "GitHub Actions configuration status"
+                  branchStrategy:
+                    type: object
+                    description: "Branch strategy implementation status"
+                    properties:
+                      implemented:
+                        type: boolean
+                        description: "Branch strategy implementation status"
+                      type:
+                        type: string
+                        description: "Branch strategy type"
+                      branchesCreated:
+                        type: array
+                        items:
+                          type: string
+                        description: "Created branches"
+                      protectionRulesApplied:
+                        type: array
+                        items:
+                          type: string
+                        description: "Applied protection rules"
+
+              # SDLC and GitOps Promoter Status
+              sdlc:
+                type: object
+                description: "SDLC and GitOps Promoter configuration status"
+                properties:
+                  promoter:
+                    type: object
+                    description: "GitOps Promoter integration status"
+                    properties:
+                      enabled:
+                        type: boolean
+                        description: "Whether GitOps Promoter is enabled"
+                      observersReady:
+                        type: boolean
+                        description: "ArgoCD application observers readiness status"
+                      promotionStrategyCreated:
+                        type: boolean
+                        description: "PromotionStrategy resource creation status"
+                      argoCDCommitStatusCreated:
+                        type: boolean
+                        description: "ArgoCDCommitStatus resource creation status"
+                      kubePools:
+                        type: object
+                        description: "Per-KubePool promoter status"
+                        x-kubernetes-preserve-unknown-fields: true
+                      environments:
+                        type: array
+                        description: "Promotion environment configuration"
+                        items:
+                          type: object
+                          properties:
+                            name:
+                              type: string
+                            branch:
+                              type: string
+                            autoMerge:
+                              type: boolean
+
+              # Template information (OPTIONAL enhancement)
+              templateName:
+                type: string
+                description: "Template name"
+              templateType:
+                type: string
+                description: "Template type"
+              templateLanguage:
+                type: string
+                description: "Template language"
+              templateProfile:
+                type: string
+                description: "Template profile"
+              source:
+                type: object
+                description: "Template source information"
+                properties:
+                  owner:
+                    type: string
+                    description: "Template source owner"
+                  repository:
+                    type: string
+                    description: "Template source repository"
+
+              # Overall status fields
+              ready:
+                type: boolean
+                description: "Overall readiness status"
+              childResources:
+                type: object
+                description: "Child resources summary"
+                properties:
+                  total:
+                    type: integer
+                    description: "Total number of child resources"
+                  healthy:
+                    type: integer
+                    description: "Number of healthy child resources"
+                  resources:
+                    type: array
+                    description: "List of resource metadata"
+                    items:
+                      type: object
+                      properties:
+                        name:
+                          type: string
+                        type:
+                          type: string
+                        status:
+                          type: string
+    additionalPrinterColumns:
+    - name: App Name
+      type: string
+      jsonPath: .spec.appName
+    - name: Repository
+      type: string
+      jsonPath: .status.repository.fullName
+    - name: Visibility
+      type: string
+      jsonPath: .spec.visibility
+    - name: Provider
+      type: string
+      jsonPath: .status.providerConfigName
+    - name: Ready
+      type: boolean
+      jsonPath: .status.ready
+    - name: Age
+      type: date
+      jsonPath: .metadata.creationTimestamp---
+apiVersion: apiextensions.crossplane.io/v2
+kind: CompositeResourceDefinition
+metadata:
+  name: xk8sapps.k8s.platform.kubecore.io
+  labels:
+    {{- include "chart.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "0"
+
+spec:
+  scope: Cluster
+  group: k8s.platform.kubecore.io
+  names:
+    kind: XK8sApp
+    plural: xk8sapps
+  defaultCompositionRef:
+    name: k8sapps.k8s.platform.kubecore.io
+  versions:
+  - name: v1alpha1
+    served: true
+    referenceable: true
+    schema:
+      openAPIV3Schema:
+        type: object
+        properties:
+          spec:
+            type: object
+            properties:
+              appName:
+                type: string
+                description: "Name of the Kubernetes app/component (defaults to XK8sApp name if not specified)"
+              repositoryName:
+                type: string
+                description: "Name of the repository to generate manifests in (defaults to XK8sApp name if not specified)"
+              features:
+                type: object
+                description: "Feature toggles for this K8s app"
+                properties:
+                  baseResources:
+                    type: object
+                    description: "Base Kubernetes resources feature configuration"
+                    properties:
+                      enabled:
+                        type: boolean
+                        description: "Whether to generate base Kubernetes resources"
+                        default: true
+                  environmentOverlays:
+                    type: object
+                    description: "Environment overlay feature configuration"
+                    properties:
+                      enabled:
+                        type: boolean
+                        description: "Whether to generate environment-specific overlays"
+                        default: true
+                  pullRequests:
+                    type: object
+                    description: "Pull request creation feature configuration"
+                    properties:
+                      enabled:
+                        type: boolean
+                        description: "Whether to create pull requests for generated manifests"
+                        default: false
+                  gitops:
+                    type: object
+                    description: "GitOps integration feature configuration"
+                    properties:
+                      enabled:
+                        type: boolean
+                        description: "Whether to enable GitOps file generation"
+                        default: true
+                      commitAuthor:
+                        type: string
+                        description: "Author for GitOps commits"
+                        default: "kubecore-k8sapp[bot]"
+                      commitEmail:
+                        type: string
+                        description: "Email for GitOps commits"
+                        default: "kubecore-k8sapp[bot]@kubecore.eu"
+                  ecr:
+                    type: object
+                    description: "ECR registry integration feature configuration"
+                    properties:
+                      enabled:
+                        type: boolean
+                        description: "Whether to create ECR repository and credentials"
+                        default: false
+                      repositoryName:
+                        type: string
+                        description: "Custom ECR repository name (optional override)"
+                  sdlc:
+                    type: object
+                    description: "SDLC and progressive delivery feature configuration"
+                    properties:
+                      promoter:
+                        type: object
+                        properties:
+                          enabled:
+                            type: boolean
+                            description: "Enable GitOps Promoter integration (PromotionStrategy and ArgoCDCommitStatus)"
+                            default: false
+              targetRepository:
+                type: string
+                description: "Name of the target repository for GitOps files (defaults to project repository if not specified)"
+            required: []
+          status:
+            type: object
+            properties:
+              # Basic Crossplane status fields
+              providerConfigName:
+                type: string
+                description: "GitHub ProviderConfig name"
+              gitHubProviderConfig:
+                type: string
+                description: "GitHub provider configuration name"
+
+              # Application configuration status
+              application:
+                type: object
+                description: "Application configuration status"
+                properties:
+                  name:
+                    type: string
+                    description: "Application name"
+                  type:
+                    type: string
+                    description: "Application type"
+                  port:
+                    type: integer
+                    description: "Application port"
+                  image:
+                    type: string
+                    description: "Application image"
+
+              # Repository status (inherited from GitHubApp)
+              repository:
+                type: object
+                description: "Repository status information"
+                properties:
+                  name:
+                    type: string
+                    description: "Repository name"
+                  fullName:
+                    type: string
+                    description: "Repository full name (owner/repo)"
+                  url:
+                    type: string
+                    description: "Repository URL"
+
+              # GitOps status per environment
+              gitops:
+                type: object
+                description: "GitOps generation status"
+                properties:
+                  baseResourcesGenerated:
+                    type: boolean
+                    description: "Base resources generation status"
+                  baseKustomizationGenerated:
+                    type: boolean
+                    description: "Base kustomization generation status"
+                  environments:
+                    type: object
+                    description: "Environment-specific GitOps status"
+                    additionalProperties:
+                      type: object
+                      properties:
+                        enabled:
+                          type: boolean
+                          description: "Environment enabled status"
+                        manifestsGenerated:
+                          type: boolean
+                          description: "Environment manifests generation status"
+                        kustomizationGenerated:
+                          type: boolean
+                          description: "Environment kustomization generation status"
+                        namespace:
+                          type: string
+                          description: "Target namespace for this environment"
+                        replicas:
+                          type: integer
+                          description: "Replica count for this environment"
+                        scheduling:
+                          type: object
+                          description: "Pod scheduling configuration for this environment"
+                          properties:
+                            nodeSelector:
+                              type: object
+                              additionalProperties:
+                                type: string
+                              description: "Node selector labels"
+                            tolerations:
+                              type: array
+                              description: "Pod tolerations"
+                              items:
+                                type: object
+                                properties:
+                                  key:
+                                    type: string
+                                  operator:
+                                    type: string
+                                  value:
+                                    type: string
+                                  effect:
+                                    type: string
+                            affinity:
+                              type: object
+                              description: "Pod affinity rules"
+                              x-kubernetes-preserve-unknown-fields: true
+
+              # ECR status information
+              ecr:
+                type: object
+                description: "ECR registry status information"
+                properties:
+                  enabled:
+                    type: boolean
+                    description: "ECR feature enabled status"
+                  repositoryName:
+                    type: string
+                    description: "ECR repository name"
+                  repositoryUrl:
+                    type: string
+                    description: "ECR repository URL (hostname + path)"
+                  registryHost:
+                    type: string
+                    description: "ECR registry hostname only (for Docker login)"
+                  repositoryArn:
+                    type: string
+                    description: "ECR repository ARN"
+                  secretCreated:
+                    type: boolean
+                    description: "ECR authentication secret creation status"
+                  environments:
+                    type: object
+                    description: "Environment-specific ECR secret status"
+                    additionalProperties:
+                      type: object
+                      properties:
+                        secretName:
+                          type: string
+                          description: "Name of the ECR secret in the environment"
+                        secretReady:
+                          type: boolean
+                          description: "ECR secret readiness status"
+
+              # SDLC and GitOps Promoter status
+              sdlc:
+                type: object
+                description: "SDLC and GitOps Promoter status"
+                properties:
+                  promoter:
+                    type: object
+                    properties:
+                      enabled:
+                        type: boolean
+                        description: "GitOps Promoter feature enabled status"
+                      promotionStrategyCreated:
+                        type: boolean
+                        description: "PromotionStrategy resource creation status"
+                      argoCDCommitStatusCreated:
+                        type: boolean
+                        description: "ArgoCDCommitStatus resource creation status"
+                      kubePools:
+                        type: object
+                        description: "Per-KubePool promoter resource status"
+                        additionalProperties:
+                          type: object
+                          properties:
+                            promotionStrategyReady:
+                              type: boolean
+                            argoCDCommitStatusReady:
+                              type: boolean
+                      environments:
+                        type: array
+                        description: "Environment promotion configuration"
+                        items:
+                          type: object
+                          properties:
+                            name:
+                              type: string
+                            branch:
+                              type: string
+                            autoMerge:
+                              type: boolean
+
+              # Overall status fields
+              ready:
+                type: boolean
+                description: "Overall readiness status"
+              childResources:
+                type: object
+                description: "Child resources summary"
+                properties:
+                  total:
+                    type: integer
+                    description: "Total number of child resources"
+                  healthy:
+                    type: integer
+                    description: "Number of healthy child resources"
+                  resources:
+                    type: array
+                    description: "List of resource metadata"
+                    items:
+                      type: object
+                      properties:
+                        name:
+                          type: string
+                        type:
+                          type: string
+                        status:
+                          type: string
+    additionalPrinterColumns:
+    - name: App Name
+      type: string
+      jsonPath: .spec.appName
+    - name: Repository
+      type: string
+      jsonPath: .status.repository.fullName
+    - name: App Type
+      type: string
+      jsonPath: .status.application.type
+    - name: Environments
+      type: string
+      jsonPath: .status.gitops.environments
+    - name: Provider
+      type: string
+      jsonPath: .status.providerConfigName
+    - name: Ready
+      type: boolean
+      jsonPath: .status.ready
+    - name: Age
+      type: date
+      jsonPath: .metadata.creationTimestamp---
+apiVersion: apiextensions.crossplane.io/v2
+kind: CompositeResourceDefinition
+metadata:
+  name: xkubeapptemplates.platform.kubecore.io
+  labels:
+    {{- include "chart.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "0"
+
+spec:
+  scope: Cluster
+  group: platform.kubecore.io
+  names:
+    kind: XKubeAppTemplate
+    plural: xkubeapptemplates
+  defaultCompositionRef:
+    name: kubeapptemplates
+  versions:
+  - name: v1alpha1
+    served: true
+    referenceable: true
+    schema:
+      openAPIV3Schema:
+        type: object
+        properties:
+          spec:
+            type: object
+            properties:
+              type:
+                type: string
+                description: "Application type (e.g., rest, grpc, batch, etc.)"
+              language:
+                type: string
+                description: "Programming language for the application"
+              description:
+                type: string
+                description: "Description of the application template"
+              source:
+                type: object
+                description: "Source configuration for the template"
+                properties:
+                  owner:
+                    type: string
+                    description: "Owner/organization of the template source"
+                  repository:
+                    type: string
+                    description: "Repository name for the template source"
+                required: [owner, repository]
+              structure:
+                type: object
+                description: "Structure definition for the application components"
+                properties:
+                  components:
+                    type: array
+                    description: "List of components that make up the application"
+                    items:
+                      type: object
+                      properties:
+                        type:
+                          type: string
+                          description: "Component type (deployment, service, ingress, etc.)"
+                          enum:
+                          - deployment
+                          - service
+                          - ingress
+                          - configmap
+                          - secret
+                          - pvc
+                        ports:
+                          type: array
+                          description: "Ports exposed by this component"
+                          items:
+                            type: integer
+                            minimum: 1
+                            maximum: 65535
+                        expose:
+                          type: array
+                          description: "Ports to expose externally (subset of ports)"
+                          items:
+                            type: integer
+                            minimum: 1
+                            maximum: 65535
+                        required:
+                          type: boolean
+                          description: "Whether this component is required"
+                          default: false
+                      required: [type]
+              profiles:
+                type: object
+                description: "Resource profiles for different deployment scenarios"
+                properties:
+                  small:
+                    type: object
+                    description: "Small resource profile"
+                    properties:
+                      requests:
+                        type: object
+                        properties:
+                          cpu:
+                            type: string
+                            pattern: '^[0-9]+m?$|^[0-9]*\.?[0-9]+$'
+                            description: "CPU request (e.g., 100m, 0.5)"
+                          memory:
+                            type: string
+                            pattern: '^[0-9]+[KMGT]i?$'
+                            description: "Memory request (e.g., 128Mi, 1Gi)"
+                        required: [cpu, memory]
+                      limits:
+                        type: object
+                        properties:
+                          cpu:
+                            type: string
+                            pattern: '^[0-9]+m?$|^[0-9]*\.?[0-9]+$'
+                            description: "CPU limit (e.g., 500m, 1)"
+                          memory:
+                            type: string
+                            pattern: '^[0-9]+[KMGT]i?$'
+                            description: "Memory limit (e.g., 512Mi, 2Gi)"
+                        required: [cpu, memory]
+                    required: [requests, limits]
+                  medium:
+                    type: object
+                    description: "Medium resource profile"
+                    properties:
+                      requests:
+                        type: object
+                        properties:
+                          cpu:
+                            type: string
+                            pattern: '^[0-9]+m?$|^[0-9]*\.?[0-9]+$'
+                            description: "CPU request (e.g., 100m, 0.5)"
+                          memory:
+                            type: string
+                            pattern: '^[0-9]+[KMGT]i?$'
+                            description: "Memory request (e.g., 128Mi, 1Gi)"
+                        required: [cpu, memory]
+                      limits:
+                        type: object
+                        properties:
+                          cpu:
+                            type: string
+                            pattern: '^[0-9]+m?$|^[0-9]*\.?[0-9]+$'
+                            description: "CPU limit (e.g., 500m, 1)"
+                          memory:
+                            type: string
+                            pattern: '^[0-9]+[KMGT]i?$'
+                            description: "Memory limit (e.g., 512Mi, 2Gi)"
+                        required: [cpu, memory]
+                    required: [requests, limits]
+                  large:
+                    type: object
+                    description: "Large resource profile"
+                    properties:
+                      requests:
+                        type: object
+                        properties:
+                          cpu:
+                            type: string
+                            pattern: '^[0-9]+m?$|^[0-9]*\.?[0-9]+$'
+                            description: "CPU request (e.g., 100m, 0.5)"
+                          memory:
+                            type: string
+                            pattern: '^[0-9]+[KMGT]i?$'
+                            description: "Memory request (e.g., 128Mi, 1Gi)"
+                        required: [cpu, memory]
+                      limits:
+                        type: object
+                        properties:
+                          cpu:
+                            type: string
+                            pattern: '^[0-9]+m?$|^[0-9]*\.?[0-9]+$'
+                            description: "CPU limit (e.g., 500m, 1)"
+                          memory:
+                            type: string
+                            pattern: '^[0-9]+[KMGT]i?$'
+                            description: "Memory limit (e.g., 512Mi, 2Gi)"
+                        required: [cpu, memory]
+                    required: [requests, limits]
+              environmentSchema:
+                type: object
+                description: "Schema for environment variables"
+                properties:
+                  required:
+                    type: array
+                    description: "Required environment variables"
+                    items:
+                      type: string
+                      minLength: 1
+                  optional:
+                    type: array
+                    description: "Optional environment variables"
+                    items:
+                      type: string
+                      minLength: 1
+            required: [type, language, description, source, structure, profiles, environmentSchema]
+          status:
+            type: object
+            properties:
+              templateId:
+                type: string
+                description: "Unique identifier for this template"
+              fullRepositoryName:
+                type: string
+                description: "Full repository name in owner/repository format"
+              validated:
+                type: boolean
+                description: "Whether the template has been validated"
+              validationErrors:
+                type: array
+                description: "List of validation errors, if any"
+                items:
+                  type: string
+              lastValidated:
+                type: string
+                format: date-time
+                description: "Timestamp of last validation"
+              resourceProfiles:
+                type: object
+                description: "Processed resource profiles information"
+                properties:
+                  profileCount:
+                    type: integer
+                    description: "Number of resource profiles defined"
+                  availableProfiles:
+                    type: array
+                    description: "List of available profile names"
+                    items:
+                      type: string
+              components:
+                type: object
+                description: "Processed components information"
+                properties:
+                  componentCount:
+                    type: integer
+                    description: "Number of components defined"
+                  componentTypes:
+                    type: array
+                    description: "List of component types"
+                    items:
+                      type: string
+                  totalPorts:
+                    type: integer
+                    description: "Total number of ports across all components"
+                  exposedPorts:
+                    type: integer
+                    description: "Total number of exposed ports"
+    additionalPrinterColumns:
+    - name: Type
+      type: string
+      jsonPath: .spec.type
+    - name: Language
+      type: string
+      jsonPath: .spec.language
+    - name: Validated
+      type: boolean
+      jsonPath: .status.validated
+    - name: Components
+      type: integer
+      jsonPath: .status.components.componentCount
+    - name: Age
+      type: date
+      jsonPath: .metadata.creationTimestamp---
+apiVersion: apiextensions.crossplane.io/v2
+kind: CompositeResourceDefinition
+metadata:
+  name: xqualitygates.platform.kubecore.io
+  labels:
+    {{- include "chart.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "0"
+
+spec:
+  scope: Namespaced
+  group: platform.kubecore.io
+  names:
+    kind: XQualityGate
+    plural: xqualitygates
+  defaultCompositionRef:
+    name: xqualitygates.platform.kubecore.io
+  versions:
+  - name: v1alpha1
+    served: true
+    referenceable: true
+    schema:
+      openAPIV3Schema:
+        type: object
+        description: "Specification for a Quality Gate instance (per-app webhook and event handling)"
+        required:
+        - spec
+        properties:
+          spec:
+            type: object
+            required:
+            - appName
+            - projectName
+            - gateName
+            - templateRef
+            - targetCluster
+            - repositoryConfig
+            properties:
+              appName:
+                type: string
+                description: "Name of the KubeApp this gate instance is for"
+              projectName:
+                type: string
+                description: "Name of the KubeProject"
+              gateName:
+                type: string
+                description: "Name of the quality gate (must match a template)"
+              templateRef:
+                type: object
+                description: "Reference to the XQualityGateTemplate"
+                required:
+                - name
+                properties:
+                  name:
+                    type: string
+                    description: "Name of the XQualityGateTemplate"
+              targetCluster:
+                type: object
+                description: "Target Kubernetes cluster configuration"
+                required:
+                - name
+                - providerConfigName
+                - baseDomain
+                properties:
+                  name:
+                    type: string
+                    description: "Name of the target cluster"
+                  providerConfigName:
+                    type: string
+                    description: "Kubernetes provider config name"
+                  baseDomain:
+                    type: string
+                    description: "Base domain for webhook ingress (e.g., cluster.example.com)"
+                  namespace:
+                    type: string
+                    description: "Namespace for app-specific resources"
+              repositoryConfig:
+                type: object
+                description: "GitHub repository configuration for webhook events"
+                required:
+                - owner
+                - name
+                - fullName
+                properties:
+                  owner:
+                    type: string
+                    description: "GitHub repository owner"
+                  name:
+                    type: string
+                    description: "GitHub repository name"
+                  fullName:
+                    type: string
+                    description: "GitHub repository full name (owner/name)"
+              githubConfig:
+                type: object
+                description: "GitHub App authentication configuration"
+                properties:
+                  appId:
+                    type: string
+                    description: "GitHub App ID"
+                  installationId:
+                    type: string
+                    description: "GitHub App Installation ID"
+                  privateKeySecretName:
+                    type: string
+                    description: "Secret name containing GitHub App private key"
+                    default: "github-app-private-key"
+                  webhookSecretName:
+                    type: string
+                    description: "Secret name containing webhook secret"
+                    default: "github-webhook-secret"
+              eventTriggers:
+                type: array
+                description: "Array of event trigger configurations (event type mapping pattern)"
+                items:
+                  type: object
+                  required:
+                  - name
+                  - targetTemplate
+                  - events
+                  properties:
+                    name:
+                      type: string
+                      description: "Trigger identifier (e.g., create-trigger, cleanup-trigger)"
+                    targetTemplate:
+                      type: string
+                      description: "Which template in WorkflowTemplate to execute (e.g., create-preview, cleanup-preview)"
+                    events:
+                      type: array
+                      description: "Array of GitHub events to listen for"
+                      minItems: 1
+                      items:
+                        type: string
+                        enum:
+                        - deployment
+                        - deployment_status
+                        - pull_request
+                        - push
+                        - create
+                        - delete
+                        - issue_comment
+                        - status
+                        - check_run
+                        - check_suite
+                    filters:
+                      type: array
+                      description: "Event payload filters (Argo Events data filter format)"
+                      items:
+                        type: object
+                        required:
+                        - path
+                        - type
+                        - value
+                        properties:
+                          path:
+                            type: string
+                            description: "JSONPath to filter field (e.g., body.action)"
+                          type:
+                            type: string
+                            description: "Filter type (string, number, bool)"
+                            enum:
+                            - string
+                            - number
+                            - bool
+                          value:
+                            type: array
+                            description: "Allowed values"
+                            items:
+                              type: string
+                    filterExpression:
+                      type: string
+                      description: "Expr language filter expression (alternative to filters array)"
+                    parameterMapping:
+                      type: array
+                      description: "Map event payload to workflow parameters"
+                      items:
+                        type: object
+                        required:
+                        - from
+                        - to
+                        properties:
+                          from:
+                            type: string
+                            description: "Event payload path (e.g., body.deployment.sha, body.pull_request.number)"
+                          to:
+                            type: string
+                            description: "Workflow parameter name (e.g., commit-sha, pr-number)"
+          status:
+            type: object
+            properties:
+              conditions:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    type:
+                      type: string
+                    status:
+                      type: string
+                    reason:
+                      type: string
+                    message:
+                      type: string
+                    lastTransitionTime:
+                      type: string
+                      format: date-time
+              webhookUrl:
+                type: string
+                description: "Webhook URL for event ingress"
+              eventSourceReady:
+                type: boolean
+                description: "EventSource readiness status"
+              sensorReady:
+                type: boolean
+                description: "Sensor readiness status"
+              ingressReady:
+                type: boolean
+                description: "Ingress readiness status"
+              triggers:
+                type: array
+                description: "Status of each trigger"
+                items:
+                  type: object
+                  properties:
+                    name:
+                      type: string
+                    targetTemplate:
+                      type: string
+                    events:
+                      type: array
+                      items:
+                        type: string
+                    ready:
+                      type: boolean
+              resources:
+                type: object
+                description: "References to created resources"
+                properties:
+                  eventSource:
+                    type: object
+                    properties:
+                      name:
+                        type: string
+                      namespace:
+                        type: string
+                      eventConfigs:
+                        type: array
+                        description: "List of event config names in EventSource"
+                        items:
+                          type: string
+                  sensor:
+                    type: object
+                    properties:
+                      name:
+                        type: string
+                      namespace:
+                        type: string
+                      triggerCount:
+                        type: integer
+                        description: "Number of triggers configured"
+                  ingress:
+                    type: object
+                    properties:
+                      name:
+                        type: string
+                      namespace:
+                        type: string
+              ready:
+                type: boolean
+                description: "Overall readiness status"
+    additionalPrinterColumns:
+    - name: App
+      type: string
+      jsonPath: .spec.appName
+    - name: Project
+      type: string
+      jsonPath: .spec.projectName
+    - name: Gate
+      type: string
+      jsonPath: .spec.gateName
+    - name: Triggers
+      type: integer
+      jsonPath: .status.resources.sensor.triggerCount
+    - name: Webhook
+      type: string
+      jsonPath: .status.webhookUrl
+    - name: Ready
+      type: string
+      jsonPath: .status.conditions[?(@.type=='Ready')].status
+    - name: Age
+      type: date
+      jsonPath: .metadata.creationTimestamp
+---
+apiVersion: apiextensions.crossplane.io/v2
+kind: CompositeResourceDefinition
+metadata:
+  name: xqualitygatetemplates.platform.kubecore.io
+  labels:
+    {{- include "chart.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "0"
+
+spec:
+  scope: Namespaced
+  group: platform.kubecore.io
+  names:
+    kind: XQualityGateTemplate
+    plural: xqualitygatetemplates
+  defaultCompositionRef:
+    name: xqualitygatetemplates.platform.kubecore.io
+  versions:
+  - name: v1alpha1
+    served: true
+    referenceable: true
+    schema:
+      openAPIV3Schema:
+        type: object
+        properties:
+          spec:
+            type: object
+            required:
+            - projectName
+            - gateName
+            - targetCluster
+            - clusterWorkflowTemplateRef
+            properties:
+              projectName:
+                type: string
+                description: "Name of the KubeProject this gate applies to"
+              gateName:
+                type: string
+                description: "Name of the quality gate (e.g., preview-env, stress-test, security-scan)"
+              gateKey:
+                type: string
+                description: "CommitStatus key for this gate (defaults to gateName if not specified)"
+              targetCluster:
+                type: object
+                description: "Target Kubernetes cluster for deploying workflow resources"
+                required:
+                - name
+                - providerConfigName
+                properties:
+                  name:
+                    type: string
+                    description: "Name of the target cluster"
+                  providerConfigName:
+                    type: string
+                    description: "Kubernetes provider config name for the target cluster"
+                  namespace:
+                    type: string
+                    description: "Namespace for workflow resources"
+                    default: "gitops-engine"
+              clusterWorkflowTemplateRef:
+                type: object
+                description: "Reference to ClusterWorkflowTemplate in control cluster that will be copied to target cluster"
+                required:
+                - name
+                properties:
+                  name:
+                    type: string
+                    description: "Name of the ClusterWorkflowTemplate resource in the control cluster"
+                  entrypoints:
+                    type: array
+                    description: "Optional: Specific entrypoints to expose from the template (defaults to all)"
+                    items:
+                      type: string
+          status:
+            type: object
+            properties:
+              conditions:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    type:
+                      type: string
+                    status:
+                      type: string
+                    reason:
+                      type: string
+                    message:
+                      type: string
+                    lastTransitionTime:
+                      type: string
+                      format: date-time
+              resources:
+                type: object
+                description: "References to created resources"
+                properties:
+                  workflowTemplate:
+                    type: object
+                    properties:
+                      name:
+                        type: string
+                      namespace:
+                        type: string
+                      templates:
+                        type: array
+                        description: "List of template names in composite WorkflowTemplate"
+                        items:
+                          type: string
+                  workflowExecutorServiceAccount:
+                    type: object
+                    properties:
+                      name:
+                        type: string
+                      namespace:
+                        type: string
+                  sensorServiceAccount:
+                    type: object
+                    properties:
+                      name:
+                        type: string
+                      namespace:
+                        type: string
+                  clusterRole:
+                    type: object
+                    properties:
+                      name:
+                        type: string
+                  clusterRoleBinding:
+                    type: object
+                    properties:
+                      name:
+                        type: string
+              ready:
+                type: boolean
+                description: "Overall readiness status"
+    additionalPrinterColumns:
+    - name: Project
+      type: string
+      jsonPath: .spec.projectName
+    - name: Gate
+      type: string
+      jsonPath: .spec.gateName
+    - name: Templates
+      type: string
+      jsonPath: .status.resources.workflowTemplate.templates[*]
+    - name: Cluster
+      type: string
+      jsonPath: .spec.targetCluster.name
+    - name: Ready
+      type: string
+      jsonPath: .status.conditions[?(@.type=='Ready')].status
+    - name: Age
+      type: date
+      jsonPath: .metadata.creationTimestamp
+---
+{{- end }}

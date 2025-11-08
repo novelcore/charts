@@ -206,3 +206,22 @@ crossplaneProviders:
         key: credentials
         name: aws-secret
         namespace: crossplane-system
+
+# [CROSSPLANE XRDs]: Crossplane Composite Resource Definitions (XRDs) configuration
+crossplaneXRDs:
+  # Enable installation of Crossplane XRDs
+  # Set to false if XRDs are already installed in your cluster
+  # XRDs define the custom resource APIs used by KubeCore platform compositions:
+  # - XAWSProvider: AWS infrastructure provisioning
+  # - XGitHubProvider: GitHub integration
+  # - XAWSNetwork: VPC and networking
+  # - XEKS: EKS cluster management
+  # - XKubeSystem: Platform system components
+  # - XGitHubProject: Project repository management
+  # - XKubEnv: Kubernetes environment (namespaces, quotas)
+  # - XGitHubApp: Application repository management
+  # - XK8sApp: Application deployment
+  # - XKubeAppTemplate: Application templates
+  # - XQualityGateInstance: Quality gate instances
+  # - XQualityGateTemplate: Quality gate templates
+  enabled: true
