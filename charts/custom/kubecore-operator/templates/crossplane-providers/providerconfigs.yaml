@@ -7,6 +7,10 @@ metadata:
   name: {{ .Values.crossplaneProviders.providerConfigs.kubernetes.name }}
   labels:
     {{- include "chart.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "20"
+    helm.sh/hook-delete-policy: before-hook-creation
 spec:
   credentials:
     source: InjectedIdentity
@@ -18,6 +22,10 @@ metadata:
   name: {{ .Values.crossplaneProviders.providerConfigs.aws.name }}
   labels:
     {{- include "chart.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "20"
+    helm.sh/hook-delete-policy: before-hook-creation
 spec:
   credentials:
     secretRef:
