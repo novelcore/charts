@@ -10,7 +10,6 @@ metadata:
   annotations:
     helm.sh/hook: post-install,post-upgrade
     helm.sh/hook-weight: "15"
-    helm.sh/hook-delete-policy: before-hook-creation
 spec:
   package: xpkg.upbound.io/upbound/provider-aws-route53:v2
 ---
@@ -24,7 +23,6 @@ metadata:
   annotations:
     helm.sh/hook: post-install,post-upgrade
     helm.sh/hook-weight: "15"
-    helm.sh/hook-delete-policy: before-hook-creation
 spec:
   package: xpkg.upbound.io/upbound/provider-aws-ec2:v2
 ---
@@ -38,7 +36,6 @@ metadata:
   annotations:
     helm.sh/hook: post-install,post-upgrade
     helm.sh/hook-weight: "15"
-    helm.sh/hook-delete-policy: before-hook-creation
 spec:
   package: xpkg.upbound.io/upbound/provider-aws-iam:v2
 ---
@@ -52,7 +49,6 @@ metadata:
   annotations:
     helm.sh/hook: post-install,post-upgrade
     helm.sh/hook-weight: "15"
-    helm.sh/hook-delete-policy: before-hook-creation
 spec:
   package: xpkg.upbound.io/upbound/provider-aws-eks:v2
 ---
@@ -66,7 +62,6 @@ metadata:
   annotations:
     helm.sh/hook: post-install,post-upgrade
     helm.sh/hook-weight: "15"
-    helm.sh/hook-delete-policy: before-hook-creation
 spec:
   package: xpkg.upbound.io/upbound/provider-aws-ecr:v2
 ---
@@ -80,7 +75,6 @@ metadata:
   annotations:
     helm.sh/hook: post-install,post-upgrade
     helm.sh/hook-weight: "15"
-    helm.sh/hook-delete-policy: before-hook-creation
 spec:
   package: xpkg.upbound.io/upbound/provider-aws-account:v2
 ---
@@ -94,7 +88,6 @@ metadata:
   annotations:
     helm.sh/hook: post-install,post-upgrade
     helm.sh/hook-weight: "15"
-    helm.sh/hook-delete-policy: before-hook-creation
 spec:
   package: xpkg.upbound.io/upbound/provider-aws-organizations:v2
 ---
@@ -108,7 +101,6 @@ metadata:
   annotations:
     helm.sh/hook: post-install,post-upgrade
     helm.sh/hook-weight: "15"
-    helm.sh/hook-delete-policy: before-hook-creation
 spec:
   package: xpkg.crossplane.io/crossplane-contrib/provider-kubernetes:v1.0.0
   {{- if .Values.crossplaneProviders.kubernetes.runtimeConfigRef }}
@@ -126,7 +118,6 @@ metadata:
   annotations:
     helm.sh/hook: post-install,post-upgrade
     helm.sh/hook-weight: "15"
-    helm.sh/hook-delete-policy: before-hook-creation
 spec:
   package: {{ .Values.crossplaneProviders.github.package | quote }}
   {{- if .Values.crossplaneProviders.github.runtimeConfigRef }}
@@ -144,7 +135,6 @@ metadata:
   annotations:
     helm.sh/hook: post-install,post-upgrade
     helm.sh/hook-weight: "15"
-    helm.sh/hook-delete-policy: before-hook-creation
 spec:
   package: xpkg.crossplane.io/crossplane-contrib/provider-helm:v1.0.2
   {{- if .Values.crossplaneProviders.helm.runtimeConfigRef }}

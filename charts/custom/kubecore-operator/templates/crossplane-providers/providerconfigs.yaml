@@ -10,7 +10,6 @@ metadata:
   annotations:
     helm.sh/hook: post-install,post-upgrade
     helm.sh/hook-weight: "20"
-    helm.sh/hook-delete-policy: before-hook-creation
 spec:
   credentials:
     source: InjectedIdentity
@@ -25,7 +24,6 @@ metadata:
   annotations:
     helm.sh/hook: post-install,post-upgrade
     helm.sh/hook-weight: "20"
-    helm.sh/hook-delete-policy: before-hook-creation
 spec:
   credentials:
     secretRef:
