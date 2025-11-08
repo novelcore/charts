@@ -2,7 +2,7 @@ apiVersion: v2
 name: kubecore-operator
 description: A sophisticated Kubernetes operator that implements a four-layer framework architecture for provisioning and managing cloud infrastructure through Crossplane compositions.
 type: application
-version: 0.1.0
+version: 0.1.1
 appVersion: "0.1.0"
 
 # Maintainers
@@ -48,6 +48,8 @@ annotations:
 
   # Changes for this chart version
   artifacthub.io/changes: |
+    - kind: fixed
+      description: "Updated Crossplane dependency to v2.1.0 from crossplane-stable"
     - kind: added
       description: "Initial Helm chart release for kubecore-operator"
     - kind: added
@@ -61,8 +63,8 @@ kubeVersion: ">=1.20.0-0"
 # Dependencies
 dependencies:
 - name: crossplane
-  version: "1.20.0"
-  repository: "https://novelcore.github.io/charts/"
+  version: "2.1.0"
+  repository: "https://charts.crossplane.io/stable"
   condition: crossplane.enabled
 - name: external-secrets
   version: "1.0.0"
