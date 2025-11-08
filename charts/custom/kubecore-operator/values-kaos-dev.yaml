@@ -44,14 +44,21 @@ registry:
   createImagePullSecret: true
   imagePullSecretName: "kubecore-operator-registry-secret"
 
-# Enable Crossplane and all its components
+# Crossplane Configuration
+# NOTE: Crossplane MUST be installed separately in crossplane-system namespace
+# to avoid Helm subchart namespace inheritance issues.
+# Install with: helm install crossplane crossplane-stable/crossplane \
+#   --namespace crossplane-system --create-namespace --version 2.1.0
 crossplane:
-  enabled: true
+  enabled: false
   namespace: crossplane-system
 
-# Enable External Secrets Operator
+# External Secrets Operator Configuration
+# NOTE: External Secrets Operator MUST be installed separately
+# Install with: helm install external-secrets external-secrets/external-secrets \
+#   --namespace external-secrets-system --create-namespace --version 1.0.0
 externalSecrets:
-  enabled: true
+  enabled: false
 
 # Enable Crossplane Functions
 crossplaneFunctions:

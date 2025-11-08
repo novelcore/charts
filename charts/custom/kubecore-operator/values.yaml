@@ -105,9 +105,16 @@ registry:
 # [CROSSPLANE]: Crossplane dependency configuration
 crossplane:
   # Enable Crossplane installation as a dependency
-  # Set to false if Crossplane is already installed in your cluster
+  # IMPORTANT: Due to Helm subchart namespace inheritance, Crossplane will be installed
+  # in the same namespace as this chart (not in crossplane-system).
+  # For production deployments, it is STRONGLY RECOMMENDED to:
+  #   1. Install Crossplane separately in crossplane-system namespace first
+  #   2. Set enabled: false here
+  # To install separately:
+  #   helm install crossplane crossplane-stable/crossplane \
+  #     --namespace crossplane-system --create-namespace --version 2.1.0
   enabled: true
-  # Namespace where Crossplane will be installed
+  # Namespace parameter (only affects Crossplane's internal configuration, not installation location)
   namespace: crossplane-system
   # Additional Crossplane values can be passed through
   # These will be forwarded to the Crossplane subchart
@@ -116,7 +123,14 @@ crossplane:
 # [EXTERNAL SECRETS OPERATOR]: ESO dependency configuration
 externalSecrets:
   # Enable External Secrets Operator installation as a dependency
-  # Set to false if ESO is already installed in your cluster
+  # IMPORTANT: Due to Helm subchart namespace inheritance, ESO will be installed
+  # in the same namespace as this chart.
+  # For production deployments, it is STRONGLY RECOMMENDED to:
+  #   1. Install External Secrets Operator separately in its own namespace first
+  #   2. Set enabled: false here
+  # To install separately:
+  #   helm install external-secrets external-secrets/external-secrets \
+  #     --namespace external-secrets-system --create-namespace --version 1.0.0
   enabled: true
   # Additional ESO values can be passed through
   # These will be forwarded to the external-secrets subchart

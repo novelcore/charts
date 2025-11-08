@@ -2,7 +2,7 @@ apiVersion: v2
 name: kubecore-operator
 description: A sophisticated Kubernetes operator that implements a four-layer framework architecture for provisioning and managing cloud infrastructure through Crossplane compositions.
 type: application
-version: 0.1.6
+version: 0.1.7
 appVersion: "0.1.1"
 
 # Maintainers
@@ -49,11 +49,11 @@ annotations:
   # Changes for this chart version
   artifacthub.io/changes: |
     - kind: fixed
-      description: "Fixed XRD YAML parsing issue by splitting XRDs into separate template files (one per XRD) instead of a single merged file"
-    - kind: added
-      description: "Added all 12 XRD definitions to Helm chart: XAWSProvider, XGitHubProvider, XAwsNetwork, XEKS, XKubeSystem, XGitHubProject, XKubEnv, XGitHubApp, XK8sApp, XKubeAppTemplate, XQualityGate, XQualityGateTemplate"
+      description: "Added missing cluster-wide secrets read permissions (get, list, watch) to operator ClusterRole - fixes RBAC errors preventing operator from accessing GitHub credentials"
+    - kind: security
+      description: "Operator now has explicit secrets permissions instead of failing silently due to missing RBAC"
     - kind: changed
-      description: "Enabled XRDs by default in values.yaml (crossplaneXRDs.enabled: true)"
+      description: "BREAKING: Crossplane and External Secrets must now be installed separately in their own namespaces to avoid Helm subchart namespace inheritance issues. Set crossplane.enabled=false and externalSecrets.enabled=false in production deployments."
 
 # Kubernetes version compatibility
 kubeVersion: ">=1.20.0-0"
