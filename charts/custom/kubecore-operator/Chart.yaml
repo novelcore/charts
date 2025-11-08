@@ -2,7 +2,7 @@ apiVersion: v2
 name: kubecore-operator
 description: A sophisticated Kubernetes operator that implements a four-layer framework architecture for provisioning and managing cloud infrastructure through Crossplane compositions.
 type: application
-version: 0.1.7
+version: 0.1.8
 appVersion: "0.1.1"
 
 # Maintainers
@@ -53,7 +53,13 @@ annotations:
     - kind: security
       description: "Operator now has explicit secrets permissions instead of failing silently due to missing RBAC"
     - kind: changed
-      description: "BREAKING: Crossplane and External Secrets must now be installed separately in their own namespaces to avoid Helm subchart namespace inheritance issues. Set crossplane.enabled=false and externalSecrets.enabled=false in production deployments."
+      description: "BREAKING: Crossplane providers, functions, and ProviderConfigs moved out of operator chart - now installed separately in crossplane-system namespace via installation script"
+    - kind: changed
+      description: "BREAKING: External Secrets Operator moved out of operator chart - now installed separately via installation script"
+    - kind: added
+      description: "Added comprehensive installation script (install-kubecore-operator.sh) that orchestrates complete platform deployment with proper namespace separation"
+    - kind: changed
+      description: "Operator chart now only installs operator deployment and XRDs - all Crossplane/ESO components must be installed separately for proper namespace isolation"
 
 # Kubernetes version compatibility
 kubeVersion: ">=1.20.0-0"

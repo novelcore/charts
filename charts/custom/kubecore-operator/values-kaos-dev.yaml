@@ -45,43 +45,31 @@ registry:
   imagePullSecretName: "kubecore-operator-registry-secret"
 
 # Crossplane Configuration
-# NOTE: Crossplane MUST be installed separately in crossplane-system namespace
-# to avoid Helm subchart namespace inheritance issues.
-# Install with: helm install crossplane crossplane-stable/crossplane \
-#   --namespace crossplane-system --create-namespace --version 2.1.0
+# NOTE: Crossplane is installed separately in crossplane-system namespace
+# via the installation script
 crossplane:
   enabled: false
   namespace: crossplane-system
 
 # External Secrets Operator Configuration
-# NOTE: External Secrets Operator MUST be installed separately
-# Install with: helm install external-secrets external-secrets/external-secrets \
-#   --namespace external-secrets-system --create-namespace --version 1.0.0
+# NOTE: External Secrets Operator is installed separately
+# via the installation script
 externalSecrets:
   enabled: false
 
-# Enable Crossplane Functions
+# Crossplane Functions Configuration
+# NOTE: Functions are installed separately in crossplane-system namespace
+# via the installation script
 crossplaneFunctions:
-  enabled: true
+  enabled: false
 
-# Enable Crossplane Providers
+# Crossplane Providers Configuration
+# NOTE: Providers and ProviderConfigs are installed separately in crossplane-system namespace
+# via the installation script
 crossplaneProviders:
-  enabled: true
-  kubernetes:
-    runtimeConfigRef:
-      name: kubesys-admin-runtime
-  github:
-    package: "ghcr.io/crossplane-contrib/provider-upjet-github:v0.19-provider-cache-testing-a3b6345"
-  providerConfigs:
-    kubernetes:
-      name: kubesys-enhanced
-    aws:
-      name: aws-default
-      secretRef:
-        key: credentials
-        name: aws-secret
-        namespace: crossplane-system
+  enabled: false
 
 # Enable Crossplane XRDs
+# These are installed as part of the operator chart since they define the APIs
 crossplaneXRDs:
   enabled: true

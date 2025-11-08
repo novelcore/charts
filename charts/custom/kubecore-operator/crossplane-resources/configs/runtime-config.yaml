@@ -1,0 +1,43 @@
+---
+# ServiceAccount for KubeSystem operations in crossplane-system namespace
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: kubesys-admin
+  namespace: crossplane-system
+---
+# ClusterRoleBinding to cluster-admin for platform management
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: kubesys-admin-crossplane
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-admin
+subjects:
+- kind: ServiceAccount
+  name: kubesys-admin
+  namespace: crossplane-system
+---
+# DeploymentRuntimeConfig to use the admin ServiceAccount
+apiVersion: pkg.crossplane.io/v1beta1
+kind: DeploymentRuntimeConfig
+metadata:
+  name: kubesys-admin-runtime
+spec:
+  deploymentTemplate:
+    spec:
+      selector: {}
+      template:
+        spec:
+          serviceAccountName: kubesys-admin
+          containers:
+          - name: package-runtime
+            resources:
+              limits:
+                cpu: 200m
+                memory: 256Mi
+              requests:
+                cpu: 100m
+                memory: 128Mi

@@ -1,0 +1,64 @@
+---
+# AWS Family Provider (meta-provider that installs individual AWS providers)
+apiVersion: pkg.crossplane.io/v1
+kind: Provider
+metadata:
+  name: upbound-provider-family-aws
+spec:
+  package: xpkg.upbound.io/upbound/provider-family-aws:v2
+---
+# AWS Route53 Provider
+apiVersion: pkg.crossplane.io/v1
+kind: Provider
+metadata:
+  name: upbound-provider-aws-route53
+spec:
+  package: xpkg.upbound.io/upbound/provider-aws-route53:v2
+---
+# AWS EC2 Provider
+apiVersion: pkg.crossplane.io/v1
+kind: Provider
+metadata:
+  name: upbound-provider-aws-ec2
+spec:
+  package: xpkg.upbound.io/upbound/provider-aws-ec2:v2
+---
+# AWS IAM Provider
+apiVersion: pkg.crossplane.io/v1
+kind: Provider
+metadata:
+  name: upbound-provider-aws-iam
+spec:
+  package: xpkg.upbound.io/upbound/provider-aws-iam:v2
+---
+# AWS EKS Provider
+apiVersion: pkg.crossplane.io/v1
+kind: Provider
+metadata:
+  name: upbound-provider-aws-eks
+spec:
+  package: xpkg.upbound.io/upbound/provider-aws-eks:v2
+---
+# AWS ECR Provider
+apiVersion: pkg.crossplane.io/v1
+kind: Provider
+metadata:
+  name: upbound-provider-aws-ecr
+spec:
+  package: xpkg.upbound.io/upbound/provider-aws-ecr:v2
+---
+# AWS Account Provider
+apiVersion: pkg.crossplane.io/v1
+kind: Provider
+metadata:
+  name: upbound-provider-aws-account
+spec:
+  package: xpkg.upbound.io/upbound/provider-aws-account:v2
+---
+# AWS Organizations Provider
+apiVersion: pkg.crossplane.io/v1
+kind: Provider
+metadata:
+  name: upbound-provider-aws-organizations
+spec:
+  package: xpkg.upbound.io/upbound/provider-aws-organizations:v2
