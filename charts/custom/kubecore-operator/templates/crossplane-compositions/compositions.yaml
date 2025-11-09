@@ -1,0 +1,6 @@
+{{- if .Values.crossplaneCompositions.enabled }}
+{{- range $path, $_ := .Files.Glob "files/compositions/comp-*.yaml" }}
+---
+{{ $.Files.Get $path }}
+{{- end }}
+{{- end }}

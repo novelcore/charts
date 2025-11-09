@@ -1,5 +1,3 @@
-{{- if .Values.crossplaneCompositions.enabled }}
-{{- $comp := `
 apiVersion: apiextensions.crossplane.io/v1
 kind: Composition
 metadata:
@@ -1406,6 +1404,4 @@ spec:
       # ArgoCDCommitStatus waits for PromotionStrategy to be Ready
       - sequence:
         - "promotion-strategy-*"
-        - "argocd-commit-status-*"` }}
-{{ $comp }}
-{{- end }}
+        - "argocd-commit-status-*"
