@@ -1,4 +1,5 @@
 {{- if .Values.crossplaneCompositions.enabled }}
+{{- $comp := `
 apiVersion: apiextensions.crossplane.io/v1
 kind: Composition
 metadata:
@@ -385,5 +386,6 @@ spec:
               total: {{ $childResourcesCount }}
               {{- if gt (len $childResourcesList) 0 }}
               resources: {{ toJson $childResourcesList | quote }}
-              {{- end }}
+              {{- end }}` }}
+{{ $comp }}
 {{- end }}

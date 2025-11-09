@@ -1,4 +1,5 @@
 {{- if .Values.crossplaneCompositions.enabled }}
+{{- $comp := `
 apiVersion: apiextensions.crossplane.io/v1
 kind: Composition
 metadata:
@@ -161,5 +162,6 @@ spec:
       kind: Input
       spec:
         policy: All
-
+` }}
+{{ $comp }}
 {{- end }}

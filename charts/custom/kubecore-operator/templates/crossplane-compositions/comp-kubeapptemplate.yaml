@@ -1,4 +1,5 @@
 {{- if .Values.crossplaneCompositions.enabled }}
+{{- $comp := `
 apiVersion: apiextensions.crossplane.io/v1
 kind: Composition
 metadata:
@@ -210,5 +211,6 @@ spec:
         respectDeletionOrder: true
         finalizerStrategy:
           mode: Strict
-      rules: []
+      rules: []` }}
+{{ $comp }}
 {{- end }}

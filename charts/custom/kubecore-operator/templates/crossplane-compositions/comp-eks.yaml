@@ -1,4 +1,5 @@
 {{- if .Values.crossplaneCompositions.enabled }}
+{{- $comp := `
 apiVersion: apiextensions.crossplane.io/v1
 kind: Composition
 metadata:
@@ -1265,5 +1266,6 @@ spec:
             {{- else }}
             environmentConfig:
               matched: false
-            {{- end }}
+            {{- end }}` }}
+{{ $comp }}
 {{- end }}

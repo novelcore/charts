@@ -1,4 +1,5 @@
 {{- if .Values.crossplaneCompositions.enabled }}
+{{- $comp := `
 apiVersion: apiextensions.crossplane.io/v1
 kind: Composition
 metadata:
@@ -2455,5 +2456,6 @@ spec:
       apiVersion: autoready.fn.crossplane.io/v1beta1
       kind: Input
       spec:
-        policy: All  # Wait for all Helm releases to be ready before marking XKubeSystem as ready
+        policy: All  # Wait for all Helm releases to be ready before marking XKubeSystem as ready` }}
+{{ $comp }}
 {{- end }}

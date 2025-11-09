@@ -2,7 +2,7 @@ apiVersion: v2
 name: kubecore-operator
 description: A sophisticated Kubernetes operator that implements a four-layer framework architecture for provisioning and managing cloud infrastructure through Crossplane compositions.
 type: application
-version: 0.1.9
+version: 0.1.10
 appVersion: "0.1.1"
 
 # Maintainers
@@ -48,14 +48,10 @@ annotations:
 
   # Changes for this chart version
   artifacthub.io/changes: |
-    - kind: added
-      description: "Added all 12 Crossplane Compositions to chart templates - compositions now installed with operator for complete platform functionality"
-    - kind: added
-      description: "New crossplaneCompositions.enabled value to control composition installation (default: true)"
     - kind: fixed
-      description: "Fixed missing Composition resources causing XR reconciliation errors (awsprovider, eks, githubprovider, etc.)"
+      description: "Fixed Helm template parsing errors in Crossplane Compositions - properly escaped Go template syntax"
     - kind: changed
-      description: "Chart now includes both XRDs and Compositions for complete Crossplane resource definitions"
+      description: "Compositions now use backtick string literals to prevent Helm from parsing Crossplane Go templates"
 
 # Kubernetes version compatibility
 kubeVersion: ">=1.20.0-0"

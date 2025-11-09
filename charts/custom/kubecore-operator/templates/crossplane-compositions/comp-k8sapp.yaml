@@ -1,4 +1,5 @@
 {{- if .Values.crossplaneCompositions.enabled }}
+{{- $comp := `
 apiVersion: apiextensions.crossplane.io/v1
 kind: Composition
 metadata:
@@ -1817,5 +1818,6 @@ spec:
         - control-k8s-store
         - github-parser
 
-      # All other resources can be created in parallel - no hard dependencies
+      # All other resources can be created in parallel - no hard dependencies` }}
+{{ $comp }}
 {{- end }}
