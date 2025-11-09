@@ -1,0 +1,2459 @@
+{{- if .Values.crossplaneCompositions.enabled }}
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: kubesystem
+  labels:
+    platform.kubecore.io/type: kubesystem
+    provider: helm
+    service: platform-system
+    layer: platform
+spec:
+  writeConnectionSecretsToNamespace: crossplane-system
+  compositeTypeRef:
+    apiVersion: platform.kubecore.io/v1alpha1
+    kind: XKubeSystem
+  mode: Pipeline
+  pipeline:
+
+  # Step 1: Load EnvironmentConfig with strict cluster-specific selection
+  - step: load-environment-configs
+    functionRef:
+      name: function-environment-configs
+    input:
+      apiVersion: environmentconfigs.fn.crossplane.io/v1beta1
+      kind: Input
+      spec:
+        environmentConfigs:
+        - type: Selector
+          selector:
+            matchLabels:
+            # PRIMARY: Select by exact cluster name (XKubeSystem clusterRef.name)
+            - key: platform.kubecore.io/cluster-name
+              type: FromCompositeFieldPath
+              valueFromFieldPath: spec.clusterRef.name
+            # SECONDARY: Ensure it's a system config type
+            - key: platform.kubecore.io/type
+              type: Value
+              value: system-config
+            # TERTIARY: Optional additional filters
+            - key: kubecore.io/kubeorg
+              type: FromCompositeFieldPath
+              valueFromFieldPath: metadata.labels["kubecore.io/kubeorg"]
+            - key: kubecore.io/region
+              type: FromCompositeFieldPath
+              valueFromFieldPath: metadata.labels["kubecore.io/region"]
+
+  # Step 2: Generate System resources with Go Templates
+  - step: generate-system-resources
+    functionRef:
+      name: function-go-templating
+    input:
+      apiVersion: gotemplating.fn.crossplane.io/v1beta1
+      kind: GoTemplate
+      source: Inline
+      inline:
+        template: |
+          {{- $name := .observed.composite.resource.metadata.name -}}
+          {{- $uid := .observed.composite.resource.metadata.uid -}}
+          {{- $spec := .observed.composite.resource.spec -}}
+          
+          {{/* Extract configuration from environment config */}}
+          {{- $envConfig := index .context "apiextensions.crossplane.io/environment" -}}
+          {{- if not $envConfig -}}
+            {{- fail "Environment configuration not found. Ensure EnvironmentConfig exists with label platform.kubecore.io/cluster-name matching this XKubeSystem clusterRef.name" -}}
+          {{- end -}}
+          
+          {{/* Validate cluster name matches for safety */}}
+          {{- if $envConfig.clusterName -}}
+            {{- if ne $envConfig.clusterName $spec.clusterRef.name -}}
+              {{- fail (printf "EnvironmentConfig cluster name '%s' does not match XKubeSystem clusterRef.name '%s'" $envConfig.clusterName $spec.clusterRef.name) -}}
+            {{- end -}}
+          {{- end -}}
+          
+          {{/* Extract environment configuration values */}}
+          {{- $clusterName := $spec.clusterRef.name -}}
+          {{- $region := $envConfig.region -}}
+          {{- $environment := $envConfig.environment -}}
+          {{- $providerConfigs := $envConfig.providerConfigs -}}
+          {{- $tools := $envConfig.tools -}}
+          {{- $runtime := $envConfig.runtime -}}
+          {{- $dns := $envConfig.dns -}}
+          {{- $tls := $envConfig.tls -}}
+          {{- $network := $envConfig.network | default dict -}}
+
+          {{/* Feature flags from spec with environment config defaults */}}
+          {{- $features := $spec.features | default dict -}}
+          {{- $crossplaneEnabled := $features.crossplane | default true -}}
+          {{- $argoCdEnabled := $features.argocd | default true -}}
+          {{- $certManagerEnabled := $features.certManager | default true -}}
+          {{- $argoRolloutsEnabled := $features.argoRollouts | default true -}}
+          {{- $argoWorkflowsEnabled := $features.argoWorkflows | default false -}}
+          {{- $traefikEnabled := $features.traefik | default false -}}
+          {{- $externalSecretsEnabled := $features.externalSecrets | default true -}}
+          {{- $gitopsPromoterEnabled := $features.gitopsPromoter | default false -}}
+
+          {{/* TLS Configuration with defaults */}}
+          {{- $tlsIssuerEnabled := false -}}
+          {{- if and $dns.clusterDomain $certManagerEnabled $traefikEnabled -}}
+            {{- if $tls.issuer -}}
+              {{- $tlsIssuerEnabled = $tls.issuer.enabled | default false -}}
+            {{- end -}}
+          {{- end -}}
+
+          {{- $tlsEmail := "kaos@kubecore.io" -}}
+          {{- if and $tls.issuer $tls.issuer.email -}}
+            {{- $tlsEmail = $tls.issuer.email -}}
+          {{- end -}}
+
+          {{- $acmeServer := "https://acme-v02.api.letsencrypt.org/directory" -}}
+          {{- if and $tls.issuer $tls.issuer.acmeServer -}}
+            {{- $acmeServer = $tls.issuer.acmeServer -}}
+          {{- end -}}
+
+          {{- $clusterIssuerName := printf "%s-system-issuer" $clusterName -}}
+
+          {{/* Provider config references */}}
+          {{- $specProviderConfigs := $spec.providerConfigRef | default dict -}}
+          {{- $helmProvider := $specProviderConfigs.helm | default $providerConfigs.helm | default "helm-default" -}}
+          {{- $kubernetesProvider := $specProviderConfigs.kubernetes | default $providerConfigs.kubernetes | default "kubernetes-default" -}}
+          {{- $awsProvider := $specProviderConfigs.aws | default $providerConfigs.aws | default "aws-default" -}}
+
+          {{/* Construct OIDC information using cluster ID from environment config */}}
+          {{- $region := $envConfig.aws.primaryRegion -}}
+          {{- $accountId := $envConfig.aws.accountId -}}
+          {{- $clusterName := printf "%s-eks" $spec.clusterRef.name -}}
+          {{- $oidcId := $envConfig.eks.clusterId -}}
+
+          {{/* Construct specific OIDC ARN using cluster ID */}}
+          {{- $oidcProviderArn := printf "arn:aws:iam::%s:oidc-provider/oidc.eks.%s.amazonaws.com/id/%s" $accountId $region $oidcId -}}
+          {{- $oidcIssuerUrl := printf "oidc.eks.%s.amazonaws.com/id/%s" $region $oidcId -}}
+          {{- $oidcProviderName := printf "%s-oidc-provider" $clusterName -}}
+          
+          {{/* Common labels */}}
+          {{- $commonLabels := dict 
+            "platform.kubecore.io/system" $name
+            "platform.kubecore.io/cluster" $clusterName
+            "platform.kubecore.io/managed-by" "crossplane"
+            "platform.kubecore.io/composition" "kubesystem"
+            "crossplane.io/composite" $name
+          -}}
+          
+          {{/* Runtime configuration */}}
+          {{- $nodeSelector := $runtime.nodeSelector | default dict -}}
+          {{- $tolerations := $runtime.tolerations | default list -}}
+          {{- $resourceProfile := $runtime.resourceProfile | default "medium" -}}
+          
+          {{/* =================================================================== */}}
+          {{/* NAMESPACE CREATION */}}
+          {{/* =================================================================== */}}
+          
+          {{/* Create Crossplane namespace */}}
+          {{- if and $crossplaneEnabled $tools.crossplane $tools.crossplane.enabled }}
+          ---
+          apiVersion: kubernetes.crossplane.io/v1alpha2
+          kind: Object
+          metadata:
+            name: {{ $name }}-crossplane-namespace
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: crossplane-namespace
+            labels:
+              {{- range $key, $value := $commonLabels }}
+              {{ $key }}: "{{ $value }}"
+              {{- end }}
+          spec:
+            deletionPolicy: Delete
+            managementPolicies: ["*"]
+            providerConfigRef:
+              name: {{ $kubernetesProvider }}
+            forProvider:
+              manifest:
+                apiVersion: v1
+                kind: Namespace
+                metadata:
+                  name: {{ $tools.crossplane.namespace }}
+                  labels:
+                    {{- range $key, $value := $commonLabels }}
+                    {{ $key }}: "{{ $value }}"
+                    {{- end }}
+                    platform.kubecore.io/component: "crossplane"
+                    pod-security.kubernetes.io/enforce: "privileged"
+          {{- end }}
+          
+          {{/* Create ArgoCD namespace */}}
+          {{- if and $argoCdEnabled $tools.argocd $tools.argocd.enabled }}
+          ---
+          apiVersion: kubernetes.crossplane.io/v1alpha2
+          kind: Object
+          metadata:
+            name: {{ $name }}-argocd-namespace
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: argocd-namespace
+            labels:
+              {{- range $key, $value := $commonLabels }}
+              {{ $key }}: "{{ $value }}"
+              {{- end }}
+          spec:
+            deletionPolicy: Delete
+            managementPolicies: ["*"]
+            providerConfigRef:
+              name: {{ $kubernetesProvider }}
+            forProvider:
+              manifest:
+                apiVersion: v1
+                kind: Namespace
+                metadata:
+                  name: {{ $tools.argocd.namespace }}
+                  labels:
+                    {{- range $key, $value := $commonLabels }}
+                    {{ $key }}: "{{ $value }}"
+                    {{- end }}
+                    platform.kubecore.io/component: "argocd"
+                    pod-security.kubernetes.io/enforce: "baseline"
+          {{- end }}
+          
+          {{/* Create cert-manager namespace */}}
+          {{- if and $certManagerEnabled $tools.certManager $tools.certManager.enabled }}
+          ---
+          apiVersion: kubernetes.crossplane.io/v1alpha2
+          kind: Object
+          metadata:
+            name: {{ $name }}-cert-manager-namespace
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: cert-manager-namespace
+            labels:
+              {{- range $key, $value := $commonLabels }}
+              {{ $key }}: "{{ $value }}"
+              {{- end }}
+          spec:
+            deletionPolicy: Delete
+            managementPolicies: ["*"]
+            providerConfigRef:
+              name: {{ $kubernetesProvider }}
+            forProvider:
+              manifest:
+                apiVersion: v1
+                kind: Namespace
+                metadata:
+                  name: {{ $tools.certManager.namespace }}
+                  labels:
+                    {{- range $key, $value := $commonLabels }}
+                    {{ $key }}: "{{ $value }}"
+                    {{- end }}
+                    platform.kubecore.io/component: "cert-manager"
+                    pod-security.kubernetes.io/enforce: "baseline"
+          {{- end }}
+          
+          {{/* Create Argo Rollouts namespace */}}
+          {{- if and $argoRolloutsEnabled $tools.argoRollouts $tools.argoRollouts.enabled }}
+          ---
+          apiVersion: kubernetes.crossplane.io/v1alpha2
+          kind: Object
+          metadata:
+            name: {{ $name }}-argo-rollouts-namespace
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: argo-rollouts-namespace
+            labels:
+              {{- range $key, $value := $commonLabels }}
+              {{ $key }}: "{{ $value }}"
+              {{- end }}
+          spec:
+            deletionPolicy: Delete
+            managementPolicies: ["*"]
+            providerConfigRef:
+              name: {{ $kubernetesProvider }}
+            forProvider:
+              manifest:
+                apiVersion: v1
+                kind: Namespace
+                metadata:
+                  name: {{ $tools.argoRollouts.namespace }}
+                  labels:
+                    {{- range $key, $value := $commonLabels }}
+                    {{ $key }}: "{{ $value }}"
+                    {{- end }}
+                    platform.kubecore.io/component: "argo-rollouts"
+                    pod-security.kubernetes.io/enforce: "baseline"
+          {{- end }}
+          
+          {{/* Create Argo Workflows namespace */}}
+          {{- if and $argoWorkflowsEnabled $tools.argoWorkflows $tools.argoWorkflows.enabled }}
+          ---
+          apiVersion: kubernetes.crossplane.io/v1alpha2
+          kind: Object
+          metadata:
+            name: {{ $name }}-argo-workflows-namespace
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: argo-workflows-namespace
+            labels:
+              {{- range $key, $value := $commonLabels }}
+              {{ $key }}: "{{ $value }}"
+              {{- end }}
+          spec:
+            deletionPolicy: Delete
+            managementPolicies: ["*"]
+            providerConfigRef:
+              name: {{ $kubernetesProvider }}
+            forProvider:
+              manifest:
+                apiVersion: v1
+                kind: Namespace
+                metadata:
+                  name: {{ $tools.argoWorkflows.namespace }}
+                  labels:
+                    {{- range $key, $value := $commonLabels }}
+                    {{ $key }}: "{{ $value }}"
+                    {{- end }}
+                    platform.kubecore.io/component: "argo-workflows"
+                    pod-security.kubernetes.io/enforce: "baseline"
+          {{- end }}
+          
+          {{/* Create Traefik namespace */}}
+          {{- if and $traefikEnabled $tools.traefik $tools.traefik.enabled }}
+          ---
+          apiVersion: kubernetes.crossplane.io/v1alpha2
+          kind: Object
+          metadata:
+            name: {{ $name }}-traefik-namespace
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: traefik-namespace
+            labels:
+              {{- range $key, $value := $commonLabels }}
+              {{ $key }}: "{{ $value }}"
+              {{- end }}
+          spec:
+            deletionPolicy: Delete
+            managementPolicies: ["*"]
+            providerConfigRef:
+              name: {{ $kubernetesProvider }}
+            forProvider:
+              manifest:
+                apiVersion: v1
+                kind: Namespace
+                metadata:
+                  name: {{ $tools.traefik.namespace }}
+                  labels:
+                    {{- range $key, $value := $commonLabels }}
+                    {{ $key }}: "{{ $value }}"
+                    {{- end }}
+                    platform.kubecore.io/component: "traefik"
+                    pod-security.kubernetes.io/enforce: "baseline"
+          {{- end }}
+
+          {{/* Create External Secrets namespace */}}
+          {{- if and $externalSecretsEnabled $tools.externalSecrets $tools.externalSecrets.enabled }}
+          ---
+          apiVersion: kubernetes.crossplane.io/v1alpha2
+          kind: Object
+          metadata:
+            name: {{ $name }}-external-secrets-namespace
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: external-secrets-namespace
+            labels:
+              {{- range $key, $value := $commonLabels }}
+              {{ $key }}: "{{ $value }}"
+              {{- end }}
+          spec:
+            deletionPolicy: Delete
+            managementPolicies: ["*"]
+            providerConfigRef:
+              name: {{ $kubernetesProvider }}
+            forProvider:
+              manifest:
+                apiVersion: v1
+                kind: Namespace
+                metadata:
+                  name: {{ $tools.externalSecrets.namespace }}
+                  labels:
+                    {{- range $key, $value := $commonLabels }}
+                    {{ $key }}: "{{ $value }}"
+                    {{- end }}
+                    platform.kubecore.io/component: "external-secrets"
+                    pod-security.kubernetes.io/enforce: "baseline"
+          {{- end }}
+
+          {{/* Create GitOps Promoter namespace */}}
+          {{- if and $gitopsPromoterEnabled $tools.gitopsPromoter $tools.gitopsPromoter.enabled }}
+          ---
+          apiVersion: kubernetes.crossplane.io/v1alpha2
+          kind: Object
+          metadata:
+            name: {{ $name }}-gitops-promoter-namespace
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: gitops-promoter-namespace
+            labels:
+              {{- range $key, $value := $commonLabels }}
+              {{ $key }}: "{{ $value }}"
+              {{- end }}
+          spec:
+            deletionPolicy: Delete
+            managementPolicies: ["*"]
+            providerConfigRef:
+              name: {{ $kubernetesProvider }}
+            forProvider:
+              manifest:
+                apiVersion: v1
+                kind: Namespace
+                metadata:
+                  name: {{ $tools.gitopsPromoter.namespace }}
+                  labels:
+                    {{- range $key, $value := $commonLabels }}
+                    {{ $key }}: "{{ $value }}"
+                    {{- end }}
+                    platform.kubecore.io/component: "gitops-promoter"
+                    pod-security.kubernetes.io/enforce: "baseline"
+          {{- end }}
+
+          {{/* Create ExternalDNS namespace */}}
+          {{- $externalDnsEnabled := $features.externalDns | default true -}}
+          {{- if and $externalDnsEnabled $tools.externalDns $tools.externalDns.enabled }}
+          ---
+          apiVersion: kubernetes.crossplane.io/v1alpha2
+          kind: Object
+          metadata:
+            name: {{ $name }}-external-dns-namespace
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: external-dns-namespace
+            labels:
+              {{- range $key, $value := $commonLabels }}
+              {{ $key }}: "{{ $value }}"
+              {{- end }}
+          spec:
+            deletionPolicy: Delete
+            managementPolicies: ["*"]
+            providerConfigRef:
+              name: {{ $kubernetesProvider }}
+            forProvider:
+              manifest:
+                apiVersion: v1
+                kind: Namespace
+                metadata:
+                  name: {{ $tools.externalDns.namespace }}
+                  labels:
+                    {{- range $key, $value := $commonLabels }}
+                    {{ $key }}: "{{ $value }}"
+                    {{- end }}
+                    platform.kubecore.io/component: "external-dns"
+                    pod-security.kubernetes.io/enforce: "baseline"
+          {{- end }}
+
+          {{/* =================================================================== */}}
+          {{/* HELM RELEASE INSTALLATIONS */}}
+          {{/* =================================================================== */}}
+          
+          {{/* Crossplane Installation */}}
+          {{- if and $crossplaneEnabled $tools.crossplane $tools.crossplane.enabled }}
+          ---
+          apiVersion: helm.crossplane.io/v1beta1
+          kind: Release
+          metadata:
+            name: {{ $clusterName }}-system-crossplane
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: crossplane-release
+            labels:
+              {{- range $key, $value := $commonLabels }}
+              {{ $key }}: "{{ $value }}"
+              {{- end }}
+              platform.kubecore.io/component: "crossplane"
+          spec:
+            deletionPolicy: Delete
+            managementPolicies: ["*"]
+            providerConfigRef:
+              name: {{ $helmProvider }}
+            forProvider:
+              chart:
+                name: crossplane
+                repository: {{ $tools.crossplane.repository.url }}
+                version: "{{ $tools.crossplane.version }}"
+              namespace: {{ $tools.crossplane.namespace }}
+              values:
+                resourcesCrossplane:
+                  {{- if $tools.crossplane.resources.controller.requests }}
+                  requests:
+                    {{- range $key, $value := $tools.crossplane.resources.controller.requests }}
+                    {{ $key }}: "{{ $value }}"
+                    {{- end }}
+                  {{- end }}
+                  {{- if $tools.crossplane.resources.controller.limits }}
+                  limits:
+                    {{- range $key, $value := $tools.crossplane.resources.controller.limits }}
+                    {{ $key }}: "{{ $value }}"
+                    {{- end }}
+                  {{- end }}
+                {{- if $tools.crossplane.args }}
+                args:
+                  {{- range $arg := $tools.crossplane.args }}
+                  - "{{ $arg }}"
+                  {{- end }}
+                {{- end }}
+                {{- if $nodeSelector }}
+                nodeSelector:
+                  {{- range $key, $value := $nodeSelector }}
+                  {{ $key }}: "{{ $value }}"
+                  {{- end }}
+                {{- end }}
+                {{- if $tolerations }}
+                tolerations:
+                  {{- range $toleration := $tolerations }}
+                  - key: "{{ $toleration.key }}"
+                    operator: "{{ $toleration.operator }}"
+                    {{- if $toleration.value }}
+                    value: "{{ $toleration.value }}"
+                    {{- end }}
+                    effect: "{{ $toleration.effect }}"
+                  {{- end }}
+                {{- end }}
+                # RBAC Manager component configuration with scheduling
+                rbacManager:
+                  {{- if $nodeSelector }}
+                  nodeSelector:
+                    {{- range $key, $value := $nodeSelector }}
+                    {{ $key }}: "{{ $value }}"
+                    {{- end }}
+                  {{- end }}
+                  {{- if $tolerations }}
+                  tolerations:
+                    {{- range $toleration := $tolerations }}
+                    - key: "{{ $toleration.key }}"
+                      operator: "{{ $toleration.operator }}"
+                      {{- if $toleration.value }}
+                      value: "{{ $toleration.value }}"
+                      {{- end }}
+                      effect: "{{ $toleration.effect }}"
+                    {{- end }}
+                  {{- end }}
+          {{- end }}
+
+          {{/* cert-manager Installation */}}
+          {{- if and $certManagerEnabled $tools.certManager $tools.certManager.enabled }}
+          ---
+          apiVersion: helm.crossplane.io/v1beta1
+          kind: Release
+          metadata:
+            name: {{ $clusterName }}-system-cert-manager
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: cert-manager-release
+            labels:
+              {{- range $key, $value := $commonLabels }}
+              {{ $key }}: "{{ $value }}"
+              {{- end }}
+              platform.kubecore.io/component: "cert-manager"
+          spec:
+            deletionPolicy: Delete
+            managementPolicies: ["*"]
+            providerConfigRef:
+              name: {{ $helmProvider }}
+            forProvider:
+              chart:
+                name: cert-manager
+                repository: {{ $tools.certManager.repository.url }}
+                version: "{{ $tools.certManager.version }}"
+              namespace: {{ $tools.certManager.namespace }}
+              values:
+                installCRDs: {{ $tools.certManager.installCRDs }}
+                # Configure cert-manager to use public DNS for ACME HTTP-01 challenge validation
+                # This ensures cert-manager can resolve external DNS records that aren't in cluster CoreDNS
+                extraArgs:
+                  - --acme-http01-solver-nameservers=8.8.8.8:53,1.1.1.1:53
+                {{- if $nodeSelector }}
+                nodeSelector:
+                  {{- range $key, $value := $nodeSelector }}
+                  {{ $key }}: "{{ $value }}"
+                  {{- end }}
+                {{- end }}
+                {{- if $tolerations }}
+                tolerations:
+                  {{- range $toleration := $tolerations }}
+                  - key: "{{ $toleration.key }}"
+                    operator: "{{ $toleration.operator }}"
+                    {{- if $toleration.value }}
+                    value: "{{ $toleration.value }}"
+                    {{- end }}
+                    effect: "{{ $toleration.effect }}"
+                  {{- end }}
+                {{- end }}
+                {{- if $tools.certManager.controller.resources }}
+                resources:
+                  {{- if $tools.certManager.controller.resources.requests }}
+                  requests:
+                    {{- range $key, $value := $tools.certManager.controller.resources.requests }}
+                    {{ $key }}: "{{ $value }}"
+                    {{- end }}
+                  {{- end }}
+                  {{- if $tools.certManager.controller.resources.limits }}
+                  limits:
+                    {{- range $key, $value := $tools.certManager.controller.resources.limits }}
+                    {{ $key }}: "{{ $value }}"
+                    {{- end }}
+                  {{- end }}
+                {{- end }}
+                # Webhook component configuration with scheduling
+                webhook:
+                  {{- if $nodeSelector }}
+                  nodeSelector:
+                    {{- range $key, $value := $nodeSelector }}
+                    {{ $key }}: "{{ $value }}"
+                    {{- end }}
+                  {{- end }}
+                  {{- if $tolerations }}
+                  tolerations:
+                    {{- range $toleration := $tolerations }}
+                    - key: "{{ $toleration.key }}"
+                      operator: "{{ $toleration.operator }}"
+                      {{- if $toleration.value }}
+                      value: "{{ $toleration.value }}"
+                      {{- end }}
+                      effect: "{{ $toleration.effect }}"
+                    {{- end }}
+                  {{- end }}
+                  {{- if $tools.certManager.webhook.resources }}
+                  resources:
+                    {{- if $tools.certManager.webhook.resources.requests }}
+                    requests:
+                      {{- range $key, $value := $tools.certManager.webhook.resources.requests }}
+                      {{ $key }}: "{{ $value }}"
+                      {{- end }}
+                    {{- end }}
+                    {{- if $tools.certManager.webhook.resources.limits }}
+                    limits:
+                      {{- range $key, $value := $tools.certManager.webhook.resources.limits }}
+                      {{ $key }}: "{{ $value }}"
+                      {{- end }}
+                    {{- end }}
+                  {{- end }}
+                
+                # Cainjector component configuration with scheduling
+                cainjector:
+                  {{- if $nodeSelector }}
+                  nodeSelector:
+                    {{- range $key, $value := $nodeSelector }}
+                    {{ $key }}: "{{ $value }}"
+                    {{- end }}
+                  {{- end }}
+                  {{- if $tolerations }}
+                  tolerations:
+                    {{- range $toleration := $tolerations }}
+                    - key: "{{ $toleration.key }}"
+                      operator: "{{ $toleration.operator }}"
+                      {{- if $toleration.value }}
+                      value: "{{ $toleration.value }}"
+                      {{- end }}
+                      effect: "{{ $toleration.effect }}"
+                    {{- end }}
+                  {{- end }}
+                  {{- if $tools.certManager.cainjector.resources }}
+                  resources:
+                    {{- if $tools.certManager.cainjector.resources.requests }}
+                    requests:
+                      {{- range $key, $value := $tools.certManager.cainjector.resources.requests }}
+                      {{ $key }}: "{{ $value }}"
+                      {{- end }}
+                    {{- end }}
+                    {{- if $tools.certManager.cainjector.resources.limits }}
+                    limits:
+                      {{- range $key, $value := $tools.certManager.cainjector.resources.limits }}
+                      {{ $key }}: "{{ $value }}"
+                      {{- end }}
+                    {{- end }}
+                  {{- end }}
+                
+                # Startup API check component configuration with scheduling
+                startupapicheck:
+                  {{- if $nodeSelector }}
+                  nodeSelector:
+                    {{- range $key, $value := $nodeSelector }}
+                    {{ $key }}: "{{ $value }}"
+                    {{- end }}
+                  {{- end }}
+                  {{- if $tolerations }}
+                  tolerations:
+                    {{- range $toleration := $tolerations }}
+                    - key: "{{ $toleration.key }}"
+                      operator: "{{ $toleration.operator }}"
+                      {{- if $toleration.value }}
+                      value: "{{ $toleration.value }}"
+                      {{- end }}
+                      effect: "{{ $toleration.effect }}"
+                    {{- end }}
+                  {{- end }}
+          {{- end }}
+
+          {{/* =================================================================== */}}
+          {{/* CLUSTER ISSUER CREATION */}}
+          {{/* =================================================================== */}}
+
+          {{/* ClusterIssuer for automatic TLS certificate management */}}
+          {{- if $tlsIssuerEnabled }}
+          ---
+          apiVersion: kubernetes.crossplane.io/v1alpha2
+          kind: Object
+          metadata:
+            name: {{ $name }}-cluster-issuer
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: cluster-issuer
+            labels:
+              {{- range $key, $value := $commonLabels }}
+              {{ $key }}: "{{ $value }}"
+              {{- end }}
+              platform.kubecore.io/component: "cert-manager"
+          spec:
+            deletionPolicy: Delete
+            managementPolicies: ["*"]
+            providerConfigRef:
+              name: {{ $kubernetesProvider }}
+            forProvider:
+              manifest:
+                apiVersion: cert-manager.io/v1
+                kind: ClusterIssuer
+                metadata:
+                  name: {{ $clusterIssuerName }}
+                  labels:
+                    {{- range $key, $value := $commonLabels }}
+                    {{ $key }}: "{{ $value }}"
+                    {{- end }}
+                spec:
+                  acme:
+                    email: {{ $tlsEmail }}
+                    server: {{ $acmeServer }}
+                    privateKeySecretRef:
+                      name: {{ $clusterName }}-acme-account-key
+                    solvers:
+                    - http01:
+                        ingress:
+                          ingressClassName: traefik-system
+                          podTemplate:
+                            spec:
+                              {{- if $nodeSelector }}
+                              nodeSelector:
+                                {{- range $key, $value := $nodeSelector }}
+                                {{ $key }}: "{{ $value }}"
+                                {{- end }}
+                              {{- end }}
+                              {{- if $tolerations }}
+                              tolerations:
+                                {{- range $toleration := $tolerations }}
+                                {{- if and $toleration.effect (ne $toleration.effect "") (ne $toleration.effect "<no value>") }}
+                                - key: "{{ $toleration.key }}"
+                                  operator: "{{ $toleration.operator }}"
+                                  {{- if and $toleration.value (ne $toleration.value "") }}
+                                  value: "{{ $toleration.value }}"
+                                  {{- end }}
+                                  effect: "{{ $toleration.effect }}"
+                                {{- end }}
+                                {{- end }}
+                              {{- end }}
+          {{- end }}
+
+          {{/* ArgoCD Installation */}}
+          {{- if and $argoCdEnabled $tools.argocd $tools.argocd.enabled }}
+          ---
+          apiVersion: helm.crossplane.io/v1beta1
+          kind: Release
+          metadata:
+            name: {{ $clusterName }}-system-argocd
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: argocd-release
+            labels:
+              {{- range $key, $value := $commonLabels }}
+              {{ $key }}: "{{ $value }}"
+              {{- end }}
+              platform.kubecore.io/component: "argocd"
+          spec:
+            deletionPolicy: Delete
+            managementPolicies: ["*"]
+            providerConfigRef:
+              name: {{ $helmProvider }}
+            forProvider:
+              chart:
+                name: argo-cd
+                repository: {{ $tools.argocd.repository.url }}
+                version: "{{ $tools.argocd.version }}"
+              namespace: {{ $tools.argocd.namespace }}
+              values:
+                fullnameOverride: "argocd"
+                global:
+                  {{- if $nodeSelector }}
+                  nodeSelector:
+                    {{- range $key, $value := $nodeSelector }}
+                    {{ $key }}: "{{ $value }}"
+                    {{- end }}
+                  {{- end }}
+                  {{- if $tolerations }}
+                  tolerations:
+                    {{- range $toleration := $tolerations }}
+                    - key: "{{ $toleration.key }}"
+                      operator: "{{ $toleration.operator }}"
+                      {{- if $toleration.value }}
+                      value: "{{ $toleration.value }}"
+                      {{- end }}
+                      effect: "{{ $toleration.effect }}"
+                    {{- end }}
+                  {{- end }}
+                configs:
+                  params:
+                    server.insecure: true
+                    # Enable Source Hydrator feature
+                    server.enable.source.hydrator: true
+                    # Enable hydrator feature (hydrator is in Alpha phase)
+                    hydrator.enabled: true
+                server:
+                  {{- if $tools.argocd.server.replicas }}
+                  replicas: {{ $tools.argocd.server.replicas }}
+                  {{- end }}
+                  {{- if $tools.argocd.server.ingress.enabled }}
+                  ingress:
+                    enabled: {{ $tools.argocd.server.ingress.enabled }}
+                    ingressClassName: {{ $tools.argocd.server.ingress.className }}
+                    hostname: argocd.system.{{ $dns.clusterDomain }}
+                    {{- if $tools.argocd.server.ingress.tls }}
+                    tls:
+                      - secretName: argocd-ingress-server-tls
+                        hosts:
+                          - argocd.system.{{ $dns.clusterDomain }}
+                    {{- end }}
+                    {{- if $tools.argocd.server.ingress.annotations }}
+                    annotations:
+                      cert-manager.io/cluster-issuer: {{ $clusterIssuerName }}
+                      {{- range $key, $value := $tools.argocd.server.ingress.annotations }}
+                      {{ $key }}: "{{ $value }}"
+                      {{- end }}
+                    {{- else }}
+                    annotations:
+                      cert-manager.io/cluster-issuer: {{ $clusterIssuerName }}
+                    {{- end }}
+                  {{- end }}
+                  {{- if $tools.argocd.server.resources }}
+                  resources:
+                    {{- if $tools.argocd.server.resources.requests }}
+                    requests:
+                      {{- range $key, $value := $tools.argocd.server.resources.requests }}
+                      {{ $key }}: "{{ $value }}"
+                      {{- end }}
+                    {{- end }}
+                    {{- if $tools.argocd.server.resources.limits }}
+                    limits:
+                      {{- range $key, $value := $tools.argocd.server.resources.limits }}
+                      {{ $key }}: "{{ $value }}"
+                      {{- end }}
+                    {{- end }}
+                  {{- end }}
+                repoServer:
+                  {{- if $tools.argocd.repoServer.replicas }}
+                  replicas: {{ $tools.argocd.repoServer.replicas }}
+                  {{- end }}
+                  {{- if $tools.argocd.repoServer.resources }}
+                  resources:
+                    {{- if $tools.argocd.repoServer.resources.requests }}
+                    requests:
+                      {{- range $key, $value := $tools.argocd.repoServer.resources.requests }}
+                      {{ $key }}: "{{ $value }}"
+                      {{- end }}
+                    {{- end }}
+                    {{- if $tools.argocd.repoServer.resources.limits }}
+                    limits:
+                      {{- range $key, $value := $tools.argocd.repoServer.resources.limits }}
+                      {{ $key }}: "{{ $value }}"
+                      {{- end }}
+                    {{- end }}
+                  {{- end }}
+                controller:
+                  {{- if $tools.argocd.controller.replicas }}
+                  replicas: {{ $tools.argocd.controller.replicas }}
+                  {{- end }}
+                  {{- if $tools.argocd.controller.resources }}
+                  resources:
+                    {{- if $tools.argocd.controller.resources.requests }}
+                    requests:
+                      {{- range $key, $value := $tools.argocd.controller.resources.requests }}
+                      {{ $key }}: "{{ $value }}"
+                      {{- end }}
+                    {{- end }}
+                    {{- if $tools.argocd.controller.resources.limits }}
+                    limits:
+                      {{- range $key, $value := $tools.argocd.controller.resources.limits }}
+                      {{ $key }}: "{{ $value }}"
+                      {{- end }}
+                    {{- end }}
+                  {{- end }}
+                commitServer:
+                  enabled: true
+                  {{- if $nodeSelector }}
+                  nodeSelector:
+                    {{- range $key, $value := $nodeSelector }}
+                    {{ $key }}: "{{ $value }}"
+                    {{- end }}
+                  {{- end }}
+                  {{- if $tolerations }}
+                  tolerations:
+                    {{- range $toleration := $tolerations }}
+                    - key: "{{ $toleration.key }}"
+                      operator: "{{ $toleration.operator }}"
+                      {{- if $toleration.value }}
+                      value: "{{ $toleration.value }}"
+                      {{- end }}
+                      effect: "{{ $toleration.effect }}"
+                    {{- end }}
+                  {{- end }}
+          {{- end }}
+
+          {{/* ArgoCD GitHub Integration ExternalSecret */}}
+          {{/* Safely check for ArgoCD and GitHub configuration */}}
+          {{- $hasArgoCd := false -}}
+          {{- if $argoCdEnabled -}}
+            {{- if $tools -}}
+              {{- if $tools.argocd -}}
+                {{- if $tools.argocd.enabled -}}
+                  {{- $hasArgoCd = true -}}
+                {{- end -}}
+              {{- end -}}
+            {{- end -}}
+          {{- end -}}
+
+          {{- $hasGithub := false -}}
+          {{- if $envConfig.github -}}
+            {{- if $envConfig.github.secretManager -}}
+              {{- if $envConfig.github.secretManager.secretName -}}
+                {{- $hasGithub = true -}}
+              {{- end -}}
+            {{- end -}}
+          {{- end -}}
+
+          {{- if and $hasArgoCd $hasGithub }}
+
+          {{/* Extract GitHub configuration with defaults */}}
+          {{- $githubSecretName := $envConfig.github.secretManager.secretName -}}
+          {{- $defaultKeyMappings := dict "appId" "appId" "installationId" "installationId" "privateKey" "privateKey" -}}
+          {{- $keyMappings := $envConfig.github.secretManager.keyMappings | default $defaultKeyMappings -}}
+
+          ---
+          apiVersion: kubernetes.crossplane.io/v1alpha2
+          kind: Object
+          metadata:
+            name: {{ $name }}-argocd-github-externalsecret
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: argocd-github-externalsecret
+              platform.kubecore.io/github-org: {{ $envConfig.github.organization | quote }}
+              platform.kubecore.io/secret-source: {{ $envConfig.github.secretManager.secretName | quote }}
+            labels:
+              {{- range $key, $value := $commonLabels }}
+              {{ $key }}: "{{ $value }}"
+              {{- end }}
+              platform.kubecore.io/component: "argocd"
+          spec:
+            deletionPolicy: Delete
+            managementPolicies: ["*"]
+            providerConfigRef:
+              name: {{ $kubernetesProvider }}
+            forProvider:
+              manifest:
+                apiVersion: external-secrets.io/v1
+                kind: ExternalSecret
+                metadata:
+                  name: {{ $clusterName }}-github-write-secret
+                  namespace: {{ $tools.argocd.namespace }}
+                  labels:
+                    argocd.argoproj.io/secret-type: repo-creds
+                    platform.kubecore.io/kubesystem: {{ $name }}
+                    platform.kubecore.io/part-of: "system"
+                    {{- range $key, $value := $commonLabels }}
+                    {{ $key }}: "{{ $value }}"
+                    {{- end }}
+                spec:
+                  refreshInterval: 1h
+                  secretStoreRef:
+                    kind: ClusterSecretStore
+                    name: {{ $envConfig.organization.name }}-infrastructure-secrets
+                  target:
+                    name: {{ $clusterName }}-github-write-secret
+                    creationPolicy: Owner
+                    deletionPolicy: Retain
+                    template:
+                      type: Opaque
+                      engineVersion: v2
+                      metadata:
+                        labels:
+                          argocd.argoproj.io/secret-type: repo-creds
+                      data:
+                        githubAppID: "{{ `{{ .appId }}` }}"
+                        githubAppInstallationID: "{{ `{{ .installationId }}` }}"
+                        githubAppPrivateKey: "{{ `{{ .privateKey }}` }}"
+                        url: "https://github.com/{{ $envConfig.github.organization }}"
+                        type: "git"
+                  data:
+                    - secretKey: appId
+                      remoteRef:
+                        key: {{ $githubSecretName }}
+                        property: {{ $keyMappings.appId }}
+                    - secretKey: installationId
+                      remoteRef:
+                        key: {{ $githubSecretName }}
+                        property: {{ $keyMappings.installationId }}
+                    - secretKey: privateKey
+                      remoteRef:
+                        key: {{ $githubSecretName }}
+                        property: {{ $keyMappings.privateKey }}
+          {{- end }}
+
+          {{/* GitOps Promoter GitHub Integration ExternalSecret */}}
+          {{/* Safely check for GitOps Promoter and GitHub configuration */}}
+          {{- $hasGitopsPromoter := false -}}
+          {{- if $gitopsPromoterEnabled -}}
+            {{- if $tools -}}
+              {{- if $tools.gitopsPromoter -}}
+                {{- if $tools.gitopsPromoter.enabled -}}
+                  {{- $hasGitopsPromoter = true -}}
+                {{- end -}}
+              {{- end -}}
+            {{- end -}}
+          {{- end -}}
+
+          {{- if and $hasGitopsPromoter $hasGithub }}
+
+          {{/* Extract GitHub configuration with defaults - needed for this scope */}}
+          {{- $githubSecretName := $envConfig.github.secretManager.secretName -}}
+          {{- $defaultKeyMappings := dict "appId" "appId" "installationId" "installationId" "privateKey" "privateKey" -}}
+          {{- $keyMappings := $envConfig.github.secretManager.keyMappings | default $defaultKeyMappings -}}
+
+          ---
+          apiVersion: kubernetes.crossplane.io/v1alpha2
+          kind: Object
+          metadata:
+            name: {{ $name }}-gitops-promoter-github-externalsecret
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: gitops-promoter-github-externalsecret
+              platform.kubecore.io/github-org: {{ $envConfig.github.organization | quote }}
+              platform.kubecore.io/secret-source: {{ $envConfig.github.secretManager.secretName | quote }}
+            labels:
+              {{- range $key, $value := $commonLabels }}
+              {{ $key }}: "{{ $value }}"
+              {{- end }}
+              platform.kubecore.io/component: "gitops-promoter"
+          spec:
+            deletionPolicy: Delete
+            managementPolicies: ["*"]
+            providerConfigRef:
+              name: {{ $kubernetesProvider }}
+            forProvider:
+              manifest:
+                apiVersion: external-secrets.io/v1
+                kind: ExternalSecret
+                metadata:
+                  name: {{ $clusterName }}-gitops-promoter-github-secret
+                  namespace: {{ $tools.gitopsPromoter.namespace }}
+                  labels:
+                    platform.kubecore.io/kubesystem: {{ $name }}
+                    platform.kubecore.io/part-of: "system"
+                    {{- range $key, $value := $commonLabels }}
+                    {{ $key }}: "{{ $value }}"
+                    {{- end }}
+                spec:
+                  refreshInterval: 1h
+                  secretStoreRef:
+                    kind: ClusterSecretStore
+                    name: {{ $envConfig.organization.name }}-infrastructure-secrets
+                  target:
+                    name: {{ $clusterName }}-gitops-promoter-github-secret
+                    creationPolicy: Owner
+                    deletionPolicy: Retain
+                    template:
+                      type: Opaque
+                      engineVersion: v2
+                      data:
+                        githubAppPrivateKey: "{{ `{{ .privateKey }}` }}"
+                  data:
+                    - secretKey: privateKey
+                      remoteRef:
+                        key: {{ $githubSecretName }}
+                        property: {{ $keyMappings.privateKey }}
+
+          ---
+          apiVersion: kubernetes.crossplane.io/v1alpha2
+          kind: Object
+          metadata:
+            name: {{ $name }}-gitops-promoter-github-token-generator
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: gitops-promoter-github-token-generator
+            labels:
+              {{- range $key, $value := $commonLabels }}
+              {{ $key }}: "{{ $value }}"
+              {{- end }}
+              platform.kubecore.io/component: "gitops-promoter"
+          spec:
+            deletionPolicy: Delete
+            managementPolicies: ["*"]
+            providerConfigRef:
+              name: {{ $kubernetesProvider }}
+            forProvider:
+              manifest:
+                apiVersion: generators.external-secrets.io/v1alpha1
+                kind: GithubAccessToken
+                metadata:
+                  name: gitops-promoter-github-token
+                  namespace: {{ $tools.gitopsPromoter.namespace }}
+                  labels:
+                    platform.kubecore.io/kubesystem: {{ $name }}
+                    platform.kubecore.io/part-of: "system"
+                    {{- range $key, $value := $commonLabels }}
+                    {{ $key }}: "{{ $value }}"
+                    {{- end }}
+                spec:
+                  appID: "{{ $envConfig.github.appId }}"
+                  installID: "{{ $envConfig.github.installationId }}"
+                  auth:
+                    privateKey:
+                      secretRef:
+                        name: {{ $clusterName }}-gitops-promoter-github-secret
+                        key: githubAppPrivateKey
+
+          ---
+          apiVersion: kubernetes.crossplane.io/v1alpha2
+          kind: Object
+          metadata:
+            name: {{ $name }}-gitops-promoter-github-token-externalsecret
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: gitops-promoter-github-token-externalsecret
+              platform.kubecore.io/github-org: {{ $envConfig.github.organization | quote }}
+            labels:
+              {{- range $key, $value := $commonLabels }}
+              {{ $key }}: "{{ $value }}"
+              {{- end }}
+              platform.kubecore.io/component: "gitops-promoter"
+          spec:
+            deletionPolicy: Delete
+            managementPolicies: ["*"]
+            providerConfigRef:
+              name: {{ $kubernetesProvider }}
+            forProvider:
+              manifest:
+                apiVersion: external-secrets.io/v1
+                kind: ExternalSecret
+                metadata:
+                  name: gitops-promoter-github-token
+                  namespace: {{ $tools.gitopsPromoter.namespace }}
+                  labels:
+                    platform.kubecore.io/kubesystem: {{ $name }}
+                    platform.kubecore.io/part-of: "system"
+                    {{- range $key, $value := $commonLabels }}
+                    {{ $key }}: "{{ $value }}"
+                    {{- end }}
+                spec:
+                  refreshInterval: "30m0s"
+                  target:
+                    name: gitops-promoter-github-token
+                    creationPolicy: Owner
+                  dataFrom:
+                  - sourceRef:
+                      generatorRef:
+                        apiVersion: generators.external-secrets.io/v1alpha1
+                        kind: GithubAccessToken
+                        name: gitops-promoter-github-token
+
+          ---
+          apiVersion: kubernetes.crossplane.io/v1alpha2
+          kind: Object
+          metadata:
+            name: {{ $name }}-cluster-scm-provider
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: cluster-scm-provider
+            labels:
+              {{- range $key, $value := $commonLabels }}
+              {{ $key }}: "{{ $value }}"
+              {{- end }}
+              platform.kubecore.io/component: "gitops-promoter"
+          spec:
+            deletionPolicy: Delete
+            managementPolicies: ["*"]
+            providerConfigRef:
+              name: {{ $kubernetesProvider }}
+            forProvider:
+              manifest:
+                apiVersion: promoter.argoproj.io/v1alpha1
+                kind: ClusterScmProvider
+                metadata:
+                  name: {{ $envConfig.organization.name }}-github-scm-provider
+                  labels:
+                    {{- range $key, $value := $commonLabels }}
+                    {{ $key }}: "{{ $value }}"
+                    {{- end }}
+                spec:
+                  secretRef:
+                    name: {{ $clusterName }}-gitops-promoter-github-secret
+                    namespace: {{ $tools.gitopsPromoter.namespace }}
+                  github:
+                    appID: {{ $envConfig.github.appId }}
+                    installationID: {{ $envConfig.github.installationId }}
+          {{- end }}
+
+          {{/* Argo Rollouts Installation */}}
+          {{- if and $argoRolloutsEnabled $tools.argoRollouts $tools.argoRollouts.enabled }}
+          ---
+          apiVersion: helm.crossplane.io/v1beta1
+          kind: Release
+          metadata:
+            name: {{ $clusterName }}-system-argo-rollouts
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: argo-rollouts-release
+            labels:
+              {{- range $key, $value := $commonLabels }}
+              {{ $key }}: "{{ $value }}"
+              {{- end }}
+              platform.kubecore.io/component: "argo-rollouts"
+          spec:
+            deletionPolicy: Delete
+            managementPolicies: ["*"]
+            providerConfigRef:
+              name: {{ $helmProvider }}
+            forProvider:
+              chart:
+                name: argo-rollouts
+                repository: {{ $tools.argoRollouts.repository.url }}
+                version: "{{ $tools.argoRollouts.version }}"
+              namespace: {{ $tools.argoRollouts.namespace }}
+              values:
+                controller:
+                  {{- if $tools.argoRollouts.controller.replicas }}
+                  replicas: {{ $tools.argoRollouts.controller.replicas }}
+                  {{- end }}
+                  {{- if $tools.argoRollouts.controller.resources }}
+                  resources:
+                    {{- if $tools.argoRollouts.controller.resources.requests }}
+                    requests:
+                      {{- range $key, $value := $tools.argoRollouts.controller.resources.requests }}
+                      {{ $key }}: "{{ $value }}"
+                      {{- end }}
+                    {{- end }}
+                    {{- if $tools.argoRollouts.controller.resources.limits }}
+                    limits:
+                      {{- range $key, $value := $tools.argoRollouts.controller.resources.limits }}
+                      {{ $key }}: "{{ $value }}"
+                      {{- end }}
+                    {{- end }}
+                  {{- end }}
+                  {{- if $nodeSelector }}
+                  nodeSelector:
+                    {{- range $key, $value := $nodeSelector }}
+                    {{ $key }}: "{{ $value }}"
+                    {{- end }}
+                  {{- end }}
+                  {{- if $tolerations }}
+                  tolerations:
+                    {{- range $toleration := $tolerations }}
+                    - key: "{{ $toleration.key }}"
+                      operator: "{{ $toleration.operator }}"
+                      {{- if $toleration.value }}
+                      value: "{{ $toleration.value }}"
+                      {{- end }}
+                      effect: "{{ $toleration.effect }}"
+                    {{- end }}
+                  {{- end }}
+                {{- if $tools.argoRollouts.dashboard.enabled }}
+                dashboard:
+                  enabled: {{ $tools.argoRollouts.dashboard.enabled }}
+                  {{- if $nodeSelector }}
+                  nodeSelector:
+                    {{- range $key, $value := $nodeSelector }}
+                    {{ $key }}: "{{ $value }}"
+                    {{- end }}
+                  {{- end }}
+                  {{- if $tolerations }}
+                  tolerations:
+                    {{- range $toleration := $tolerations }}
+                    - key: "{{ $toleration.key }}"
+                      operator: "{{ $toleration.operator }}"
+                      {{- if $toleration.value }}
+                      value: "{{ $toleration.value }}"
+                      {{- end }}
+                      effect: "{{ $toleration.effect }}"
+                    {{- end }}
+                  {{- end }}
+                  {{- if $tools.argoRollouts.dashboard.ingress.enabled }}
+                  ingress:
+                    enabled: {{ $tools.argoRollouts.dashboard.ingress.enabled }}
+                    ingressClassName: {{ $tools.argoRollouts.dashboard.ingress.className }}
+                    hosts:
+                      - rollouts.system.{{ $dns.clusterDomain }}
+                    paths:
+                      - /
+                    pathType: Prefix
+                    {{- if $tools.argoRollouts.dashboard.ingress.tls }}
+                    tls:
+                      - secretName: argo-rollouts-dashboard-tls
+                        hosts:
+                          - rollouts.system.{{ $dns.clusterDomain }}
+                    {{- end }}
+                    {{- if $tools.argoRollouts.dashboard.ingress.annotations }}
+                    annotations:
+                      cert-manager.io/cluster-issuer: {{ $clusterIssuerName }}
+                      {{- range $key, $value := $tools.argoRollouts.dashboard.ingress.annotations }}
+                      {{ $key }}: "{{ $value }}"
+                      {{- end }}
+                    {{- else }}
+                    annotations:
+                      cert-manager.io/cluster-issuer: {{ $clusterIssuerName }}
+                    {{- end }}
+                  {{- end }}
+                {{- end }}
+          {{- end }}
+          
+          {{/* Argo Workflows Installation */}}
+          {{- if and $argoWorkflowsEnabled $tools.argoWorkflows $tools.argoWorkflows.enabled }}
+          ---
+          apiVersion: helm.crossplane.io/v1beta1
+          kind: Release
+          metadata:
+            name: {{ $clusterName }}-system-argo-workflows
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: argo-workflows-release
+            labels:
+              {{- range $key, $value := $commonLabels }}
+              {{ $key }}: "{{ $value }}"
+              {{- end }}
+              platform.kubecore.io/component: "argo-workflows"
+          spec:
+            deletionPolicy: Delete
+            managementPolicies: ["*"]
+            providerConfigRef:
+              name: {{ $helmProvider }}
+            forProvider:
+              chart:
+                name: argo-workflows
+                repository: {{ $tools.argoWorkflows.repository.url }}
+                version: "{{ $tools.argoWorkflows.version }}"
+              namespace: {{ $tools.argoWorkflows.namespace }}
+              values:
+                # Enable cluster-wide workflow watching - allows UI to see workflows in all namespaces
+                singleNamespace: false
+                controller:
+                  {{- if $tools.argoWorkflows.controller.resources }}
+                  resources:
+                    {{- if $tools.argoWorkflows.controller.resources.requests }}
+                    requests:
+                      {{- range $key, $value := $tools.argoWorkflows.controller.resources.requests }}
+                      {{ $key }}: "{{ $value }}"
+                      {{- end }}
+                    {{- end }}
+                    {{- if $tools.argoWorkflows.controller.resources.limits }}
+                    limits:
+                      {{- range $key, $value := $tools.argoWorkflows.controller.resources.limits }}
+                      {{ $key }}: "{{ $value }}"
+                      {{- end }}
+                    {{- end }}
+                  {{- end }}
+                  {{- if $nodeSelector }}
+                  nodeSelector:
+                    {{- range $key, $value := $nodeSelector }}
+                    {{ $key }}: "{{ $value }}"
+                    {{- end }}
+                  {{- end }}
+                  {{- if $tolerations }}
+                  tolerations:
+                    {{- range $toleration := $tolerations }}
+                    - key: "{{ $toleration.key }}"
+                      operator: "{{ $toleration.operator }}"
+                      {{- if $toleration.value }}
+                      value: "{{ $toleration.value }}"
+                      {{- end }}
+                      effect: "{{ $toleration.effect }}"
+                    {{- end }}
+                  {{- end }}
+                {{- if $tools.argoWorkflows.server.enabled }}
+                server:
+                  enabled: {{ $tools.argoWorkflows.server.enabled }}
+                  {{- if $nodeSelector }}
+                  nodeSelector:
+                    {{- range $key, $value := $nodeSelector }}
+                    {{ $key }}: "{{ $value }}"
+                    {{- end }}
+                  {{- end }}
+                  {{- if $tolerations }}
+                  tolerations:
+                    {{- range $toleration := $tolerations }}
+                    - key: "{{ $toleration.key }}"
+                      operator: "{{ $toleration.operator }}"
+                      {{- if $toleration.value }}
+                      value: "{{ $toleration.value }}"
+                      {{- end }}
+                      effect: "{{ $toleration.effect }}"
+                    {{- end }}
+                  {{- end }}
+                  {{- if $tools.argoWorkflows.server.ingress.enabled }}
+                  ingress:
+                    enabled: {{ $tools.argoWorkflows.server.ingress.enabled }}
+                    ingressClassName: {{ $tools.argoWorkflows.server.ingress.className }}
+                    hosts:
+                      - workflows.system.{{ $dns.clusterDomain }}
+                    {{- if $tools.argoWorkflows.server.ingress.tls }}
+                    tls:
+                      - secretName: argo-workflows-server-tls
+                        hosts:
+                          - workflows.system.{{ $dns.clusterDomain }}
+                    {{- end }}
+                    {{- if $tools.argoWorkflows.server.ingress.annotations }}
+                    annotations:
+                      cert-manager.io/cluster-issuer: {{ $clusterIssuerName }}
+                      {{- range $key, $value := $tools.argoWorkflows.server.ingress.annotations }}
+                      {{ $key }}: "{{ $value }}"
+                      {{- end }}
+                    {{- else }}
+                    annotations:
+                      cert-manager.io/cluster-issuer: {{ $clusterIssuerName }}
+                    {{- end }}
+                  {{- end }}
+                {{- end }}
+          {{- end }}
+          
+          {{/* Traefik Installation */}}
+          {{- if and $traefikEnabled $tools.traefik $tools.traefik.enabled }}
+          ---
+          apiVersion: helm.crossplane.io/v1beta1
+          kind: Release
+          metadata:
+            name: {{ $clusterName }}-system-traefik
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: traefik-release
+            labels:
+              {{- range $key, $value := $commonLabels }}
+              {{ $key }}: "{{ $value }}"
+              {{- end }}
+              platform.kubecore.io/component: "traefik"
+          spec:
+            deletionPolicy: Delete
+            managementPolicies: ["*"]
+            providerConfigRef:
+              name: {{ $helmProvider }}
+            forProvider:
+              chart:
+                name: traefik
+                repository: {{ $tools.traefik.repository.url }}
+                version: "{{ $tools.traefik.version }}"
+              namespace: {{ $tools.traefik.namespace }}
+              values:
+                deployment:
+                  {{- if $tools.traefik.deployment.replicas }}
+                  replicas: {{ $tools.traefik.deployment.replicas }}
+                  {{- end }}
+                {{- if $tools.traefik.resources }}
+                resources:
+                  {{- if $tools.traefik.resources.requests }}
+                  requests:
+                    {{- range $key, $value := $tools.traefik.resources.requests }}
+                    {{ $key }}: "{{ $value }}"
+                    {{- end }}
+                  {{- end }}
+                  {{- if $tools.traefik.resources.limits }}
+                  limits:
+                    {{- range $key, $value := $tools.traefik.resources.limits }}
+                    {{ $key }}: "{{ $value }}"
+                    {{- end }}
+                  {{- end }}
+                {{- end }}
+                {{- if $tools.traefik.service }}
+                service:
+                  {{- if $tools.traefik.service.type }}
+                  type: {{ $tools.traefik.service.type }}
+                  {{- end }}
+                  {{- if $tools.traefik.service.annotations }}
+                  annotations:
+                    {{- range $key, $value := $tools.traefik.service.annotations }}
+                    {{ $key }}: "{{ $value }}"
+                    {{- end }}
+                  {{- end }}
+                {{- end }}
+                {{- if $tools.traefik.ingressClass }}
+                ingressClass:
+                  enabled: true
+                  isDefaultClass: {{ $tools.traefik.ingressClass.isDefaultClass }}
+                  name: {{ $tools.traefik.ingressClass.name }}
+                {{- end }}
+                providers:
+                  kubernetesIngress:
+                    publishedService:
+                      enabled: true
+                {{- if $nodeSelector }}
+                nodeSelector:
+                  {{- range $key, $value := $nodeSelector }}
+                  {{ $key }}: "{{ $value }}"
+                  {{- end }}
+                {{- end }}
+                {{- if $tolerations }}
+                tolerations:
+                  {{- range $toleration := $tolerations }}
+                  - key: "{{ $toleration.key }}"
+                    operator: "{{ $toleration.operator }}"
+                    {{- if $toleration.value }}
+                    value: "{{ $toleration.value }}"
+                    {{- end }}
+                    effect: "{{ $toleration.effect }}"
+                  {{- end }}
+                {{- end }}
+          {{- end }}
+
+          {{/* External Secrets Operator Installation */}}
+          {{- if and $externalSecretsEnabled $tools.externalSecrets $tools.externalSecrets.enabled }}
+          ---
+          apiVersion: helm.crossplane.io/v1beta1
+          kind: Release
+          metadata:
+            name: {{ $clusterName }}-system-external-secrets
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: external-secrets-release
+            labels:
+              {{- range $key, $value := $commonLabels }}
+              {{ $key }}: "{{ $value }}"
+              {{- end }}
+              platform.kubecore.io/component: "external-secrets"
+          spec:
+            deletionPolicy: Delete
+            managementPolicies: ["*"]
+            providerConfigRef:
+              name: {{ $helmProvider }}
+            forProvider:
+              chart:
+                name: external-secrets
+                repository: {{ $tools.externalSecrets.repository.url }}
+                version: "{{ $tools.externalSecrets.version }}"
+              namespace: {{ $tools.externalSecrets.namespace }}
+              values:
+                installCRDs: true
+                serviceAccount:
+                  create: false
+                  name: {{ $envConfig.organization.name }}-eso-sa
+                {{- if $tools.externalSecrets.resources }}
+                resources:
+                  {{- if $tools.externalSecrets.resources.requests }}
+                  requests:
+                    {{- range $key, $value := $tools.externalSecrets.resources.requests }}
+                    {{ $key }}: "{{ $value }}"
+                    {{- end }}
+                  {{- end }}
+                  {{- if $tools.externalSecrets.resources.limits }}
+                  limits:
+                    {{- range $key, $value := $tools.externalSecrets.resources.limits }}
+                    {{ $key }}: "{{ $value }}"
+                    {{- end }}
+                  {{- end }}
+                {{- end }}
+                serviceMonitor:
+                  enabled: {{ $runtime.monitoring.enabled | default false }}
+                {{- if $nodeSelector }}
+                nodeSelector:
+                  {{- range $key, $value := $nodeSelector }}
+                  {{ $key }}: "{{ $value }}"
+                  {{- end }}
+                {{- end }}
+                {{- if $tolerations }}
+                tolerations:
+                  {{- range $toleration := $tolerations }}
+                  - key: "{{ $toleration.key }}"
+                    operator: "{{ $toleration.operator }}"
+                    {{- if $toleration.value }}
+                    value: "{{ $toleration.value }}"
+                    {{- end }}
+                    effect: "{{ $toleration.effect }}"
+                  {{- end }}
+                {{- end }}
+                # Apply tolerations and nodeSelector to cert-controller
+                certController:
+                  {{- if $nodeSelector }}
+                  nodeSelector:
+                    {{- range $key, $value := $nodeSelector }}
+                    {{ $key }}: "{{ $value }}"
+                    {{- end }}
+                  {{- end }}
+                  {{- if $tolerations }}
+                  tolerations:
+                    {{- range $toleration := $tolerations }}
+                    - key: "{{ $toleration.key }}"
+                      operator: "{{ $toleration.operator }}"
+                      {{- if $toleration.value }}
+                      value: "{{ $toleration.value }}"
+                      {{- end }}
+                      effect: "{{ $toleration.effect }}"
+                    {{- end }}
+                  {{- end }}
+                # Apply tolerations and nodeSelector to webhook
+                webhook:
+                  {{- if $nodeSelector }}
+                  nodeSelector:
+                    {{- range $key, $value := $nodeSelector }}
+                    {{ $key }}: "{{ $value }}"
+                    {{- end }}
+                  {{- end }}
+                  {{- if $tolerations }}
+                  tolerations:
+                    {{- range $toleration := $tolerations }}
+                    - key: "{{ $toleration.key }}"
+                      operator: "{{ $toleration.operator }}"
+                      {{- if $toleration.value }}
+                      value: "{{ $toleration.value }}"
+                      {{- end }}
+                      effect: "{{ $toleration.effect }}"
+                    {{- end }}
+                  {{- end }}
+          {{- end }}
+
+          {{/* GitOps Promoter Installation */}}
+          {{- if and $gitopsPromoterEnabled $tools.gitopsPromoter $tools.gitopsPromoter.enabled }}
+          ---
+          apiVersion: helm.crossplane.io/v1beta1
+          kind: Release
+          metadata:
+            name: {{ $clusterName }}-system-gitops-promoter
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: gitops-promoter-release
+            labels:
+              {{- range $key, $value := $commonLabels }}
+              {{ $key }}: "{{ $value }}"
+              {{- end }}
+              platform.kubecore.io/component: "gitops-promoter"
+          spec:
+            deletionPolicy: Delete
+            managementPolicies: ["*"]
+            providerConfigRef:
+              name: {{ $helmProvider }}
+            forProvider:
+              chart:
+                name: gitops-promoter
+                repository: {{ $tools.gitopsPromoter.repository.url }}
+                version: "{{ $tools.gitopsPromoter.version }}"
+              namespace: {{ $tools.gitopsPromoter.namespace }}
+              values:
+                fullnameOverride: "gitops-promoter"  # Keeps service names under 63 chars
+                namespace:
+                  create: false  # Namespace is managed by Crossplane
+                controllerManager:
+                  {{- if $tools.gitopsPromoter.controllerManager.replicas }}
+                  replicaCount: {{ $tools.gitopsPromoter.controllerManager.replicas }}
+                  {{- end }}
+                  {{- if $tools.gitopsPromoter.controllerManager.resources }}
+                  resources:
+                    {{- if $tools.gitopsPromoter.controllerManager.resources.requests }}
+                    requests:
+                      {{- range $key, $value := $tools.gitopsPromoter.controllerManager.resources.requests }}
+                      {{ $key }}: "{{ $value }}"
+                      {{- end }}
+                    {{- end }}
+                    {{- if $tools.gitopsPromoter.controllerManager.resources.limits }}
+                    limits:
+                      {{- range $key, $value := $tools.gitopsPromoter.controllerManager.resources.limits }}
+                      {{ $key }}: "{{ $value }}"
+                      {{- end }}
+                    {{- end }}
+                  {{- end }}
+
+                kubeRbacProxy:
+                  {{- if $tools.gitopsPromoter.kubeRbacProxy.resources }}
+                  resources:
+                    {{- if $tools.gitopsPromoter.kubeRbacProxy.resources.requests }}
+                    requests:
+                      {{- range $key, $value := $tools.gitopsPromoter.kubeRbacProxy.resources.requests }}
+                      {{ $key }}: "{{ $value }}"
+                      {{- end }}
+                    {{- end }}
+                    {{- if $tools.gitopsPromoter.kubeRbacProxy.resources.limits }}
+                    limits:
+                      {{- range $key, $value := $tools.gitopsPromoter.kubeRbacProxy.resources.limits }}
+                      {{ $key }}: "{{ $value }}"
+                      {{- end }}
+                    {{- end }}
+                  {{- end }}
+
+                {{- if or $nodeSelector $tolerations }}
+                pod:
+                  {{- if $nodeSelector }}
+                  nodeSelector:
+                    {{- range $key, $value := $nodeSelector }}
+                    {{ $key }}: "{{ $value }}"
+                    {{- end }}
+                  {{- end }}
+                  {{- if $tolerations }}
+                  tolerations:
+                    {{- range $toleration := $tolerations }}
+                    - key: "{{ $toleration.key }}"
+                      operator: "{{ $toleration.operator }}"
+                      {{- if $toleration.value }}
+                      value: "{{ $toleration.value }}"
+                      {{- end }}
+                      effect: "{{ $toleration.effect }}"
+                    {{- end }}
+                  {{- end }}
+                {{- end }}
+
+                services:
+                  {{- if $tools.gitopsPromoter.services.metrics }}
+                  metrics:
+                    enabled: {{ $tools.gitopsPromoter.services.metrics.enabled }}
+                  {{- end }}
+                  {{- if $tools.gitopsPromoter.services.webhookReceiver }}
+                  webhookReceiver:
+                    enabled: {{ $tools.gitopsPromoter.services.webhookReceiver.enabled }}
+                  {{- end }}
+
+                {{- if and $tools.gitopsPromoter.ingress $tools.gitopsPromoter.ingress.enabled }}
+                ingress:
+                  enabled: {{ $tools.gitopsPromoter.ingress.enabled }}
+                  ingressClassName: {{ $tools.gitopsPromoter.ingress.ingressClassName }}
+                  hostname: {{ regexReplaceAll "\\{cluster-domain\\}" $tools.gitopsPromoter.ingress.hostname $dns.clusterDomain }}
+                  {{- if $tools.gitopsPromoter.ingress.tls }}
+                  tls:
+                    enabled: {{ $tools.gitopsPromoter.ingress.tls.enabled }}
+                    {{- if not $tools.gitopsPromoter.ingress.tls.secretName }}
+                    secretName: {{ regexReplaceAll "\\{cluster-domain\\}" $tools.gitopsPromoter.ingress.hostname $dns.clusterDomain }}
+                    {{- end }}
+                  {{- end }}
+                  {{- if $tools.gitopsPromoter.ingress.annotations }}
+                  annotations:
+                    cert-manager.io/cluster-issuer: {{ $clusterIssuerName }}
+                    {{- range $key, $value := $tools.gitopsPromoter.ingress.annotations }}
+                    {{- if ne $key "cert-manager.io/cluster-issuer" }}
+                    {{ $key }}: "{{ $value }}"
+                    {{- end }}
+                    {{- end }}
+                    {{- if and $externalDnsEnabled $tools.externalDns $tools.externalDns.enabled }}
+                    # ExternalDNS annotations
+                    external-dns.alpha.kubernetes.io/hostname: {{ regexReplaceAll "\\{cluster-domain\\}" $tools.gitopsPromoter.ingress.hostname $dns.clusterDomain }}
+                    external-dns.alpha.kubernetes.io/ttl: "300"
+                    {{- end }}
+                  {{- else }}
+                  annotations:
+                    cert-manager.io/cluster-issuer: {{ $clusterIssuerName }}
+                    {{- if and $externalDnsEnabled $tools.externalDns $tools.externalDns.enabled }}
+                    # ExternalDNS annotations
+                    external-dns.alpha.kubernetes.io/hostname: {{ regexReplaceAll "\\{cluster-domain\\}" $tools.gitopsPromoter.ingress.hostname $dns.clusterDomain }}
+                    external-dns.alpha.kubernetes.io/ttl: "300"
+                    {{- end }}
+                  {{- end }}
+                {{- end }}
+
+                controllerConfiguration:
+                  enabled: true
+                  {{- if $tools.gitopsPromoter.controllerConfiguration.argocdCommitStatusRequeueDuration }}
+                  argocdCommitStatusRequeueDuration: {{ $tools.gitopsPromoter.controllerConfiguration.argocdCommitStatusRequeueDuration | quote }}
+                  {{- end }}
+                  {{- if $tools.gitopsPromoter.controllerConfiguration.changeTransferPolicyRequeueDuration }}
+                  changeTransferPolicyRequeueDuration: {{ $tools.gitopsPromoter.controllerConfiguration.changeTransferPolicyRequeueDuration | quote }}
+                  {{- end }}
+                  {{- if $tools.gitopsPromoter.controllerConfiguration.promotionStrategyRequeueDuration }}
+                  promotionStrategyRequeueDuration: {{ $tools.gitopsPromoter.controllerConfiguration.promotionStrategyRequeueDuration | quote }}
+                  {{- end }}
+                  {{- if $tools.gitopsPromoter.controllerConfiguration.pullRequestRequeueDuration }}
+                  pullRequestRequeueDuration: {{ $tools.gitopsPromoter.controllerConfiguration.pullRequestRequeueDuration | quote }}
+                  {{- end }}
+                  {{- if $tools.gitopsPromoter.controllerConfiguration.pullRequest }}
+                  pullRequest:
+                    template:
+                      title: {{ $tools.gitopsPromoter.controllerConfiguration.pullRequest.template.title | quote }}
+                      {{- if $tools.gitopsPromoter.controllerConfiguration.pullRequest.template.description }}
+                      description: {{ $tools.gitopsPromoter.controllerConfiguration.pullRequest.template.description | quote }}
+                      {{- end }}
+                  {{- end }}
+
+                gitFetchDaemon:
+                  enabled: true
+                  secret:
+                    name: "gitops-promoter-github-token"
+                    tokenKey: "token"
+                  image:
+                    repository: alpine/git
+                    tag: "v2.49.1" 
+                    pullPolicy: IfNotPresent
+
+                crds:
+                  install: true
+                  keep: true
+          {{- end }}
+
+          {{/* =================================================================== */}}
+          {{/* AWS IAM RESOURCES FOR ESO */}}
+          {{/* =================================================================== */}}
+
+          {{/* Cluster-specific ESO IAM Role with OIDC trust policy */}}
+          {{- if and $externalSecretsEnabled $tools.externalSecrets $tools.externalSecrets.enabled $oidcIssuerUrl }}
+          ---
+          apiVersion: iam.aws.upbound.io/v1beta1
+          kind: Role
+          metadata:
+            name: {{ $clusterName }}-eso-role
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: cluster-eso-role
+            labels:
+              {{- range $key, $value := $commonLabels }}
+              {{ $key }}: "{{ $value }}"
+              {{- end }}
+              platform.kubecore.io/resource-type: iam-role
+              platform.kubecore.io/role-type: eso-irsa
+          spec:
+            deletionPolicy: Delete
+            managementPolicies: ["*"]
+            providerConfigRef:
+              name: {{ $awsProvider }}
+            forProvider:
+              description: "External Secrets Operator IRSA role for {{ $clusterName }}"
+              # Trust policy for cluster-specific OIDC provider
+              assumeRolePolicy: |
+                {
+                  "Version": "2012-10-17",
+                  "Statement": [
+                    {
+                      "Effect": "Allow",
+                      "Principal": {
+                        "Federated": "{{ $oidcProviderArn }}"
+                      },
+                      "Action": "sts:AssumeRoleWithWebIdentity",
+                      "Condition": {
+                        "StringEquals": {
+                          "{{ regexReplaceAll "^https://" $oidcIssuerUrl "" }}:aud": "sts.amazonaws.com"
+                        },
+                        "StringLike": {
+                          "{{ regexReplaceAll "^https://" $oidcIssuerUrl "" }}:sub": "system:serviceaccount:*:{{ $envConfig.organization.name }}-eso-sa"
+                        }
+                      }
+                    }
+                  ]
+                }
+              tags:
+                Name: "{{ $clusterName }}-eso-role"
+                Cluster: "{{ $clusterName }}"
+                Purpose: "ESO IRSA Role"
+                Organization: "{{ $envConfig.organization.name }}"
+          {{- end }}
+
+          {{/* Attach AWS Secrets Manager policy to cluster ESO role */}}
+          {{- if and $externalSecretsEnabled $tools.externalSecrets $tools.externalSecrets.enabled $oidcIssuerUrl }}
+          ---
+          apiVersion: iam.aws.upbound.io/v1beta1
+          kind: RolePolicyAttachment
+          metadata:
+            name: {{ $clusterName }}-eso-secrets-attachment
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: cluster-eso-secrets-attachment
+            labels:
+              {{- range $key, $value := $commonLabels }}
+              {{ $key }}: "{{ $value }}"
+              {{- end }}
+          spec:
+            deletionPolicy: Delete
+            managementPolicies: ["*"]
+            providerConfigRef:
+              name: {{ $awsProvider }}
+            forProvider:
+              policyArn: "arn:aws:iam::aws:policy/SecretsManagerReadWrite"
+              roleRef:
+                name: {{ $clusterName }}-eso-role
+          {{- end }}
+
+          {{/* Attach ECR power user policy to cluster ESO role for ECRAuthorizationToken generators */}}
+          {{- if and $externalSecretsEnabled $tools.externalSecrets $tools.externalSecrets.enabled $oidcIssuerUrl }}
+          ---
+          apiVersion: iam.aws.upbound.io/v1beta1
+          kind: RolePolicyAttachment
+          metadata:
+            name: {{ $clusterName }}-eso-ecr-attachment
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: cluster-eso-ecr-attachment
+            labels:
+              {{- range $key, $value := $commonLabels }}
+              {{ $key }}: "{{ $value }}"
+              {{- end }}
+          spec:
+            deletionPolicy: Delete
+            managementPolicies: ["*"]
+            providerConfigRef:
+              name: {{ $awsProvider }}
+            forProvider:
+              policyArn: "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryPowerUser"
+              roleRef:
+                name: {{ $clusterName }}-eso-role
+          {{- end }}
+
+          {{/* =================================================================== */}}
+          {{/* ECR CREDENTIAL ACCESS IAM ROLE (SEPARATE FROM ESO ROLE) */}}
+          {{/* =================================================================== */}}
+          {{/* This role is specifically for app-level ECR credential access */}}
+          {{/* Apps create per-namespace ServiceAccounts that assume this role */}}
+
+          {{/* ECR Credentials IAM Role with OIDC trust policy */}}
+          {{- if and $externalSecretsEnabled $tools.externalSecrets $tools.externalSecrets.enabled $oidcIssuerUrl }}
+          ---
+          apiVersion: iam.aws.upbound.io/v1beta1
+          kind: Role
+          metadata:
+            name: {{ $clusterName }}-ecr-credentials-role
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: ecr-credentials-role
+            labels:
+              {{- range $key, $value := $commonLabels }}
+              {{ $key }}: {{ $value | quote }}
+              {{- end }}
+              platform.kubecore.io/cluster: {{ $clusterName }}
+              platform.kubecore.io/resource-type: iam-role
+              platform.kubecore.io/role-type: ecr-credentials
+          spec:
+            deletionPolicy: Delete
+            providerConfigRef:
+              name: {{ $awsProvider }}
+            forProvider:
+              description: "ECR credentials access role for {{ $clusterName }} - allows app-level ECR credential generation"
+              assumeRolePolicy: |
+                {
+                  "Version": "2012-10-17",
+                  "Statement": [
+                    {
+                      "Effect": "Allow",
+                      "Principal": {
+                        "Federated": "{{ $oidcProviderArn }}"
+                      },
+                      "Action": "sts:AssumeRoleWithWebIdentity",
+                      "Condition": {
+                        "StringEquals": {
+                          "{{ regexReplaceAll "^https://" $oidcIssuerUrl "" }}:aud": "sts.amazonaws.com"
+                        },
+                        "StringLike": {
+                          "{{ regexReplaceAll "^https://" $oidcIssuerUrl "" }}:sub": "system:serviceaccount:*:{{ $envConfig.organization.name }}-eso-sa"
+                        }
+                      }
+                    }
+                  ]
+                }
+              tags:
+                Name: {{ $clusterName }}-ecr-credentials-role
+                Cluster: {{ $clusterName }}
+                ManagedBy: crossplane
+                Purpose: ecr-credentials
+                Organization: {{ $envConfig.organization.name }}
+          {{- end }}
+
+          {{/* Attach ECR policy to ECR Credentials role */}}
+          {{- if and $externalSecretsEnabled $tools.externalSecrets $tools.externalSecrets.enabled $oidcIssuerUrl }}
+          ---
+          apiVersion: iam.aws.upbound.io/v1beta1
+          kind: RolePolicyAttachment
+          metadata:
+            name: {{ $name }}-ecr-credentials-ecr-policy
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: ecr-credentials-ecr-policy-attachment
+            labels:
+              {{- range $key, $value := $commonLabels }}
+              {{ $key }}: {{ $value | quote }}
+              {{- end }}
+              platform.kubecore.io/cluster: {{ $clusterName }}
+              platform.kubecore.io/resource-type: policy-attachment
+          spec:
+            deletionPolicy: Delete
+            providerConfigRef:
+              name: {{ $awsProvider }}
+            forProvider:
+              policyArnSelector:
+                matchLabels:
+                  platform.kubecore.io/organization: {{ $envConfig.organization.name }}
+                  platform.kubecore.io/policy-type: ecr
+              roleRef:
+                name: {{ $clusterName }}-ecr-credentials-role
+          {{- end }}
+
+          {{/* =================================================================== */}}
+          {{/* KUBERNETES RESOURCES FOR ESO */}}
+          {{/* =================================================================== */}}
+
+          {{/* ESO Service Account with IRSA */}}
+          {{- if and $externalSecretsEnabled $tools.externalSecrets $tools.externalSecrets.enabled $oidcIssuerUrl }}
+          ---
+          apiVersion: kubernetes.crossplane.io/v1alpha2
+          kind: Object
+          metadata:
+            name: {{ $name }}-eso-service-account
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: eso-service-account
+            labels:
+              {{- range $key, $value := $commonLabels }}
+              {{ $key }}: "{{ $value }}"
+              {{- end }}
+          spec:
+            deletionPolicy: Delete
+            managementPolicies: ["*"]
+            providerConfigRef:
+              name: {{ $kubernetesProvider }}
+            forProvider:
+              manifest:
+                apiVersion: v1
+                kind: ServiceAccount
+                metadata:
+                  name: {{ $envConfig.organization.name }}-eso-sa
+                  namespace: {{ $tools.externalSecrets.namespace }}
+                  annotations:
+                    eks.amazonaws.com/role-arn: {{ printf "arn:aws:iam::%s:role/%s-eso-role" $envConfig.aws.accountId $clusterName }}
+                  labels:
+                    {{- range $key, $value := $commonLabels }}
+                    {{ $key }}: "{{ $value }}"
+                    {{- end }}
+          {{- end }}
+
+          {{/* ClusterSecretStore for AWS Secrets Manager */}}
+          {{- if and $externalSecretsEnabled $tools.externalSecrets $tools.externalSecrets.enabled $oidcIssuerUrl }}
+          ---
+          apiVersion: kubernetes.crossplane.io/v1alpha2
+          kind: Object
+          metadata:
+            name: {{ $name }}-cluster-secret-store
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: cluster-secret-store
+            labels:
+              {{- range $key, $value := $commonLabels }}
+              {{ $key }}: "{{ $value }}"
+              {{- end }}
+          spec:
+            deletionPolicy: Delete
+            managementPolicies: ["*"]
+            providerConfigRef:
+              name: {{ $kubernetesProvider }}
+            forProvider:
+              manifest:
+                apiVersion: external-secrets.io/v1
+                kind: ClusterSecretStore
+                metadata:
+                  name: {{ $envConfig.organization.name }}-infrastructure-secrets
+                  labels:
+                    {{- range $key, $value := $commonLabels }}
+                    {{ $key }}: "{{ $value }}"
+                    {{- end }}
+                spec:
+                  provider:
+                    aws:
+                      auth:
+                        jwt:
+                          serviceAccountRef:
+                            name: {{ $envConfig.organization.name }}-eso-sa
+                            namespace: {{ $tools.externalSecrets.namespace }}
+                      region: {{ $envConfig.aws.primaryRegion }}
+                      service: SecretsManager
+          {{- end }}
+
+          {{/* ECR Authorization Token Generators */}}
+          {{- if and $externalSecretsEnabled $tools.externalSecrets $tools.externalSecrets.enabled $oidcIssuerUrl }}
+          {{- range $region := $envConfig.aws.regions }}
+          ---
+          apiVersion: kubernetes.crossplane.io/v1alpha2
+          kind: Object
+          metadata:
+            name: {{ $name }}-ecr-gen-{{ $region }}
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: ecr-gen-{{ $region }}
+            labels:
+              {{- range $key, $value := $commonLabels }}
+              {{ $key }}: "{{ $value }}"
+              {{- end }}
+          spec:
+            deletionPolicy: Delete
+            managementPolicies: ["*"]
+            providerConfigRef:
+              name: {{ $kubernetesProvider }}
+            forProvider:
+              manifest:
+                apiVersion: generators.external-secrets.io/v1alpha1
+                kind: ECRAuthorizationToken
+                metadata:
+                  name: {{ $envConfig.organization.name }}-ecr-gen-{{ $region }}
+                  namespace: {{ $tools.externalSecrets.namespace }}
+                  labels:
+                    {{- range $key, $value := $commonLabels }}
+                    {{ $key }}: "{{ $value }}"
+                    {{- end }}
+                spec:
+                  region: {{ $region }}
+                  auth:
+                    jwt:
+                      serviceAccountRef:
+                        name: {{ $envConfig.organization.name }}-eso-sa
+                        namespace: {{ $tools.externalSecrets.namespace }}
+          {{- end }}
+          {{- end }}
+
+          {{/* =================================================================== */}}
+          {{/* EXTERNAL DNS IAM & DEPLOYMENT */}}
+          {{/* =================================================================== */}}
+
+          {{- if and $externalDnsEnabled $tools.externalDns $tools.externalDns.enabled $oidcIssuerUrl }}
+          {{/* Extract DNS configuration */}}
+          {{- $defaultDomain := $dns.baseDomain | default $dns.clusterDomain -}}
+          {{- $hostedZoneId := $dns.hostedZoneId | default "" -}}
+
+          {{- if and (ne $hostedZoneId "") (ne $defaultDomain "") }}
+          ---
+          # ExternalDNS IRSA IAM Role
+          apiVersion: iam.aws.upbound.io/v1beta1
+          kind: Role
+          metadata:
+            name: {{ $clusterName }}-external-dns-irsa-role
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: external-dns-irsa-role
+            labels:
+              {{- range $key, $value := $commonLabels }}
+              {{ $key }}: "{{ $value }}"
+              {{- end }}
+              platform.kubecore.io/part-of: "dns"
+              platform.kubecore.io/component: "external-dns"
+          spec:
+            deletionPolicy: Delete
+            managementPolicies: ["*"]
+            providerConfigRef:
+              name: {{ $awsProvider }}
+            forProvider:
+              description: "ExternalDNS IRSA role for {{ $clusterName }}"
+              assumeRolePolicy: |
+                {
+                  "Version": "2012-10-17",
+                  "Statement": [
+                    {
+                      "Effect": "Allow",
+                      "Principal": {
+                        "Federated": "{{ $oidcProviderArn }}"
+                      },
+                      "Action": "sts:AssumeRoleWithWebIdentity",
+                      "Condition": {
+                        "StringEquals": {
+                          "{{ $oidcIssuerUrl }}:sub": "system:serviceaccount:{{ $tools.externalDns.namespace | default "external-dns" }}:external-dns",
+                          "{{ $oidcIssuerUrl }}:aud": "sts.amazonaws.com"
+                        }
+                      }
+                    }
+                  ]
+                }
+              tags:
+                Name: {{ $clusterName }}-external-dns-irsa-role
+                Purpose: "ExternalDNS IRSA Role"
+                KubeSystem: {{ $clusterName }}
+
+          ---
+          # Attach ExternalDNS Policy to IRSA Role
+          apiVersion: iam.aws.upbound.io/v1beta1
+          kind: RolePolicyAttachment
+          metadata:
+            name: {{ $clusterName }}-external-dns-irsa-policy-attachment
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: external-dns-irsa-policy-attachment
+            labels:
+              {{- range $key, $value := $commonLabels }}
+              {{ $key }}: "{{ $value }}"
+              {{- end }}
+              platform.kubecore.io/part-of: "dns"
+              platform.kubecore.io/component: "external-dns"
+          spec:
+            deletionPolicy: Delete
+            managementPolicies: ["*"]
+            providerConfigRef:
+              name: {{ $awsProvider }}
+            forProvider:
+              roleRef:
+                name: {{ $clusterName }}-external-dns-irsa-role
+              policyArnSelector:
+                matchLabels:
+                  platform.kubecore.io/awsnetwork: {{ $network.awsnetworkRef.name }}
+                  platform.kubecore.io/role: "external-dns"
+
+          ---
+          # ExternalDNS Helm Release
+          apiVersion: helm.crossplane.io/v1beta1
+          kind: Release
+          metadata:
+            name: {{ $clusterName }}-external-dns
+            annotations:
+              crossplane.io/external-name: external-dns
+              gotemplating.fn.crossplane.io/composition-resource-name: external-dns-release
+            labels:
+              {{- range $key, $value := $commonLabels }}
+              {{ $key }}: "{{ $value }}"
+              {{- end }}
+              platform.kubecore.io/component: "external-dns"
+          spec:
+            deletionPolicy: Delete
+            managementPolicies: ["*"]
+            rollbackLimit: 3
+            providerConfigRef:
+              name: {{ $helmProvider }}
+            forProvider:
+              chart:
+                name: external-dns
+                repository: {{ $tools.externalDns.repository.url }}
+                version: {{ $tools.externalDns.version | default "1.18.0" | quote }}
+              namespace: {{ $tools.externalDns.namespace | default "external-dns" }}
+              wait: true
+              skipCRDs: false
+              values:
+                # Provider configuration
+                provider:
+                  name: aws
+                  aws:
+                    region: {{ $region }}
+                    zoneType: public
+
+                # Domain filtering to match hosted zone
+                domainFilters:
+                  - {{ $defaultDomain }}
+
+                # Policy and registry settings
+                policy: {{ $tools.externalDns.policy | default "sync" }}
+                registry: {{ $tools.externalDns.registry | default "txt" }}
+                txtOwnerId: {{ $clusterName }}
+                txtPrefix: {{ $tools.externalDns.txtPrefix | default "external-dns-" }}
+
+                # Sources to watch
+                sources: {{ $tools.externalDns.sources | default (list "service" "ingress" "crd") | toJson }}
+
+                # Traefik CRD support
+                crd:
+                  create: false
+                  apiversion: traefik.io/v1alpha1
+                  kind: IngressRoute
+
+                # Interval and logging
+                interval: {{ $tools.externalDns.interval | default "1m" }}
+                logLevel: {{ $tools.externalDns.logLevel | default "info" }}
+                logFormat: {{ $tools.externalDns.logFormat | default "text" }}
+
+                # IRSA configuration for ExternalDNS
+                serviceAccount:
+                  create: true
+                  name: external-dns
+                  annotations:
+                    eks.amazonaws.com/role-arn: "arn:aws:iam::{{ $accountId }}:role/{{ $clusterName }}-external-dns-irsa-role"
+
+                # Resource configuration
+                {{- if $tools.externalDns.resources }}
+                resources:
+                  {{- if $tools.externalDns.resources.limits }}
+                  limits:
+                    cpu: {{ $tools.externalDns.resources.limits.cpu | default "250m" }}
+                    memory: {{ $tools.externalDns.resources.limits.memory | default "256Mi" }}
+                  {{- end }}
+                  {{- if $tools.externalDns.resources.requests }}
+                  requests:
+                    cpu: {{ $tools.externalDns.resources.requests.cpu | default "100m" }}
+                    memory: {{ $tools.externalDns.resources.requests.memory | default "128Mi" }}
+                  {{- end }}
+                {{- else }}
+                resources:
+                  limits:
+                    cpu: 250m
+                    memory: 256Mi
+                  requests:
+                    cpu: 100m
+                    memory: 128Mi
+                {{- end }}
+
+                # Node scheduling
+                {{- if $nodeSelector }}
+                nodeSelector:
+                {{- range $key, $value := $nodeSelector }}
+                  {{ $key }}: {{ $value | quote }}
+                {{- end }}
+                {{- end }}
+
+                {{- if $tolerations }}
+                tolerations:
+                {{- range $tolerations }}
+                - key: {{ .key | quote }}
+                  {{- if .value }}
+                  value: {{ .value | quote }}
+                  {{- end }}
+                  operator: {{ .operator | default "Equal" }}
+                  effect: {{ .effect }}
+                {{- end }}
+                {{- end }}
+
+                # Security context
+                securityContext:
+                  runAsNonRoot: true
+                  runAsUser: 65534
+                  fsGroup: 65534
+
+                # Monitoring integration
+                {{- if and $tools.externalDns.metrics $tools.externalDns.metrics.enabled }}
+                serviceMonitor:
+                  enabled: true
+                  additionalLabels:
+                    app.kubernetes.io/name: external-dns
+                {{- end }}
+          {{- else }}
+          # WARNING: ExternalDNS not created - missing Hosted Zone ID or domain
+          # Ensure the XAwsNetwork has created Route53 hosted zone and the zone ID is in EnvironmentConfig
+          {{- end }}
+          {{- end }}
+
+          {{/* =================================================================== */}}
+          {{/* STATUS EXTRACTION - Extract IAM role ARNs from observed resources */}}
+          {{/* =================================================================== */}}
+
+          {{- $ecrRoleArn := "" -}}
+
+          {{/* Iterate through observed resources to extract ECR role ARN */}}
+          {{- range $resourceName, $resource := .observed.resources -}}
+            {{- if $resource.resource -}}
+              {{/* Extract ECR Role ARN */}}
+              {{- if eq $resourceName "ecr-credentials-role" -}}
+                {{- if eq $resource.resource.kind "Role" -}}
+                  {{- if $resource.resource.status.atProvider.arn -}}
+                    {{- $ecrRoleArn = $resource.resource.status.atProvider.arn -}}
+                  {{- end -}}
+                {{- end -}}
+              {{- end -}}
+            {{- end -}}
+          {{- end -}}
+
+          {{/* =================================================================== */}}
+          {{/* STATUS PROPAGATION - Populate status fields */}}
+          {{/* Pattern from XAWSProvider composition - uses observed composite resource */}}
+          {{/* =================================================================== */}}
+
+          ---
+          apiVersion: {{ .observed.composite.resource.apiVersion }}
+          kind: {{ .observed.composite.resource.kind }}
+          metadata:
+            name: {{ .observed.composite.resource.metadata.name }}
+          status:
+            {{- if $ecrRoleArn }}
+            iamRoles:
+              ecrRoleArn: {{ $ecrRoleArn | quote }}
+            {{- end }}
+            tools:
+              {{- if and $argoCdEnabled $tools.argocd $tools.argocd.enabled }}
+              {{- if $tools.argocd.server.ingress.enabled }}
+              argocd:
+                url: argocd.system.{{ $dns.clusterDomain }}
+              {{- end }}
+              {{- end }}
+              {{- if and $argoWorkflowsEnabled $tools.argoWorkflows $tools.argoWorkflows.enabled }}
+              {{- if and $tools.argoWorkflows.server.enabled $tools.argoWorkflows.server.ingress.enabled }}
+              argoWorkflows:
+                url: workflows.system.{{ $dns.clusterDomain }}
+              {{- end }}
+              {{- end }}
+              {{- if and $gitopsPromoterEnabled $tools.gitopsPromoter $tools.gitopsPromoter.enabled }}
+              {{- if and $tools.gitopsPromoter.ingress $tools.gitopsPromoter.ingress.enabled }}
+              gitopsPromoter:
+                url: {{ regexReplaceAll "\\{cluster-domain\\}" $tools.gitopsPromoter.ingress.hostname $dns.clusterDomain }}
+                {{- if $hasGithub }}
+                githubSecretName: {{ $clusterName }}-gitops-promoter-github-secret
+                clusterScmProviderName: {{ $envConfig.organization.name }}-github-scm-provider
+                {{- end }}
+              {{- end }}
+              {{- end }}
+
+  # Step 4: Sequence resources for proper installation order
+  - step: sequence-resources
+    functionRef:
+      name: function-sequencer
+    input:
+      apiVersion: sequencer.fn.crossplane.io/v1beta1
+      kind: Input
+      spec:
+        rules:
+        # Namespaces must be created first
+        - sequence:
+          - crossplane-namespace
+          - cert-manager-namespace
+          - argocd-namespace
+          - argo-rollouts-namespace
+          - argo-workflows-namespace
+          - traefik-namespace
+          - external-secrets-namespace
+          - gitops-promoter-namespace
+          - external-dns-namespace
+        # cert-manager must be installed before other tools that depend on certificates
+        - sequence:
+          - cert-manager-release
+        # ClusterIssuer must be created after cert-manager is ready
+        - sequence:
+          - cert-manager-release
+          - cluster-issuer
+        # Then Crossplane and other core tools
+        - sequence:
+          - crossplane-release
+        # ESO needs to be installed before its configuration resources
+        - sequence:
+          - external-secrets-namespace
+          - external-secrets-release
+        # Cluster ESO IAM role must be created first
+        - sequence:
+          - external-secrets-release
+          - cluster-eso-role
+        # Policy attachments after role creation
+        - sequence:
+          - cluster-eso-role
+          - cluster-eso-secrets-attachment
+          - cluster-eso-ecr-attachment
+        # ESO service account after IAM role and all policies are ready
+        - sequence:
+          - cluster-eso-secrets-attachment
+          - cluster-eso-ecr-attachment
+          - eso-service-account
+        # ClusterSecretStore after service account
+        - sequence:
+          - eso-service-account
+          - cluster-secret-store
+        # ECR generators after ClusterSecretStore (dynamically referenced in template)
+        - sequence:
+          - cluster-secret-store
+          - ecr-gen-eu-central-1
+        # ExternalDNS namespace must be created first
+        - sequence:
+          - external-dns-namespace
+        # ExternalDNS IAM policy must be created
+        - sequence:
+          - external-dns-namespace
+          - external-dns-policy
+        # ExternalDNS IRSA role after policy
+        - sequence:
+          - external-dns-policy
+          - external-dns-irsa-role
+        # Policy attachment after both role and policy
+        - sequence:
+          - external-dns-irsa-role
+          - external-dns-policy
+          - external-dns-irsa-policy-attachment
+        # ExternalDNS release after IAM setup
+        - sequence:
+          - external-dns-irsa-policy-attachment
+          - external-dns-release
+        # GitOps Promoter namespace must be created first
+        - sequence:
+          - gitops-promoter-namespace
+          - gitops-promoter-release
+        # GitOps Promoter GitHub ExternalSecret after GitOps Promoter release and ClusterSecretStore
+        - sequence:
+          - gitops-promoter-release
+          - cluster-secret-store
+          - gitops-promoter-github-externalsecret
+        # Private key ExternalSecret must create secret before GithubAccessToken generator can use it
+        - sequence:
+          - gitops-promoter-github-externalsecret
+          - gitops-promoter-github-token-generator
+        # Token ExternalSecret needs the generator to be ready
+        - sequence:
+          - gitops-promoter-github-token-generator
+          - gitops-promoter-github-token-externalsecret
+        # ClusterScmProvider after GitOps Promoter GitHub ExternalSecret
+        - sequence:
+          - gitops-promoter-github-externalsecret
+          - cluster-scm-provider
+        # ArgoCD GitHub ExternalSecret after ArgoCD release and ClusterSecretStore
+        - sequence:
+          - argocd-release
+          - cluster-secret-store
+          - argocd-github-externalsecret
+        # Finally application tools
+        - sequence:
+          - argocd-release
+          - argo-rollouts-release
+          - argo-workflows-release
+          - traefik-release
+
+  # Step 5: Auto-ready function for status management
+  - step: auto-ready
+    functionRef:
+      name: function-auto-ready
+    input:
+      apiVersion: autoready.fn.crossplane.io/v1beta1
+      kind: Input
+      spec:
+        policy: All  # Wait for all Helm releases to be ready before marking XKubeSystem as ready
+{{- end }}

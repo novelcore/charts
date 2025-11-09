@@ -239,3 +239,22 @@ crossplaneXRDs:
   # - XQualityGateInstance: Quality gate instances
   # - XQualityGateTemplate: Quality gate templates
   enabled: true
+
+# [CROSSPLANE COMPOSITIONS]: Crossplane Compositions configuration
+crossplaneCompositions:
+  # Enable installation of Crossplane Compositions
+  # Set to false if Compositions are already installed in your cluster
+  # Compositions implement the infrastructure provisioning logic for XRDs:
+  # - awsprovider: AWS infrastructure and IAM setup
+  # - githubprovider: GitHub provider integration
+  # - awsnetwork: VPC and networking infrastructure
+  # - eks: EKS cluster provisioning
+  # - kubesystem: Platform system installations
+  # - githubproject: GitHub repositories and teams
+  # - kubenv: Kubernetes namespaces and quotas
+  # - githubapp: Application repository management
+  # - k8sapp: Application deployments
+  # - kubeapptemplate: Application templates
+  # - qualitygate-template: Quality gate templates
+  # - qualitygate-instance: Quality gate instances
+  enabled: true

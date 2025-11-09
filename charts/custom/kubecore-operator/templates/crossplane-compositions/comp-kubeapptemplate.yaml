@@ -1,0 +1,214 @@
+{{- if .Values.crossplaneCompositions.enabled }}
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: kubeapptemplates
+  labels:
+    platform.kubecore.io/type: kubeapptemplate
+    provider: semantic
+    service: app-templates
+    version: v2
+spec:
+  writeConnectionSecretsToNamespace: crossplane-system
+  compositeTypeRef:
+    apiVersion: platform.kubecore.io/v1alpha1
+    kind: XKubeAppTemplate
+  mode: Pipeline
+  pipeline:
+
+  # Step 1: Validate and process template specification
+  - step: validate-and-process-template
+    functionRef:
+      name: function-go-templating
+    input:
+      apiVersion: gotemplating.fn.crossplane.io/v1beta1
+      kind: GoTemplate
+      source: Inline
+      inline:
+        template: |
+          {{- $xr := .observed.composite.resource -}}
+          {{- $name := $xr.metadata.name -}}
+          {{- $spec := $xr.spec -}}
+
+          {{/* Validation logic */}}
+          {{- $errors := list -}}
+
+          {{/* Validate required fields */}}
+          {{- if not $spec.type -}}
+            {{- $errors = append $errors "spec.type is required" -}}
+          {{- end -}}
+
+          {{- if not $spec.language -}}
+            {{- $errors = append $errors "spec.language is required" -}}
+          {{- end -}}
+
+          {{- if not $spec.description -}}
+            {{- $errors = append $errors "spec.description is required" -}}
+          {{- end -}}
+
+          {{- if not $spec.source -}}
+            {{- $errors = append $errors "spec.source is required" -}}
+          {{- else -}}
+            {{- if not $spec.source.owner -}}
+              {{- $errors = append $errors "spec.source.owner is required" -}}
+            {{- end -}}
+            {{- if not $spec.source.repository -}}
+              {{- $errors = append $errors "spec.source.repository is required" -}}
+            {{- end -}}
+          {{- end -}}
+
+          {{- if not $spec.structure -}}
+            {{- $errors = append $errors "spec.structure is required" -}}
+          {{- else -}}
+            {{- if not $spec.structure.components -}}
+              {{- $errors = append $errors "spec.structure.components is required" -}}
+            {{- else -}}
+              {{- range $i, $component := $spec.structure.components -}}
+                {{- if not $component.type -}}
+                  {{- $errors = append $errors (printf "spec.structure.components[%d].type is required" $i) -}}
+                {{- end -}}
+                {{/* Validate component type */}}
+                {{- $validTypes := list "deployment" "service" "ingress" "configmap" "secret" "pvc" -}}
+                {{- if $component.type -}}
+                  {{- if not (has $component.type $validTypes) -}}
+                    {{- $errors = append $errors (printf "spec.structure.components[%d].type must be one of: %s" $i (join ", " $validTypes)) -}}
+                  {{- end -}}
+                {{- end -}}
+                {{/* Validate ports are integers */}}
+                {{- if $component.ports -}}
+                  {{- range $j, $port := $component.ports -}}
+                    {{- if or (lt $port 1) (gt $port 65535) -}}
+                      {{- $errors = append $errors (printf "spec.structure.components[%d].ports[%d] must be between 1 and 65535" $i $j) -}}
+                    {{- end -}}
+                  {{- end -}}
+                {{- end -}}
+                {{/* Validate expose ports are subset of ports */}}
+                {{- if and $component.expose $component.ports -}}
+                  {{- range $expose := $component.expose -}}
+                    {{- if not (has $expose $component.ports) -}}
+                      {{- $errors = append $errors (printf "spec.structure.components[%d].expose contains port %d which is not in ports array" $i $expose) -}}
+                    {{- end -}}
+                  {{- end -}}
+                {{- end -}}
+              {{- end -}}
+            {{- end -}}
+          {{- end -}}
+
+          {{- if not $spec.profiles -}}
+            {{- $errors = append $errors "spec.profiles is required" -}}
+          {{- else -}}
+            {{/* Validate at least one profile exists */}}
+            {{- $profileCount := 0 -}}
+            {{- if $spec.profiles.small -}}{{- $profileCount = add $profileCount 1 -}}{{- end -}}
+            {{- if $spec.profiles.medium -}}{{- $profileCount = add $profileCount 1 -}}{{- end -}}
+            {{- if $spec.profiles.large -}}{{- $profileCount = add $profileCount 1 -}}{{- end -}}
+            {{- if eq $profileCount 0 -}}
+              {{- $errors = append $errors "At least one profile (small, medium, large) must be defined" -}}
+            {{- end -}}
+          {{- end -}}
+
+          {{- if not $spec.environmentSchema -}}
+            {{- $errors = append $errors "spec.environmentSchema is required" -}}
+          {{- end -}}
+
+          {{/* Calculate metrics */}}
+          {{- $componentCount := 0 -}}
+          {{- $componentTypes := list -}}
+          {{- $totalPorts := 0 -}}
+          {{- $exposedPorts := 0 -}}
+
+          {{- if $spec.structure -}}
+            {{- if $spec.structure.components -}}
+              {{- $componentCount = len $spec.structure.components -}}
+              {{- range $component := $spec.structure.components -}}
+                {{- if $component.type -}}
+                  {{- if not (has $component.type $componentTypes) -}}
+                    {{- $componentTypes = append $componentTypes $component.type -}}
+                  {{- end -}}
+                {{- end -}}
+                {{- if $component.ports -}}
+                  {{- $totalPorts = add $totalPorts (len $component.ports) -}}
+                {{- end -}}
+                {{- if $component.expose -}}
+                  {{- $exposedPorts = add $exposedPorts (len $component.expose) -}}
+                {{- end -}}
+              {{- end -}}
+            {{- end -}}
+          {{- end -}}
+
+          {{- $profileCount := 0 -}}
+          {{- $availableProfiles := list -}}
+          {{- if $spec.profiles -}}
+            {{- if $spec.profiles.small -}}
+              {{- $profileCount = add $profileCount 1 -}}
+              {{- $availableProfiles = append $availableProfiles "small" -}}
+            {{- end -}}
+            {{- if $spec.profiles.medium -}}
+              {{- $profileCount = add $profileCount 1 -}}
+              {{- $availableProfiles = append $availableProfiles "medium" -}}
+            {{- end -}}
+            {{- if $spec.profiles.large -}}
+              {{- $profileCount = add $profileCount 1 -}}
+              {{- $availableProfiles = append $availableProfiles "large" -}}
+            {{- end -}}
+          {{- end -}}
+
+          {{/* Generate template ID */}}
+          {{- $templateId := printf "%s-%s-%s" $spec.type $spec.language $name -}}
+
+          {{/* Compute full repository name */}}
+          {{- $fullRepositoryName := "" -}}
+          {{- if and $spec.source $spec.source.owner $spec.source.repository -}}
+            {{- $fullRepositoryName = printf "%s/%s" $spec.source.owner $spec.source.repository -}}
+          {{- end -}}
+
+          apiVersion: platform.kubecore.io/v1alpha1
+          kind: XKubeAppTemplate
+          metadata:
+            name: {{ $name }}
+          status:
+            templateId: {{ $templateId }}
+            {{- if $fullRepositoryName }}
+            fullRepositoryName: {{ $fullRepositoryName }}
+            {{- end }}
+            validated: {{ if $errors }}false{{ else }}true{{ end }}
+            {{- if $errors }}
+            validationErrors:
+            {{- range $error := $errors }}
+            - {{ $error | quote }}
+            {{- end }}
+            {{- end }}
+            lastValidated: {{ now | date "2006-01-02T15:04:05Z" }}
+            resourceProfiles:
+              profileCount: {{ $profileCount }}
+              availableProfiles:
+              {{- range $profile := $availableProfiles }}
+              - {{ $profile }}
+              {{- end }}
+            components:
+              componentCount: {{ $componentCount }}
+              componentTypes:
+              {{- range $type := $componentTypes }}
+              - {{ $type }}
+              {{- end }}
+              totalPorts: {{ $totalPorts }}
+              exposedPorts: {{ $exposedPorts }}
+
+  # Step 2: Auto-ready function to check resource readiness
+  - step: detect-readiness
+    functionRef:
+      name: function-auto-ready
+
+  # Step 3: Sequencer function (minimal since no actual resources are created)
+  - step: sequence-resources
+    functionRef:
+      name: function-sequencer
+    input:
+      apiVersion: sequencer.fn.crossplane.io/v1beta1
+      kind: Input
+      config:
+        respectDeletionOrder: true
+        finalizerStrategy:
+          mode: Strict
+      rules: []
+{{- end }}

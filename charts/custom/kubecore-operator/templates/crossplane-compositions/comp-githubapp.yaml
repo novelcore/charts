@@ -1,0 +1,1409 @@
+{{- if .Values.crossplaneCompositions.enabled }}
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: githubapps-v2.github.platform.kubecore.io
+  labels:
+    provider: github
+    service: app-repositories
+    version: v2
+    implementation: v2-migration
+    fix-version: "status-reporting-fix-v2"
+spec:
+  writeConnectionSecretsToNamespace: crossplane-system
+  compositeTypeRef:
+    apiVersion: github.platform.kubecore.io/v1alpha1
+    kind: XGitHubApp
+  mode: Pipeline
+  pipeline:
+
+  # Step 1: Load EnvironmentConfig - 1:1 mapping with XGitHubApp name
+  - step: load-environment-configs
+    functionRef:
+      name: function-environment-configs
+    input:
+      apiVersion: environmentconfigs.fn.crossplane.io/v1beta1
+      kind: Input
+      spec:
+        environmentConfigs:
+        - type: Selector
+          selector:
+            matchLabels:
+            # PRIMARY: Select by app name (must match XGitHubApp name)
+            - key: github.platform.kubecore.io/app-name
+              type: FromCompositeFieldPath
+              valueFromFieldPath: metadata.name
+            # SECONDARY: Ensure it's a GitHub app config type
+            - key: platform.kubecore.io/type
+              type: Value
+              value: githubapp-config
+
+  # Step 2: Generate GitHub resources with Go Templates - ONLY EnvironmentConfig + spec
+  - step: generate-github-resources
+    functionRef:
+      name: function-go-templating
+    input:
+      apiVersion: gotemplating.fn.crossplane.io/v1beta1
+      kind: GoTemplate
+      source: Inline
+      inline:
+        template: |
+          {{- $xr := .observed.composite.resource -}}
+          {{- $name := $xr.metadata.name -}}
+          {{- $spec := $xr.spec -}}
+
+          {{/* Extract configuration from environment config - SINGLE SOURCE OF TRUTH */}}
+          {{- $envConfig := index .context "apiextensions.crossplane.io/environment" -}}
+          {{- if not $envConfig -}}
+            {{- fail "Environment configuration not found - EnvironmentConfig name must match XGitHubApp name" -}}
+          {{- end -}}
+
+          {{/* Extract all configuration from EnvironmentConfig */}}
+          {{- $githubProviderConfigName := $envConfig.githubProviderConfigName -}}
+          {{- if not $githubProviderConfigName -}}
+            {{- fail "githubProviderConfigName is required in EnvironmentConfig" -}}
+          {{- end -}}
+
+          {{- $project := $envConfig.project -}}
+          {{- if not $project -}}
+            {{- fail "project configuration is required in EnvironmentConfig" -}}
+          {{- end -}}
+
+          {{- $repositorySource := $envConfig.repositorySource -}}
+          {{- if not $repositorySource -}}
+            {{- fail "repositorySource is required in EnvironmentConfig" -}}
+          {{- end -}}
+
+          {{- $registry := $envConfig.registry -}}
+          {{- $github := $envConfig.github -}}
+          {{- $networking := $envConfig.networking -}}
+          {{- $webhooks := $envConfig.webhooks -}}
+
+          {{/* App configuration from spec and environment */}}
+          {{- $description := $envConfig.description | default "GitHub app created by Crossplane" -}}
+          {{- $visibility := $spec.visibility | default "private" -}}
+          {{- $branchStrategy := $spec.branchStrategy -}}
+
+          {{/* Repository name from spec or default to XR name */}}
+          {{- $repositoryName := $spec.repositoryName | default $name -}}
+          {{- $baseName := printf "%s-%s" $project.name $repositoryName -}}
+
+
+          ---
+          # Repository - Main application repository
+          apiVersion: repo.github.upbound.io/v1alpha1
+          kind: Repository
+          metadata:
+            name: {{ $baseName }}-repository
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: repository
+              crossplane.io/external-name: {{ if eq $repositorySource.type "existing" }}{{ $repositorySource.existing.repository }}{{ else }}{{ $baseName }}{{ end }}
+            labels:
+              kubecore.eu/kubeapp: {{ $repositoryName }}
+              kubecore.eu/kubeproject: {{ $project.name }}
+              kubecore.eu/part-of: "schema"
+              testing.upbound.io/example-name: {{ $baseName }}
+              kubecore.eu/deletion-order: "40"
+          spec:
+            {{ if eq $repositorySource.type "existing" }}
+            managementPolicies: ["Observe"]
+            {{ else }}
+            managementPolicies: ["*"]
+            {{ end }}
+            providerConfigRef:
+              name: {{ $githubProviderConfigName }}
+            deletionPolicy: Delete
+            forProvider:
+              {{ if eq $repositorySource.type "existing" }}
+              name: {{ $repositorySource.existing.repository }}
+              {{ else }}
+              name: {{ $baseName }}
+              {{ if and $repositorySource.template }}
+              template:
+              - owner: {{ $repositorySource.template.owner }}
+                repository: {{ $repositorySource.template.repository }}
+                includeAllBranches: {{ $repositorySource.template.includeAllBranches | default false }}
+              {{ end }}
+              {{ end }}
+              description: {{ $description | quote }}
+              visibility: {{ $visibility }}
+              allowMergeCommit: true
+              allowRebaseMerge: true
+              allowSquashMerge: true
+              hasIssues: true
+              hasProjects: true
+              mergeCommitMessage: "PR_TITLE"
+              mergeCommitTitle: "MERGE_MESSAGE"
+              squashMergeCommitMessage: "COMMIT_MESSAGES"
+              squashMergeCommitTitle: "COMMIT_OR_PR_TITLE"
+              securityAndAnalysis:
+              - secretScanning:
+                - status: "disabled"
+                secretScanningPushProtection:
+                - status: "disabled"
+
+          ---
+          # Team Repository Binding - Main Team (pull permission)
+          apiVersion: team.github.upbound.io/v1alpha1
+          kind: TeamRepository
+          metadata:
+            name: {{ $baseName }}-team-repository-main
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: team-repository-main
+            labels:
+              kubecore.eu/kubeapp: {{ $repositoryName }}
+              kubecore.eu/kubeproject: {{ $project.name }}
+              kubecore.eu/part-of: "schema"
+              testing.upbound.io/example-name: {{ $baseName }}
+              kubecore.eu/deletion-order: "30"
+          spec:
+            providerConfigRef:
+              name: {{ $githubProviderConfigName }}
+            deletionPolicy: Delete
+            forProvider:
+              permission: pull
+              {{ if eq $repositorySource.type "existing" }}
+              repository: {{ $repositorySource.existing.repository }}
+              {{ else }}
+              repository: {{ $baseName }}
+              {{ end }}
+              teamIdSelector:
+                matchLabels:
+                  {{ range $key, $value := $project.teams.main.labels }}
+                  {{ $key }}: {{ $value }}
+                  {{ end }}
+
+          ---
+          # Team Repository Binding - Ops Team (admin permission)
+          apiVersion: team.github.upbound.io/v1alpha1
+          kind: TeamRepository
+          metadata:
+            name: {{ $baseName }}-team-repository-ops
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: team-repository-ops
+            labels:
+              kubecore.eu/kubeapp: {{ $repositoryName }}
+              kubecore.eu/kubeproject: {{ $project.name }}
+              kubecore.eu/part-of: "schema"
+              testing.upbound.io/example-name: {{ printf "%s-ops-repo" $baseName }}
+              kubecore.eu/deletion-order: "30"
+          spec:
+            providerConfigRef:
+              name: {{ $githubProviderConfigName }}
+            deletionPolicy: Delete
+            forProvider:
+              permission: admin
+              {{ if eq $repositorySource.type "existing" }}
+              repository: {{ $repositorySource.existing.repository }}
+              {{ else }}
+              repository: {{ $baseName }}
+              {{ end }}
+              teamIdSelector:
+                matchLabels:
+                  {{ range $key, $value := $project.teams.ops.labels }}
+                  {{ $key }}: {{ $value }}
+                  {{ end }}
+
+          ---
+          # Team Repository Binding - Software Team (maintain permission)
+          apiVersion: team.github.upbound.io/v1alpha1
+          kind: TeamRepository
+          metadata:
+            name: {{ $baseName }}-team-repository-software
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: team-repository-software
+            labels:
+              kubecore.eu/kubeapp: {{ $repositoryName }}
+              kubecore.eu/kubeproject: {{ $project.name }}
+              kubecore.eu/part-of: "schema"
+              testing.upbound.io/example-name: {{ printf "%s-software-repo" $baseName }}
+              kubecore.eu/deletion-order: "30"
+          spec:
+            providerConfigRef:
+              name: {{ $githubProviderConfigName }}
+            deletionPolicy: Delete
+            forProvider:
+              permission: maintain
+              {{ if eq $repositorySource.type "existing" }}
+              repository: {{ $repositorySource.existing.repository }}
+              {{ else }}
+              repository: {{ $baseName }}
+              {{ end }}
+              teamIdSelector:
+                matchLabels:
+                  {{ range $key, $value := $project.teams.software.labels }}
+                  {{ $key }}: {{ $value }}
+                  {{ end }}
+
+          ---
+          # Team Repository Binding - Business Team (triage permission)
+          apiVersion: team.github.upbound.io/v1alpha1
+          kind: TeamRepository
+          metadata:
+            name: {{ $baseName }}-team-repository-business
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: team-repository-business
+            labels:
+              kubecore.eu/kubeapp: {{ $repositoryName }}
+              kubecore.eu/kubeproject: {{ $project.name }}
+              kubecore.eu/part-of: "schema"
+              testing.upbound.io/example-name: {{ printf "%s-business-repo" $baseName }}
+              kubecore.eu/deletion-order: "30"
+          spec:
+            providerConfigRef:
+              name: {{ $githubProviderConfigName }}
+            deletionPolicy: Delete
+            forProvider:
+              permission: triage
+              {{ if eq $repositorySource.type "existing" }}
+              repository: {{ $repositorySource.existing.repository }}
+              {{ else }}
+              repository: {{ $baseName }}
+              {{ end }}
+              teamIdSelector:
+                matchLabels:
+                  {{ range $key, $value := $project.teams.business.labels }}
+                  {{ $key }}: {{ $value }}
+                  {{ end }}
+
+          {{/* Branch Strategy Implementation */}}
+          {{ if and $branchStrategy $branchStrategy.enabled }}
+          {{ if eq $branchStrategy.type "gitFlow" }}
+          ---
+          # GitFlow Dev Branch Creation
+          apiVersion: repo.github.upbound.io/v1alpha1
+          kind: Branch
+          metadata:
+            name: {{ $baseName }}-branch-dev
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: branch-dev
+              crossplane.io/external-name: {{ if eq $repositorySource.type "existing" }}{{ $repositorySource.existing.repository }}{{ else }}{{ $baseName }}{{ end }}:dev
+              meta.upbound.io/example-id: repo/v1alpha1/branch
+            labels:
+              kubecore.eu/kubeapp: {{ $repositoryName }}
+              kubecore.eu/kubeproject: {{ $project.name }}
+              kubecore.eu/part-of: "schema"
+              kubecore.eu/branch-strategy: "gitFlow"
+              kubecore.eu/deletion-order: "10"
+              testing.upbound.io/example-name: {{ $baseName }}-branch-dev
+          spec:
+            providerConfigRef:
+              name: {{ $githubProviderConfigName }}
+            deletionPolicy: Delete
+            forProvider:
+              branch: dev
+              {{ if eq $repositorySource.type "existing" }}
+              repository: {{ $repositorySource.existing.repository }}
+              {{ else }}
+              repository: {{ $baseName }}
+              {{ end }}
+              sourceBranch: main
+
+          ---
+          # GitFlow Dev Branch Protection Rules
+          apiVersion: repo.github.upbound.io/v1alpha1
+          kind: BranchProtection
+          metadata:
+            name: {{ $baseName }}-branch-protection-dev
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: branch-protection-dev
+            labels:
+              kubecore.eu/kubeapp: {{ $repositoryName }}
+              kubecore.eu/kubeproject: {{ $project.name }}
+              kubecore.eu/part-of: "schema"
+              kubecore.eu/branch-strategy: "gitFlow"
+              kubecore.eu/deletion-order: "5"
+          spec:
+            providerConfigRef:
+              name: {{ $githubProviderConfigName }}
+            deletionPolicy: Delete
+            forProvider:
+              # Protect the dev branch
+              pattern: dev
+              repositoryIdSelector:
+                matchLabels:
+                  testing.upbound.io/example-name: {{ $baseName }}
+
+              # Enforce protection rules for administrators
+              enforceAdmins: true
+
+              # Prevent force pushes and deletions
+              allowsForcePushes: false
+              allowsDeletions: false
+
+              # Require pull request reviews
+              requiredPullRequestReviews:
+              - dismissStaleReviews: true
+                requireCodeOwnerReviews: false
+                requiredApprovingReviewCount: 1
+                restrictDismissals: false
+
+              # Require all conversations to be resolved before merging
+              requireConversationResolution: true
+
+              # Required status checks including deployment validation
+              requiredStatusChecks:
+              - strict: true # Require branches to be up to date before merging
+                contexts:
+                # Standard CI checks for GitFlow
+                - "gate-check"
+                - "validate-pr"
+                - "build-scan-push"
+                - "deploy-preview"
+                - "preview-deployment-validation"
+          {{ end }}
+          {{ end }}
+
+          ---
+          # Action Variables - Registry
+          apiVersion: actions.github.upbound.io/v1alpha1
+          kind: ActionsVariable
+          metadata:
+            name: {{ printf "%s-registry" $baseName }}
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: action-var-registry
+            labels:
+              kubecore.eu/kubeapp: {{ $repositoryName }}
+              kubecore.eu/kubeproject: {{ $project.name }}
+              kubecore.eu/part-of: "ci-cd"
+              kubecore.eu/deletion-order: "10"
+          spec:
+            forProvider:
+              {{ if eq $repositorySource.type "existing" }}
+              repository: {{ $repositorySource.existing.repository }}
+              {{ else }}
+              repository: {{ $baseName }}
+              {{ end }}
+              variableName: KUBECORE_REGISTRY
+              value: {{ $registry.url | default ($registry.registryHost | default "novelcore.azurecr.io") }}
+            providerConfigRef:
+              name: {{ $githubProviderConfigName }}
+
+          ---
+          # Action Variables - Runners
+          apiVersion: actions.github.upbound.io/v1alpha1
+          kind: ActionsVariable
+          metadata:
+            name: {{ printf "%s-runners" $baseName }}
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: action-var-runners
+              crossplane.io/external-name: "{{ if eq $repositorySource.type "existing" }}{{ $repositorySource.existing.repository }}{{ else }}{{ $baseName }}{{ end }}:KUBECORE_RUNNERS"
+            labels:
+              kubecore.eu/kubeapp: {{ $repositoryName }}
+              kubecore.eu/kubeproject: {{ $project.name }}
+              kubecore.eu/part-of: "ci-cd"
+              kubecore.eu/deletion-order: "10"
+          spec:
+            forProvider:
+              {{ if eq $repositorySource.type "existing" }}
+              repository: {{ $repositorySource.existing.repository }}
+              {{ else }}
+              repository: {{ $baseName }}
+              {{ end }}
+              variableName: KUBECORE_RUNNERS
+              value: {{ $github.actions.default | default "[\"ubuntu-latest\"]" | quote }}
+            providerConfigRef:
+              name: {{ $githubProviderConfigName }}
+
+          ---
+          # Action Variables - Runners ARM
+          apiVersion: actions.github.upbound.io/v1alpha1
+          kind: ActionsVariable
+          metadata:
+            name: {{ printf "%s-runners-arm" $baseName }}
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: action-var-runners-arm
+              crossplane.io/external-name: "{{ if eq $repositorySource.type "existing" }}{{ $repositorySource.existing.repository }}{{ else }}{{ $baseName }}{{ end }}:KUBECORE_RUNNERS_ARM"
+            labels:
+              kubecore.eu/kubeapp: {{ $repositoryName }}
+              kubecore.eu/kubeproject: {{ $project.name }}
+              kubecore.eu/part-of: "ci-cd"
+              kubecore.eu/deletion-order: "10"
+          spec:
+            forProvider:
+              {{ if eq $repositorySource.type "existing" }}
+              repository: {{ $repositorySource.existing.repository }}
+              {{ else }}
+              repository: {{ $baseName }}
+              {{ end }}
+              variableName: KUBECORE_RUNNERS_ARM
+              value: {{ $github.actions.arm64 | default "[\"ubuntu-latest\"]" | quote }}
+            providerConfigRef:
+              name: {{ $githubProviderConfigName }}
+
+          ---
+          # Action Variables - Kubeproject Repo
+          apiVersion: actions.github.upbound.io/v1alpha1
+          kind: ActionsVariable
+          metadata:
+            name: {{ printf "%s-kubeproject-repo" $baseName }}
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: action-var-kubeproject-repo
+            labels:
+              kubecore.eu/kubeapp: {{ $repositoryName }}
+              kubecore.eu/kubeproject: {{ $project.name }}
+              kubecore.eu/part-of: "ci-cd"
+              kubecore.eu/deletion-order: "10"
+          spec:
+            forProvider:
+              {{ if eq $repositorySource.type "existing" }}
+              repository: {{ $repositorySource.existing.repository }}
+              {{ else }}
+              repository: {{ $baseName }}
+              {{ end }}
+              variableName: KUBECORE_KUBEPROJECT_REPO
+              value: {{ $project.name }}
+            providerConfigRef:
+              name: {{ $githubProviderConfigName }}
+
+          ---
+          # Action Variables - Kubeproject
+          apiVersion: actions.github.upbound.io/v1alpha1
+          kind: ActionsVariable
+          metadata:
+            name: {{ printf "%s-kubeproject" $baseName }}
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: action-var-kubeproject
+            labels:
+              kubecore.eu/kubeapp: {{ $repositoryName }}
+              kubecore.eu/kubeproject: {{ $project.name }}
+              kubecore.eu/part-of: "ci-cd"
+              kubecore.eu/deletion-order: "10"
+          spec:
+            forProvider:
+              {{ if eq $repositorySource.type "existing" }}
+              repository: {{ $repositorySource.existing.repository }}
+              {{ else }}
+              repository: {{ $baseName }}
+              {{ end }}
+              variableName: KUBECORE_KUBEPROJECT
+              value: {{ $project.name }}
+            providerConfigRef:
+              name: {{ $githubProviderConfigName }}
+
+          {{ if and $branchStrategy $branchStrategy.enabled }}
+          ---
+          # Action Variables - Kubeapp SDLC
+          apiVersion: actions.github.upbound.io/v1alpha1
+          kind: ActionsVariable
+          metadata:
+            name: {{ printf "%s-kubeapp-sdlc" $baseName }}
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: action-var-kubeapp-sdlc
+            labels:
+              kubecore.eu/kubeapp: {{ $repositoryName }}
+              kubecore.eu/kubeproject: {{ $project.name }}
+              kubecore.eu/part-of: "ci-cd"
+              kubecore.eu/deletion-order: "10"
+          spec:
+            forProvider:
+              {{ if eq $repositorySource.type "existing" }}
+              repository: {{ $repositorySource.existing.repository }}
+              {{ else }}
+              repository: {{ $baseName }}
+              {{ end }}
+              variableName: KUBECORE_KUBEAPP_SDLC
+              value: {{ $branchStrategy.type }}
+            providerConfigRef:
+              name: {{ $githubProviderConfigName }}
+          {{ end }}
+
+          ---
+          # Action Variables - Kubeproject Domain
+          apiVersion: actions.github.upbound.io/v1alpha1
+          kind: ActionsVariable
+          metadata:
+            name: {{ printf "%s-kubeproject-domain" $baseName }}
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: action-var-kubeproject-domain
+            labels:
+              kubecore.eu/kubeapp: {{ $repositoryName }}
+              kubecore.eu/kubeproject: {{ $project.name }}
+              kubecore.eu/part-of: "ci-cd"
+              kubecore.eu/deletion-order: "10"
+          spec:
+            forProvider:
+              {{ if eq $repositorySource.type "existing" }}
+              repository: {{ $repositorySource.existing.repository }}
+              {{ else }}
+              repository: {{ $baseName }}
+              {{ end }}
+              variableName: KUBECORE_KUBEPROJECT_DOMAIN
+              value: {{ $networking.defaultDomain | default "platform.kubecore.eu" }}
+            providerConfigRef:
+              name: {{ $githubProviderConfigName }}
+
+          # NOTE: Registry credentials (KUBECORE_REGISTRY_UNAME and KUBECORE_REGISTRY_PWD)
+          # are now handled by the k8sapp composition using PushSecret resources
+          # that sync ECR credentials from External Secrets Operator.
+          # The old ActionsSecret resources have been removed to prevent conflicts.
+
+          ---
+          # Action Secrets - GitHub App ID
+          apiVersion: actions.github.upbound.io/v1alpha1
+          kind: ActionsSecret
+          metadata:
+            name: {{ printf "%s-github-app-id" $baseName }}
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: action-secret-github-app-id
+            labels:
+              kubecore.eu/kubeapp: {{ $repositoryName }}
+              kubecore.eu/kubeproject: {{ $project.name }}
+              kubecore.eu/part-of: "ci-cd"
+              kubecore.eu/deletion-order: "10"
+          spec:
+            forProvider:
+              {{ if eq $repositorySource.type "existing" }}
+              repository: {{ $repositorySource.existing.repository }}
+              {{ else }}
+              repository: {{ $baseName }}
+              {{ end }}
+              secretName: KUBECORE_APP_ID
+              plaintextValueSecretRef:
+                name: {{ $github.credentialsSecretRef.name | default "github-app-repo-creds" }}
+                namespace: {{ $github.credentialsSecretRef.namespace | default "argocd" }}
+                key: {{ $github.credentialsSecretRef.appIdKey | default "appID" }}
+            providerConfigRef:
+              name: {{ $githubProviderConfigName }}
+
+          ---
+          # Action Secrets - GitHub App Private Key
+          apiVersion: actions.github.upbound.io/v1alpha1
+          kind: ActionsSecret
+          metadata:
+            name: {{ printf "%s-github-app-private-key" $baseName }}
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: action-secret-github-app-private-key
+            labels:
+              kubecore.eu/kubeapp: {{ $repositoryName }}
+              kubecore.eu/kubeproject: {{ $project.name }}
+              kubecore.eu/part-of: "ci-cd"
+              kubecore.eu/deletion-order: "10"
+          spec:
+            forProvider:
+              {{ if eq $repositorySource.type "existing" }}
+              repository: {{ $repositorySource.existing.repository }}
+              {{ else }}
+              repository: {{ $baseName }}
+              {{ end }}
+              secretName: KUBECORE_APP_PKEY
+              plaintextValueSecretRef:
+                name: {{ $github.credentialsSecretRef.name | default "github-app-repo-creds" }}
+                namespace: {{ $github.credentialsSecretRef.namespace | default "argocd" }}
+                key: {{ $github.credentialsSecretRef.privateKeyKey | default "privateKey" }}
+            providerConfigRef:
+              name: {{ $githubProviderConfigName }}
+
+          {{/* Webhook logic: get from EnvironmentConfig */}}
+          {{ $webhooksEnabled := true }}
+          {{ if hasKey $spec "webhooks" }}
+            {{ if hasKey $spec.webhooks "enabled" }}
+              {{ $webhooksEnabled = $spec.webhooks.enabled }}
+            {{ end }}
+          {{ end }}
+          {{ $webhookItems := list }}
+          {{ if $webhooks }}
+            {{ $webhookItems = $webhooks.items }}
+          {{ end }}
+          {{ if $spec.webhooks }}
+            {{ if $spec.webhooks.items }}
+              {{ $webhookItems = $spec.webhooks.items }}
+            {{ end }}
+          {{ end }}
+          {{ if and $webhooksEnabled $webhookItems }}
+          {{ range $webhook := $webhookItems }}
+          ---
+          apiVersion: repo.github.upbound.io/v1alpha1
+          kind: RepositoryWebhook
+          metadata:
+            name: {{ printf "%s-%s" $baseName $webhook.name }}
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: repository-webhook-{{ printf "%s-%s" $baseName $webhook.name }}
+            labels:
+              kubecore.eu/kubeapp: {{ $repositoryName }}
+              kubecore.eu/kubeproject: {{ $project.name }}
+              kubecore.eu/part-of: "schema"
+              kubecore.eu/deletion-order: "35"
+          spec:
+            providerConfigRef:
+              name: {{ $githubProviderConfigName }}
+            forProvider:
+              repositoryRef:
+                name: {{ printf "%s-repository" $baseName }}
+              events: {{ $webhook.events | toJson }}
+              active: {{ $webhook.active | default true }}
+              configuration:
+                - contentType: {{ $webhook.configuration.contentType | default "json" }}
+                  insecureSsl: {{ $webhook.configuration.insecureSsl | default false }}
+                  urlSecretRef:
+                    name: {{ $webhook.configuration.urlSecretRef.name }}
+                    namespace: {{ $webhook.configuration.urlSecretRef.namespace }}
+                    key: {{ $webhook.configuration.urlSecretRef.key }}
+                  {{ if $webhook.configuration.secretSecretRef }}
+                  secretSecretRef:
+                    name: {{ $webhook.configuration.secretSecretRef.name }}
+                    namespace: {{ $webhook.configuration.secretSecretRef.namespace }}
+                    key: {{ $webhook.configuration.secretSecretRef.key }}
+                  {{ end }}
+          {{ end }}
+          {{ end }}
+
+  # Step 3: Observe ArgoCD Applications Before Creating PromotionStrategy
+  - step: observe-argocd-applications
+    functionRef:
+      name: function-go-templating
+    input:
+      apiVersion: gotemplating.fn.crossplane.io/v1beta1
+      kind: GoTemplate
+      source: Inline
+      inline:
+        template: |
+          {{- $xr := .observed.composite.resource -}}
+          {{- $name := $xr.metadata.name -}}
+          {{- $spec := $xr.spec -}}
+
+          {{/* Extract configuration from environment config */}}
+          {{- $envConfig := index .context "apiextensions.crossplane.io/environment" -}}
+          {{- if not $envConfig -}}
+            {{- fail "Environment configuration not found - EnvironmentConfig name must match XGitHubApp name" -}}
+          {{- end -}}
+
+          {{- $project := $envConfig.project -}}
+          {{- $k8sapp := $envConfig.k8sapp -}}
+          {{- $org := $envConfig.organization.name -}}
+          {{- if not $org -}}
+            {{- fail "Organization name is required for ArgoCD application observers. Ensure organization config is properly set in EnvironmentConfig." -}}
+          {{- end -}}
+
+          {{/* App configuration */}}
+          {{- $appName := $k8sapp.appName | default $name -}}
+          {{- $projectName := $project.name -}}
+          {{- $resourceName := printf "%s-%s" $projectName $appName -}}
+
+          {{/* Check promoter feature flag from EnvironmentConfig */}}
+          {{- $promoterEnabled := false -}}
+          {{- if $envConfig.sdlc -}}
+            {{- if $envConfig.sdlc.promotions -}}
+              {{- $promoterEnabled = $envConfig.sdlc.promotions.enabled | default false -}}
+            {{- end -}}
+          {{- end -}}
+
+          {{/* Extract KubePool configurations */}}
+          {{- $kubePools := list -}}
+          {{- if $envConfig.kubePools -}}
+            {{- $kubePools = $envConfig.kubePools -}}
+          {{- end -}}
+
+          {{- if and $promoterEnabled (gt (len $kubePools) 0) }}
+          {{/* Find first enabled environment to observe */}}
+          {{- $firstEnv := "" -}}
+          {{- range $env := $k8sapp.environments }}
+            {{- if and $env.enabled (not $firstEnv) }}
+              {{- $firstEnv = $env.name -}}
+            {{- end }}
+          {{- end }}
+
+          {{- if $firstEnv }}
+          {{/* Create one observer per KubePool */}}
+          {{- range $kubePool := $kubePools }}
+          ---
+          # ArgoCD Application Observer for KubePool: {{ $kubePool.name }}
+          # This observer ensures ArgoCD Applications exist before creating PromotionStrategy
+          # It observes the first environment's Application as a proxy for "ApplicationSet has processed overlays"
+          apiVersion: kubernetes.crossplane.io/v1alpha2
+          kind: Object
+          metadata:
+            name: {{ $name }}-observe-argocd-app-{{ $kubePool.name }}
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: observe-argocd-app-{{ $kubePool.name }}
+              kubecore.eu/app: {{ $resourceName }}
+              kubecore.eu/project: {{ $projectName }}
+              kubecore.eu/observed-environment: {{ $firstEnv }}
+              kubecore.eu/observed-application: {{ $resourceName }}-{{ $firstEnv }}
+            labels:
+              platform.kubecore.io/organization: {{ $org }}
+              platform.kubecore.io/project: {{ $projectName }}
+              platform.kubecore.io/kubepool: {{ $kubePool.name }}
+              platform.kubecore.io/resource-type: argocd-application-observer
+          spec:
+            deletionPolicy: Delete
+            managementPolicies: ["Observe"]  # Read-only: don't create, just observe
+            providerConfigRef:
+              name: {{ $kubePool.kubernetesProviderConfig }}
+            forProvider:
+              manifest:
+                apiVersion: argoproj.io/v1alpha1
+                kind: Application
+                metadata:
+                  name: {{ $resourceName }}-{{ $firstEnv }}
+                  namespace: argocd
+            # Wait for hydrator to complete successfully before becoming Ready
+            readiness:
+              policy: DeriveFromCelQuery
+              celQuery: 'object.status.sourceHydrator.currentOperation.phase == "Hydrated"'
+          {{- end }}
+          {{- end }}
+          {{- end }}
+
+  # Step 4: Create PromotionStrategy Resources for GitOps Promoter
+  - step: create-promotion-strategies
+    functionRef:
+      name: function-go-templating
+    input:
+      apiVersion: gotemplating.fn.crossplane.io/v1beta1
+      kind: GoTemplate
+      source: Inline
+      inline:
+        template: |
+          {{- $xr := .observed.composite.resource -}}
+          {{- $name := $xr.metadata.name -}}
+          {{- $spec := $xr.spec -}}
+
+          {{/* Extract configuration from environment config */}}
+          {{- $envConfig := index .context "apiextensions.crossplane.io/environment" -}}
+          {{- if not $envConfig -}}
+            {{- fail "Environment configuration not found - EnvironmentConfig name must match XGitHubApp name" -}}
+          {{- end -}}
+
+          {{- $project := $envConfig.project -}}
+          {{- $k8sapp := $envConfig.k8sapp -}}
+          {{- $org := $envConfig.organization.name -}}
+          {{- if not $org -}}
+            {{- fail "Organization name is required for promotion strategies. Ensure organization config is properly set in EnvironmentConfig." -}}
+          {{- end -}}
+
+          {{/* App configuration */}}
+          {{- $appName := $k8sapp.appName | default $name -}}
+          {{- $projectName := $project.name -}}
+          {{- $resourceName := printf "%s-%s" $projectName $appName -}}
+
+          {{/* Check promoter feature flag from EnvironmentConfig */}}
+          {{- $promoterEnabled := false -}}
+          {{- if $envConfig.sdlc -}}
+            {{- if $envConfig.sdlc.promotions -}}
+              {{- $promoterEnabled = $envConfig.sdlc.promotions.enabled | default false -}}
+            {{- end -}}
+          {{- end -}}
+
+          {{/* Extract KubePool configurations */}}
+          {{- $kubePools := list -}}
+          {{- if $envConfig.kubePools -}}
+            {{- $kubePools = $envConfig.kubePools -}}
+          {{- end -}}
+
+          {{/* Check if observer Objects are Ready before creating PromotionStrategy */}}
+          {{/* This ensures ArgoCD Applications exist and hydrator has run successfully */}}
+          {{- $observersReady := true -}}
+          {{- if and $promoterEnabled (gt (len $kubePools) 0) -}}
+            {{- range $key, $resource := .observed.resources -}}
+              {{- if $resource.resource -}}
+                {{- $compName := index $resource.resource.metadata.annotations "gotemplating.fn.crossplane.io/composition-resource-name" | default "" -}}
+                {{- if hasPrefix "observe-argocd-app-" $compName -}}
+                  {{- $isReady := false -}}
+                  {{- range $resource.resource.status.conditions -}}
+                    {{- if and (eq .type "Ready") (eq .status "True") -}}
+                      {{- $isReady = true -}}
+                    {{- end -}}
+                  {{- end -}}
+                  {{- if not $isReady -}}
+                    {{- $observersReady = false -}}
+                  {{- end -}}
+                {{- end -}}
+              {{- end -}}
+            {{- end -}}
+          {{- end -}}
+
+          {{- if and $promoterEnabled (gt (len $kubePools) 0) $observersReady }}
+          {{/* Create one PromotionStrategy per KubePool */}}
+          {{- range $kubePool := $kubePools }}
+          ---
+          # PromotionStrategy for KubePool: {{ $kubePool.name }}
+          apiVersion: kubernetes.crossplane.io/v1alpha2
+          kind: Object
+          metadata:
+            name: {{ $name }}-promotion-strategy-{{ $kubePool.name }}
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: promotion-strategy-{{ $kubePool.name }}
+              kubecore.eu/app: {{ $resourceName }}
+              kubecore.eu/project: {{ $projectName }}
+            labels:
+              platform.kubecore.io/organization: {{ $org }}
+              platform.kubecore.io/project: {{ $projectName }}
+              platform.kubecore.io/kubepool: {{ $kubePool.name }}
+              platform.kubecore.io/resource-type: promotion-strategy
+          spec:
+            deletionPolicy: Delete
+            managementPolicies: ["*"]
+            providerConfigRef:
+              name: {{ $kubePool.kubernetesProviderConfig }}
+            forProvider:
+              manifest:
+                apiVersion: promoter.argoproj.io/v1alpha1
+                kind: PromotionStrategy
+                metadata:
+                  name: {{ $resourceName }}
+                  namespace: gitops-promoter
+                  labels:
+                    project.kubecore.io/kubeproject: {{ $projectName }}
+                    project.kubecore.io/kubeapp: {{ $resourceName }}
+                    project.kubecore.io/managed-by: crossplane
+                spec:
+                  gitRepositoryRef:
+                    name: {{ $projectName }}
+                  activeCommitStatuses:
+                    - key: argocd-app-health
+                  environments:
+                    {{- range $env := $k8sapp.environments }}
+                    {{- if $env.enabled }}
+                    - branch: kubeapp/{{ $resourceName }}/kubenv/{{ $env.name }}
+                      autoMerge: {{ $env.autoMerge | default true }}
+                    {{- end }}
+                    {{- end }}
+          {{- end }}
+          {{- end }}
+
+  # Step 5: Create ArgoCDCommitStatus Resources for GitOps Promoter
+  - step: create-argocd-commit-statuses
+    functionRef:
+      name: function-go-templating
+    input:
+      apiVersion: gotemplating.fn.crossplane.io/v1beta1
+      kind: GoTemplate
+      source: Inline
+      inline:
+        template: |
+          {{- $xr := .observed.composite.resource -}}
+          {{- $name := $xr.metadata.name -}}
+          {{- $spec := $xr.spec -}}
+
+          {{/* Extract configuration from environment config */}}
+          {{- $envConfig := index .context "apiextensions.crossplane.io/environment" -}}
+          {{- if not $envConfig -}}
+            {{- fail "Environment configuration not found - EnvironmentConfig name must match XGitHubApp name" -}}
+          {{- end -}}
+
+          {{- $project := $envConfig.project -}}
+          {{- $k8sapp := $envConfig.k8sapp -}}
+          {{- $org := $envConfig.organization.name -}}
+          {{- if not $org -}}
+            {{- fail "Organization name is required for ArgoCD commit statuses. Ensure organization config is properly set in EnvironmentConfig." -}}
+          {{- end -}}
+
+          {{/* App configuration */}}
+          {{- $appName := $k8sapp.appName | default $name -}}
+          {{- $projectName := $project.name -}}
+          {{- $resourceName := printf "%s-%s" $projectName $appName -}}
+
+          {{/* Check promoter feature flag from EnvironmentConfig */}}
+          {{- $promoterEnabled := false -}}
+          {{- if $envConfig.sdlc -}}
+            {{- if $envConfig.sdlc.promotions -}}
+              {{- $promoterEnabled = $envConfig.sdlc.promotions.enabled | default false -}}
+            {{- end -}}
+          {{- end -}}
+
+          {{/* Extract KubePool configurations */}}
+          {{- $kubePools := list -}}
+          {{- if $envConfig.kubePools -}}
+            {{- $kubePools = $envConfig.kubePools -}}
+          {{- end -}}
+
+          {{/* Check if PromotionStrategy Objects are Ready before creating ArgoCDCommitStatus */}}
+          {{/* This ensures proper dependency chain: Observer → PromotionStrategy → ArgoCDCommitStatus */}}
+          {{- $promotionStrategiesReady := true -}}
+          {{- if and $promoterEnabled (gt (len $kubePools) 0) -}}
+            {{- range $key, $resource := .observed.resources -}}
+              {{- if $resource.resource -}}
+                {{- $compName := index $resource.resource.metadata.annotations "gotemplating.fn.crossplane.io/composition-resource-name" | default "" -}}
+                {{- if hasPrefix "promotion-strategy-" $compName -}}
+                  {{- $isReady := false -}}
+                  {{- range $resource.resource.status.conditions -}}
+                    {{- if and (eq .type "Ready") (eq .status "True") -}}
+                      {{- $isReady = true -}}
+                    {{- end -}}
+                  {{- end -}}
+                  {{- if not $isReady -}}
+                    {{- $promotionStrategiesReady = false -}}
+                  {{- end -}}
+                {{- end -}}
+              {{- end -}}
+            {{- end -}}
+          {{- end -}}
+
+          {{- if and $promoterEnabled (gt (len $kubePools) 0) $promotionStrategiesReady }}
+          {{/* Create one ArgoCDCommitStatus per KubePool */}}
+          {{- range $kubePool := $kubePools }}
+          ---
+          # ArgoCDCommitStatus for KubePool: {{ $kubePool.name }}
+          apiVersion: kubernetes.crossplane.io/v1alpha2
+          kind: Object
+          metadata:
+            name: {{ $name }}-argocd-commit-status-{{ $kubePool.name }}
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: argocd-commit-status-{{ $kubePool.name }}
+              kubecore.eu/app: {{ $resourceName }}
+              kubecore.eu/project: {{ $projectName }}
+            labels:
+              platform.kubecore.io/organization: {{ $org }}
+              platform.kubecore.io/project: {{ $projectName }}
+              platform.kubecore.io/kubepool: {{ $kubePool.name }}
+              platform.kubecore.io/resource-type: argocd-commit-status
+          spec:
+            deletionPolicy: Delete
+            managementPolicies: ["*"]
+            providerConfigRef:
+              name: {{ $kubePool.kubernetesProviderConfig }}
+            forProvider:
+              manifest:
+                apiVersion: promoter.argoproj.io/v1alpha1
+                kind: ArgoCDCommitStatus
+                metadata:
+                  name: {{ $resourceName }}-health
+                  namespace: gitops-promoter
+                  labels:
+                    project.kubecore.io/kubeproject: {{ $projectName }}
+                    project.kubecore.io/kubeapp: {{ $resourceName }}
+                    project.kubecore.io/managed-by: crossplane
+                spec:
+                  applicationSelector:
+                    matchLabels:
+                      project.kubecore.io/kubeapp: {{ $resourceName }}
+                  promotionStrategyRef:
+                    name: {{ $resourceName }}
+          {{- end }}
+          {{- end }}
+
+  # Step 6: Set provider config status from EnvironmentConfig
+  - step: set-provider-config-status
+    functionRef:
+      name: function-go-templating
+    input:
+      apiVersion: gotemplating.fn.crossplane.io/v1beta1
+      kind: GoTemplate
+      source: Inline
+      inline:
+        template: |
+          {{- $xr := .observed.composite.resource -}}
+          {{- $name := $xr.metadata.name -}}
+
+          {{- $envConfig := index .context "apiextensions.crossplane.io/environment" -}}
+          {{- if not $envConfig -}}
+            {{- fail "Environment configuration not found" -}}
+          {{- end -}}
+
+          {{- $githubProviderConfigName := $envConfig.githubProviderConfigName -}}
+
+          apiVersion: github.platform.kubecore.io/v1alpha1
+          kind: XGitHubApp
+          metadata:
+            name: {{ $name }}
+          status:
+            providerConfigName: {{ $githubProviderConfigName }}
+
+  # Step 7: Aggregate detailed status from managed resources
+  - step: aggregate-detailed-status
+    functionRef:
+      name: function-go-templating
+    input:
+      apiVersion: gotemplating.fn.crossplane.io/v1beta1
+      kind: GoTemplate
+      source: Inline
+      inline:
+        template: |
+          {{- $xr := .observed.composite.resource -}}
+          {{- $name := $xr.metadata.name -}}
+          {{- $spec := $xr.spec -}}
+
+          {{/* Extract configuration from environment config for status building */}}
+          {{- $envConfig := index .context "apiextensions.crossplane.io/environment" -}}
+          {{- if not $envConfig -}}
+            {{- fail "Environment configuration not found" -}}
+          {{- end -}}
+
+          {{- $githubProviderConfigName := $envConfig.githubProviderConfigName -}}
+          {{- $project := $envConfig.project -}}
+          {{- $repositorySource := $envConfig.repositorySource -}}
+          {{- $branchStrategy := $spec.branchStrategy -}}
+          {{- $repositoryName := $spec.repositoryName | default $name -}}
+          {{- $k8sapp := $envConfig.k8sapp -}}
+
+          {{/* Find repository resource by composition annotation */}}
+          {{- $repoResource := "" -}}
+          {{- range $key, $resource := .observed.resources -}}
+            {{- if $resource.resource -}}
+              {{- $compName := index $resource.resource.metadata.annotations "crossplane.io/composition-resource-name" -}}
+              {{- if eq $compName "repository" -}}
+                {{- $repoResource = $resource -}}
+              {{- end -}}
+            {{- end -}}
+          {{- end -}}
+
+          {{/* Extract repository information from the found resource */}}
+          {{- $repoReady := false -}}
+          {{- $repoName := "" -}}
+          {{- $repoFullName := "" -}}
+          {{- $repoUrl := "" -}}
+          {{- $repoVisibility := "private" -}}
+
+          {{- if $repoResource -}}
+            {{- range $repoResource.resource.status.conditions -}}
+              {{- if and (eq .type "Ready") (eq .status "True") -}}
+                {{- $repoReady = true -}}
+              {{- end -}}
+            {{- end -}}
+            {{- if $repoResource.resource.status.atProvider -}}
+              {{- $repoName = $repoResource.resource.status.atProvider.name | default "" -}}
+              {{- $repoFullName = $repoResource.resource.status.atProvider.fullName | default "" -}}
+              {{- $repoUrl = $repoResource.resource.status.atProvider.htmlUrl | default "" -}}
+              {{- $repoVisibility = $repoResource.resource.status.atProvider.visibility | default "private" -}}
+            {{- end -}}
+          {{- end -}}
+
+          {{/* Count and extract team repository resources */}}
+          {{- $teamResources := list -}}
+          {{- $teamCount := 0 -}}
+          {{- $teamNames := list -}}
+          {{- $teamsConfigured := false -}}
+
+          {{- range $key, $resource := .observed.resources -}}
+            {{- if $resource.resource -}}
+              {{- $compName := index $resource.resource.metadata.annotations "crossplane.io/composition-resource-name" -}}
+              {{- if hasPrefix "team-repository-" $compName -}}
+                {{- $teamResources = append $teamResources $resource -}}
+                {{- $teamCount = add $teamCount 1 -}}
+                {{/* Extract team name from composition name */}}
+                {{- $teamName := trimPrefix "team-repository-" $compName -}}
+                {{- $teamNames = append $teamNames $teamName -}}
+              {{- end -}}
+            {{- end -}}
+          {{- end -}}
+
+          {{/* Check if all team resources are ready */}}
+          {{- $readyTeamCount := 0 -}}
+          {{- range $teamResources -}}
+            {{- range .resource.status.conditions -}}
+              {{- if and (eq .type "Ready") (eq .status "True") -}}
+                {{- $readyTeamCount = add $readyTeamCount 1 -}}
+              {{- end -}}
+            {{- end -}}
+          {{- end -}}
+          {{- $teamsConfigured = eq $readyTeamCount $teamCount -}}
+
+          {{/* Count and check CI/CD related resources */}}
+          {{- $actionSecrets := 0 -}}
+          {{- $actionVariables := 0 -}}
+          {{- $branchResources := 0 -}}
+          {{- $branchProtectionResources := 0 -}}
+
+          {{- range $key, $resource := .observed.resources -}}
+            {{- if $resource.resource -}}
+              {{- if eq $resource.resource.kind "ActionsSecret" -}}
+                {{- $actionSecrets = add $actionSecrets 1 -}}
+              {{- else if eq $resource.resource.kind "ActionsVariable" -}}
+                {{- $actionVariables = add $actionVariables 1 -}}
+              {{- else if eq $resource.resource.kind "Branch" -}}
+                {{- $branchResources = add $branchResources 1 -}}
+              {{- else if eq $resource.resource.kind "BranchProtection" -}}
+                {{- $branchProtectionResources = add $branchProtectionResources 1 -}}
+              {{- end -}}
+            {{- end -}}
+          {{- end -}}
+
+          {{- $actionsConfigured := gt (add $actionSecrets $actionVariables) 0 -}}
+          {{- $branchStrategyImplemented := and (gt $branchResources 0) (gt $branchProtectionResources 0) -}}
+          {{- $ciCdConfigured := and $actionsConfigured $branchStrategyImplemented -}}
+
+          {{/* Track promoter resource status */}}
+          {{- $promoterEnabled := false -}}
+          {{- if $envConfig.sdlc -}}
+            {{- if $envConfig.sdlc.promotions -}}
+              {{- $promoterEnabled = $envConfig.sdlc.promotions.enabled | default false -}}
+            {{- end -}}
+          {{- end -}}
+
+          {{- $observersReady := false -}}
+          {{- $promotionStrategyCreated := false -}}
+          {{- $argoCDCommitStatusCreated := false -}}
+          {{- $promoterKubePoolStatus := dict -}}
+
+          {{- if $promoterEnabled -}}
+            {{- range $key, $resource := .observed.resources -}}
+              {{- if $resource.resource -}}
+                {{- $compName := index $resource.resource.metadata.annotations "gotemplating.fn.crossplane.io/composition-resource-name" | default "" -}}
+                {{- if hasPrefix "observe-argocd-app-" $compName -}}
+                  {{- $kubePoolName := trimPrefix "observe-argocd-app-" $compName -}}
+                  {{- $poolStatus := index $promoterKubePoolStatus $kubePoolName | default (dict "observerReady" false "promotionStrategyReady" false "argoCDCommitStatusReady" false) -}}
+                  {{- range $resource.resource.status.conditions -}}
+                    {{- if and (eq .type "Ready") (eq .status "True") -}}
+                      {{- $observersReady = true -}}
+                      {{- $poolStatus = set $poolStatus "observerReady" true -}}
+                    {{- end -}}
+                  {{- end -}}
+                  {{- $promoterKubePoolStatus = set $promoterKubePoolStatus $kubePoolName $poolStatus -}}
+                {{- else if hasPrefix "promotion-strategy-" $compName -}}
+                  {{- $kubePoolName := trimPrefix "promotion-strategy-" $compName -}}
+                  {{- $poolStatus := index $promoterKubePoolStatus $kubePoolName | default (dict "observerReady" false "promotionStrategyReady" false "argoCDCommitStatusReady" false) -}}
+                  {{- range $resource.resource.status.conditions -}}
+                    {{- if and (eq .type "Ready") (eq .status "True") -}}
+                      {{- $promotionStrategyCreated = true -}}
+                      {{- $poolStatus = set $poolStatus "promotionStrategyReady" true -}}
+                    {{- end -}}
+                  {{- end -}}
+                  {{- $promoterKubePoolStatus = set $promoterKubePoolStatus $kubePoolName $poolStatus -}}
+                {{- else if hasPrefix "argocd-commit-status-" $compName -}}
+                  {{- $kubePoolName := trimPrefix "argocd-commit-status-" $compName -}}
+                  {{- $poolStatus := index $promoterKubePoolStatus $kubePoolName | default (dict "observerReady" false "promotionStrategyReady" false "argoCDCommitStatusReady" false) -}}
+                  {{- range $resource.resource.status.conditions -}}
+                    {{- if and (eq .type "Ready") (eq .status "True") -}}
+                      {{- $argoCDCommitStatusCreated = true -}}
+                      {{- $poolStatus = set $poolStatus "argoCDCommitStatusReady" true -}}
+                    {{- end -}}
+                  {{- end -}}
+                  {{- $promoterKubePoolStatus = set $promoterKubePoolStatus $kubePoolName $poolStatus -}}
+                {{- end -}}
+              {{- end -}}
+            {{- end -}}
+          {{- end -}}
+
+          {{/* Build environment list for promoter status */}}
+          {{- $promoterEnvironments := list -}}
+          {{- if and $promoterEnabled $k8sapp -}}
+            {{- range $env := $k8sapp.environments -}}
+              {{- if $env.enabled -}}
+                {{- $appName := $k8sapp.appName | default $name -}}
+                {{- $envPromotion := dict "name" $env.name "branch" (printf "kubeapp/%s-%s/kubenv/%s" $project.name $appName $env.name) "autoMerge" ($env.autoMerge | default true) -}}
+                {{- $promoterEnvironments = append $promoterEnvironments $envPromotion -}}
+              {{- end -}}
+            {{- end -}}
+          {{- end -}}
+
+          {{/* Extract Template Information from Environment Config */}}
+          {{- $templateName := "" -}}
+          {{- $templateType := "rest" -}}
+          {{- $templateLanguage := "python" -}}
+          {{- $templateProfile := "small" -}}
+          {{- $sourceOwner := "" -}}
+          {{- $sourceRepository := "" -}}
+          {{- $branchStrategyType := $branchStrategy.type | default "gitFlow" -}}
+
+          {{- if and $repositorySource $repositorySource.template -}}
+            {{- $sourceOwner = $repositorySource.template.owner | default "" -}}
+            {{- $sourceRepository = $repositorySource.template.repository | default "" -}}
+            {{/* Infer template information from source repository name */}}
+            {{- if contains "python" $sourceRepository -}}
+              {{- $templateLanguage = "python" -}}
+            {{- else if contains "nodejs" $sourceRepository -}}
+              {{- $templateLanguage = "nodejs" -}}
+            {{- else if contains "java" $sourceRepository -}}
+              {{- $templateLanguage = "java" -}}
+            {{- end -}}
+            {{- if contains "rest" $sourceRepository -}}
+              {{- $templateType = "rest" -}}
+              {{- $templateName = printf "%s-rest-api" $templateLanguage -}}
+            {{- else if contains "web" $sourceRepository -}}
+              {{- $templateType = "web" -}}
+              {{- $templateName = printf "%s-web-app" $templateLanguage -}}
+            {{- end -}}
+            {{- if contains "small" $sourceRepository -}}
+              {{- $templateProfile = "small" -}}
+            {{- else if contains "medium" $sourceRepository -}}
+              {{- $templateProfile = "medium" -}}
+            {{- else if contains "large" $sourceRepository -}}
+              {{- $templateProfile = "large" -}}
+            {{- end -}}
+          {{- end -}}
+
+          apiVersion: github.platform.kubecore.io/v1alpha1
+          kind: XGitHubApp
+          metadata:
+            name: {{ $name }}
+          status:
+            # Provider Configuration
+            providerConfigName: {{ $githubProviderConfigName | quote }}
+            gitHubProviderConfig: {{ $githubProviderConfigName | quote }}
+
+            # Repository URL for backward compatibility
+            repositoryUrl: {{ $repoUrl | quote }}
+
+            # Repository Status - Required by KubeApp controller
+            repository:
+              created: {{ $repoReady }}
+              name: {{ $repoName | quote }}
+              fullName: {{ $repoFullName | quote }}
+              url: {{ $repoUrl | quote }}
+              visibility: {{ $repoVisibility | quote }}
+
+            # Teams Status - Required by KubeApp controller
+            teams:
+              configured: {{ $teamsConfigured }}
+              teamCount: {{ $teamCount }}
+              teams: {{ if $teamNames }}{{ $teamNames | toJson }}{{ else }}[]{{ end }}
+
+            # CI/CD Status - Required by KubeApp controller
+            ciCd:
+              configured: {{ $ciCdConfigured }}
+              actionsConfigured: {{ $actionsConfigured }}
+              branchStrategy:
+                implemented: {{ $branchStrategyImplemented }}
+                type: {{ $branchStrategyType | default "gitFlow" | quote }}
+                branchesCreated: {{ if gt $branchResources 0 }}["main", "develop"]{{ else }}[]{{ end }}
+                protectionRulesApplied: {{ if gt $branchProtectionResources 0 }}["main", "develop"]{{ else }}[]{{ end }}
+
+            # Template Information - with safe defaults
+            templateName: {{ $templateName | default "" | quote }}
+            templateType: {{ $templateType | default "rest" | quote }}
+            templateLanguage: {{ $templateLanguage | default "python" | quote }}
+            templateProfile: {{ $templateProfile | default "small" | quote }}
+            source:
+              owner: {{ $sourceOwner | default "" | quote }}
+              repository: {{ $sourceRepository | default "" | quote }}
+
+            # SDLC and GitOps Promoter status
+            sdlc:
+              promoter:
+                enabled: {{ $promoterEnabled }}
+                {{- if $promoterEnabled }}
+                observersReady: {{ $observersReady }}
+                promotionStrategyCreated: {{ $promotionStrategyCreated }}
+                argoCDCommitStatusCreated: {{ $argoCDCommitStatusCreated }}
+                kubePools: {{ $promoterKubePoolStatus | toJson }}
+                environments: {{ $promoterEnvironments | toJson }}
+                {{- end }}
+
+  # Step 8: Auto-ready function to check resource readiness
+  - step: detect-readiness
+    functionRef:
+      name: function-auto-ready
+
+  # Step 9: Sequencer function to ensure proper resource creation ordering
+  - step: sequence-resources
+    functionRef:
+      name: function-sequencer
+    input:
+      apiVersion: sequencer.fn.crossplane.io/v1beta1
+      kind: Input
+      config:
+        respectDeletionOrder: true
+        finalizerStrategy:
+          mode: Strict
+          cleanupRules:
+          # GitOps Promoter resources delete first
+          - resource: "argocd-commit-status-*"
+            waitFor: []
+          - resource: "promotion-strategy-*"
+            waitFor: ["argocd-commit-status-*"]
+          - resource: "observe-argocd-app-*"
+            waitFor: ["promotion-strategy-*"]
+          # INVERTED DEPENDENCY: Action variables and secrets delete first
+          - resource: "action-var-*"
+            waitFor: ["observe-argocd-app-*"]
+          - resource: "action-secret-*"
+            waitFor: ["observe-argocd-app-*"]
+          # Branch protection then branches
+          - resource: "branch-protection-*"
+            waitFor: [ "action-var-*", "action-secret-*" ]
+          - resource: "branch-*"
+            waitFor: [ "branch-protection-*" ]
+          # Team repository bindings
+          - resource: "team-repository-*"
+            waitFor: [ "branch-*" ]
+          # Webhooks before repository
+          - resource: "repository-webhook-*"
+            waitFor: [ "team-repository-*" ]
+          # Finally delete the repository
+          - resource: "repository"
+            waitFor: [ "repository-webhook-*" ]
+      rules:
+      # Creation sequence (optimized for parallel creation where possible)
+
+      # Repository first
+      - sequence:
+        - "repository"
+
+      # Team repositories can be created in parallel after repository
+      - sequence:
+        - "repository"
+        - "team-repository-main"
+      - sequence:
+        - "repository"
+        - "team-repository-ops"
+      - sequence:
+        - "repository"
+        - "team-repository-software"
+      - sequence:
+        - "repository"
+        - "team-repository-business"
+
+      # Branches depend on repository and team permissions being established
+      - sequence:
+        - "team-repository-main"
+        - "branch-dev"
+      - sequence:
+        - "team-repository-ops"
+        - "branch-dev"
+      - sequence:
+        - "team-repository-software"
+        - "branch-dev"
+      - sequence:
+        - "team-repository-business"
+        - "branch-dev"
+
+      # Branch protection waits for branch
+      - sequence:
+        - "branch-dev"
+        - "branch-protection-dev"
+
+      # Action variables can be created in parallel after repository
+      - sequence:
+        - "repository"
+        - "action-var-registry"
+      - sequence:
+        - "repository"
+        - "action-var-runners"
+      - sequence:
+        - "repository"
+        - "action-var-runners-arm"
+      - sequence:
+        - "repository"
+        - "action-var-kubeproject-repo"
+      - sequence:
+        - "repository"
+        - "action-var-kubeproject"
+      - sequence:
+        - "repository"
+        - "action-var-kubeapp-sdlc"
+      - sequence:
+        - "repository"
+        - "action-var-kubeproject-domain"
+
+      # Action secrets can be created in parallel after repository
+      - sequence:
+        - "repository"
+        - "action-secret-registry-username"
+      - sequence:
+        - "repository"
+        - "action-secret-registry-password"
+      - sequence:
+        - "repository"
+        - "action-secret-github-app-id"
+      - sequence:
+        - "repository"
+        - "action-secret-github-app-private-key"
+
+      # Webhooks depend on repository
+      - sequence:
+        - "repository"
+        - "repository-webhook-*"
+
+      # GitOps Promoter resources - observers wait for all other resources to be ready
+      # No explicit dependency needed here - natural timing takes care of it
+      # PromotionStrategy waits for observers to be Ready
+      - sequence:
+        - "observe-argocd-app-*"
+        - "promotion-strategy-*"
+
+      # ArgoCDCommitStatus waits for PromotionStrategy to be Ready
+      - sequence:
+        - "promotion-strategy-*"
+        - "argocd-commit-status-*"
+{{- end }}

@@ -1,0 +1,165 @@
+{{- if .Values.crossplaneCompositions.enabled }}
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: xqualitygatetemplates.platform.kubecore.io
+  labels:
+    platform.kubecore.io/type: qualitygate-template
+    provider: kubernetes
+    service: workflow-template
+    layer: sdlc
+spec:
+  # This composition reads ClusterWorkflowTemplate from control cluster
+  # and copies it to target cluster as namespaced WorkflowTemplate
+  compositeTypeRef:
+    apiVersion: platform.kubecore.io/v1alpha1
+    kind: XQualityGateTemplate
+  mode: Pipeline
+  pipeline:
+
+  # Step 1: Load EnvironmentConfig (optional, for future extensibility)
+  - step: load-environment-configs
+    functionRef:
+      name: function-environment-configs
+    input:
+      apiVersion: environmentconfigs.fn.crossplane.io/v1beta1
+      kind: Input
+      spec:
+        environmentConfigs:
+        - type: Selector
+          selector:
+            matchLabels:
+            # Match by type: qualitygate-template-config
+            - key: platform.kubecore.io/type
+              type: Value
+              value: qualitygate-template-config
+            # Match by project name
+            - key: kubecore.io/project
+              type: FromCompositeFieldPath
+              valueFromFieldPath: spec.projectName
+            # Match by gate name
+            - key: kubecore.io/gate
+              type: FromCompositeFieldPath
+              valueFromFieldPath: spec.gateName
+
+  # Step 2: Load ClusterWorkflowTemplate from control cluster
+  - step: load-workflow-template
+    functionRef:
+      name: function-extra-resources
+    input:
+      apiVersion: extra-resources.fn.crossplane.io/v1beta1
+      kind: Input
+      spec:
+        extraResources:
+        - kind: ClusterWorkflowTemplate
+          into: workflow-templates
+          apiVersion: argoproj.io/v1alpha1
+          type: Selector
+          selector:
+            matchLabels:
+            - key: platform.kubecore.io/project
+              type: FromCompositeFieldPath
+              valueFromFieldPath: spec.projectName
+            - key: platform.kubecore.io/gate
+              type: FromCompositeFieldPath
+              valueFromFieldPath: spec.gateName
+
+  # Step 3: Generate WorkflowTemplate and RBAC resources in target cluster
+  - step: generate-template-resources
+    functionRef:
+      name: function-go-templating
+    input:
+      apiVersion: gotemplating.fn.crossplane.io/v1beta1
+      kind: GoTemplate
+      source: Inline
+      inline:
+        template: |
+          {{- $xr := .observed.composite.resource -}}
+          {{- $spec := $xr.spec -}}
+          {{- $name := $xr.metadata.name -}}
+          {{- $xrNamespace := $xr.metadata.namespace -}}
+
+          {{/* Extract configuration from XR */}}
+          {{- $projectName := $spec.projectName -}}
+          {{- $gateName := $spec.gateName -}}
+          {{- $gateKey := $spec.gateKey | default $gateName -}}
+          {{- $targetCluster := $spec.targetCluster -}}
+          {{- $clusterName := $targetCluster.name -}}
+          {{- $providerConfigName := $targetCluster.providerConfigName -}}
+          {{/* Default to XR namespace for WorkflowTemplate deployment in child cluster */}}
+          {{- $namespace := $targetCluster.namespace | default $xrNamespace -}}
+          {{- $templateRef := $spec.clusterWorkflowTemplateRef -}}
+          {{- $templateName := $templateRef.name -}}
+
+          {{/* Read ServiceAccount names from EnvironmentConfig */}}
+          {{- $workflowSAs := .environment.workflowServiceAccounts | default dict -}}
+          {{- $executorSA := $workflowSAs.executorServiceAccount | default "workflow-executor-sa" -}}
+          {{- $sensorSA := $workflowSAs.sensorServiceAccount | default "sensor-service-account" -}}
+          {{- $saNamespace := $workflowSAs.namespace | default "gitops-engine" -}}
+
+          {{/* Retrieve ClusterWorkflowTemplate from ExtraResources */}}
+          {{- $extraRes := index .context "apiextensions.crossplane.io/extra-resources" -}}
+          {{- if not $extraRes -}}
+            {{- fail "ExtraResources context not found - function-extra-resources may not have run" -}}
+          {{- end -}}
+
+          {{- $templates := index $extraRes "workflow-templates" -}}
+          {{- if not $templates -}}
+            {{- fail (printf "ClusterWorkflowTemplate '%s' not found in control cluster. Ensure it exists with correct labels." $templateName) -}}
+          {{- end -}}
+
+          {{- if eq (len $templates) 0 -}}
+            {{- fail (printf "No ClusterWorkflowTemplate found matching project=%s gate=%s" $projectName $gateName) -}}
+          {{- end -}}
+
+          {{- $clusterTemplate := index $templates 0 -}}
+
+          {{/* Resource names */}}
+          {{- $workflowTemplateName := printf "%s-%s-workflow" $projectName $gateName -}}
+
+          ---
+          # WorkflowTemplate - Copy from ClusterWorkflowTemplate in control cluster
+          # ServiceAccounts are managed separately and referenced from EnvironmentConfig
+          # Uses namespace-scoped Object API (provider-kubernetes v1.0.0+)
+          apiVersion: kubernetes.m.crossplane.io/v1alpha1
+          kind: Object
+          metadata:
+            name: {{ $name }}-workflow-template
+            namespace: {{ $xrNamespace }}
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: workflow-template
+              platform.kubecore.io/project: {{ $projectName | quote }}
+              platform.kubecore.io/gate: {{ $gateName | quote }}
+              platform.kubecore.io/source-template: {{ $clusterTemplate.metadata.name | quote }}
+          spec:
+            providerConfigRef:
+              name: {{ $providerConfigName }}
+              kind: ClusterProviderConfig
+            forProvider:
+              manifest:
+                apiVersion: argoproj.io/v1alpha1
+                kind: WorkflowTemplate
+                metadata:
+                  name: {{ $workflowTemplateName }}
+                  namespace: {{ $namespace }}
+                  labels:
+                    platform.kubecore.io/project: {{ $projectName | quote }}
+                    platform.kubecore.io/gate: {{ $gateName | quote }}
+                    platform.kubecore.io/gate-key: {{ $gateKey | quote }}
+                    platform.kubecore.io/resource-type: workflow-template
+                    platform.kubecore.io/source-template: {{ $clusterTemplate.metadata.name | quote }}
+                spec:
+                  # Copy entire spec from ClusterWorkflowTemplate
+                  {{- toYaml $clusterTemplate.spec | nindent 18 }}
+
+  # Step 4: Auto-ready function with explicit input
+  - step: detect-readiness
+    functionRef:
+      name: function-auto-ready
+    input:
+      apiVersion: autoready.fn.crossplane.io/v1beta1
+      kind: Input
+      spec:
+        policy: All
+
+{{- end }}

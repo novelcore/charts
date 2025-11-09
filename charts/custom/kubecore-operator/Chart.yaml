@@ -2,7 +2,7 @@ apiVersion: v2
 name: kubecore-operator
 description: A sophisticated Kubernetes operator that implements a four-layer framework architecture for provisioning and managing cloud infrastructure through Crossplane compositions.
 type: application
-version: 0.1.8
+version: 0.1.9
 appVersion: "0.1.1"
 
 # Maintainers
@@ -48,18 +48,14 @@ annotations:
 
   # Changes for this chart version
   artifacthub.io/changes: |
-    - kind: fixed
-      description: "Added missing cluster-wide secrets read permissions (get, list, watch) to operator ClusterRole - fixes RBAC errors preventing operator from accessing GitHub credentials"
-    - kind: security
-      description: "Operator now has explicit secrets permissions instead of failing silently due to missing RBAC"
-    - kind: changed
-      description: "BREAKING: Crossplane providers, functions, and ProviderConfigs moved out of operator chart - now installed separately in crossplane-system namespace via installation script"
-    - kind: changed
-      description: "BREAKING: External Secrets Operator moved out of operator chart - now installed separately via installation script"
     - kind: added
-      description: "Added comprehensive installation script (install-kubecore-operator.sh) that orchestrates complete platform deployment with proper namespace separation"
+      description: "Added all 12 Crossplane Compositions to chart templates - compositions now installed with operator for complete platform functionality"
+    - kind: added
+      description: "New crossplaneCompositions.enabled value to control composition installation (default: true)"
+    - kind: fixed
+      description: "Fixed missing Composition resources causing XR reconciliation errors (awsprovider, eks, githubprovider, etc.)"
     - kind: changed
-      description: "Operator chart now only installs operator deployment and XRDs - all Crossplane/ESO components must be installed separately for proper namespace isolation"
+      description: "Chart now includes both XRDs and Compositions for complete Crossplane resource definitions"
 
 # Kubernetes version compatibility
 kubeVersion: ">=1.20.0-0"

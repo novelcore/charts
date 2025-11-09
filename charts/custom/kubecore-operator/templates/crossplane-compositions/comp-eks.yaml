@@ -1,0 +1,1269 @@
+{{- if .Values.crossplaneCompositions.enabled }}
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: eks
+  labels:
+    platform.kubecore.io/type: eks
+    provider: aws
+    service: kubernetes-cluster
+    layer: platform
+spec:
+  writeConnectionSecretsToNamespace: crossplane-system
+  compositeTypeRef:
+    apiVersion: platform.kubecore.io/v1alpha1
+    kind: XEKS
+  mode: Pipeline
+  pipeline:
+
+  # Step 1: Load EnvironmentConfig with strict cluster-specific selection
+  - step: load-environment-configs
+    functionRef:
+      name: function-environment-configs
+    input:
+      apiVersion: environmentconfigs.fn.crossplane.io/v1beta1
+      kind: Input
+      spec:
+        environmentConfigs:
+        - type: Selector
+          selector:
+            matchLabels:
+            # PRIMARY: Select by exact cluster name (XEKS resource name)
+            - key: platform.kubecore.io/cluster-name
+              type: FromCompositeFieldPath
+              valueFromFieldPath: metadata.name
+            # SECONDARY: Ensure it's an EKS config type
+            - key: platform.kubecore.io/type
+              type: Value
+              value: eks-config
+            # TERTIARY: Optional additional filters
+            - key: kubecore.io/kubeorg
+              type: FromCompositeFieldPath
+              valueFromFieldPath: metadata.labels["kubecore.io/kubeorg"]
+            - key: kubecore.io/region
+              type: FromCompositeFieldPath
+              valueFromFieldPath: metadata.labels["kubecore.io/region"]
+
+  # Step 2: Generate EKS resources with Go Templates
+  - step: generate-eks-resources
+    functionRef:
+      name: function-go-templating
+    input:
+      apiVersion: gotemplating.fn.crossplane.io/v1beta1
+      kind: GoTemplate
+      source: Inline
+      inline:
+        template: |
+          {{- $name := .observed.composite.resource.metadata.name -}}
+          {{- $uid := .observed.composite.resource.metadata.uid -}}
+          {{- $spec := .observed.composite.resource.spec -}}
+          {{/* Connection secrets handled by ClusterAuth */}}
+          
+          {{/* Extract configuration from environment config */}}
+          {{- $envConfig := index .context "apiextensions.crossplane.io/environment" -}}
+          {{- if not $envConfig -}}
+            {{- fail "Environment configuration not found. Ensure EnvironmentConfig exists with label platform.kubecore.io/cluster-name matching this XEKS name" -}}
+          {{- end -}}
+          
+          {{/* Validate cluster name matches for safety */}}
+          {{- if $envConfig.clusterName -}}
+            {{- if ne $envConfig.clusterName $name -}}
+              {{- fail (printf "EnvironmentConfig cluster name '%s' does not match XEKS name '%s'" $envConfig.clusterName $name) -}}
+            {{- end -}}
+          {{- end -}}
+          
+          {{/* Extract environment configuration values */}}
+          {{- $accountId := $envConfig.accountId -}}
+          {{- $primaryRegion := $envConfig.primaryRegion -}}
+          {{- $providerConfigName := $envConfig.providerConfig -}}
+          {{- $vpcId := $envConfig.vpcId -}}
+          {{- $vpcCidr := $envConfig.vpcCidr -}}
+          {{- $availabilityZones := $envConfig.availabilityZones -}}
+          {{- $eksSubnets := $envConfig.eksSubnets -}}
+          {{- $eksDefaults := $envConfig.eksDefaults -}}
+          
+          {{/* Feature flags from spec with defaults from EnvironmentConfig */}}
+          {{- $features := $spec.features | default dict -}}
+          {{- $loggingEnabled := $features.logging | default false -}}
+          {{- $encryptionEnabled := $features.encryption | default false -}}
+          {{- $publicEndpoint := $features.publicEndpoint | default true -}}
+          {{- $privateEndpoint := $features.privateEndpoint | default true -}}
+          {{- $addonsSpec := $features.addons | default dict -}}
+          {{- $vpcCniEnabled := $addonsSpec.vpcCni | default true -}}
+          {{- $coreDnsEnabled := $addonsSpec.coreDns | default true -}}
+          {{- $kubeProxyEnabled := $addonsSpec.kubeProxy | default true -}}
+          {{- $ebsCsiEnabled := $addonsSpec.ebsCsiDriver | default false -}}
+          
+          {{/* Node groups configuration */}}
+          {{/* Note: Only kubecoresys system node group is created */}}
+          
+          {{/* Provider config reference */}}
+          {{- $awsProviderConfig := "aws-default" -}}
+          {{- if $spec.providerConfigRef -}}
+            {{- $awsProviderConfig = $spec.providerConfigRef.name | default "aws-default" -}}
+          {{- end -}}
+          {{- if $providerConfigName -}}
+            {{- $awsProviderConfig = $providerConfigName -}}
+          {{- end -}}
+          
+          {{/* Connection secret configuration */}}
+          {{- $connectionSecretNamespace := "crossplane-system" -}}
+          
+          {{/* EKS configuration from environment */}}
+          {{- $eksVersion := $eksDefaults.version | default "1.32" -}}
+          {{- $systemNodeGroup := $eksDefaults.systemNodeGroup | default dict -}}
+          {{- $systemInstanceTypes := $systemNodeGroup.instanceTypes | default (list "m5.xlarge" "m5.2xlarge" "m6i.xlarge") -}}
+          {{- $systemDiskSize := $systemNodeGroup.diskSize | default 60 -}}
+          {{- $scalingConfig := $systemNodeGroup.scalingConfig | default dict -}}
+          {{- $systemMinSize := $scalingConfig.minSize | default 3 -}}
+          {{- $systemMaxSize := $scalingConfig.maxSize | default 10 -}}
+          {{- $systemDesiredSize := $scalingConfig.desiredSize | default 3 -}}
+          
+          {{/* Common tags - without Name to allow resource-specific naming */}}
+          {{- $commonTags := dict 
+            "kubernetes.io/cluster" $name
+            "platform.kubecore.io/cluster" $name
+            "platform.kubecore.io/managed-by" "crossplane"
+            "platform.kubecore.io/composition" "eks"
+            "crossplane.io/claim-name" $name
+            "crossplane.io/composite" $name
+          -}}
+          
+          {{/* =================================================================== */}}
+          {{/* SUBNET CREATION - NEW FUNCTIONALITY */}}
+          {{/* =================================================================== */}}
+          
+          {{/* Create EKS-specific subnets */}}
+          {{- if $eksSubnets -}}
+          {{- range $type, $subnets := $eksSubnets }}
+          {{- range $i, $subnet := $subnets }}
+          ---
+          # EKS {{ $type | title }} Subnet {{ $i }}
+          apiVersion: ec2.aws.upbound.io/v1beta1
+          kind: Subnet
+          metadata:
+            name: {{ $name }}-{{ $type }}-subnet-{{ $i }}
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: {{ $name }}-{{ $type }}-subnet-{{ $i }}
+            labels:
+              platform.kubecore.io/cluster: {{ $name }}
+              platform.kubecore.io/subnet-type: {{ $type }}
+              platform.kubecore.io/subnet-index: "{{ $i }}"
+              platform.kubecore.io/cloud-provider: aws
+          spec:
+            deletionPolicy: Delete
+            managementPolicies: ["*"]
+            forProvider:
+              vpcId: {{ $vpcId }}
+              cidrBlock: {{ $subnet.cidr }}
+              availabilityZone: {{ $subnet.az }}
+              mapPublicIpOnLaunch: {{ eq $type "public" }}
+              region: {{ $primaryRegion }}
+              tags:
+                Name: {{ $name }}-{{ $type }}-subnet-{{ $i }}
+                {{- range $k, $v := $subnet.tags }}
+                {{ $k }}: {{ $v | quote }}
+                {{- end }}
+                kubernetes.io/cluster/{{ $name }}: "owned"
+                platform.kubecore.io/cluster: {{ $name }}
+                platform.kubecore.io/subnet-type: {{ $type }}
+                {{- range $k, $v := $commonTags }}
+                {{ $k }}: {{ $v | quote }}
+                {{- end }}
+            providerConfigRef:
+              name: {{ $awsProviderConfig }}
+          {{- end }}
+          {{- end }}
+          {{- end }}
+          
+          {{/* =================================================================== */}}
+          {{/* ROUTE TABLES AND NETWORKING */}}
+          {{/* =================================================================== */}}
+          
+          {{/* Extract Internet Gateway configuration */}}
+          {{- $internetGatewayId := $envConfig.internetGatewayId | default "" -}}
+          
+          {{/* Create private route tables for each AZ */}}
+          {{- if $eksSubnets -}}
+          {{- range $i, $subnet := $eksSubnets.private }}
+          {{- $azSuffix := printf "%s" (substr -1 1 $subnet.az) }}
+          ---
+          # Private Route Table for {{ $subnet.az }}
+          apiVersion: ec2.aws.upbound.io/v1beta1
+          kind: RouteTable
+          metadata:
+            name: {{ $name }}-private-rt-{{ $i }}
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: private-route-table-{{ $i }}
+            labels:
+              platform.kubecore.io/cluster: {{ $name }}
+              platform.kubecore.io/route-table-type: private
+              platform.kubecore.io/availability-zone: {{ $subnet.az }}
+              platform.kubecore.io/cloud-provider: aws
+          spec:
+            deletionPolicy: Delete
+            managementPolicies: ["*"]
+            forProvider:
+              vpcId: {{ $vpcId }}
+              region: {{ $primaryRegion }}
+              tags:
+                Name: {{ $name }}-private-rt-{{ $i }}
+                "kubernetes.io/cluster/{{ $name }}": "owned"
+                platform.kubecore.io/cluster: {{ $name }}
+                platform.kubecore.io/route-table-type: private
+                platform.kubecore.io/availability-zone: {{ $subnet.az }}
+                {{- range $k, $v := $commonTags }}
+                {{ $k }}: {{ $v | quote }}
+                {{- end }}
+            providerConfigRef:
+              name: {{ $awsProviderConfig }}
+          {{- end }}
+          {{- end }}
+          
+          {{/* Route table associations for private subnets */}}
+          {{- if $eksSubnets -}}
+          {{- range $i, $subnet := $eksSubnets.private }}
+          ---
+          # Route Table Association for Private Subnet {{ $i }}
+          apiVersion: ec2.aws.upbound.io/v1beta1
+          kind: RouteTableAssociation
+          metadata:
+            name: {{ $name }}-private-rta-{{ $i }}
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: private-route-table-association-{{ $i }}
+            labels:
+              platform.kubecore.io/cluster: {{ $name }}
+              platform.kubecore.io/route-table-type: private
+              platform.kubecore.io/availability-zone: {{ $subnet.az }}
+              platform.kubecore.io/cloud-provider: aws
+          spec:
+            deletionPolicy: Delete
+            managementPolicies: ["*"]
+            forProvider:
+              routeTableIdRef:
+                name: {{ $name }}-private-rt-{{ $i }}
+              subnetIdRef:
+                name: {{ $name }}-private-subnet-{{ $i }}
+              region: {{ $primaryRegion }}
+            providerConfigRef:
+              name: {{ $awsProviderConfig }}
+          {{- end }}
+          {{- end }}
+          
+          {{/* NAT Gateway creation is handled by XAwsNetwork composition - not here */}}
+          
+          {{/* Routes for private subnets to NAT gateways */}}
+          {{- if $eksSubnets -}}
+          {{- range $i, $subnet := $eksSubnets.private }}
+          {{- if $subnet.natGatewayId }}
+          ---
+          # Route for Private Subnet {{ $i }} to NAT Gateway
+          apiVersion: ec2.aws.upbound.io/v1beta1
+          kind: Route
+          metadata:
+            name: {{ $name }}-private-nat-route-{{ $i }}
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: private-nat-route-{{ $i }}
+            labels:
+              platform.kubecore.io/cluster: {{ $name }}
+              platform.kubecore.io/route-type: nat-gateway
+              platform.kubecore.io/availability-zone: {{ $subnet.az }}
+              platform.kubecore.io/cloud-provider: aws
+          spec:
+            deletionPolicy: Delete
+            managementPolicies: ["*"]
+            forProvider:
+              routeTableIdRef:
+                name: {{ $name }}-private-rt-{{ $i }}
+              destinationCidrBlock: "0.0.0.0/0"
+              natGatewayId: {{ $subnet.natGatewayId }}
+              region: {{ $primaryRegion }}
+            providerConfigRef:
+              name: {{ $awsProviderConfig }}
+          {{- end }}
+          {{- end }}
+          {{- end }}
+          
+          {{/* =================================================================== */}}
+          {{/* IAM ROLES */}}
+          {{/* =================================================================== */}}
+          
+          # EKS Cluster Service Role
+          ---
+          apiVersion: iam.aws.upbound.io/v1beta1
+          kind: Role
+          metadata:
+            name: {{ $name }}-cluster-service-role
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: cluster-service-role
+            labels:
+              platform.kubecore.io/cluster: {{ $name }}
+              platform.kubecore.io/role: "cluster-service"
+              platform.kubecore.io/cloud-provider: aws
+              role: "cluster-service-role"
+              cluster: {{ $name }}
+          spec:
+            deletionPolicy: Delete
+            managementPolicies: ["*"]
+            forProvider:
+              assumeRolePolicy: |
+                {
+                  "Version": "2012-10-17",
+                  "Statement": [
+                    {
+                      "Effect": "Allow",
+                      "Principal": {
+                        "Service": "eks.amazonaws.com"
+                      },
+                      "Action": "sts:AssumeRole"
+                    }
+                  ]
+                }
+              managedPolicyArns:
+                - "arn:aws:iam::aws:policy/AmazonEKSClusterPolicy"
+              tags:
+                Name: {{ $name }}-cluster-service-role
+                Cluster: {{ $name }}
+                {{- range $k, $v := $commonTags }}
+                {{ $k }}: {{ $v | quote }}
+                {{- end }}
+            providerConfigRef:
+              name: {{ $awsProviderConfig }}
+          
+          # EKS Node Group Role
+          ---
+          apiVersion: iam.aws.upbound.io/v1beta1
+          kind: Role
+          metadata:
+            name: {{ $name }}-node-group-role
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: node-group-role
+            labels:
+              platform.kubecore.io/cluster: {{ $name }}
+              platform.kubecore.io/role: "node-group"
+              platform.kubecore.io/cloud-provider: aws
+              role: "node-instance-role"
+              cluster: {{ $name }}
+          spec:
+            deletionPolicy: Delete
+            managementPolicies: ["*"]
+            forProvider:
+              assumeRolePolicy: |
+                {
+                  "Version": "2012-10-17",
+                  "Statement": [
+                    {
+                      "Effect": "Allow",
+                      "Principal": {
+                        "Service": "ec2.amazonaws.com"
+                      },
+                      "Action": "sts:AssumeRole"
+                    }
+                  ]
+                }
+              managedPolicyArns:
+                - "arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy"
+                - "arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy"
+                - "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly"
+                - "arn:aws:iam::aws:policy/service-role/AmazonEBSCSIDriverPolicy"
+              tags:
+                Name: {{ $name }}-node-group-role
+                Cluster: {{ $name }}
+                {{- range $k, $v := $commonTags }}
+                {{ $k }}: {{ $v | quote }}
+                {{- end }}
+            providerConfigRef:
+              name: {{ $awsProviderConfig }}
+          
+          {{/* =================================================================== */}}
+          {{/* EKS CLUSTER */}}
+          {{/* =================================================================== */}}
+          
+          # EKS Cluster
+          ---
+          apiVersion: eks.aws.upbound.io/v1beta2
+          kind: Cluster
+          metadata:
+            name: {{ $name }}-cluster
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: cluster
+              crossplane.io/external-name: {{ $name }}
+            labels:
+              platform.kubecore.io/cluster: {{ $name }}
+              platform.kubecore.io/cloud-provider: aws
+              crossplane.io/external-name: {{ $name }}
+          spec:
+            deletionPolicy: Delete
+            managementPolicies: ["*"]
+            forProvider:
+              region: {{ $primaryRegion }}
+              version: {{ $eksVersion | quote }}
+              roleArnSelector:
+                matchLabels:
+                  role: "cluster-service-role"
+                  cluster: {{ $name }}
+              vpcConfig:
+                endpointPrivateAccess: {{ $privateEndpoint }}
+                endpointPublicAccess: {{ $publicEndpoint }}
+                {{- if eq $publicEndpoint true }}
+                publicAccessCidrs:
+                  - "0.0.0.0/0"
+                {{- end }}
+                # Use created subnets
+                subnetIdSelector:
+                  matchLabels:
+                    platform.kubecore.io/cluster: {{ $name }}
+              {{- if $loggingEnabled }}
+              enabledClusterLogTypes:
+                {{- if $eksDefaults.logging.types }}
+                {{- range $eksDefaults.logging.types }}
+                - {{ . }}
+                {{- end }}
+                {{- else }}
+                # Cost optimization: CloudWatch logging disabled by default (saves ~$150-180/month)
+                # To enable, set features.logging: true in XEKS spec and uncomment desired log types below:
+                - "api"                 # API server logs - recommended for troubleshooting (~$30-40/month)
+                # - "audit"             # Kubernetes audit logs (VERY verbose, high cost ~$80-100/month)
+                # - "authenticator"     # IAM authentication attempts (~$20-30/month)
+                # - "controllerManager" # Controller manager operations (~$20-30/month)
+                # - "scheduler"         # Pod scheduling decisions (~$20-30/month)
+                {{- end }}
+              {{- end }}
+              {{- if $encryptionEnabled }}
+              encryptionConfig:
+                - resources:
+                  - "secrets"
+                  provider:
+                    keyArn: {{ $envConfig.kmsKeyId | default "" }}
+              {{- end }}
+              tags:
+                Name: {{ $name }}
+                "kubernetes.io/cluster/{{ $name }}": "owned"
+                {{- range $k, $v := $commonTags }}
+                {{ $k }}: {{ $v | quote }}
+                {{- end }}
+            providerConfigRef:
+              name: {{ $awsProviderConfig }}
+          
+          # EKS Cluster Auth for kubeconfig generation
+          ---
+          apiVersion: eks.aws.upbound.io/v1beta1
+          kind: ClusterAuth
+          metadata:
+            name: {{ $name }}-cluster-auth
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: cluster-auth
+            labels:
+              platform.kubecore.io/cluster: {{ $name }}
+              platform.kubecore.io/cloud-provider: aws
+          spec:
+            deletionPolicy: Delete
+            managementPolicies: ["*"]
+            forProvider:
+              region: {{ $primaryRegion }}
+              clusterNameSelector:
+                matchLabels:
+                  crossplane.io/external-name: {{ $name }}
+            writeConnectionSecretToRef:
+              name: {{ $uid }}-ekscluster
+              namespace: {{ $connectionSecretNamespace }}
+            providerConfigRef:
+              name: {{ $awsProviderConfig }}
+          
+          {{/* =================================================================== */}}
+          {{/* NODE GROUPS */}}
+          {{/* =================================================================== */}}
+          
+          # Mandatory System Node Group: kubecoresys
+          ---
+          apiVersion: eks.aws.upbound.io/v1beta2
+          kind: NodeGroup
+          metadata:
+            name: {{ $name }}-kubecoresys
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: node-group-kubecoresys
+            labels:
+              platform.kubecore.io/cluster: {{ $name }}
+              platform.kubecore.io/node-group: kubecoresys
+              platform.kubecore.io/cloud-provider: aws
+              platform.kubecore.io/system-nodegroup: "true"
+          spec:
+            deletionPolicy: Delete
+            managementPolicies: ["*"]
+            forProvider:
+              region: {{ $primaryRegion }}
+              clusterNameSelector:
+                matchLabels:
+                  crossplane.io/external-name: {{ $name }}
+              nodeRoleArnSelector:
+                matchLabels:
+                  role: "node-instance-role"
+                  cluster: {{ $name }}
+              instanceTypes:
+              {{- range $systemInstanceTypes }}
+              - {{ . }}
+              {{- end }}
+              scalingConfig:
+                minSize: {{ $systemMinSize }}
+                maxSize: {{ $systemMaxSize }}
+                desiredSize: {{ $systemDesiredSize }}
+              diskSize: {{ $systemDiskSize }}
+              capacityType: "ON_DEMAND"
+              labels:
+                platform.kubecore.io/nodegroup-type: "kubecoresys"
+                platform.kubecore.io/system: "true"
+                kubecore.eu/computation-type: "kubecore-system"
+              taint:
+              - key: "kubecore.eu/computation-type"
+                value: "kubecore-system"
+                effect: "NO_SCHEDULE"
+              # Use private subnets for system nodes
+              subnetIdSelector:
+                matchLabels:
+                  platform.kubecore.io/cluster: {{ $name }}
+                  platform.kubecore.io/subnet-type: "private"
+              tags:
+                Name: {{ $name }}-kubecoresys
+                Cluster: {{ $name }}
+                NodeGroupType: kubecoresys
+                "kubecore.eu/monitoring": "enabled"
+                "kubecore.eu/resource-tier": "system"
+                {{- range $k, $v := $commonTags }}
+                {{ $k }}: {{ $v | quote }}
+                {{- end }}
+            providerConfigRef:
+              name: {{ $awsProviderConfig }}
+          
+          {{/* Only kubecoresys system node group is created - no user-defined node groups */}}
+          
+          {{/* =================================================================== */}}
+          {{/* EKS ADD-ONS */}}
+          {{/* =================================================================== */}}
+          
+          {{- if $vpcCniEnabled }}
+          # VPC CNI Add-on
+          ---
+          apiVersion: eks.aws.upbound.io/v1beta1
+          kind: Addon
+          metadata:
+            name: {{ $name }}-vpc-cni-addon
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: vpc-cni-addon
+            labels:
+              platform.kubecore.io/cluster: {{ $name }}
+              platform.kubecore.io/addon: "vpc-cni"
+              platform.kubecore.io/cloud-provider: aws
+          spec:
+            deletionPolicy: Delete
+            managementPolicies: ["*"]
+            forProvider:
+              region: {{ $primaryRegion }}
+              addonName: "vpc-cni"
+              clusterNameSelector:
+                matchLabels:
+                  crossplane.io/external-name: {{ $name }}
+              {{- if and $eksDefaults.addons $eksDefaults.addons.vpcCni $eksDefaults.addons.vpcCni.version }}
+              addonVersion: {{ $eksDefaults.addons.vpcCni.version }}
+              {{- end }}
+              resolveConflictsOnCreate: "OVERWRITE"
+              resolveConflictsOnUpdate: "OVERWRITE"
+              configurationValues: |-
+                {
+                  "tolerations": [
+                    {
+                      "key": "kubecore.eu/computation-type",
+                      "operator": "Equal",
+                      "value": "kubecore-system",
+                      "effect": "NoSchedule"
+                    },
+                    {
+                      "key": "CriticalAddonsOnly",
+                      "operator": "Exists"
+                    },
+                    {
+                      "effect": "NoSchedule",
+                      "key": "node-role.kubernetes.io/control-plane"
+                    },
+                    {
+                      "operator": "Exists",
+                      "effect": "NoSchedule"
+                    },
+                    {
+                      "operator": "Exists",
+                      "effect": "PreferNoSchedule"
+                    },
+                    {
+                      "operator": "Exists",
+                      "effect": "NoExecute",
+                      "tolerationSeconds": 300
+                    }
+                  ]
+                }
+              tags:
+                Name: {{ $name }}-vpc-cni
+                Cluster: {{ $name }}
+                {{- range $k, $v := $commonTags }}
+                {{ $k }}: {{ $v | quote }}
+                {{- end }}
+            providerConfigRef:
+              name: {{ $awsProviderConfig }}
+          {{- end }}
+          
+          {{- if $coreDnsEnabled }}
+          # CoreDNS Add-on
+          ---
+          apiVersion: eks.aws.upbound.io/v1beta1
+          kind: Addon
+          metadata:
+            name: {{ $name }}-coredns-addon
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: coredns-addon
+            labels:
+              platform.kubecore.io/cluster: {{ $name }}
+              platform.kubecore.io/addon: "coredns"
+              platform.kubecore.io/cloud-provider: aws
+          spec:
+            deletionPolicy: Delete
+            managementPolicies: ["*"]
+            forProvider:
+              region: {{ $primaryRegion }}
+              addonName: "coredns"
+              clusterNameSelector:
+                matchLabels:
+                  crossplane.io/external-name: {{ $name }}
+              {{- if and $eksDefaults.addons $eksDefaults.addons.coreDns $eksDefaults.addons.coreDns.version }}
+              addonVersion: {{ $eksDefaults.addons.coreDns.version }}
+              {{- end }}
+              resolveConflictsOnCreate: "OVERWRITE"
+              resolveConflictsOnUpdate: "OVERWRITE"
+              configurationValues: |-
+                {
+                  "tolerations": [
+                    {
+                      "key": "CriticalAddonsOnly",
+                      "operator": "Exists"
+                    },
+                    {
+                      "effect": "NoSchedule",
+                      "key": "node-role.kubernetes.io/control-plane"
+                    },
+                    {
+                      "key": "kubecore.eu/computation-type",
+                      "operator": "Equal",
+                      "value": "kubecore-system",
+                      "effect": "NoSchedule"
+                    }
+                  ]
+                }
+              tags:
+                Name: {{ $name }}-coredns
+                Cluster: {{ $name }}
+                {{- range $k, $v := $commonTags }}
+                {{ $k }}: {{ $v | quote }}
+                {{- end }}
+            providerConfigRef:
+              name: {{ $awsProviderConfig }}
+          {{- end }}
+          
+          {{- if $kubeProxyEnabled }}
+          # kube-proxy Add-on
+          ---
+          apiVersion: eks.aws.upbound.io/v1beta1
+          kind: Addon
+          metadata:
+            name: {{ $name }}-kube-proxy-addon
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: kube-proxy-addon
+            labels:
+              platform.kubecore.io/cluster: {{ $name }}
+              platform.kubecore.io/addon: "kube-proxy"
+              platform.kubecore.io/cloud-provider: aws
+          spec:
+            deletionPolicy: Delete
+            managementPolicies: ["*"]
+            forProvider:
+              region: {{ $primaryRegion }}
+              addonName: "kube-proxy"
+              clusterNameSelector:
+                matchLabels:
+                  crossplane.io/external-name: {{ $name }}
+              {{- if and $eksDefaults.addons $eksDefaults.addons.kubeProxy $eksDefaults.addons.kubeProxy.version }}
+              addonVersion: {{ $eksDefaults.addons.kubeProxy.version }}
+              {{- end }}
+              resolveConflictsOnCreate: "OVERWRITE"
+              resolveConflictsOnUpdate: "OVERWRITE"
+              configurationValues: |-
+                {
+                  "mode": "iptables"
+                }
+              tags:
+                Name: {{ $name }}-kube-proxy
+                Cluster: {{ $name }}
+                {{- range $k, $v := $commonTags }}
+                {{ $k }}: {{ $v | quote }}
+                {{- end }}
+            providerConfigRef:
+              name: {{ $awsProviderConfig }}
+          {{- end }}
+          
+          {{- if $ebsCsiEnabled }}
+          # EBS CSI Driver Add-on
+          ---
+          apiVersion: eks.aws.upbound.io/v1beta1
+          kind: Addon
+          metadata:
+            name: {{ $name }}-ebs-csi-driver-addon
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: ebs-csi-driver-addon
+            labels:
+              platform.kubecore.io/cluster: {{ $name }}
+              platform.kubecore.io/addon: "ebs-csi-driver"
+              platform.kubecore.io/cloud-provider: aws
+          spec:
+            deletionPolicy: Delete
+            managementPolicies: ["*"]
+            forProvider:
+              region: {{ $primaryRegion }}
+              addonName: "aws-ebs-csi-driver"
+              clusterNameSelector:
+                matchLabels:
+                  crossplane.io/external-name: {{ $name }}
+              {{- if and $eksDefaults.addons $eksDefaults.addons.ebsCsiDriver $eksDefaults.addons.ebsCsiDriver.version }}
+              addonVersion: {{ $eksDefaults.addons.ebsCsiDriver.version }}
+              {{- end }}
+              resolveConflictsOnCreate: "OVERWRITE"
+              resolveConflictsOnUpdate: "OVERWRITE"
+              configurationValues: |-
+                {
+                  "controller": {
+                    "tolerations": [
+                      {
+                        "key": "CriticalAddonsOnly",
+                        "operator": "Exists"
+                      },
+                      {
+                        "effect": "NoExecute",
+                        "operator": "Exists",
+                        "tolerationSeconds": 300
+                      },
+                      {
+                        "key": "kubecore.eu/computation-type",
+                        "operator": "Equal",
+                        "value": "kubecore-system",
+                        "effect": "NoSchedule"
+                      }
+                    ]
+                  },
+                  "node": {
+                    "tolerations": [
+                      {
+                        "effect": "NoExecute",
+                        "operator": "Exists",
+                        "tolerationSeconds": 300
+                      },
+                      {
+                        "key": "kubecore.eu/computation-type",
+                        "operator": "Equal",
+                        "value": "kubecore-system",
+                        "effect": "NoSchedule"
+                      },
+                      {
+                        "operator": "Exists",
+                        "effect": "NoSchedule"
+                      },
+                      {
+                        "operator": "Exists",
+                        "effect": "PreferNoSchedule"
+                      }
+                    ]
+                  }
+                }
+              tags:
+                Name: {{ $name }}-ebs-csi-driver
+                Cluster: {{ $name }}
+                {{- range $k, $v := $commonTags }}
+                {{ $k }}: {{ $v | quote }}
+                {{- end }}
+            providerConfigRef:
+              name: {{ $awsProviderConfig }}
+          {{- end }}
+
+  # Step 3: Create OIDC Provider after cluster is ready
+  - step: create-oidc-provider
+    functionRef:
+      name: function-go-templating
+    input:
+      apiVersion: gotemplating.fn.crossplane.io/v1beta1
+      kind: GoTemplate
+      source: Inline
+      inline:
+        template: |
+          {{- $name := .observed.composite.resource.metadata.name -}}
+          {{- $spec := .observed.composite.resource.spec -}}
+          
+          {{/* Extract configuration from environment config */}}
+          {{- $envConfig := index .context "apiextensions.crossplane.io/environment" -}}
+          {{- if not $envConfig -}}
+            {{- fail "Environment configuration not found" -}}
+          {{- end -}}
+          
+          {{- $primaryRegion := $envConfig.primaryRegion -}}
+          {{- $providerConfigName := $envConfig.providerConfig -}}
+          
+          {{- $awsProviderConfig := "aws-default" -}}
+          {{- if $spec.providerConfigRef -}}
+            {{- $awsProviderConfig = $spec.providerConfigRef.name | default "aws-default" -}}
+          {{- end -}}
+          {{- if $providerConfigName -}}
+            {{- $awsProviderConfig = $providerConfigName -}}
+          {{- end -}}
+          
+          {{/* Extract OIDC issuer URL from cluster status */}}
+          {{- $oidcIssuerUrl := "" }}
+          {{- if .observed.resources }}
+            {{- $cluster := index .observed.resources "cluster" }}
+            {{- if $cluster }}
+              {{- if $cluster.resource.status.atProvider.identity }}
+                {{- if (index $cluster.resource.status.atProvider.identity 0).oidc }}
+                  {{- $oidcIssuerUrl = (index (index $cluster.resource.status.atProvider.identity 0).oidc 0).issuer }}
+                {{- end }}
+              {{- end }}
+            {{- end }}
+          {{- end }}
+          
+          {{- if $oidcIssuerUrl }}
+          # OIDC Identity Provider for IRSA
+          ---
+          apiVersion: iam.aws.upbound.io/v1beta1
+          kind: OpenIDConnectProvider
+          metadata:
+            name: {{ $name }}-oidc-provider
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: oidc-provider
+            labels:
+              platform.kubecore.io/cluster: {{ $name }}
+              platform.kubecore.io/cloud-provider: aws
+          spec:
+            deletionPolicy: Delete
+            managementPolicies: ["*"]
+            forProvider:
+              url: {{ $oidcIssuerUrl }}
+              clientIdList:
+              - "sts.amazonaws.com"
+              thumbprintList:
+              - "9e99a48a9960b14926bb7f3b02e22da2b0ab7280"
+              - "a9d53002e97e00e043244f3d170d6f4c414104fd"
+              tags:
+                Name: {{ $name }}-oidc-provider
+                Cluster: {{ $name }}
+                Purpose: "IRSA OIDC Provider"
+            providerConfigRef:
+              name: {{ $awsProviderConfig }}
+          {{- end }}
+
+  # Step 4: Create ProviderConfigs after cluster is ready
+  - step: create-provider-configs
+    functionRef:
+      name: function-go-templating
+    input:
+      apiVersion: gotemplating.fn.crossplane.io/v1beta1
+      kind: GoTemplate
+      source: Inline
+      inline:
+        template: |
+          {{- $name := .observed.composite.resource.metadata.name -}}
+          {{- $uid := .observed.composite.resource.metadata.uid -}}
+          {{/* Connection secrets handled by ClusterAuth */}}
+          {{- $connectionSecretNamespace := "crossplane-system" }}
+          
+          # Helm Provider Config for cluster access
+          ---
+          apiVersion: helm.crossplane.io/v1beta1
+          kind: ProviderConfig
+          metadata:
+            name: {{ $name }}-helm
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: helm-provider-config
+              gotemplating.fn.crossplane.io/ready: "True"
+            labels:
+              platform.kubecore.io/cluster: {{ $name }}
+              platform.kubecore.io/cloud-provider: aws
+          spec:
+            credentials:
+              source: Secret
+              secretRef:
+                name: {{ $uid }}-ekscluster
+                namespace: {{ $connectionSecretNamespace }}
+                key: kubeconfig
+          
+          # Kubernetes Provider Config for cluster access
+          ---
+          apiVersion: kubernetes.crossplane.io/v1alpha1
+          kind: ProviderConfig
+          metadata:
+            name: {{ $name }}-kubernetes
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: kubernetes-provider-config
+              gotemplating.fn.crossplane.io/ready: "True"
+            labels:
+              platform.kubecore.io/cluster: {{ $name }}
+              platform.kubecore.io/cloud-provider: aws
+          spec:
+            credentials:
+              source: Secret
+              secretRef:
+                name: {{ $uid }}-ekscluster
+                namespace: {{ $connectionSecretNamespace }}
+                key: kubeconfig
+
+  # Step 5: Auto-ready
+  - step: auto-ready
+    functionRef:
+      name: function-auto-ready
+    input:
+      apiVersion: autoready.fn.crossplane.io/v1beta1
+      kind: Input
+
+  # Step 6: Sequence Resources (Ensure proper creation order)
+  - step: sequence-resources
+    functionRef:
+      name: function-sequencer
+    input:
+      apiVersion: sequencer.fn.crossplane.io/v1beta1
+      kind: Input
+      config:
+        respectDeletionOrder: true
+        finalizerStrategy:
+          mode: Strict
+      rules:
+      # IAM roles must be created first
+      - sequence:
+        - cluster-service-role
+        - node-group-role
+
+      # Subnets must be created before cluster
+      - sequence:
+        - cluster-service-role
+        - cluster
+
+      # Cluster must be created after IAM roles and subnets
+      - sequence:
+        - cluster-service-role
+        - cluster
+
+      # ClusterAuth must wait for cluster to be ready
+      - sequence:
+        - cluster
+        - cluster-auth
+
+      # OIDC Provider must wait for cluster to be ready
+      - sequence:
+        - cluster
+        - oidc-provider
+
+      # ProviderConfigs must wait for ClusterAuth (which creates the connection secret)
+      - sequence:
+        - cluster-auth
+        - helm-provider-config
+      - sequence:
+        - cluster-auth
+        - kubernetes-provider-config
+
+      # Node groups must wait for cluster
+      - sequence:
+        - cluster
+        - node-group-kubecoresys
+
+      # Addons must wait for cluster and node groups
+      - sequence:
+        - cluster
+        - vpc-cni-addon
+      - sequence:
+        - cluster
+        - coredns-addon
+      - sequence:
+        - cluster
+        - kube-proxy-addon
+      - sequence:
+        - cluster
+        - ebs-csi-driver-addon
+
+  # Step 7: Status Transformer - Extract cluster information and populate status
+  - step: status-transformer
+    functionRef:
+      name: function-go-templating
+    input:
+      apiVersion: gotemplating.fn.crossplane.io/v1beta1
+      kind: GoTemplate
+      source: Inline
+      inline:
+        template: |
+          {{- $name := .observed.composite.resource.metadata.name }}
+          {{- $spec := .observed.composite.resource.spec }}
+          
+          {{/* Extract configuration from environment config */}}
+          {{- $envConfig := index .context "apiextensions.crossplane.io/environment" -}}
+          
+          {{/* Extract information from child resources */}}
+          {{- $childResourcesCount := 0 }}
+          {{- $childResourcesList := list }}
+          {{- $clusterEndpoint := "" }}
+          {{- $clusterVersion := "" }}
+          {{- $clusterArn := "" }}
+          {{- $clusterStatus := "" }}
+          {{- $oidcIssuerUrl := "" }}
+          {{- $oidcProviderArn := "" }}
+          {{- $oidcProviderName := "" }}
+          {{- $oidcClientId := "" }}
+          {{- $systemNodeGroupsList := list }}
+          {{- $addOnsList := list }}
+          {{- $publicSubnets := list }}
+          {{- $privateSubnets := list }}
+          
+          {{/* Iterate through observed resources to gather status information */}}
+          {{- range $name, $resource := .observed.resources }}
+          {{/* Count child resources */}}
+          {{- if $resource.resource.kind }}
+          {{- $childResourcesCount = add $childResourcesCount 1 }}
+          {{- $childResource := dict "name" $name "kind" $resource.resource.kind }}
+          {{- if $resource.resource.apiVersion }}
+          {{- $_ := set $childResource "apiVersion" $resource.resource.apiVersion }}
+          {{- end }}
+          {{- $childResourcesList = append $childResourcesList $childResource }}
+          {{- end }}
+          
+          {{/* Extract subnet information */}}
+          {{- if eq $resource.resource.kind "Subnet" }}
+          {{- if $resource.resource.metadata.labels }}
+          {{- if eq (index $resource.resource.metadata.labels "platform.kubecore.io/subnet-type") "public" }}
+          {{- if $resource.resource.status.atProvider.id }}
+          {{- $publicSubnets = append $publicSubnets $resource.resource.status.atProvider.id }}
+          {{- end }}
+          {{- else if eq (index $resource.resource.metadata.labels "platform.kubecore.io/subnet-type") "private" }}
+          {{- if $resource.resource.status.atProvider.id }}
+          {{- $privateSubnets = append $privateSubnets $resource.resource.status.atProvider.id }}
+          {{- end }}
+          {{- end }}
+          {{- end }}
+          {{- end }}
+          
+          {{/* Extract EKS Cluster information */}}
+          {{- if and $resource.resource $resource.resource.status }}
+          {{- if eq $resource.resource.kind "Cluster" }}
+          {{- if eq $resource.resource.apiVersion "eks.aws.upbound.io/v1beta2" }}
+          {{- if $resource.resource.status.atProvider }}
+          {{- if $resource.resource.status.atProvider.endpoint }}
+          {{- $clusterEndpoint = $resource.resource.status.atProvider.endpoint }}
+          {{- end }}
+          {{- if $resource.resource.status.atProvider.version }}
+          {{- $clusterVersion = $resource.resource.status.atProvider.version }}
+          {{- end }}
+          {{- if $resource.resource.status.atProvider.arn }}
+          {{- $clusterArn = $resource.resource.status.atProvider.arn }}
+          {{- end }}
+          {{- if $resource.resource.status.atProvider.status }}
+          {{- $clusterStatus = $resource.resource.status.atProvider.status }}
+          {{- end }}
+          {{- end }}
+          {{- end }}
+          {{- end }}
+          
+          {{/* Extract OIDC Provider information */}}
+          {{- if eq $resource.resource.kind "OpenIDConnectProvider" }}
+          {{- if eq $resource.resource.apiVersion "iam.aws.upbound.io/v1beta1" }}
+          {{- if $resource.resource.status.atProvider }}
+          {{- if $resource.resource.status.atProvider.url }}
+          {{- $oidcIssuerUrl = $resource.resource.status.atProvider.url }}
+          {{- end }}
+          {{- if $resource.resource.status.atProvider.arn }}
+          {{- $oidcProviderArn = $resource.resource.status.atProvider.arn }}
+          {{- end }}
+          {{- if $resource.resource.metadata.name }}
+          {{- $oidcProviderName = $resource.resource.metadata.name }}
+          {{- end }}
+          {{- if $resource.resource.status.atProvider.clientIdList }}
+          {{- range $resource.resource.status.atProvider.clientIdList }}
+          {{- $oidcClientId = . }}
+          {{- break }}
+          {{- end }}
+          {{- end }}
+          {{- end }}
+          {{- end }}
+          {{- end }}
+          
+          {{/* Extract Node Group information */}}
+          {{- if eq $resource.resource.kind "NodeGroup" }}
+          {{- if eq $resource.resource.apiVersion "eks.aws.upbound.io/v1beta2" }}
+          {{- if and $resource.resource.metadata.name $resource.resource.status.atProvider }}
+          {{- $nodeGroupName := $resource.resource.metadata.name }}
+          {{- $nodeGroupStatus := "" }}
+          {{- $nodeGroupArn := "" }}
+          {{- $instanceTypes := list }}
+          {{- $scalingConfig := dict }}
+          
+          {{- if $resource.resource.status.atProvider.status }}
+          {{- $nodeGroupStatus = $resource.resource.status.atProvider.status }}
+          {{- end }}
+          {{- if $resource.resource.status.atProvider.arn }}
+          {{- $nodeGroupArn = $resource.resource.status.atProvider.arn }}
+          {{- end }}
+          {{- if $resource.resource.status.atProvider.instanceTypes }}
+          {{- $instanceTypes = $resource.resource.status.atProvider.instanceTypes }}
+          {{- end }}
+          {{- if $resource.resource.status.atProvider.scalingConfig }}
+          {{- $scalingConfig = $resource.resource.status.atProvider.scalingConfig }}
+          {{- end }}
+          
+          {{- $nodeGroupInfo := dict "name" $nodeGroupName "status" $nodeGroupStatus }}
+          {{- if $nodeGroupArn }}
+          {{- $nodeGroupInfo = merge $nodeGroupInfo (dict "arn" $nodeGroupArn) }}
+          {{- end }}
+          {{- if gt (len $instanceTypes) 0 }}
+          {{- $nodeGroupInfo = merge $nodeGroupInfo (dict "instanceTypes" $instanceTypes) }}
+          {{- end }}
+          {{- if $scalingConfig }}
+          {{- $nodeGroupInfo = merge $nodeGroupInfo (dict "scalingConfig" $scalingConfig) }}
+          {{- end }}
+          
+          {{/* Only kubecoresys system node groups */}}
+          {{- if contains $nodeGroupName "kubecoresys" }}
+          {{- $systemNodeGroupsList = append $systemNodeGroupsList $nodeGroupInfo }}
+          {{- end }}
+          {{- end }}
+          {{- end }}
+          {{- end }}
+          
+          {{/* Extract Add-on information */}}
+          {{- if eq $resource.resource.kind "Addon" }}
+          {{- if eq $resource.resource.apiVersion "eks.aws.upbound.io/v1beta1" }}
+          {{- if $resource.resource.status.atProvider }}
+          {{- $addonName := "" }}
+          {{- $addonVersion := "" }}
+          {{- $addonStatus := "" }}
+          {{- $addonArn := "" }}
+          
+          {{- if $resource.resource.status.atProvider.addonName }}
+          {{- $addonName = $resource.resource.status.atProvider.addonName }}
+          {{- end }}
+          {{- if $resource.resource.status.atProvider.addonVersion }}
+          {{- $addonVersion = $resource.resource.status.atProvider.addonVersion }}
+          {{- end }}
+          {{- if $resource.resource.status.atProvider.status }}
+          {{- $addonStatus = $resource.resource.status.atProvider.status }}
+          {{- end }}
+          {{- if $resource.resource.status.atProvider.arn }}
+          {{- $addonArn = $resource.resource.status.atProvider.arn }}
+          {{- end }}
+          
+          {{- if $addonName }}
+          {{- $addonInfo := dict "name" $addonName }}
+          {{- if $addonVersion }}
+          {{- $addonInfo = merge $addonInfo (dict "version" $addonVersion) }}
+          {{- end }}
+          {{- if $addonStatus }}
+          {{- $addonInfo = merge $addonInfo (dict "status" $addonStatus) }}
+          {{- end }}
+          {{- if $addonArn }}
+          {{- $addonInfo = merge $addonInfo (dict "arn" $addonArn) }}
+          {{- end }}
+          {{- $addOnsList = append $addOnsList $addonInfo }}
+          {{- end }}
+          {{- end }}
+          {{- end }}
+          {{- end }}
+          {{- end }}
+          {{- end }}
+          
+          # Update composite resource status with cluster information
+          ---
+          apiVersion: {{ .observed.composite.resource.apiVersion }}
+          kind: {{ .observed.composite.resource.kind }}
+          metadata:
+            name: {{ .observed.composite.resource.metadata.name }}
+          status:
+            # Child Resources Summary
+            childResources:
+              total: {{ $childResourcesCount }}
+              {{- if gt (len $childResourcesList) 0 }}
+              resources: {{ toJson $childResourcesList | quote }}
+              {{- end }}
+            
+            # Cluster Information
+            {{- if $clusterEndpoint }}
+            clusterName: {{ $name }}
+            endpoint: {{ $clusterEndpoint | quote }}
+            {{- end }}
+            {{- if $clusterVersion }}
+            version: {{ $clusterVersion | quote }}
+            {{- end }}
+            {{- if $envConfig.primaryRegion }}
+            region: {{ $envConfig.primaryRegion | quote }}
+            {{- end }}
+            {{- if $clusterStatus }}
+            clusterStatus: {{ $clusterStatus | quote }}
+            {{- end }}
+            {{- if $clusterArn }}
+            arn: {{ $clusterArn | quote }}
+            {{- end }}
+            
+            # VPC and Network Information
+            {{- if or $envConfig.vpcId $publicSubnets $privateSubnets }}
+            vpc:
+              {{- if $envConfig.vpcId }}
+              vpcId: {{ $envConfig.vpcId | quote }}
+              {{- end }}
+              {{- if or $publicSubnets $privateSubnets }}
+              subnets:
+                {{- if $publicSubnets }}
+                public: {{ toJson $publicSubnets }}
+                {{- end }}
+                {{- if $privateSubnets }}
+                private: {{ toJson $privateSubnets }}
+                {{- end }}
+              {{- end }}
+            {{- end }}
+            
+            # OIDC Provider Information
+            {{- if $oidcIssuerUrl }}
+            oidc:
+              issuerUrl: {{ $oidcIssuerUrl | quote }}
+              {{- if $oidcProviderArn }}
+              providerArn: {{ $oidcProviderArn | quote }}
+              {{- end }}
+              {{- if $oidcProviderName }}
+              providerName: {{ $oidcProviderName | quote }}
+              {{- end }}
+              {{- if $oidcClientId }}
+              clientId: {{ $oidcClientId | quote }}
+              {{- end }}
+            {{- end }}
+            
+            # System Node Groups Status (kubecoresys only)
+            {{- if $systemNodeGroupsList }}
+            systemNodeGroups: {{ toJson $systemNodeGroupsList }}
+            {{- end }}
+            
+            # Add-ons Status
+            {{- if $addOnsList }}
+            addOns: {{ toJson $addOnsList }}
+            {{- end }}
+            
+            # Provider Configurations Status
+            providerConfigs:
+              helm:
+                name: {{ printf "%s-helm" $name | quote }}
+                ready: {{ if eq $clusterStatus "ACTIVE" }}true{{ else }}false{{ end }}
+              kubernetes:
+                name: {{ printf "%s-kubernetes" $name | quote }}
+                ready: {{ if eq $clusterStatus "ACTIVE" }}true{{ else }}false{{ end }}
+            
+            # Environment Configuration Reference
+            {{- if $envConfig }}
+            environmentConfig:
+              name: {{ printf "%s-eks-config" $name | quote }}
+              matched: true
+            {{- else }}
+            environmentConfig:
+              matched: false
+            {{- end }}
+{{- end }}
