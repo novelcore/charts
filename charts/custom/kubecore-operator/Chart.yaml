@@ -2,7 +2,7 @@ apiVersion: v2
 name: kubecore-operator
 description: A sophisticated Kubernetes operator that implements a four-layer framework architecture for provisioning and managing cloud infrastructure through Crossplane compositions.
 type: application
-version: 0.1.16
+version: 0.1.17
 appVersion: "v0.1.4"
 
 # Maintainers
@@ -49,9 +49,7 @@ annotations:
   # Changes for this chart version
   artifacthub.io/changes: |
     - kind: fixed
-      description: "Fixed missing RBAC permissions for kubernetes.crossplane.io/objects (required for ClusterUsage feature)"
-    - kind: fixed
-      description: "Added protection.crossplane.io/clusterusages CREATE permission to ClusterRole"
+      description: "Fixed ClusterRole naming mismatch - changed 'manager-role' to 'kubecore-operator-manager-role' to match ClusterRoleBinding reference"
 
 # Kubernetes version compatibility
 kubeVersion: ">=1.20.0-0"
