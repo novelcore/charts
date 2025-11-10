@@ -2,7 +2,7 @@ apiVersion: v2
 name: kubecore-operator
 description: A sophisticated Kubernetes operator that implements a four-layer framework architecture for provisioning and managing cloud infrastructure through Crossplane compositions.
 type: application
-version: 0.1.15
+version: 0.1.16
 appVersion: "v0.1.4"
 
 # Maintainers
@@ -48,14 +48,10 @@ annotations:
 
   # Changes for this chart version
   artifacthub.io/changes: |
-    - kind: changed
-      description: "Moved ClusterUsage creation from composition to controller for proper ownership chain"
     - kind: fixed
-      description: "Fixed ClusterUsage co-deletion issue where protection was removed simultaneously with protected resources"
-    - kind: changed
-      description: "ClusterUsage now owned by ClusterSecretStore Object instead of XAWSProvider to prevent premature deletion"
-    - kind: added
-      description: "Added controller-managed ClusterUsage with proper deletion ordering (after GitHub, before AWS provider)"
+      description: "Fixed missing RBAC permissions for kubernetes.crossplane.io/objects (required for ClusterUsage feature)"
+    - kind: fixed
+      description: "Added protection.crossplane.io/clusterusages CREATE permission to ClusterRole"
 
 # Kubernetes version compatibility
 kubeVersion: ">=1.20.0-0"
