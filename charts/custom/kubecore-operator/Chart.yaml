@@ -2,7 +2,7 @@ apiVersion: v2
 name: kubecore-operator
 description: A sophisticated Kubernetes operator that implements a four-layer framework architecture for provisioning and managing cloud infrastructure through Crossplane compositions.
 type: application
-version: 0.1.13
+version: 0.1.14
 appVersion: "v0.1.3"
 
 # Maintainers
@@ -48,12 +48,14 @@ annotations:
 
   # Changes for this chart version
   artifacthub.io/changes: |
+    - kind: changed
+      description: "Migrated from deprecated apiextensions.crossplane.io/v1alpha1 Usage to protection.crossplane.io/v1beta1 ClusterUsage API"
     - kind: fixed
-      description: "Fixed ClusterSecretStore deletion deadlock by adding Usage resource to enforce deletion ordering"
+      description: "Fixed ClusterSecretStore deletion deadlock with proper ClusterUsage resource enforcement"
+    - kind: added
+      description: "Added explicit reason field to ClusterUsage for better documentation of deletion dependencies"
     - kind: changed
-      description: "ServiceAccount now protected from deletion until ClusterSecretStore is fully deleted"
-    - kind: changed
-      description: "Crossplane Usage resource prevents finalizer deadlock during KubeOrg deletion"
+      description: "ServiceAccount deletion now properly blocked until ClusterSecretStore finalizer completes"
 
 # Kubernetes version compatibility
 kubeVersion: ">=1.20.0-0"

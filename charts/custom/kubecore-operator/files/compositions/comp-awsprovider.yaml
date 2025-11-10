@@ -512,8 +512,8 @@ spec:
               policy: SuccessfulCreate
             forProvider:
               manifest:
-                apiVersion: apiextensions.crossplane.io/v1alpha1
-                kind: Usage
+                apiVersion: protection.crossplane.io/v1beta1
+                kind: ClusterUsage
                 metadata:
                   name: {{ $org }}-clustersecretstore-uses-serviceaccount
                   labels:
@@ -538,6 +538,8 @@ spec:
                         platform.kubecore.io/organization: {{ $org }}
                         platform.kubecore.io/resource-type: cluster-secret-store
                         platform.kubecore.io/service-type: external-secrets
+                  # Explanation for why this protection exists
+                  reason: "ClusterSecretStore requires ServiceAccount for IRSA authentication to AWS. ServiceAccount must remain available until ClusterSecretStore finalizer completes cleanup."
                   # Enable fast deletion replay - triggers immediately when ClusterSecretStore is deleted
                   # instead of waiting for Kubernetes garbage collector exponential backoff
                   replayDeletion: true
