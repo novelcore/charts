@@ -178,7 +178,7 @@ rules:
   - update
   - watch
 - apiGroups:
-  - kubecore.io
+  - schema.kubecore.io
   resources:
   - kubeapps
   verbs:
@@ -190,13 +190,13 @@ rules:
   - update
   - watch
 - apiGroups:
-  - kubecore.io
+  - schema.kubecore.io
   resources:
   - kubeapps/finalizers
   verbs:
   - update
 - apiGroups:
-  - kubecore.io
+  - schema.kubecore.io
   resources:
   - kubeapps/status
   verbs:
