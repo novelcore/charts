@@ -2,8 +2,8 @@ apiVersion: v2
 name: kubecore-operator
 description: A sophisticated Kubernetes operator that implements a four-layer framework architecture for provisioning and managing cloud infrastructure through Crossplane compositions.
 type: application
-version: 0.1.12
-appVersion: "v0.1.2"
+version: 0.1.13
+appVersion: "v0.1.3"
 
 # Maintainers
 maintainers:
@@ -49,11 +49,11 @@ annotations:
   # Changes for this chart version
   artifacthub.io/changes: |
     - kind: fixed
-      description: "Fixed Helm template parsing - moved Crossplane Compositions to files/ directory"
+      description: "Fixed ClusterSecretStore deletion deadlock by adding Usage resource to enforce deletion ordering"
     - kind: changed
-      description: "Compositions now loaded via .Files.Get to prevent Helm template evaluation"
+      description: "ServiceAccount now protected from deletion until ClusterSecretStore is fully deleted"
     - kind: changed
-      description: "Simplified composition template structure using single loader template"
+      description: "Crossplane Usage resource prevents finalizer deadlock during KubeOrg deletion"
 
 # Kubernetes version compatibility
 kubeVersion: ">=1.20.0-0"
