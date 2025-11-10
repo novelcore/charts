@@ -2,8 +2,8 @@ apiVersion: v2
 name: kubecore-operator
 description: A sophisticated Kubernetes operator that implements a four-layer framework architecture for provisioning and managing cloud infrastructure through Crossplane compositions.
 type: application
-version: 0.1.18
-appVersion: "v0.1.4"
+version: 0.1.19
+appVersion: "v0.1.5"
 
 # Maintainers
 maintainers:
@@ -49,7 +49,7 @@ annotations:
   # Changes for this chart version
   artifacthub.io/changes: |
     - kind: fixed
-      description: "Fixed KubeApp RBAC permissions - changed API group from 'kubecore.io' to 'schema.kubecore.io' for kubeapps resources"
+      description: "Fixed ClusterSecretStore deletion deadlock - ServiceAccount now uses deletionPolicy: Orphan with controller-managed cleanup to prevent premature deletion during finalization (v0.1.5)"
 
 # Kubernetes version compatibility
 kubeVersion: ">=1.20.0-0"
