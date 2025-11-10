@@ -490,60 +490,6 @@ spec:
                       region: {{ $primaryRegion }}
                       service: SecretsManager
 
-          # Usage constraint to enforce deletion ordering between ServiceAccount and ClusterSecretStore
-          # This prevents ServiceAccount deletion until ClusterSecretStore is fully deleted
-          # Solves the deadlock where ClusterSecretStore finalizer needs ServiceAccount for IRSA authentication
-          ---
-          apiVersion: kubernetes.crossplane.io/v1alpha1
-          kind: Object
-          metadata:
-            name: {{ $org }}-eso-sa-usage
-            annotations:
-              gotemplating.fn.crossplane.io/composition-resource-name: eso-service-account-usage
-            labels:
-              platform.kubecore.io/organization: {{ $org }}
-              platform.kubecore.io/resource-type: usage-constraint
-              platform.kubecore.io/service-type: crossplane-usage
-          spec:
-            deletionPolicy: Delete
-            providerConfigRef:
-              name: {{ $kubernetesProviderConfig }}
-            readiness:
-              policy: SuccessfulCreate
-            forProvider:
-              manifest:
-                apiVersion: protection.crossplane.io/v1beta1
-                kind: ClusterUsage
-                metadata:
-                  name: {{ $org }}-clustersecretstore-uses-serviceaccount
-                  labels:
-                    platform.kubecore.io/organization: {{ $org }}
-                    platform.kubecore.io/resource-type: usage-constraint
-                spec:
-                  # The resource being used (ServiceAccount)
-                  of:
-                    apiVersion: kubernetes.crossplane.io/v1alpha1
-                    kind: Object
-                    resourceSelector:
-                      matchLabels:
-                        platform.kubecore.io/organization: {{ $org }}
-                        platform.kubecore.io/resource-type: service-account
-                        platform.kubecore.io/service-type: external-secrets
-                  # The resource that uses it (ClusterSecretStore)
-                  by:
-                    apiVersion: kubernetes.crossplane.io/v1alpha1
-                    kind: Object
-                    resourceSelector:
-                      matchLabels:
-                        platform.kubecore.io/organization: {{ $org }}
-                        platform.kubecore.io/resource-type: cluster-secret-store
-                        platform.kubecore.io/service-type: external-secrets
-                  # Explanation for why this protection exists
-                  reason: "ClusterSecretStore requires ServiceAccount for IRSA authentication to AWS. ServiceAccount must remain available until ClusterSecretStore finalizer completes cleanup."
-                  # Enable fast deletion replay - triggers immediately when ClusterSecretStore is deleted
-                  # instead of waiting for Kubernetes garbage collector exponential backoff
-                  replayDeletion: true
-
           {{- range $region := $regions }}
           # ECRAuthorizationToken Generator for {{ $region }}
           ---
@@ -719,14 +665,6 @@ spec:
       - sequence:
         - eso-service-account
         - cluster-secret-store
-
-      # Usage resource to enforce deletion ordering (must exist after both dependencies)
-      - sequence:
-        - eso-service-account
-        - eso-service-account-usage
-      - sequence:
-        - cluster-secret-store
-        - eso-service-account-usage
 
       # ECRAuthorizationToken generators after service account
       - sequence:
