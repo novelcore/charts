@@ -507,7 +507,7 @@ spec:
                 maxSize: {{ $systemMaxSize }}
                 desiredSize: {{ $systemDesiredSize }}
               diskSize: {{ $systemDiskSize }}
-              capacityType: "ON_DEMAND"
+              capacityType: "SPOT"
               labels:
                 platform.kubecore.io/nodegroup-type: "kubecoresys"
                 platform.kubecore.io/system: "true"

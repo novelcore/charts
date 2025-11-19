@@ -93,7 +93,11 @@ spec:
                     platform.kubecore.io/managed-by: githubprovider
                     platform.kubecore.io/organization: {{ $org }}
                 spec:
-                  deletionPolicy: Delete  # Delete from AWS when PushSecret is deleted
+                  # deletionPolicy: None - Don't delete secret from AWS during PushSecret finalization
+                  # AWS Secrets Manager uses scheduled deletion (7-30 day window), which causes ESO
+                  # finalizer to hang waiting for immediate deletion. Secret will be cleaned up when
+                  # XAWSProvider is deleted or via AWS's scheduled deletion window.
+                  deletionPolicy: None
                   refreshInterval: {{ $refreshInterval }}
                   secretStoreRefs:
                   - kind: {{ $secretStoreRef.kind }}

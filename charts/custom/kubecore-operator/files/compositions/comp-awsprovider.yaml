@@ -130,6 +130,9 @@ spec:
                         "secretsmanager:UpdateSecret",
                         "secretsmanager:PutSecretValue",
                         "secretsmanager:DeleteSecret",
+                        "secretsmanager:GetResourcePolicy",
+                        "secretsmanager:PutResourcePolicy",
+                        "secretsmanager:DeleteResourcePolicy",
                         "secretsmanager:TagResource",
                         "secretsmanager:UntagResource"
                       ],
@@ -314,111 +317,7 @@ spec:
                   platform.kubecore.io/role-type: eso-irsa
           
           # ========================================
-          # Group 4: ECR Repositories (after IAM resources)
-          # ========================================
-          
-          # TODO: REmove this, move it to application, because one repository per application is better, aws allows you to have only one image name per repository, you can only change the tags,
-          # So something like url.com/org/repo1, url.com/org/repo2, url.com/org/repo3 is not possible, you can only have url.com/org and then tag it with repo1, repo2, repo3
-          {{- range $region := $regions }}
-          # ECR Repository for {{ $region }}
-          ---
-          apiVersion: ecr.aws.upbound.io/v1beta2
-          kind: Repository
-          metadata:
-            name: {{ $org }}-ecr-{{ $region }}
-            annotations:
-              gotemplating.fn.crossplane.io/composition-resource-name: ecr-{{ $region }}
-            labels:
-              platform.kubecore.io/organization: {{ $org }}
-              platform.kubecore.io/resource-type: ecr-repository
-              platform.kubecore.io/region: {{ $region }}
-          spec:
-            deletionPolicy: Delete
-            providerConfigRef:
-              name: {{ $providerConfig }}
-            forProvider:
-              region: {{ $region }}
-              imageScanningConfiguration:
-                scanOnPush: true
-              imageTagMutability: MUTABLE
-              encryptionConfiguration:
-                - encryptionType: AES256
-              tags:
-                Organization: {{ $org }}
-                Region: {{ $region }}
-                ManagedBy: crossplane
-                Purpose: container-registry
-          
-          # ECR Lifecycle Policy for {{ $region }}
-          ---
-          apiVersion: ecr.aws.upbound.io/v1beta1
-          kind: LifecyclePolicy
-          metadata:
-            name: {{ $org }}-lifecycle-{{ $region }}
-            annotations:
-              gotemplating.fn.crossplane.io/composition-resource-name: lifecycle-{{ $region }}
-            labels:
-              platform.kubecore.io/organization: {{ $org }}
-              platform.kubecore.io/resource-type: ecr-lifecycle
-              platform.kubecore.io/region: {{ $region }}
-          spec:
-            deletionPolicy: Delete
-            providerConfigRef:
-              name: {{ $providerConfig }}
-            forProvider:
-              region: {{ $region }}
-              repositorySelector:
-                matchLabels:
-                  platform.kubecore.io/organization: {{ $org }}
-                  platform.kubecore.io/region: {{ $region }}
-              policy: |
-                {
-                  "rules": [
-                    {
-                      "rulePriority": 1,
-                      "description": "Expire untagged images after 30 days",
-                      "selection": {
-                        "tagStatus": "untagged",
-                        "countType": "sinceImagePushed",
-                        "countUnit": "days",
-                        "countNumber": 30
-                      },
-                      "action": {
-                        "type": "expire"
-                      }
-                    },
-                    {
-                      "rulePriority": 2,
-                      "description": "Keep last 50 tagged images",
-                      "selection": {
-                        "tagStatus": "tagged",
-                        "tagPrefixList": ["v"],
-                        "countType": "imageCountMoreThan",
-                        "countNumber": 50
-                      },
-                      "action": {
-                        "type": "expire"
-                      }
-                    },
-                    {
-                      "rulePriority": 3,
-                      "description": "Keep production images forever",
-                      "selection": {
-                        "tagStatus": "tagged",
-                        "tagPrefixList": ["prod", "production"],
-                        "countType": "imageCountMoreThan",
-                        "countNumber": 1000
-                      },
-                      "action": {
-                        "type": "expire"
-                      }
-                    }
-                  ]
-                }
-          {{- end }}
-          
-          # ========================================
-          # Group 5: ESO Native ECR Token Generation
+          # Group 4: ESO Infrastructure
           # ========================================
           
           # ESO Service Account for ECRAuthorizationToken generators
@@ -434,7 +333,7 @@ spec:
               platform.kubecore.io/resource-type: service-account
               platform.kubecore.io/service-type: external-secrets
           spec:
-            deletionPolicy: Orphan  # Orphan to prevent premature deletion during ClusterSecretStore finalization
+            deletionPolicy: Delete
             providerConfigRef:
               name: {{ $kubernetesProviderConfig }}
             forProvider:
@@ -477,6 +376,8 @@ spec:
                     platform.kubecore.io/organization: {{ $org }}
                     platform.kubecore.io/resource-type: cluster-secret-store
                     platform.kubecore.io/service-type: external-secrets
+                  finalizers:
+                  - secretstore.externalsecrets.io/finalizer
                 spec:
                   provider:
                     secretsManager:
@@ -490,103 +391,6 @@ spec:
                       region: {{ $primaryRegion }}
                       service: SecretsManager
 
-          {{- range $region := $regions }}
-          # ECRAuthorizationToken Generator for {{ $region }}
-          ---
-          apiVersion: kubernetes.crossplane.io/v1alpha1
-          kind: Object
-          metadata:
-            name: {{ $org }}-ecr-gen-{{ $region }}
-            annotations:
-              gotemplating.fn.crossplane.io/composition-resource-name: ecr-gen-{{ $region }}
-            labels:
-              platform.kubecore.io/organization: {{ $org }}
-              platform.kubecore.io/resource-type: ecr-auth-generator
-              platform.kubecore.io/region: {{ $region }}
-          spec:
-            deletionPolicy: Delete
-            providerConfigRef:
-              name: {{ $kubernetesProviderConfig }}
-            forProvider:
-              manifest:
-                apiVersion: generators.external-secrets.io/v1alpha1
-                kind: ECRAuthorizationToken
-                metadata:
-                  name: {{ $org }}-ecr-gen-{{ $region }}
-                  namespace: external-secrets
-                  labels:
-                    platform.kubecore.io/organization: {{ $org }}
-                    platform.kubecore.io/region: {{ $region }}
-                spec:
-                  region: {{ $region }}
-                  auth:
-                    jwt:
-                      serviceAccountRef:
-                        name: {{ $org }}-eso-sa
-                        namespace: external-secrets
-          {{- end }}
-          
-          # Unified ExternalSecret with Multi-Region dockerconfigjson
-          ---
-          apiVersion: kubernetes.crossplane.io/v1alpha1
-          kind: Object
-          metadata:
-            name: {{ $org }}-ecr-credentials-external-secret
-            annotations:
-              gotemplating.fn.crossplane.io/composition-resource-name: ecr-credentials-external-secret
-            labels:
-              platform.kubecore.io/organization: {{ $org }}
-              platform.kubecore.io/resource-type: external-secret
-              platform.kubecore.io/secret-type: ecr-credentials
-          spec:
-            deletionPolicy: Delete
-            providerConfigRef:
-              name: {{ $kubernetesProviderConfig }}
-            forProvider:
-              manifest:
-                apiVersion: external-secrets.io/v1
-                kind: ExternalSecret
-                metadata:
-                  name: {{ $org }}-ecr-credentials
-                  namespace: external-secrets
-                  labels:
-                    platform.kubecore.io/organization: {{ $org }}
-                    platform.kubecore.io/resource-type: external-secret
-                    platform.kubecore.io/secret-type: ecr-credentials
-                spec:
-                  refreshInterval: "11h"  # Refresh every 11 hours (before 12-hour token expiration)
-                  target:
-                    name: {{ $org }}-ecr-dockerconfig
-                    namespace: crossplane-system
-                    type: kubernetes.io/dockerconfigjson
-                    template:
-                      data:
-                        .dockerconfigjson: |
-                          {
-                            "auths": {
-                              {{- range $i, $region := $regions }}
-                              {{- if $i }},{{ end }}
-                              "{{ $accountId }}.dkr.ecr.{{ $region }}.amazonaws.com": {
-                                "username": "{{ "{{" }} .username_{{ $region | replace "-" "_" }} {{ "}}" }}",
-                                "password": "{{ "{{" }} .password_{{ $region | replace "-" "_" }} {{ "}}" }}",
-                                "auth": "{{ "{{" }} printf "%s:%s" .username_{{ $region | replace "-" "_" }} .password_{{ $region | replace "-" "_" }} | b64enc {{ "}}" }}"
-                              }
-                              {{- end }}
-                            }
-                          }
-                  dataFrom:
-                    {{- range $region := $regions }}
-                    - sourceRef:
-                        generatorRef:
-                          apiVersion: generators.external-secrets.io/v1alpha1
-                          kind: ECRAuthorizationToken
-                          name: {{ $org }}-ecr-gen-{{ $region }}
-                      rewrite:
-                        - regexp:
-                            source: "(.*)"
-                            target: "${1}_{{ $region | replace "-" "_" }}"
-                    {{- end }}
-  
   # Step 3: Enable automatic readiness detection
   - step: auto-ready
     functionRef:
@@ -610,83 +414,31 @@ spec:
         finalizerStrategy:
           mode: Strict
       rules:
-      # IAM Policies must be created first
-      
-      # IAM Roles come after policies
-      - sequence:
-        - secrets-policy
-        - eso-role
-      - sequence:
-        - ecr-policy
-        - eso-role
-      
-      # Policy attachments after both policies and roles
+      # IAM Policies and Role can be created in parallel
+
+      # Policy Attachments need both policy + role
       - sequence:
         - eso-role
         - eso-secrets-attachment
       - sequence:
-        - eso-role
-        - eso-ecr-attachment
-      - sequence:
         - secrets-policy
         - eso-secrets-attachment
       - sequence:
+        - eso-role
+        - eso-ecr-attachment
+      - sequence:
         - ecr-policy
         - eso-ecr-attachment
-      
-      # ECR repositories after IAM setup
+
+      # Service Account needs role ARN for annotation
       - sequence:
-        - eso-ecr-attachment
-        - ecr-eu-central-1
-      - sequence:
-        - eso-ecr-attachment
-        - ecr-eu-west-3
-      - sequence:
-        - eso-ecr-attachment
-        - ecr-us-east-1
-      
-      # ECR lifecycle policies after repositories
-      - sequence:
-        - ecr-eu-central-1
-        - lifecycle-eu-central-1
-      - sequence:
-        - ecr-eu-west-3
-        - lifecycle-eu-west-3
-      - sequence:
-        - ecr-us-east-1
-        - lifecycle-us-east-1
-      
-      # ESO Service Account after IAM resources
-      - sequence:
-        - eso-ecr-attachment
+        - eso-role
         - eso-service-account
-      
-      # ClusterSecretStore after ESO service account
+
+      # ClusterSecretStore needs service account
       - sequence:
         - eso-service-account
         - cluster-secret-store
-
-      # ECRAuthorizationToken generators after service account
-      - sequence:
-        - eso-service-account
-        - ecr-gen-eu-central-1
-      - sequence:
-        - eso-service-account
-        - ecr-gen-eu-west-3
-      - sequence:
-        - eso-service-account
-        - ecr-gen-us-east-1
-      
-      # ExternalSecret after all generators are ready
-      - sequence:
-        - ecr-gen-eu-central-1
-        - ecr-credentials-external-secret
-      - sequence:
-        - ecr-gen-eu-west-3
-        - ecr-credentials-external-secret
-      - sequence:
-        - ecr-gen-us-east-1
-        - ecr-credentials-external-secret
   
   # Step 5: Extract and populate status fields
   - step: status-transformer
@@ -719,7 +471,6 @@ spec:
           {{- end -}}
           
           {{/* Initialize variables for collecting status information */}}
-          {{- $registries := list -}}
           {{- $secretArn := "" -}}
           {{- $esoRoleArn := "" -}}
           {{- $secretsPolicyArn := "" -}}
@@ -730,8 +481,6 @@ spec:
           {{- $childResourcesCount := 0 -}}
           {{- $childResourcesList := list -}}
           {{- $isReady := true -}}
-          {{- $ecrGeneratorsStatus := dict -}}
-          {{- $ecrCredentialsGenerated := false -}}
           {{- $clusterSecretStoreReady := false -}}
           {{- $clusterSecretStoreName := "" -}}
           
@@ -770,56 +519,19 @@ spec:
                 {{- if not $resourceReady -}}
                   {{- $_ := set $childResource "ready" false -}}
                   {{/* Only mark composite as not ready if this is a critical resource */}}
-                  {{- if or (hasPrefix "ecr-" $resourceName) (hasPrefix "eso-" $resourceName) (hasSuffix "-policy" $resourceName) -}}
+                  {{- if or (hasPrefix "eso-" $resourceName) (hasSuffix "-policy" $resourceName) -}}
                     {{- $isReady = false -}}
                   {{- end -}}
                 {{- end -}}
               {{- else -}}
                 {{- $_ := set $childResource "ready" false -}}
                 {{/* Only mark composite as not ready if this is a critical resource */}}
-                {{- if or (hasPrefix "ecr-" $resourceName) (hasPrefix "eso-" $resourceName) (hasSuffix "-policy" $resourceName) -}}
+                {{- if or (hasPrefix "eso-" $resourceName) (hasSuffix "-policy" $resourceName) -}}
                   {{- $isReady = false -}}
                 {{- end -}}
               {{- end -}}
               {{- $childResourcesList = append $childResourcesList $childResource -}}
-              
-              {{/* Extract ECR Repository information */}}
-              {{- if and (hasPrefix "ecr-" $resourceName) (eq $resource.resource.kind "Repository") -}}
-                {{- if eq $resource.resource.apiVersion "ecr.aws.upbound.io/v1beta2" -}}
-                  {{- if $resource.resource.status.atProvider -}}
-                    {{- $registry := dict -}}
-                    {{- if $resource.resource.spec.forProvider.region -}}
-                      {{- $_ := set $registry "region" $resource.resource.spec.forProvider.region -}}
-                    {{- end -}}
-                    {{- if $resource.resource.status.atProvider.repositoryUrl -}}
-                      {{- $_ := set $registry "url" $resource.resource.status.atProvider.repositoryUrl -}}
-                    {{- end -}}
-                    {{- if $resource.resource.status.atProvider.arn -}}
-                      {{- $_ := set $registry "arn" $resource.resource.status.atProvider.arn -}}
-                    {{- end -}}
-                    {{- if $registry -}}
-                      {{- $registries = append $registries $registry -}}
-                    {{- end -}}
-                  {{- end -}}
-                {{- end -}}
-              {{- end -}}
-              
-              {{/* Track ECRAuthorizationToken Generator Status */}}
-              {{- if hasPrefix "ecr-gen-" $resourceName -}}
-                {{- $generatorStatus := dict "name" $resourceName "ready" $resourceReady -}}
-                {{- if $resourceReady -}}
-                  {{- $ecrCredentialsGenerated = true -}}
-                {{- end -}}
-                {{- $_ := set $ecrGeneratorsStatus $resourceName $generatorStatus -}}
-              {{- end -}}
-              
-              {{/* Track ExternalSecret Status */}}
-              {{- if eq $resourceName "ecr-credentials-external-secret" -}}
-                {{- if $resourceReady -}}
-                  {{- $ecrCredentialsGenerated = true -}}
-                {{- end -}}
-              {{- end -}}
-              
+
               {{/* Extract ESO Role ARN */}}
               {{- if eq $resourceName "eso-role" -}}
                 {{- if eq $resource.resource.kind "Role" -}}
@@ -879,12 +591,7 @@ spec:
               {{- if gt (len $childResourcesList) 0 }}
               resources: {{ toJson $childResourcesList | quote }}
               {{- end }}
-            
-            # ECR Registries
-            {{- if gt (len $registries) 0 }}
-            registries: {{ toJson $registries | quote }}
-            {{- end }}
-            
+
             # IAM Roles
             {{- if $esoRoleArn }}
             iamRoles:
@@ -912,19 +619,7 @@ spec:
               url: {{ $oidcProviderUrl | quote }}
               {{- end }}
             {{- end }}
-            
-            # ECR Credentials Status (ESO Native)
-            {{- if or $ecrCredentialsGenerated (gt (len $ecrGeneratorsStatus) 0) }}
-            ecrCredentials:
-              {{- if $ecrCredentialsGenerated }}
-              generated: {{ $ecrCredentialsGenerated }}
-              generationMethod: "eso-native"
-              {{- end }}
-              {{- if gt (len $ecrGeneratorsStatus) 0 }}
-              generators: {{ toJson $ecrGeneratorsStatus | quote }}
-              {{- end }}
-            {{- end }}
-            
+
             # ClusterSecretStore Status
             {{- if or $clusterSecretStoreReady $clusterSecretStoreName }}
             clusterSecretStore:
