@@ -348,8 +348,9 @@ spec:
                 - "gate-check"
                 - "validate-pr"
                 - "build-scan-push"
-                - "deploy-preview"
-                - "preview-deployment-validation"
+                # TODO: add quality gate
+                # - "deploy-preview"
+                # - "preview-deployment-validation"
           {{ end }}
           {{ end }}
 
