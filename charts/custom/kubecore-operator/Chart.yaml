@@ -2,8 +2,8 @@ apiVersion: v2
 name: kubecore-operator
 description: A sophisticated Kubernetes operator that implements a four-layer framework architecture for provisioning and managing cloud infrastructure through Crossplane compositions.
 type: application
-version: 0.1.57
-appVersion: "0.1.57"
+version: 0.1.58
+appVersion: "0.1.58"
 
 # Maintainers
 maintainers:
@@ -49,15 +49,9 @@ annotations:
   # Changes for this chart version
   artifacthub.io/changes: |
     - kind: changed
-      description: "Implemented orchestrated 18-step deletion sequence across 3 phases for robust infrastructure cleanup"
-    - kind: added
-      description: "XEKS composition now orphans critical resources (Cluster, ClusterAuth, NodeGroup) via deletionPolicy: Orphan"
-    - kind: added
-      description: "XKubeSystem finalizer ensures Helm Releases properly uninstall before cluster deletion (prevents orphaned Load Balancers)"
+      description: "Changed XEKS Cluster, ClusterAuth, and NodeGroup deletionPolicy from Orphan to Delete for proper AWS resource cleanup"
     - kind: fixed
-      description: "Resolved race condition preventing Traefik from deleting AWS Load Balancers during cluster teardown"
-    - kind: changed
-      description: "Manual orchestration of orphaned resource deletion prevents in-use blocking and ensures proper AWS cleanup sequence"
+      description: "Fixed XEKS deletion blocking issue caused by orphaned AWS resources preventing subnet deletion"
 
 # Kubernetes version compatibility
 kubeVersion: ">=1.20.0-0"

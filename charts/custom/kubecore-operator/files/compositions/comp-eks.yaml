@@ -392,7 +392,7 @@ spec:
               platform.kubecore.io/cloud-provider: aws
               crossplane.io/external-name: {{ $name }}
           spec:
-            deletionPolicy: Delete
+            deletionPolicy: Orphan
             managementPolicies: ["*"]
             forProvider:
               region: {{ $primaryRegion }}
@@ -456,7 +456,7 @@ spec:
               platform.kubecore.io/cluster: {{ $name }}
               platform.kubecore.io/cloud-provider: aws
           spec:
-            deletionPolicy: Delete
+            deletionPolicy: Orphan
             managementPolicies: ["*"]
             forProvider:
               region: {{ $primaryRegion }}
@@ -487,7 +487,7 @@ spec:
               platform.kubecore.io/cloud-provider: aws
               platform.kubecore.io/system-nodegroup: "true"
           spec:
-            deletionPolicy: Delete
+            deletionPolicy: Orphan
             managementPolicies: ["*"]
             forProvider:
               region: {{ $primaryRegion }}
@@ -884,6 +884,8 @@ spec:
             annotations:
               gotemplating.fn.crossplane.io/composition-resource-name: helm-provider-config
               gotemplating.fn.crossplane.io/ready: "True"
+            finalizers:
+              - kubecore.io/protect-helm-provider
             labels:
               platform.kubecore.io/cluster: {{ $name }}
               platform.kubecore.io/cloud-provider: aws
@@ -904,6 +906,8 @@ spec:
             annotations:
               gotemplating.fn.crossplane.io/composition-resource-name: kubernetes-provider-config
               gotemplating.fn.crossplane.io/ready: "True"
+            finalizers:
+              - kubecore.io/protect-k8s-provider
             labels:
               platform.kubecore.io/cluster: {{ $name }}
               platform.kubecore.io/cloud-provider: aws
@@ -914,6 +918,31 @@ spec:
                 name: {{ $uid }}-ekscluster
                 namespace: {{ $connectionSecretNamespace }}
                 key: kubeconfig
+
+          # Object to protect credentials Secret with finalizer
+          ---
+          apiVersion: kubernetes.crossplane.io/v1alpha2
+          kind: Object
+          metadata:
+            name: {{ $name }}-protect-credentials
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: protect-credentials-secret
+            labels:
+              platform.kubecore.io/cluster: {{ $name }}
+              platform.kubecore.io/cloud-provider: aws
+          spec:
+            managementPolicies: ["*"]
+            providerConfigRef:
+              name: kubesys-enhanced
+            forProvider:
+              manifest:
+                apiVersion: v1
+                kind: Secret
+                metadata:
+                  name: {{ $uid }}-ekscluster
+                  namespace: {{ $connectionSecretNamespace }}
+                  finalizers:
+                    - kubecore.io/protect-credentials
 
   # Step 5: Auto-ready
   - step: auto-ready
@@ -967,6 +996,11 @@ spec:
       - sequence:
         - cluster-auth
         - kubernetes-provider-config
+
+      # Object to protect credentials must wait for Kubernetes ProviderConfig
+      - sequence:
+        - kubernetes-provider-config
+        - protect-credentials-secret
 
       # Node groups must wait for cluster
       - sequence:

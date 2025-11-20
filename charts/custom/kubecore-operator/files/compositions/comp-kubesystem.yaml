@@ -161,7 +161,7 @@ spec:
               {{ $key }}: "{{ $value }}"
               {{- end }}
           spec:
-            deletionPolicy: Delete
+            deletionPolicy: Orphan
             managementPolicies: ["*"]
             providerConfigRef:
               name: {{ $kubernetesProvider }}
@@ -193,7 +193,7 @@ spec:
               {{ $key }}: "{{ $value }}"
               {{- end }}
           spec:
-            deletionPolicy: Delete
+            deletionPolicy: Orphan
             managementPolicies: ["*"]
             providerConfigRef:
               name: {{ $kubernetesProvider }}
@@ -225,7 +225,7 @@ spec:
               {{ $key }}: "{{ $value }}"
               {{- end }}
           spec:
-            deletionPolicy: Delete
+            deletionPolicy: Orphan
             managementPolicies: ["*"]
             providerConfigRef:
               name: {{ $kubernetesProvider }}
@@ -257,7 +257,7 @@ spec:
               {{ $key }}: "{{ $value }}"
               {{- end }}
           spec:
-            deletionPolicy: Delete
+            deletionPolicy: Orphan
             managementPolicies: ["*"]
             providerConfigRef:
               name: {{ $kubernetesProvider }}
@@ -289,7 +289,7 @@ spec:
               {{ $key }}: "{{ $value }}"
               {{- end }}
           spec:
-            deletionPolicy: Delete
+            deletionPolicy: Orphan
             managementPolicies: ["*"]
             providerConfigRef:
               name: {{ $kubernetesProvider }}
@@ -321,7 +321,7 @@ spec:
               {{ $key }}: "{{ $value }}"
               {{- end }}
           spec:
-            deletionPolicy: Delete
+            deletionPolicy: Orphan
             managementPolicies: ["*"]
             providerConfigRef:
               name: {{ $kubernetesProvider }}
@@ -353,7 +353,7 @@ spec:
               {{ $key }}: "{{ $value }}"
               {{- end }}
           spec:
-            deletionPolicy: Delete
+            deletionPolicy: Orphan
             managementPolicies: ["*"]
             providerConfigRef:
               name: {{ $kubernetesProvider }}
@@ -385,7 +385,7 @@ spec:
               {{ $key }}: "{{ $value }}"
               {{- end }}
           spec:
-            deletionPolicy: Delete
+            deletionPolicy: Orphan
             managementPolicies: ["*"]
             providerConfigRef:
               name: {{ $kubernetesProvider }}
@@ -418,7 +418,7 @@ spec:
               {{ $key }}: "{{ $value }}"
               {{- end }}
           spec:
-            deletionPolicy: Delete
+            deletionPolicy: Orphan
             managementPolicies: ["*"]
             providerConfigRef:
               name: {{ $kubernetesProvider }}
@@ -455,7 +455,7 @@ spec:
               {{- end }}
               platform.kubecore.io/component: "crossplane"
           spec:
-            deletionPolicy: Delete
+            deletionPolicy: Orphan
             managementPolicies: ["*"]
             providerConfigRef:
               name: {{ $helmProvider }}
@@ -538,7 +538,7 @@ spec:
               {{- end }}
               platform.kubecore.io/component: "cert-manager"
           spec:
-            deletionPolicy: Delete
+            deletionPolicy: Orphan
             managementPolicies: ["*"]
             providerConfigRef:
               name: {{ $helmProvider }}
@@ -696,7 +696,7 @@ spec:
               {{- end }}
               platform.kubecore.io/component: "cert-manager"
           spec:
-            deletionPolicy: Delete
+            deletionPolicy: Orphan
             managementPolicies: ["*"]
             providerConfigRef:
               name: {{ $kubernetesProvider }}
@@ -758,7 +758,7 @@ spec:
               {{- end }}
               platform.kubecore.io/component: "argocd"
           spec:
-            deletionPolicy: Delete
+            deletionPolicy: Orphan
             managementPolicies: ["*"]
             providerConfigRef:
               name: {{ $helmProvider }}
@@ -939,7 +939,7 @@ spec:
               {{- end }}
               platform.kubecore.io/component: "argocd"
           spec:
-            deletionPolicy: Delete
+            deletionPolicy: Orphan
             managementPolicies: ["*"]
             providerConfigRef:
               name: {{ $kubernetesProvider }}
@@ -1028,7 +1028,7 @@ spec:
               {{- end }}
               platform.kubecore.io/component: "gitops-promoter"
           spec:
-            deletionPolicy: Delete
+            deletionPolicy: Orphan
             managementPolicies: ["*"]
             providerConfigRef:
               name: {{ $kubernetesProvider }}
@@ -1078,7 +1078,7 @@ spec:
               {{- end }}
               platform.kubecore.io/component: "gitops-promoter"
           spec:
-            deletionPolicy: Delete
+            deletionPolicy: Orphan
             managementPolicies: ["*"]
             providerConfigRef:
               name: {{ $kubernetesProvider }}
@@ -1118,7 +1118,7 @@ spec:
               {{- end }}
               platform.kubecore.io/component: "gitops-promoter"
           spec:
-            deletionPolicy: Delete
+            deletionPolicy: Orphan
             managementPolicies: ["*"]
             providerConfigRef:
               name: {{ $kubernetesProvider }}
@@ -1160,7 +1160,7 @@ spec:
               {{- end }}
               platform.kubecore.io/component: "gitops-promoter"
           spec:
-            deletionPolicy: Delete
+            deletionPolicy: Orphan
             managementPolicies: ["*"]
             providerConfigRef:
               name: {{ $kubernetesProvider }}
@@ -1198,7 +1198,7 @@ spec:
               {{- end }}
               platform.kubecore.io/component: "argo-rollouts"
           spec:
-            deletionPolicy: Delete
+            deletionPolicy: Orphan
             managementPolicies: ["*"]
             providerConfigRef:
               name: {{ $helmProvider }}
@@ -1309,7 +1309,7 @@ spec:
               {{- end }}
               platform.kubecore.io/component: "argo-workflows"
           spec:
-            deletionPolicy: Delete
+            deletionPolicy: Orphan
             managementPolicies: ["*"]
             providerConfigRef:
               name: {{ $helmProvider }}
@@ -1416,7 +1416,7 @@ spec:
               {{- end }}
               platform.kubecore.io/component: "traefik"
           spec:
-            deletionPolicy: Delete
+            deletionPolicy: Orphan
             managementPolicies: ["*"]
             providerConfigRef:
               name: {{ $helmProvider }}
@@ -1502,7 +1502,7 @@ spec:
               {{- end }}
               platform.kubecore.io/component: "external-secrets"
           spec:
-            deletionPolicy: Delete
+            deletionPolicy: Orphan
             managementPolicies: ["*"]
             providerConfigRef:
               name: {{ $helmProvider }}
@@ -1606,7 +1606,7 @@ spec:
               {{- end }}
               platform.kubecore.io/component: "gitops-promoter"
           spec:
-            deletionPolicy: Delete
+            deletionPolicy: Orphan
             managementPolicies: ["*"]
             providerConfigRef:
               name: {{ $helmProvider }}
@@ -1782,7 +1782,7 @@ spec:
               platform.kubecore.io/resource-type: iam-role
               platform.kubecore.io/role-type: eso-irsa
           spec:
-            deletionPolicy: Delete
+            deletionPolicy: Orphan
             managementPolicies: ["*"]
             providerConfigRef:
               name: {{ $awsProvider }}
@@ -1831,7 +1831,7 @@ spec:
               {{ $key }}: "{{ $value }}"
               {{- end }}
           spec:
-            deletionPolicy: Delete
+            deletionPolicy: Orphan
             managementPolicies: ["*"]
             providerConfigRef:
               name: {{ $awsProvider }}
@@ -1855,7 +1855,7 @@ spec:
               {{ $key }}: "{{ $value }}"
               {{- end }}
           spec:
-            deletionPolicy: Delete
+            deletionPolicy: Orphan
             managementPolicies: ["*"]
             providerConfigRef:
               name: {{ $awsProvider }}
@@ -1888,7 +1888,7 @@ spec:
               platform.kubecore.io/resource-type: iam-role
               platform.kubecore.io/role-type: ecr-credentials
           spec:
-            deletionPolicy: Delete
+            deletionPolicy: Orphan
             providerConfigRef:
               name: {{ $awsProvider }}
             forProvider:
@@ -1938,7 +1938,7 @@ spec:
               platform.kubecore.io/cluster: {{ $clusterName }}
               platform.kubecore.io/resource-type: policy-attachment
           spec:
-            deletionPolicy: Delete
+            deletionPolicy: Orphan
             providerConfigRef:
               name: {{ $awsProvider }}
             forProvider:
@@ -1968,7 +1968,7 @@ spec:
               {{ $key }}: "{{ $value }}"
               {{- end }}
           spec:
-            deletionPolicy: Delete
+            deletionPolicy: Orphan
             managementPolicies: ["*"]
             providerConfigRef:
               name: {{ $kubernetesProvider }}
@@ -2001,7 +2001,7 @@ spec:
               {{ $key }}: "{{ $value }}"
               {{- end }}
           spec:
-            deletionPolicy: Delete
+            deletionPolicy: Orphan
             managementPolicies: ["*"]
             providerConfigRef:
               name: {{ $kubernetesProvider }}
@@ -2042,7 +2042,7 @@ spec:
               {{ $key }}: "{{ $value }}"
               {{- end }}
           spec:
-            deletionPolicy: Delete
+            deletionPolicy: Orphan
             managementPolicies: ["*"]
             providerConfigRef:
               name: {{ $kubernetesProvider }}
@@ -2092,7 +2092,7 @@ spec:
               platform.kubecore.io/part-of: "dns"
               platform.kubecore.io/component: "external-dns"
           spec:
-            deletionPolicy: Delete
+            deletionPolicy: Orphan
             managementPolicies: ["*"]
             providerConfigRef:
               name: {{ $awsProvider }}
@@ -2137,7 +2137,7 @@ spec:
               platform.kubecore.io/part-of: "dns"
               platform.kubecore.io/component: "external-dns"
           spec:
-            deletionPolicy: Delete
+            deletionPolicy: Orphan
             managementPolicies: ["*"]
             providerConfigRef:
               name: {{ $awsProvider }}
@@ -2164,7 +2164,7 @@ spec:
               {{- end }}
               platform.kubecore.io/component: "external-dns"
           spec:
-            deletionPolicy: Delete
+            deletionPolicy: Orphan
             managementPolicies: ["*"]
             rollbackLimit: 3
             providerConfigRef:

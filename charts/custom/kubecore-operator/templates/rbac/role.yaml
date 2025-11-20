@@ -32,6 +32,8 @@ rules:
   verbs:
   - get
   - list
+  - patch
+  - update
   - watch
 - apiGroups:
   - ""
@@ -245,6 +247,8 @@ rules:
   - xkubesystems/status
   verbs:
   - get
+  - patch
+  - update
 - apiGroups:
   - platform.kubecore.io
   resources:
