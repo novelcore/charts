@@ -7,7 +7,6 @@ This repository contains Helm charts for the Novelcore organization, including b
 ```bash
 https://novelcore.github.io/charts/
 ```
-
 ## Usage
 
 ### Adding the Repository
