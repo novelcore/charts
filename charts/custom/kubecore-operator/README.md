@@ -180,6 +180,4 @@ For issues and questions:
 - GitHub Issues: https://github.com/novelcore/kubecore-operator/issues
 - Documentation: https://github.com/novelcore/kubecore-operator/blob/main/README.md
 
-## License
 
-Apache License 2.0
