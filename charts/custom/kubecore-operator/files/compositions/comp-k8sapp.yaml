@@ -597,7 +597,6 @@ spec:
               kubecore.eu/environment: {{ $envName }}
           spec:
             deletionPolicy: Delete
-            managementPolicies: ["Observe", "Create","Delete"]
             forProvider:
               branch: main
               commitAuthor: {{ $commitAuthor }}
