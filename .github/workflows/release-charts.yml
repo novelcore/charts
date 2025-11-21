@@ -26,7 +26,16 @@ jobs:
         run: |
           git config user.name "AbstractVersion"
           git config user.email "g.fiotakis@hotmail.com"
-
+          
+      - name: Install system dependencies
+        run: |
+          # Install unzip if not available (needed for Helm setup)
+          if ! command -v unzip &> /dev/null; then
+            echo "Installing unzip..."
+            sudo apt-get update
+            sudo apt-get install -y unzip
+          fi
+          
       - name: Install Helm
         uses: azure/setup-helm@v3
         with:
