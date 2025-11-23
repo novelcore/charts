@@ -63,7 +63,6 @@ main() {
     # Add helm repositories
     print_info "Adding helm repositories"
     helm repo add stable https://charts.helm.sh/stable > /dev/null 2>&1 || true
-    helm repo add bitnami https://charts.bitnami.com/bitnami > /dev/null 2>&1 || true
     helm repo add crossplane-stable https://charts.crossplane.io/stable > /dev/null 2>&1 || true
     helm repo update > /dev/null 2>&1
     
