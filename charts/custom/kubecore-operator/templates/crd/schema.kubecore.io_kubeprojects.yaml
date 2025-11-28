@@ -351,6 +351,82 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
+              directCost:
+                description: DirectCost contains the cost information for this project
+                properties:
+                  calculationStatus:
+                    description: CalculationStatus indicates the status of the last
+                      calculation
+                    enum:
+                    - success
+                    - failed
+                    - pending
+                    type: string
+                  daily:
+                    description: Daily contains the last 24-hour cost
+                    properties:
+                      amount:
+                        description: Amount is the total daily cost
+                        type: string
+                      breakdown:
+                        additionalProperties:
+                          type: string
+                        description: Breakdown contains cost per service
+                        type: object
+                      currency:
+                        default: USD
+                        description: Currency is the currency code (always USD)
+                        type: string
+                      lastUpdated:
+                        description: LastUpdated is when this daily cost was calculated
+                        format: date-time
+                        type: string
+                    type: object
+                  error:
+                    description: Error contains the error message if calculation failed
+                    type: string
+                  lastCalculated:
+                    description: LastCalculated is when the cost was last successfully
+                      calculated
+                    format: date-time
+                    type: string
+                  monthToDate:
+                    description: MonthToDate contains the current month's aggregated
+                      cost
+                    properties:
+                      amount:
+                        description: Amount is the total month-to-date cost
+                        type: string
+                      averageDaily:
+                        description: AverageDaily is the average daily cost
+                        type: string
+                      breakdown:
+                        additionalProperties:
+                          type: string
+                        description: Breakdown contains cost per service
+                        type: object
+                      currency:
+                        default: USD
+                        description: Currency is the currency code (always USD)
+                        type: string
+                      daysIncluded:
+                        description: DaysIncluded is the number of days in the calculation
+                        type: integer
+                      endDate:
+                        description: EndDate is the end of the billing period (today)
+                        type: string
+                      projectedMonthly:
+                        description: ProjectedMonthly is the projected monthly cost
+                        type: string
+                      startDate:
+                        description: StartDate is the start of the billing period
+                        type: string
+                    type: object
+                  nextCalculation:
+                    description: NextCalculation is when the next calculation is scheduled
+                    format: date-time
+                    type: string
+                type: object
               environments:
                 description: Environments contains the status of each environment
                 items:
@@ -542,4 +618,4 @@ spec:
     storage: true
     subresources:
       status: {}
-{{- end }}
+{{- end -}}

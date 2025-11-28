@@ -1,8 +1,14 @@
+{{- if .Values.crd.enable }}
 ---
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
+  labels:
+    {{- include "chart.labels" . | nindent 4 }}
   annotations:
+    {{- if .Values.crd.keep }}
+    "helm.sh/resource-policy": keep
+    {{- end }}
     controller-gen.kubebuilder.io/version: v0.18.0
   name: kubepools.schema.kubecore.io
 spec:
@@ -66,6 +72,19 @@ spec:
                       for the cluster
                     pattern: ^[0-9]+\.[0-9]+$
                     type: string
+                  system:
+                    description: System defines configuration for the system node
+                      group (kubecoresys)
+                    properties:
+                      capacityType:
+                        default: SPOT
+                        description: CapacityType specifies the capacity type for
+                          system nodes
+                        enum:
+                        - ON_DEMAND
+                        - SPOT
+                        type: string
+                    type: object
                   tags:
                     additionalProperties:
                       type: string
@@ -610,6 +629,83 @@ spec:
                 description: DeletionRetryCount tracks retry attempts during deletion
                   phase for timeout/backoff logic
                 type: integer
+              directCost:
+                description: DirectCost contains the cost information for this cluster
+                  pool
+                properties:
+                  calculationStatus:
+                    description: CalculationStatus indicates the status of the last
+                      calculation
+                    enum:
+                    - success
+                    - failed
+                    - pending
+                    type: string
+                  daily:
+                    description: Daily contains the last 24-hour cost
+                    properties:
+                      amount:
+                        description: Amount is the total daily cost
+                        type: string
+                      breakdown:
+                        additionalProperties:
+                          type: string
+                        description: Breakdown contains cost per service
+                        type: object
+                      currency:
+                        default: USD
+                        description: Currency is the currency code (always USD)
+                        type: string
+                      lastUpdated:
+                        description: LastUpdated is when this daily cost was calculated
+                        format: date-time
+                        type: string
+                    type: object
+                  error:
+                    description: Error contains the error message if calculation failed
+                    type: string
+                  lastCalculated:
+                    description: LastCalculated is when the cost was last successfully
+                      calculated
+                    format: date-time
+                    type: string
+                  monthToDate:
+                    description: MonthToDate contains the current month's aggregated
+                      cost
+                    properties:
+                      amount:
+                        description: Amount is the total month-to-date cost
+                        type: string
+                      averageDaily:
+                        description: AverageDaily is the average daily cost
+                        type: string
+                      breakdown:
+                        additionalProperties:
+                          type: string
+                        description: Breakdown contains cost per service
+                        type: object
+                      currency:
+                        default: USD
+                        description: Currency is the currency code (always USD)
+                        type: string
+                      daysIncluded:
+                        description: DaysIncluded is the number of days in the calculation
+                        type: integer
+                      endDate:
+                        description: EndDate is the end of the billing period (today)
+                        type: string
+                      projectedMonthly:
+                        description: ProjectedMonthly is the projected monthly cost
+                        type: string
+                      startDate:
+                        description: StartDate is the start of the billing period
+                        type: string
+                    type: object
+                  nextCalculation:
+                    description: NextCalculation is when the next calculation is scheduled
+                    format: date-time
+                    type: string
+                type: object
               eksCluster:
                 description: EKSCluster contains a reference to the created XEKS resource
                 properties:
@@ -736,3 +832,4 @@ spec:
     storage: true
     subresources:
       status: {}
+{{- end -}}
