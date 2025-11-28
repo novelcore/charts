@@ -142,7 +142,13 @@ spec:
           {{- $nodeSelector := $runtime.nodeSelector | default dict -}}
           {{- $tolerations := $runtime.tolerations | default list -}}
           {{- $resourceProfile := $runtime.resourceProfile | default "medium" -}}
-          
+
+          {{/* Extract cost allocation tags from EnvironmentConfig */}}
+          {{- $costTags := dict -}}
+          {{- if $envConfig.costAllocationTags -}}
+            {{- $costTags = $envConfig.costAllocationTags -}}
+          {{- end -}}
+
           {{/* =================================================================== */}}
           {{/* NAMESPACE CREATION */}}
           {{/* =================================================================== */}}
@@ -1811,6 +1817,9 @@ spec:
                   ]
                 }
               tags:
+                {{- range $key, $value := $costTags }}
+                {{ $key }}: {{ $value | quote }}
+                {{- end }}
                 Name: "{{ $clusterName }}-eso-role"
                 Cluster: "{{ $clusterName }}"
                 Purpose: "ESO IRSA Role"
@@ -1888,7 +1897,9 @@ spec:
               platform.kubecore.io/resource-type: iam-role
               platform.kubecore.io/role-type: ecr-credentials
           spec:
-            deletionPolicy: Orphan
+            # Use Delete policy to ensure IAM role is removed from AWS when cluster is deleted
+            # This prevents orphaned roles that block organization-level ECR policy deletion
+            deletionPolicy: Delete
             providerConfigRef:
               name: {{ $awsProvider }}
             forProvider:
@@ -1915,6 +1926,9 @@ spec:
                   ]
                 }
               tags:
+                {{- range $key, $value := $costTags }}
+                {{ $key }}: {{ $value | quote }}
+                {{- end }}
                 Name: {{ $clusterName }}-ecr-credentials-role
                 Cluster: {{ $clusterName }}
                 ManagedBy: crossplane
@@ -1938,7 +1952,9 @@ spec:
               platform.kubecore.io/cluster: {{ $clusterName }}
               platform.kubecore.io/resource-type: policy-attachment
           spec:
-            deletionPolicy: Orphan
+            # Use Delete policy to ensure policy attachment is removed from AWS when cluster is deleted
+            # This prevents orphaned attachments that block organization-level ECR policy deletion
+            deletionPolicy: Delete
             providerConfigRef:
               name: {{ $awsProvider }}
             forProvider:
@@ -2118,6 +2134,9 @@ spec:
                   ]
                 }
               tags:
+                {{- range $key, $value := $costTags }}
+                {{ $key }}: {{ $value | quote }}
+                {{- end }}
                 Name: {{ $clusterName }}-external-dns-irsa-role
                 Purpose: "ExternalDNS IRSA Role"
                 KubeSystem: {{ $clusterName }}
