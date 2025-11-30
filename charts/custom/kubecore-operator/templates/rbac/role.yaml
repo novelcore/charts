@@ -146,6 +146,20 @@ rules:
   - update
   - watch
 - apiGroups:
+  - eks.aws.upbound.io
+  resources:
+  - nodegroups
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - eks.aws.upbound.io
+  resources:
+  - nodegroups/status
+  verbs:
+  - get
+- apiGroups:
   - external-secrets.io
   resources:
   - clustersecretstores
