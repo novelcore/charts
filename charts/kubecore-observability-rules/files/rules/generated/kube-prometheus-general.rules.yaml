@@ -1,0 +1,17 @@
+{{- $Values := (.helm).Values | default .Values }}
+{{- $runbookUrl := ($Values.defaultRules).runbookUrl | default "https://runbooks.prometheus-operator.dev/runbooks" }}
+{{- $clusterLabel := ($Values.defaultRules).clusterLabel | default ($Values.global).clusterLabel | default "cluster" }}
+{{- $additionalGroupByLabels := append ($Values.defaultRules).additionalGroupByLabels $clusterLabel }}
+{{- $groupLabels := join "," (uniq $additionalGroupByLabels) }}
+{{- $clusterName := ($Values.defaultRules).clusterName | default "" }}
+{{- $environment := ($Values.defaultRules).environment | default "" }}
+{{- $namespace := ($Values.defaultRules).namespace | default "" }}
+name: kube-prometheus-general.rules
+rules:
+- expr: count(up == 1) without(instance,pod,node)
+  condition: true
+  record: count:up1
+- expr: count(up == 0) without(instance,pod,node)
+  condition: true
+  record: count:up0
+condition: true

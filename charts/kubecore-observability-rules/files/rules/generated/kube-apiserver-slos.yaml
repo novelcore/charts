@@ -1,0 +1,59 @@
+{{- $Values := (.helm).Values | default .Values }}
+{{- $runbookUrl := ($Values.defaultRules).runbookUrl | default "https://runbooks.prometheus-operator.dev/runbooks" }}
+{{- $clusterLabel := ($Values.defaultRules).clusterLabel | default ($Values.global).clusterLabel | default "cluster" }}
+{{- $additionalGroupByLabels := append ($Values.defaultRules).additionalGroupByLabels $clusterLabel }}
+{{- $groupLabels := join "," (uniq $additionalGroupByLabels) }}
+{{- $clusterName := ($Values.defaultRules).clusterName | default "" }}
+{{- $environment := ($Values.defaultRules).environment | default "" }}
+{{- $namespace := ($Values.defaultRules).namespace | default "" }}
+name: kube-apiserver-slos
+rules:
+- alert: KubeAPIErrorBudgetBurn
+  expr: '{{`{{`}} printf "(sum(apiserver_request:burnrate1h) by(%s) > 0.14400000000000002) and on(cluster) (sum(apiserver_request:burnrate5m) by(%s) > 0.14400000000000002)" $groupLabels $groupLabels {{`}}`}}'
+  for: 2m
+  labels:
+    long: 1h
+    severity: critical
+    short: 5m
+  annotations:
+    description: The API server is burning too much error budget on cluster {{`{{`}} $labels.{{`{{`}} $clusterLabel {{`}}`}} {{`}}`}}.
+    runbook_url: '{{`{{`}} $runbookUrl {{`}}`}}/kubernetes/kubeapierrorbudgetburn'
+    summary: The API server is burning too much error budget.
+  condition: true
+- alert: KubeAPIErrorBudgetBurn
+  expr: '{{`{{`}} printf "(sum(apiserver_request:burnrate6h) by(%s) > 0.06) and on(cluster) (sum(apiserver_request:burnrate30m) by(%s) > 0.06)" $groupLabels $groupLabels {{`}}`}}'
+  for: 15m
+  labels:
+    long: 6h
+    severity: critical
+    short: 30m
+  annotations:
+    description: The API server is burning too much error budget on cluster {{`{{`}} $labels.{{`{{`}} $clusterLabel {{`}}`}} {{`}}`}}.
+    runbook_url: '{{`{{`}} $runbookUrl {{`}}`}}/kubernetes/kubeapierrorbudgetburn'
+    summary: The API server is burning too much error budget.
+  condition: true
+- alert: KubeAPIErrorBudgetBurn
+  expr: '{{`{{`}} printf "(sum(apiserver_request:burnrate1d) by(%s) > 0.03) and on(cluster) (sum(apiserver_request:burnrate2h) by(%s) > 0.03)" $groupLabels $groupLabels {{`}}`}}'
+  for: 1h
+  labels:
+    long: 1d
+    severity: warning
+    short: 2h
+  annotations:
+    description: The API server is burning too much error budget on cluster {{`{{`}} $labels.{{`{{`}} $clusterLabel {{`}}`}} {{`}}`}}.
+    runbook_url: '{{`{{`}} $runbookUrl {{`}}`}}/kubernetes/kubeapierrorbudgetburn'
+    summary: The API server is burning too much error budget.
+  condition: true
+- alert: KubeAPIErrorBudgetBurn
+  expr: '{{`{{`}} printf "(sum(apiserver_request:burnrate3d) by(%s) > 0.01) and on(cluster) (sum(apiserver_request:burnrate6h) by(%s) > 0.01)" $groupLabels $groupLabels {{`}}`}}'
+  for: 3h
+  labels:
+    long: 3d
+    severity: warning
+    short: 6h
+  annotations:
+    description: The API server is burning too much error budget on cluster {{`{{`}} $labels.{{`{{`}} $clusterLabel {{`}}`}} {{`}}`}}.
+    runbook_url: '{{`{{`}} $runbookUrl {{`}}`}}/kubernetes/kubeapierrorbudgetburn'
+    summary: The API server is burning too much error budget.
+  condition: true
+condition: true

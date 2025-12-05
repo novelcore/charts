@@ -36,6 +36,11 @@ jobs:
             sudo apt-get install -y unzip
           fi
           
+      - name: Set up Go (for observability rules generation)
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+          
       - name: Install Helm
         uses: azure/setup-helm@v3
         with:
@@ -45,6 +50,16 @@ jobs:
         run: |
           helm repo add stable https://charts.helm.sh/stable
           helm repo update
+
+      - name: Generate observability rules and dashboards
+        run: |
+          if [ -d "hack/rules-and-dashboards" ] && [ -f "hack/rules-and-dashboards/main.go" ]; then
+            echo "Generating rules and dashboards..."
+            cd hack/rules-and-dashboards
+            go mod download || true
+            go run main.go || echo "Go generation failed, continuing..."
+            cd ../..
+          fi
 
       - name: Package custom charts
         run: |
@@ -56,6 +71,13 @@ jobs:
               helm package "$chart" -d .deploy
             fi
           done
+          
+      - name: Package kubecore-observability-rules chart
+        run: |
+          if [ -f "charts/kubecore-observability-rules/Chart.yaml" ]; then
+            echo "Packaging kubecore-observability-rules"
+            helm package charts/kubecore-observability-rules -d .deploy
+          fi
 
       - name: Package external charts
         run: |
@@ -87,3 +109,13 @@ jobs:
           git add .
           git diff --staged --quiet || git commit -m "Update Helm repository"
           git push
+
+      - name: Publish kubecore-observability-rules to GHCR
+        run: |
+          if ls .deploy/kubecore-observability-rules-*.tgz 1> /dev/null 2>&1; then
+            echo "Publishing kubecore-observability-rules to GHCR..."
+            echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io -u ${{ github.actor }} --password-stdin
+            helm push .deploy/kubecore-observability-rules-*.tgz oci://ghcr.io/novelcore/charts
+          else
+            echo "kubecore-observability-rules chart not found, skipping GHCR publish"
+          fi

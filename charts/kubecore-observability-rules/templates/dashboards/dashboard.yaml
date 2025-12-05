@@ -1,0 +1,111 @@
+{{- if .Values.defaultDashboards.enabled }}
+
+{{- /*
+Create custom template context
+*/}}
+{{- $ctx := dict "helm" . -}}
+
+{{- /*
+Get cluster label and datasource
+*/}}
+{{- $clusterLabel := .Values.defaultDashboards.clusterLabel | default .Values.global.clusterLabel | default "cluster" }}
+{{- $defaultDatasource := .Values.defaultDashboards.defaultDatasource | default "prometheus" }}
+{{- $multicluster := .Values.defaultDashboards.multicluster | default false }}
+
+{{- /*
+Loop through all dashboard files, that were crafted with hack/rules-and-dashboards/main.go
+*/}}
+{{- range $dashboardFile, $_ := .Files.Glob  "files/dashboards/**.yaml" -}}
+
+{{- /*
+Get dashboard name
+*/}}
+{{- $dashboardBase := base $dashboardFile }}
+{{- $dashboardName := (trimSuffix (ext $dashboardBase) $dashboardBase) -}}
+
+{{- /*
+Get dashboard data from file
+*/}}
+{{- $dashboardData := fromYaml (tpl ($.Files.Get $dashboardFile) $) -}}
+
+{{- /*
+Save condition for a dashboard from file
+*/}}
+{{- $dashboardCondition := $dashboardData.condition }}
+{{- if hasKey (index ((($.Values).defaultDashboards).dashboards) $dashboardName) "enabled" }}
+  {{- $dashboardCondition = index $.Values.defaultDashboards.dashboards $dashboardName "enabled" }}
+{{- end }}
+
+{{- /*
+Delete condition from dashboard
+*/}}
+{{- $_ := unset $dashboardData "condition" -}}
+
+{{- /*
+Check if dashboard is enabled
+*/}}
+{{- if $dashboardCondition }}
+
+{{- /*
+Get folder reference if configured
+*/}}
+{{- $folderRef := "" }}
+{{- if hasKey (index ((($.Values).defaultDashboards).dashboards) $dashboardName) "folderRef" }}
+  {{- $folderRef = index $.Values.defaultDashboards.dashboards $dashboardName "folderRef" }}
+{{- else if $.Values.defaultDashboards.folderRef }}
+  {{- $folderRef = $.Values.defaultDashboards.folderRef }}
+{{- end }}
+
+{{- /*
+Convert dashboard to JSON
+*/}}
+{{- $dashboardJson := toRawJson $dashboardData -}}
+
+{{- /*
+Set context for helpers
+*/}}
+{{- $_ := set $ctx "name" $dashboardName }}
+
+{{- /*
+Check if dashboard has pre-compressed gzipJson (from Go script)
+*/}}
+{{- $hasGzipJson := hasKey $dashboardData "gzipJson" }}
+{{- $gzipJson := "" }}
+{{- if $hasGzipJson }}
+  {{- $gzipJson = $dashboardData.gzipJson }}
+  {{- $_ := unset $dashboardData "gzipJson" }}
+  {{- $dashboardJson = toRawJson $dashboardData }}
+{{- end }}
+
+---
+apiVersion: grafana.integreatly.org/v1beta1
+kind: GrafanaDashboard
+metadata:
+  name: {{ include "kubecore-observability-rules.dashboard.name" $ctx }}
+  namespace: {{ $.Release.Namespace }}
+  {{- with (include "kubecore-observability-rules.dashboard.labels" $ctx) }}
+  labels: {{ . | nindent 4 }}
+  {{- end }}
+  {{- with $.Values.defaultDashboards.annotations }}
+  annotations:
+    {{- range $key, $val := . }}
+    {{ $key }}: {{ $val | quote }}
+    {{- end }}
+  {{- end }}
+spec:
+  {{- if $folderRef }}
+  folderRef: {{ $folderRef | quote }}
+  {{- end }}
+  instanceSelector:
+    {{- toYaml $.Values.defaultDashboards.instanceSelector | nindent 4 }}
+  {{- if and $hasGzipJson $gzipJson }}
+  gzipJson: |
+    {{- $gzipJson | nindent 4 }}
+  {{- else }}
+  json: |
+    {{- $dashboardJson | nindent 4 }}
+  {{- end }}
+{{- end }}
+{{- end }}
+{{- end }}
+

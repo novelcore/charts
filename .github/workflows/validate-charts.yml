@@ -34,6 +34,21 @@ jobs:
       - name: Set up chart-testing
         uses: helm/chart-testing-action@v2.6.1
 
+      - name: Set up Go (for observability rules generation)
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+
+      - name: Generate observability rules and dashboards
+        run: |
+          if [ -d "hack/rules-and-dashboards" ] && [ -f "hack/rules-and-dashboards/main.go" ]; then
+            echo "Generating rules and dashboards for validation..."
+            cd hack/rules-and-dashboards
+            go mod download || true
+            go run main.go || echo "Generation failed, but continuing validation..."
+            cd ../..
+          fi
+
       - name: Add Helm repositories
         run: |
           helm repo add stable https://charts.helm.sh/stable

@@ -1,0 +1,56 @@
+{{- $Values := (.helm).Values | default .Values }}
+{{- $runbookUrl := ($Values.defaultRules).runbookUrl | default "https://runbooks.prometheus-operator.dev/runbooks" }}
+{{- $clusterLabel := ($Values.defaultRules).clusterLabel | default ($Values.global).clusterLabel | default "cluster" }}
+{{- $additionalGroupByLabels := append ($Values.defaultRules).additionalGroupByLabels $clusterLabel }}
+{{- $groupLabels := join "," (uniq $additionalGroupByLabels) }}
+{{- $clusterName := ($Values.defaultRules).clusterName | default "" }}
+{{- $environment := ($Values.defaultRules).environment | default "" }}
+{{- $namespace := ($Values.defaultRules).namespace | default "" }}
+name: kube-scheduler.rules
+rules:
+- expr: histogram_quantile(0.99, sum(rate(scheduler_scheduling_attempt_duration_seconds_bucket{job="kube-scheduler"}[5m])) without(instance,pod))
+  labels:
+    quantile: "0.99"
+  condition: true
+  record: cluster_quantile:scheduler_scheduling_attempt_duration_seconds:histogram_quantile
+- expr: histogram_quantile(0.99, sum(rate(scheduler_scheduling_algorithm_duration_seconds_bucket{job="kube-scheduler"}[5m])) without(instance,pod))
+  labels:
+    quantile: "0.99"
+  condition: true
+  record: cluster_quantile:scheduler_scheduling_algorithm_duration_seconds:histogram_quantile
+- expr: histogram_quantile(0.99, sum(rate(scheduler_pod_scheduling_sli_duration_seconds_bucket{job="kube-scheduler"}[5m])) without(instance,pod))
+  labels:
+    quantile: "0.99"
+  condition: true
+  record: cluster_quantile:scheduler_pod_scheduling_sli_duration_seconds:histogram_quantile
+- expr: histogram_quantile(0.9, sum(rate(scheduler_scheduling_attempt_duration_seconds_bucket{job="kube-scheduler"}[5m])) without(instance,pod))
+  labels:
+    quantile: "0.9"
+  condition: true
+  record: cluster_quantile:scheduler_scheduling_attempt_duration_seconds:histogram_quantile
+- expr: histogram_quantile(0.9, sum(rate(scheduler_scheduling_algorithm_duration_seconds_bucket{job="kube-scheduler"}[5m])) without(instance,pod))
+  labels:
+    quantile: "0.9"
+  condition: true
+  record: cluster_quantile:scheduler_scheduling_algorithm_duration_seconds:histogram_quantile
+- expr: histogram_quantile(0.9, sum(rate(scheduler_pod_scheduling_sli_duration_seconds_bucket{job="kube-scheduler"}[5m])) without(instance,pod))
+  labels:
+    quantile: "0.9"
+  condition: true
+  record: cluster_quantile:scheduler_pod_scheduling_sli_duration_seconds:histogram_quantile
+- expr: histogram_quantile(0.5, sum(rate(scheduler_scheduling_attempt_duration_seconds_bucket{job="kube-scheduler"}[5m])) without(instance,pod))
+  labels:
+    quantile: "0.5"
+  condition: true
+  record: cluster_quantile:scheduler_scheduling_attempt_duration_seconds:histogram_quantile
+- expr: histogram_quantile(0.5, sum(rate(scheduler_scheduling_algorithm_duration_seconds_bucket{job="kube-scheduler"}[5m])) without(instance,pod))
+  labels:
+    quantile: "0.5"
+  condition: true
+  record: cluster_quantile:scheduler_scheduling_algorithm_duration_seconds:histogram_quantile
+- expr: histogram_quantile(0.5, sum(rate(scheduler_pod_scheduling_sli_duration_seconds_bucket{job="kube-scheduler"}[5m])) without(instance,pod))
+  labels:
+    quantile: "0.5"
+  condition: true
+  record: cluster_quantile:scheduler_pod_scheduling_sli_duration_seconds:histogram_quantile
+condition: true
