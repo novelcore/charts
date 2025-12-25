@@ -91,7 +91,7 @@ spec:
           {{- $vpcCniEnabled := $addonsSpec.vpcCni | default true -}}
           {{- $coreDnsEnabled := $addonsSpec.coreDns | default true -}}
           {{- $kubeProxyEnabled := $addonsSpec.kubeProxy | default true -}}
-          {{- $ebsCsiEnabled := $addonsSpec.ebsCsiDriver | default false -}}
+          {{- $ebsCsiEnabled := $addonsSpec.ebsCsiDriver | default true -}}
           
           {{/* Node groups configuration */}}
           {{/* Note: Only kubecoresys system node group is created */}}
@@ -113,13 +113,20 @@ spec:
           {{- $systemNodeGroup := $eksDefaults.systemNodeGroup | default dict -}}
           {{- $systemInstanceTypes := $systemNodeGroup.instanceTypes | default (list "m5.xlarge" "m5.2xlarge" "m6i.xlarge") -}}
           {{- $systemDiskSize := $systemNodeGroup.diskSize | default 60 -}}
+          {{- $systemCapacityType := $systemNodeGroup.capacityType | default "SPOT" -}}
           {{- $scalingConfig := $systemNodeGroup.scalingConfig | default dict -}}
           {{- $systemMinSize := $scalingConfig.minSize | default 3 -}}
           {{- $systemMaxSize := $scalingConfig.maxSize | default 10 -}}
           {{- $systemDesiredSize := $scalingConfig.desiredSize | default 3 -}}
-          
+
+          {{/* Extract cost allocation tags from EnvironmentConfig */}}
+          {{- $costTags := dict -}}
+          {{- if $envConfig.costAllocationTags -}}
+            {{- $costTags = $envConfig.costAllocationTags -}}
+          {{- end -}}
+
           {{/* Common tags - without Name to allow resource-specific naming */}}
-          {{- $commonTags := dict 
+          {{- $commonTags := dict
             "kubernetes.io/cluster" $name
             "platform.kubecore.io/cluster" $name
             "platform.kubecore.io/managed-by" "crossplane"
@@ -127,6 +134,9 @@ spec:
             "crossplane.io/claim-name" $name
             "crossplane.io/composite" $name
           -}}
+
+          {{/* Merge common tags with cost allocation tags */}}
+          {{- $allTags := merge $commonTags $costTags -}}
           
           {{/* =================================================================== */}}
           {{/* SUBNET CREATION - NEW FUNCTIONALITY */}}
@@ -166,7 +176,7 @@ spec:
                 kubernetes.io/cluster/{{ $name }}: "owned"
                 platform.kubecore.io/cluster: {{ $name }}
                 platform.kubecore.io/subnet-type: {{ $type }}
-                {{- range $k, $v := $commonTags }}
+                {{- range $k, $v := $allTags }}
                 {{ $k }}: {{ $v | quote }}
                 {{- end }}
             providerConfigRef:
@@ -211,7 +221,7 @@ spec:
                 platform.kubecore.io/cluster: {{ $name }}
                 platform.kubecore.io/route-table-type: private
                 platform.kubecore.io/availability-zone: {{ $subnet.az }}
-                {{- range $k, $v := $commonTags }}
+                {{- range $k, $v := $allTags }}
                 {{ $k }}: {{ $v | quote }}
                 {{- end }}
             providerConfigRef:
@@ -323,7 +333,7 @@ spec:
               tags:
                 Name: {{ $name }}-cluster-service-role
                 Cluster: {{ $name }}
-                {{- range $k, $v := $commonTags }}
+                {{- range $k, $v := $allTags }}
                 {{ $k }}: {{ $v | quote }}
                 {{- end }}
             providerConfigRef:
@@ -367,7 +377,7 @@ spec:
               tags:
                 Name: {{ $name }}-node-group-role
                 Cluster: {{ $name }}
-                {{- range $k, $v := $commonTags }}
+                {{- range $k, $v := $allTags }}
                 {{ $k }}: {{ $v | quote }}
                 {{- end }}
             providerConfigRef:
@@ -437,7 +447,7 @@ spec:
               tags:
                 Name: {{ $name }}
                 "kubernetes.io/cluster/{{ $name }}": "owned"
-                {{- range $k, $v := $commonTags }}
+                {{- range $k, $v := $allTags }}
                 {{ $k }}: {{ $v | quote }}
                 {{- end }}
             providerConfigRef:
@@ -506,7 +516,7 @@ spec:
                 maxSize: {{ $systemMaxSize }}
                 desiredSize: {{ $systemDesiredSize }}
               diskSize: {{ $systemDiskSize }}
-              capacityType: "SPOT"
+              capacityType: {{ $systemCapacityType | quote }}
               labels:
                 platform.kubecore.io/nodegroup-type: "kubecoresys"
                 platform.kubecore.io/system: "true"
@@ -526,7 +536,7 @@ spec:
                 NodeGroupType: kubecoresys
                 "kubecore.eu/monitoring": "enabled"
                 "kubecore.eu/resource-tier": "system"
-                {{- range $k, $v := $commonTags }}
+                {{- range $k, $v := $allTags }}
                 {{ $k }}: {{ $v | quote }}
                 {{- end }}
             providerConfigRef:
@@ -600,7 +610,7 @@ spec:
               tags:
                 Name: {{ $name }}-vpc-cni
                 Cluster: {{ $name }}
-                {{- range $k, $v := $commonTags }}
+                {{- range $k, $v := $allTags }}
                 {{ $k }}: {{ $v | quote }}
                 {{- end }}
             providerConfigRef:
@@ -656,7 +666,7 @@ spec:
               tags:
                 Name: {{ $name }}-coredns
                 Cluster: {{ $name }}
-                {{- range $k, $v := $commonTags }}
+                {{- range $k, $v := $allTags }}
                 {{ $k }}: {{ $v | quote }}
                 {{- end }}
             providerConfigRef:
@@ -697,7 +707,7 @@ spec:
               tags:
                 Name: {{ $name }}-kube-proxy
                 Cluster: {{ $name }}
-                {{- range $k, $v := $commonTags }}
+                {{- range $k, $v := $allTags }}
                 {{ $k }}: {{ $v | quote }}
                 {{- end }}
             providerConfigRef:
@@ -781,7 +791,7 @@ spec:
               tags:
                 Name: {{ $name }}-ebs-csi-driver
                 Cluster: {{ $name }}
-                {{- range $k, $v := $commonTags }}
+                {{- range $k, $v := $allTags }}
                 {{ $k }}: {{ $v | quote }}
                 {{- end }}
             providerConfigRef:
@@ -1043,6 +1053,38 @@ spec:
                   finalizers:
                     - kubecore.io/protect-credentials
 
+          # Default gp3 StorageClass for kubepool cluster
+          ---
+          apiVersion: kubernetes.crossplane.io/v1alpha2
+          kind: Object
+          metadata:
+            name: {{ $name }}-gp3-storageclass
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: gp3-storageclass
+            labels:
+              platform.kubecore.io/cluster: {{ $name }}
+              platform.kubecore.io/cloud-provider: aws
+              platform.kubecore.io/component: "storage"
+          spec:
+            deletionPolicy: Orphan
+            managementPolicies: ["*"]
+            providerConfigRef:
+              name: {{ $name }}-kubernetes
+            forProvider:
+              manifest:
+                apiVersion: storage.k8s.io/v1
+                kind: StorageClass
+                metadata:
+                  name: gp3
+                  annotations:
+                    storageclass.kubernetes.io/is-default-class: "true"
+                provisioner: ebs.csi.aws.com
+                parameters:
+                  type: gp3
+                reclaimPolicy: Delete
+                volumeBindingMode: WaitForFirstConsumer
+                allowVolumeExpansion: true
+
   # Step 5: Auto-ready
   - step: auto-ready
     functionRef:
@@ -1106,6 +1148,11 @@ spec:
         - kubernetes-provider-config
         - protect-credentials-secret
 
+      # gp3 StorageClass must wait for Kubernetes ProviderConfig
+      - sequence:
+        - kubernetes-provider-config
+        - gp3-storageclass
+
       # Node groups must wait for cluster
       - sequence:
         - cluster
@@ -1125,6 +1172,20 @@ spec:
         - cluster
         - ebs-csi-irsa-role
         - ebs-csi-driver-addon
+
+      # CRITICAL: Route tables must be ready before route table associations
+      # This prevents InvalidSubnetID.NotFound and InvalidRouteTableID errors
+      # Note: Subnets are handled via subnetIdRef which Crossplane resolves automatically,
+      # but we ensure route tables are ready to avoid race conditions
+      - sequence:
+        - private-route-table-0
+        - private-route-table-association-0
+      - sequence:
+        - private-route-table-1
+        - private-route-table-association-1
+      - sequence:
+        - private-route-table-2
+        - private-route-table-association-2
 
   # Step 7: Status Transformer - Extract cluster information and populate status
   - step: status-transformer

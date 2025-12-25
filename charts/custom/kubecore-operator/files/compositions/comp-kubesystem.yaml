@@ -91,6 +91,41 @@ spec:
           {{- $traefikEnabled := $features.traefik | default false -}}
           {{- $externalSecretsEnabled := $features.externalSecrets | default true -}}
           {{- $gitopsPromoterEnabled := $features.gitopsPromoter | default false -}}
+          {{- $observabilityEnabled := $features.observability | default true -}}
+
+          {{/* VictoriaMetrics configuration from EnvironmentConfig (with safe defaults) */}}
+          {{- $vmConfig := $tools.victoriametrics | default dict -}}
+          {{- $vmEnabled := $vmConfig.enabled | default false -}}
+          {{- $vmMode := $vmConfig.mode | default "single" -}}
+          {{- $vmChartVersion := $vmConfig.chartVersion | default "0.29.5" -}}
+          {{- $vmNamespace := $vmConfig.namespace | default "observability" -}}
+          {{- $vmRetention := $vmConfig.retention | default "90d" -}}
+          {{- $vmStorageSize := $vmConfig.storage.size | default "50Gi" -}}
+
+          {{/* Defaults: latest tested VictoriaMetrics versions + gp3 storage */}}
+          {{- $vmAppVersion := "v1.131.0" -}}
+          {{- $vmStorageClass := "gp3" -}}
+          {{- $vmAgentChartVersion := $vmConfig.vmagent.chartVersion | default "0.26.5" -}}
+          {{- $vmAgentAppVersion := "v1.131.0" -}}
+          {{- $grafanaEnabled := $vmConfig.grafana.enabled | default true -}}
+          {{- $grafanaChartVersion := $vmConfig.grafana.chartVersion | default "latest" -}}
+          {{- $grafanaVersion := $vmConfig.grafana.version | default "latest" -}}
+          {{- $grafanaPersistenceSize := $vmConfig.grafana.persistence.size | default "10Gi" -}}
+          {{- $vmAlertEnabled := $vmConfig.alert.enabled | default true -}}
+          {{- $clusterLabel := $vmConfig.clusterLabel | default "cluster" -}}
+
+          {{/* FR-1: Dual-Level Feature Toggle - observability only deploys when both flags are true */}}
+          {{- $shouldDeployVM := and $observabilityEnabled $vmEnabled -}}
+
+          {{/* Initialize observability variables (used in status even if not deploying) */}}
+          {{- $vmSelectReplicas := 1 -}}
+          {{- $vmInsertReplicas := 1 -}}
+          {{- $vmStorageReplicas := 1 -}}
+          {{- if and $shouldDeployVM (eq $vmMode "ha") }}
+            {{- $vmSelectReplicas = 3 -}}
+            {{- $vmInsertReplicas = 2 -}}
+            {{- $vmStorageReplicas = 3 -}}
+          {{- end }}
 
           {{/* TLS Configuration with defaults */}}
           {{- $tlsIssuerEnabled := false -}}
@@ -142,6 +177,41 @@ spec:
           {{- $nodeSelector := $runtime.nodeSelector | default dict -}}
           {{- $tolerations := $runtime.tolerations | default list -}}
           {{- $resourceProfile := $runtime.resourceProfile | default "medium" -}}
+
+          {{/* Observability nodegroup specifications based on resource profile */}}
+          {{- $obsNodeGroupInstanceTypes := list "m5.xlarge" "m5.2xlarge" -}}
+          {{- $obsNodeGroupMaxSize := 5 -}}
+          {{- $obsNodeGroupDesiredSize := 1 -}}
+          {{- if eq $resourceProfile "small" }}
+            {{- $obsNodeGroupInstanceTypes = list "m5.large" "m5.xlarge" -}}
+            {{- $obsNodeGroupMaxSize = 3 -}}
+            {{- $obsNodeGroupDesiredSize = 1 -}}
+          {{- else if eq $resourceProfile "large" }}
+            {{- $obsNodeGroupInstanceTypes = list "m5.2xlarge" "m6i.2xlarge" -}}
+            {{- $obsNodeGroupMaxSize = 10 -}}
+            {{- $obsNodeGroupDesiredSize = 1 -}}
+          {{- end }}
+          {{/* Always use minSize=1 (single instance), HA achieved via tolerations/taints and pod anti-affinity */}}
+          {{- $obsNodeGroupMinSize := 1 -}}
+          {{/* In HA mode we must have enough nodes to place replicas on different nodes */}}
+          {{- if and $shouldDeployVM (eq $vmMode "ha") }}
+            {{- $obsNodeGroupMinSize = 3 -}}
+            {{- $obsNodeGroupDesiredSize = 3 -}}
+          {{- end }}
+          {{/* Extract disk size from VM storage config - map storage size to nodegroup disk size */}}
+          {{/* Default mapping: small=20Gi->50GB, medium=50Gi->100GB, large=100Gi->200GB */}}
+          {{- $obsNodeGroupDiskSize := 100 -}}
+          {{- if $vmStorageSize }}
+            {{- $vmStorageSizeStr := toString $vmStorageSize -}}
+            {{/* Map VM storage size to nodegroup disk: 20Gi->50GB, 50Gi->100GB, 100Gi->200GB */}}
+            {{- if contains "20Gi" $vmStorageSizeStr }}
+              {{- $obsNodeGroupDiskSize = 50 -}}
+            {{- else if contains "50Gi" $vmStorageSizeStr }}
+              {{- $obsNodeGroupDiskSize = 100 -}}
+            {{- else if contains "100Gi" $vmStorageSizeStr }}
+              {{- $obsNodeGroupDiskSize = 200 -}}
+            {{- end }}
+          {{- end }}
 
           {{/* Extract cost allocation tags from EnvironmentConfig */}}
           {{- $costTags := dict -}}
@@ -442,6 +512,38 @@ spec:
                     pod-security.kubernetes.io/enforce: "baseline"
           {{- end }}
 
+          {{/* Create Observability namespace */}}
+          {{- if $shouldDeployVM }}
+          ---
+          apiVersion: kubernetes.crossplane.io/v1alpha2
+          kind: Object
+          metadata:
+            name: {{ $name }}-observability-namespace
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: observability-namespace
+            labels:
+              {{- range $key, $value := $commonLabels }}
+              {{ $key }}: "{{ $value }}"
+              {{- end }}
+          spec:
+            deletionPolicy: Orphan
+            managementPolicies: ["*"]
+            providerConfigRef:
+              name: {{ $kubernetesProvider }}
+            forProvider:
+              manifest:
+                apiVersion: v1
+                kind: Namespace
+                metadata:
+                  name: {{ $vmNamespace }}
+                  labels:
+                    {{- range $key, $value := $commonLabels }}
+                    {{ $key }}: "{{ $value }}"
+                    {{- end }}
+                    platform.kubecore.io/component: "observability"
+                    pod-security.kubernetes.io/enforce: "privileged"
+          {{- end }}
+
           {{/* =================================================================== */}}
           {{/* HELM RELEASE INSTALLATIONS */}}
           {{/* =================================================================== */}}
@@ -461,7 +563,8 @@ spec:
               {{- end }}
               platform.kubecore.io/component: "crossplane"
           spec:
-            deletionPolicy: Orphan
+            # Use Delete to avoid stale Helm release history causing sticky failed state on re-create.
+            deletionPolicy: Delete
             managementPolicies: ["*"]
             providerConfigRef:
               name: {{ $helmProvider }}
@@ -544,11 +647,15 @@ spec:
               {{- end }}
               platform.kubecore.io/component: "cert-manager"
           spec:
-            deletionPolicy: Orphan
+            # Use Delete to avoid stale Helm release history causing sticky failed state on re-create.
+            deletionPolicy: Delete
             managementPolicies: ["*"]
             providerConfigRef:
               name: {{ $helmProvider }}
             forProvider:
+              # Helm installs may include hook jobs (e.g. startupapicheck) that can exceed the default 5m timeout
+              wait: true
+              waitTimeout: "20m"
               chart:
                 name: cert-manager
                 repository: {{ $tools.certManager.repository.url }}
@@ -684,6 +791,62 @@ spec:
           {{- end }}
 
           {{/* =================================================================== */}}
+          {{/* NOTE: VictoriaMetrics Operator is included in victoria-metrics-k8s-stack */}}
+          {{/* No separate operator installation needed - it's a dependency of the stack */}}
+          {{/* =================================================================== */}}
+
+          {{/* Grafana Operator Installation */}}
+          {{/* Default to enabled if Grafana is enabled and grafanaOperator config exists */}}
+          {{- $grafanaOperatorEnabled := true -}}
+          {{- if and $vmConfig.grafanaOperator (hasKey $vmConfig.grafanaOperator "enabled") -}}
+            {{- $grafanaOperatorEnabled = $vmConfig.grafanaOperator.enabled -}}
+          {{- end -}}
+          {{- if and $shouldDeployVM $grafanaEnabled $vmConfig.grafanaOperator $grafanaOperatorEnabled }}
+          ---
+          apiVersion: helm.crossplane.io/v1beta1
+          kind: Release
+          metadata:
+            name: {{ $clusterName }}-system-grafana-operator
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: grafana-operator-release
+            labels:
+              {{- range $key, $value := $commonLabels }}
+              {{ $key }}: "{{ $value }}"
+              {{- end }}
+              platform.kubecore.io/component: "observability"
+          spec:
+            deletionPolicy: Orphan
+            managementPolicies: ["*"]
+            providerConfigRef:
+              name: {{ $helmProvider }}
+            forProvider:
+              chart:
+                name: grafana-operator
+                repository: {{ $vmConfig.grafanaOperator.repository.url }}
+                version: "{{ $vmConfig.grafanaOperator.version }}"
+              namespace: {{ $vmNamespace }}
+              values:
+                watchNamespaces: {{ $vmNamespace }}
+                {{- if $nodeSelector }}
+                nodeSelector:
+                  {{- range $key, $value := $nodeSelector }}
+                  {{ $key }}: "{{ $value }}"
+                  {{- end }}
+                {{- end }}
+                {{- if $tolerations }}
+                tolerations:
+                  {{- range $toleration := $tolerations }}
+                  - key: "{{ $toleration.key }}"
+                    operator: "{{ $toleration.operator }}"
+                    {{- if $toleration.value }}
+                    value: "{{ $toleration.value }}"
+                    {{- end }}
+                    effect: "{{ $toleration.effect }}"
+                  {{- end }}
+                {{- end }}
+          {{- end }}
+
+          {{/* =================================================================== */}}
           {{/* CLUSTER ISSUER CREATION */}}
           {{/* =================================================================== */}}
 
@@ -749,6 +912,525 @@ spec:
                               {{- end }}
           {{- end }}
 
+          {{/* =================================================================== */}}
+          {{/* GRAFANA DASHBOARDS (Grafana Operator CRDs) */}}
+          {{/* =================================================================== */}}
+
+          {{/* Target the existing Helm-managed Grafana instance via an external Grafana CR */}}
+          {{- if and $shouldDeployVM $grafanaEnabled }}
+          ---
+          apiVersion: kubernetes.crossplane.io/v1alpha2
+          kind: Object
+          metadata:
+            name: {{ $name }}-grafana-external
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: grafana-external
+            labels:
+              {{- range $key, $value := $commonLabels }}
+              {{ $key }}: "{{ $value }}"
+              {{- end }}
+              platform.kubecore.io/component: "observability"
+          spec:
+            deletionPolicy: Orphan
+            managementPolicies: ["*"]
+            providerConfigRef:
+              name: {{ $kubernetesProvider }}
+            forProvider:
+              manifest:
+                apiVersion: grafana.integreatly.org/v1beta1
+                kind: Grafana
+                metadata:
+                  name: {{ $clusterName }}-external-grafana
+                  namespace: {{ $vmNamespace }}
+                  labels:
+                    dashboards: "kubecore-grafana"
+                    {{- range $key, $value := $commonLabels }}
+                    {{ $key }}: "{{ $value }}"
+                    {{- end }}
+                spec:
+                  external:
+                    url: http://{{ $clusterName }}-vm-stack-grafana.{{ $vmNamespace }}.svc.cluster.local:80
+                    adminUser:
+                      name: {{ $clusterName }}-vm-stack-grafana
+                      key: admin-user
+                    adminPassword:
+                      name: {{ $clusterName }}-vm-stack-grafana
+                      key: admin-password
+          {{- end }}
+
+          {{/* =================================================================== */}}
+          {{/* GRAFANA DATASOURCE CLEANUP (remove legacy aliases) */}}
+          {{/* =================================================================== */}}
+
+          {{- if and $shouldDeployVM $grafanaEnabled }}
+          {{/* Older iterations created datasource aliases like k8s-qa/Prometheus/UID aliases. */}}
+          {{/* We now prefer mapping dashboards to the existing vm-stack datasource instead of creating duplicates. */}}
+          {{/* These delete-only objects remove the legacy alias datasources if present. */}}
+          ---
+          apiVersion: kubernetes.crossplane.io/v1alpha2
+          kind: Object
+          metadata:
+            name: {{ $name }}-grafana-datasource-delete-k8s-qa
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: grafana-datasource-delete-k8s-qa
+            labels:
+              {{- range $key, $value := $commonLabels }}
+              {{ $key }}: "{{ $value }}"
+              {{- end }}
+              platform.kubecore.io/component: "observability"
+          spec:
+            deletionPolicy: Delete
+            # Delete-only: do not (re)create this datasource, only delete it if it exists.
+            managementPolicies: ["Delete"]
+            providerConfigRef:
+              name: {{ $kubernetesProvider }}
+            forProvider:
+              manifest:
+                apiVersion: grafana.integreatly.org/v1beta1
+                kind: GrafanaDatasource
+                metadata:
+                  name: {{ $clusterName }}-ds-k8s-qa
+                  namespace: {{ $vmNamespace }}
+
+          ---
+          apiVersion: kubernetes.crossplane.io/v1alpha2
+          kind: Object
+          metadata:
+            name: {{ $name }}-grafana-datasource-delete-prometheus
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: grafana-datasource-delete-prometheus
+            labels:
+              {{- range $key, $value := $commonLabels }}
+              {{ $key }}: "{{ $value }}"
+              {{- end }}
+              platform.kubecore.io/component: "observability"
+          spec:
+            deletionPolicy: Delete
+            managementPolicies: ["Delete"]
+            providerConfigRef:
+              name: {{ $kubernetesProvider }}
+            forProvider:
+              manifest:
+                apiVersion: grafana.integreatly.org/v1beta1
+                kind: GrafanaDatasource
+                metadata:
+                  name: {{ $clusterName }}-ds-prometheus
+                  namespace: {{ $vmNamespace }}
+
+          ---
+          apiVersion: kubernetes.crossplane.io/v1alpha2
+          kind: Object
+          metadata:
+            name: {{ $name }}-grafana-datasource-delete-victoriametrics-uid
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: grafana-datasource-delete-victoriametrics-uid
+            labels:
+              {{- range $key, $value := $commonLabels }}
+              {{ $key }}: "{{ $value }}"
+              {{- end }}
+              platform.kubecore.io/component: "observability"
+          spec:
+            deletionPolicy: Delete
+            managementPolicies: ["Delete"]
+            providerConfigRef:
+              name: {{ $kubernetesProvider }}
+            forProvider:
+              manifest:
+                apiVersion: grafana.integreatly.org/v1beta1
+                kind: GrafanaDatasource
+                metadata:
+                  name: {{ $clusterName }}-ds-victoriametrics-uid
+                  namespace: {{ $vmNamespace }}
+          {{- end }}
+
+          {{/* KubeTools folder (for tool dashboards like ArgoCD, Traefik, etc.) */}}
+          {{- if and $shouldDeployVM $grafanaEnabled }}
+          ---
+          apiVersion: kubernetes.crossplane.io/v1alpha2
+          kind: Object
+          metadata:
+            name: {{ $name }}-grafana-folder-kubetools
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: grafana-folder-kubetools
+            labels:
+              {{- range $key, $value := $commonLabels }}
+              {{ $key }}: "{{ $value }}"
+              {{- end }}
+              platform.kubecore.io/component: "observability"
+          spec:
+            deletionPolicy: Orphan
+            managementPolicies: ["*"]
+            providerConfigRef:
+              name: {{ $kubernetesProvider }}
+            forProvider:
+              manifest:
+                apiVersion: grafana.integreatly.org/v1beta1
+                kind: GrafanaFolder
+                metadata:
+                  name: {{ $clusterName }}-kubetools
+                  namespace: {{ $vmNamespace }}
+                  labels:
+                    {{- range $key, $value := $commonLabels }}
+                    {{ $key }}: "{{ $value }}"
+                    {{- end }}
+                spec:
+                  title: "KubeTools"
+                  instanceSelector:
+                    matchLabels:
+                      dashboards: "kubecore-grafana"
+          {{- end }}
+
+          {{/* Kubernetes folder (for core Kubernetes dashboards: cluster, nodes, pods, PVs) */}}
+          {{- if and $shouldDeployVM $grafanaEnabled }}
+          ---
+          apiVersion: kubernetes.crossplane.io/v1alpha2
+          kind: Object
+          metadata:
+            name: {{ $name }}-grafana-folder-kubernetes
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: grafana-folder-kubernetes
+            labels:
+              {{- range $key, $value := $commonLabels }}
+              {{ $key }}: "{{ $value }}"
+              {{- end }}
+              platform.kubecore.io/component: "observability"
+          spec:
+            deletionPolicy: Orphan
+            managementPolicies: ["*"]
+            providerConfigRef:
+              name: {{ $kubernetesProvider }}
+            forProvider:
+              manifest:
+                apiVersion: grafana.integreatly.org/v1beta1
+                kind: GrafanaFolder
+                metadata:
+                  name: {{ $clusterName }}-kubernetes
+                  namespace: {{ $vmNamespace }}
+                  labels:
+                    {{- range $key, $value := $commonLabels }}
+                    {{ $key }}: "{{ $value }}"
+                    {{- end }}
+                spec:
+                  title: "Kubernetes"
+                  instanceSelector:
+                    matchLabels:
+                      dashboards: "kubecore-grafana"
+          {{- end }}
+
+          {{/* ArgoCD dashboard (Grafana.com ID 19993) */}}
+          {{- if and $shouldDeployVM $grafanaEnabled $argoCdEnabled $tools.argocd $tools.argocd.enabled }}
+          ---
+          apiVersion: kubernetes.crossplane.io/v1alpha2
+          kind: Object
+          metadata:
+            name: {{ $name }}-grafana-dashboard-argocd-19993
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: grafana-dashboard-argocd-19993
+            labels:
+              {{- range $key, $value := $commonLabels }}
+              {{ $key }}: "{{ $value }}"
+              {{- end }}
+              platform.kubecore.io/component: "argocd"
+          spec:
+            deletionPolicy: Orphan
+            managementPolicies: ["*"]
+            providerConfigRef:
+              name: {{ $kubernetesProvider }}
+            forProvider:
+              manifest:
+                apiVersion: grafana.integreatly.org/v1beta1
+                kind: GrafanaDashboard
+                metadata:
+                  name: {{ $clusterName }}-argocd-19993
+                  namespace: {{ $vmNamespace }}
+                  labels:
+                    {{- range $key, $value := $commonLabels }}
+                    {{ $key }}: "{{ $value }}"
+                    {{- end }}
+                    platform.kubecore.io/component: "argocd"
+                spec:
+                  folderRef: {{ $clusterName }}-kubetools
+                  instanceSelector:
+                    matchLabels:
+                      dashboards: "kubecore-grafana"
+                  grafanaCom:
+                    id: 19993
+                    revision: 1
+          {{- end }}
+
+          {{/* cert-manager dashboard (Grafana.com ID 22184) */}}
+          {{- if and $shouldDeployVM $grafanaEnabled $certManagerEnabled $tools.certManager $tools.certManager.enabled }}
+          ---
+          apiVersion: kubernetes.crossplane.io/v1alpha2
+          kind: Object
+          metadata:
+            name: {{ $name }}-grafana-dashboard-cert-manager-22184
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: grafana-dashboard-cert-manager-22184
+            labels:
+              {{- range $key, $value := $commonLabels }}
+              {{ $key }}: "{{ $value }}"
+              {{- end }}
+              platform.kubecore.io/component: "cert-manager"
+          spec:
+            deletionPolicy: Orphan
+            managementPolicies: ["*"]
+            providerConfigRef:
+              name: {{ $kubernetesProvider }}
+            forProvider:
+              manifest:
+                apiVersion: grafana.integreatly.org/v1beta1
+                kind: GrafanaDashboard
+                metadata:
+                  name: {{ $clusterName }}-cert-manager-22184
+                  namespace: {{ $vmNamespace }}
+                  labels:
+                    {{- range $key, $value := $commonLabels }}
+                    {{ $key }}: "{{ $value }}"
+                    {{- end }}
+                    platform.kubecore.io/component: "cert-manager"
+                spec:
+                  folderRef: {{ $clusterName }}-kubetools
+                  instanceSelector:
+                    matchLabels:
+                      dashboards: "kubecore-grafana"
+                  datasources:
+                    # Map templated datasource inputs inside the imported dashboard JSON
+                    # to our existing vm-stack datasource by UID (Grafana variable value is a UID).
+                    - inputName: "DS_PROMETHEUS"
+                      datasourceName: "P4169E866C3094E38"
+                  grafanaCom:
+                    id: 22184
+                    revision: 1
+          {{- end }}
+
+          {{/* external-secrets dashboard (Grafana.com ID 21640) */}}
+          {{- if and $shouldDeployVM $grafanaEnabled $externalSecretsEnabled $tools.externalSecrets $tools.externalSecrets.enabled }}
+          ---
+          apiVersion: kubernetes.crossplane.io/v1alpha2
+          kind: Object
+          metadata:
+            name: {{ $name }}-grafana-dashboard-external-secrets-21640
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: grafana-dashboard-external-secrets-21640
+            labels:
+              {{- range $key, $value := $commonLabels }}
+              {{ $key }}: "{{ $value }}"
+              {{- end }}
+              platform.kubecore.io/component: "external-secrets"
+          spec:
+            deletionPolicy: Orphan
+            managementPolicies: ["*"]
+            providerConfigRef:
+              name: {{ $kubernetesProvider }}
+            forProvider:
+              manifest:
+                apiVersion: grafana.integreatly.org/v1beta1
+                kind: GrafanaDashboard
+                metadata:
+                  name: {{ $clusterName }}-external-secrets-21640
+                  namespace: {{ $vmNamespace }}
+                  labels:
+                    {{- range $key, $value := $commonLabels }}
+                    {{ $key }}: "{{ $value }}"
+                    {{- end }}
+                    platform.kubecore.io/component: "external-secrets"
+                spec:
+                  folderRef: {{ $clusterName }}-kubetools
+                  instanceSelector:
+                    matchLabels:
+                      dashboards: "kubecore-grafana"
+                  datasources:
+                    # Map templated datasource inputs inside the imported dashboard JSON
+                    # to our existing vm-stack datasource by UID (Grafana variable value is a UID).
+                    - inputName: "DS_PROMETHEUS"
+                      datasourceName: "P4169E866C3094E38"
+                  grafanaCom:
+                    id: 21640
+                    revision: 1
+          {{- end }}
+
+          {{/* Kubernetes Persistent Volumes dashboard (Grafana.com ID 13646) */}}
+          {{- if and $shouldDeployVM $grafanaEnabled }}
+          ---
+          apiVersion: kubernetes.crossplane.io/v1alpha2
+          kind: Object
+          metadata:
+            name: {{ $name }}-grafana-dashboard-kubernetes-pv-13646
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: grafana-dashboard-kubernetes-pv-13646
+            labels:
+              {{- range $key, $value := $commonLabels }}
+              {{ $key }}: "{{ $value }}"
+              {{- end }}
+              platform.kubecore.io/component: "observability"
+          spec:
+            deletionPolicy: Orphan
+            managementPolicies: ["*"]
+            providerConfigRef:
+              name: {{ $kubernetesProvider }}
+            forProvider:
+              manifest:
+                apiVersion: grafana.integreatly.org/v1beta1
+                kind: GrafanaDashboard
+                metadata:
+                  name: {{ $clusterName }}-kubernetes-persistent-volumes-13646
+                  namespace: {{ $vmNamespace }}
+                  labels:
+                    {{- range $key, $value := $commonLabels }}
+                    {{ $key }}: "{{ $value }}"
+                    {{- end }}
+                    platform.kubecore.io/component: "observability"
+                spec:
+                  folderRef: {{ $clusterName }}-kubernetes
+                  instanceSelector:
+                    matchLabels:
+                      dashboards: "kubecore-grafana"
+                  # Map common Prometheus-style input placeholders to our vmselect-backed datasource(s).
+                  datasources:
+                    - inputName: "DS_PROMETHEUS"
+                      datasourceName: "P4169E866C3094E38"
+                    - inputName: "Datasource"
+                      datasourceName: "P4169E866C3094E38"
+                    - inputName: "PROMETHEUS"
+                      datasourceName: "P4169E866C3094E38"
+                  grafanaCom:
+                    id: 13646
+                    revision: 1
+          {{- end }}
+
+          {{/* Kubernetes Cluster overview dashboard (Grafana.com ID 7249) */}}
+          {{- if and $shouldDeployVM $grafanaEnabled }}
+          ---
+          apiVersion: kubernetes.crossplane.io/v1alpha2
+          kind: Object
+          metadata:
+            name: {{ $name }}-grafana-dashboard-kubernetes-cluster-7249
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: grafana-dashboard-kubernetes-cluster-7249
+            labels:
+              {{- range $key, $value := $commonLabels }}
+              {{ $key }}: "{{ $value }}"
+              {{- end }}
+              platform.kubecore.io/component: "observability"
+          spec:
+            deletionPolicy: Orphan
+            managementPolicies: ["*"]
+            providerConfigRef:
+              name: {{ $kubernetesProvider }}
+            forProvider:
+              manifest:
+                apiVersion: grafana.integreatly.org/v1beta1
+                kind: GrafanaDashboard
+                metadata:
+                  name: {{ $clusterName }}-kubernetes-cluster-7249
+                  namespace: {{ $vmNamespace }}
+                  labels:
+                    {{- range $key, $value := $commonLabels }}
+                    {{ $key }}: "{{ $value }}"
+                    {{- end }}
+                    platform.kubecore.io/component: "observability"
+                spec:
+                  folderRef: {{ $clusterName }}-kubernetes
+                  instanceSelector:
+                    matchLabels:
+                      dashboards: "kubecore-grafana"
+                  datasources:
+                    - inputName: "DS_PROMETHEUS"
+                      datasourceName: "P4169E866C3094E38"
+                  grafanaCom:
+                    id: 7249
+                    revision: 1
+          {{- end }}
+
+          {{/* Node Exporter Full dashboard (Grafana.com ID 1860) */}}
+          {{- if and $shouldDeployVM $grafanaEnabled }}
+          ---
+          apiVersion: kubernetes.crossplane.io/v1alpha2
+          kind: Object
+          metadata:
+            name: {{ $name }}-grafana-dashboard-node-exporter-1860
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: grafana-dashboard-node-exporter-1860
+            labels:
+              {{- range $key, $value := $commonLabels }}
+              {{ $key }}: "{{ $value }}"
+              {{- end }}
+              platform.kubecore.io/component: "observability"
+          spec:
+            deletionPolicy: Orphan
+            managementPolicies: ["*"]
+            providerConfigRef:
+              name: {{ $kubernetesProvider }}
+            forProvider:
+              manifest:
+                apiVersion: grafana.integreatly.org/v1beta1
+                kind: GrafanaDashboard
+                metadata:
+                  name: {{ $clusterName }}-node-exporter-full-1860
+                  namespace: {{ $vmNamespace }}
+                  labels:
+                    {{- range $key, $value := $commonLabels }}
+                    {{ $key }}: "{{ $value }}"
+                    {{- end }}
+                    platform.kubecore.io/component: "observability"
+                spec:
+                  folderRef: {{ $clusterName }}-kubernetes
+                  instanceSelector:
+                    matchLabels:
+                      dashboards: "kubecore-grafana"
+                  datasources:
+                    - inputName: "DS_LOCALHOST"
+                      datasourceName: "P4169E866C3094E38"
+                  grafanaCom:
+                    id: 1860
+                    revision: 1
+          {{- end }}
+
+          {{/* Kubernetes Pod resources dashboard (Grafana.com ID 6417) */}}
+          {{- if and $shouldDeployVM $grafanaEnabled }}
+          ---
+          apiVersion: kubernetes.crossplane.io/v1alpha2
+          kind: Object
+          metadata:
+            name: {{ $name }}-grafana-dashboard-kubernetes-pod-resources-6417
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: grafana-dashboard-kubernetes-pod-resources-6417
+            labels:
+              {{- range $key, $value := $commonLabels }}
+              {{ $key }}: "{{ $value }}"
+              {{- end }}
+              platform.kubecore.io/component: "observability"
+          spec:
+            deletionPolicy: Orphan
+            managementPolicies: ["*"]
+            providerConfigRef:
+              name: {{ $kubernetesProvider }}
+            forProvider:
+              manifest:
+                apiVersion: grafana.integreatly.org/v1beta1
+                kind: GrafanaDashboard
+                metadata:
+                  name: {{ $clusterName }}-kubernetes-pod-resources-6417
+                  namespace: {{ $vmNamespace }}
+                  labels:
+                    {{- range $key, $value := $commonLabels }}
+                    {{ $key }}: "{{ $value }}"
+                    {{- end }}
+                    platform.kubecore.io/component: "observability"
+                spec:
+                  folderRef: {{ $clusterName }}-kubernetes
+                  instanceSelector:
+                    matchLabels:
+                      dashboards: "kubecore-grafana"
+                  datasources:
+                    - inputName: "DS_PROMETHEUS"
+                      datasourceName: "P4169E866C3094E38"
+                  grafanaCom:
+                    id: 6417
+                    revision: 1
+          {{- end }}
+
           {{/* ArgoCD Installation */}}
           {{- if and $argoCdEnabled $tools.argocd $tools.argocd.enabled }}
           ---
@@ -764,11 +1446,15 @@ spec:
               {{- end }}
               platform.kubecore.io/component: "argocd"
           spec:
-            deletionPolicy: Orphan
+            # Use Delete to avoid stale Helm release history causing sticky failed state on re-create.
+            deletionPolicy: Delete
             managementPolicies: ["*"]
             providerConfigRef:
               name: {{ $helmProvider }}
             forProvider:
+              # ArgoCD can take longer than the default 5m to become Ready on first install
+              wait: true
+              waitTimeout: "20m"
               chart:
                 name: argo-cd
                 repository: {{ $tools.argocd.repository.url }}
@@ -899,6 +1585,613 @@ spec:
                       effect: "{{ $toleration.effect }}"
                     {{- end }}
                   {{- end }}
+          {{- end }}
+
+          {{/* =================================================================== */}}
+          {{/* ARGOCD METRICS SCRAPING (VMServiceScrape) */}}
+          {{/* =================================================================== */}}
+
+          {{- if and $shouldDeployVM $argoCdEnabled $tools.argocd $tools.argocd.enabled }}
+          {{/* Create dedicated metrics Services (avoid mutating Helm-managed Services) */}}
+          ---
+          apiVersion: kubernetes.crossplane.io/v1alpha2
+          kind: Object
+          metadata:
+            name: {{ $name }}-argocd-metrics-service-server
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: argocd-metrics-service-server
+            labels:
+              {{- range $key, $value := $commonLabels }}
+              {{ $key }}: "{{ $value }}"
+              {{- end }}
+              platform.kubecore.io/component: "argocd"
+          spec:
+            deletionPolicy: Orphan
+            managementPolicies: ["*"]
+            providerConfigRef:
+              name: {{ $kubernetesProvider }}
+            forProvider:
+              manifest:
+                apiVersion: v1
+                kind: Service
+                metadata:
+                  name: argocd-server-metrics
+                  namespace: {{ $tools.argocd.namespace }}
+                  labels:
+                    platform.kubecore.io/component: "argocd"
+                    platform.kubecore.io/metrics: "true"
+                    {{- range $key, $value := $commonLabels }}
+                    {{ $key }}: "{{ $value }}"
+                    {{- end }}
+                spec:
+                  type: ClusterIP
+                  selector:
+                    app.kubernetes.io/instance: {{ printf "%s-system-argocd" $clusterName | quote }}
+                    app.kubernetes.io/name: "argocd-server"
+                  ports:
+                    - name: metrics
+                      port: 8083
+                      targetPort: metrics
+                      protocol: TCP
+
+          ---
+          apiVersion: kubernetes.crossplane.io/v1alpha2
+          kind: Object
+          metadata:
+            name: {{ $name }}-argocd-metrics-service-application-controller
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: argocd-metrics-service-application-controller
+            labels:
+              {{- range $key, $value := $commonLabels }}
+              {{ $key }}: "{{ $value }}"
+              {{- end }}
+              platform.kubecore.io/component: "argocd"
+          spec:
+            deletionPolicy: Orphan
+            managementPolicies: ["*"]
+            providerConfigRef:
+              name: {{ $kubernetesProvider }}
+            forProvider:
+              manifest:
+                apiVersion: v1
+                kind: Service
+                metadata:
+                  name: argocd-application-controller-metrics
+                  namespace: {{ $tools.argocd.namespace }}
+                  labels:
+                    platform.kubecore.io/component: "argocd"
+                    platform.kubecore.io/metrics: "true"
+                    {{- range $key, $value := $commonLabels }}
+                    {{ $key }}: "{{ $value }}"
+                    {{- end }}
+                spec:
+                  type: ClusterIP
+                  selector:
+                    app.kubernetes.io/instance: {{ printf "%s-system-argocd" $clusterName | quote }}
+                    app.kubernetes.io/name: "argocd-application-controller"
+                  ports:
+                    - name: metrics
+                      port: 8082
+                      targetPort: metrics
+                      protocol: TCP
+
+          ---
+          apiVersion: kubernetes.crossplane.io/v1alpha2
+          kind: Object
+          metadata:
+            name: {{ $name }}-argocd-metrics-service-repo-server
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: argocd-metrics-service-repo-server
+            labels:
+              {{- range $key, $value := $commonLabels }}
+              {{ $key }}: "{{ $value }}"
+              {{- end }}
+              platform.kubecore.io/component: "argocd"
+          spec:
+            deletionPolicy: Orphan
+            managementPolicies: ["*"]
+            providerConfigRef:
+              name: {{ $kubernetesProvider }}
+            forProvider:
+              manifest:
+                apiVersion: v1
+                kind: Service
+                metadata:
+                  name: argocd-repo-server-metrics
+                  namespace: {{ $tools.argocd.namespace }}
+                  labels:
+                    platform.kubecore.io/component: "argocd"
+                    platform.kubecore.io/metrics: "true"
+                    {{- range $key, $value := $commonLabels }}
+                    {{ $key }}: "{{ $value }}"
+                    {{- end }}
+                spec:
+                  type: ClusterIP
+                  selector:
+                    app.kubernetes.io/instance: {{ printf "%s-system-argocd" $clusterName | quote }}
+                    app.kubernetes.io/name: "argocd-repo-server"
+                  ports:
+                    - name: metrics
+                      port: 8084
+                      targetPort: metrics
+                      protocol: TCP
+
+          ---
+          apiVersion: kubernetes.crossplane.io/v1alpha2
+          kind: Object
+          metadata:
+            name: {{ $name }}-argocd-metrics-service-applicationset-controller
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: argocd-metrics-service-applicationset-controller
+            labels:
+              {{- range $key, $value := $commonLabels }}
+              {{ $key }}: "{{ $value }}"
+              {{- end }}
+              platform.kubecore.io/component: "argocd"
+          spec:
+            deletionPolicy: Orphan
+            managementPolicies: ["*"]
+            providerConfigRef:
+              name: {{ $kubernetesProvider }}
+            forProvider:
+              manifest:
+                apiVersion: v1
+                kind: Service
+                metadata:
+                  name: argocd-applicationset-controller-metrics
+                  namespace: {{ $tools.argocd.namespace }}
+                  labels:
+                    platform.kubecore.io/component: "argocd"
+                    platform.kubecore.io/metrics: "true"
+                    {{- range $key, $value := $commonLabels }}
+                    {{ $key }}: "{{ $value }}"
+                    {{- end }}
+                spec:
+                  type: ClusterIP
+                  selector:
+                    app.kubernetes.io/instance: {{ printf "%s-system-argocd" $clusterName | quote }}
+                    app.kubernetes.io/name: "argocd-applicationset-controller"
+                  ports:
+                    - name: metrics
+                      port: 8080
+                      targetPort: metrics
+                      protocol: TCP
+
+          ---
+          apiVersion: kubernetes.crossplane.io/v1alpha2
+          kind: Object
+          metadata:
+            name: {{ $name }}-argocd-metrics-service-notifications-controller
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: argocd-metrics-service-notifications-controller
+            labels:
+              {{- range $key, $value := $commonLabels }}
+              {{ $key }}: "{{ $value }}"
+              {{- end }}
+              platform.kubecore.io/component: "argocd"
+          spec:
+            deletionPolicy: Orphan
+            managementPolicies: ["*"]
+            providerConfigRef:
+              name: {{ $kubernetesProvider }}
+            forProvider:
+              manifest:
+                apiVersion: v1
+                kind: Service
+                metadata:
+                  name: argocd-notifications-controller-metrics
+                  namespace: {{ $tools.argocd.namespace }}
+                  labels:
+                    platform.kubecore.io/component: "argocd"
+                    platform.kubecore.io/metrics: "true"
+                    {{- range $key, $value := $commonLabels }}
+                    {{ $key }}: "{{ $value }}"
+                    {{- end }}
+                spec:
+                  type: ClusterIP
+                  selector:
+                    app.kubernetes.io/instance: {{ printf "%s-system-argocd" $clusterName | quote }}
+                    app.kubernetes.io/name: "argocd-notifications-controller"
+                  ports:
+                    - name: metrics
+                      port: 9001
+                      targetPort: metrics
+                      protocol: TCP
+
+          {{/* Scrape all the above metrics Services via VMServiceScrape */}}
+          ---
+          apiVersion: kubernetes.crossplane.io/v1alpha2
+          kind: Object
+          metadata:
+            name: {{ $name }}-argocd-vmservicescrape
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: argocd-vmservicescrape
+            labels:
+              {{- range $key, $value := $commonLabels }}
+              {{ $key }}: "{{ $value }}"
+              {{- end }}
+              platform.kubecore.io/component: "observability"
+          spec:
+            deletionPolicy: Orphan
+            managementPolicies: ["*"]
+            providerConfigRef:
+              name: {{ $kubernetesProvider }}
+            forProvider:
+              manifest:
+                apiVersion: operator.victoriametrics.com/v1beta1
+                kind: VMServiceScrape
+                metadata:
+                  name: {{ $clusterName }}-argocd
+                  namespace: {{ $vmNamespace }}
+                  labels:
+                    platform.kubecore.io/component: "argocd"
+                    {{- range $key, $value := $commonLabels }}
+                    {{ $key }}: "{{ $value }}"
+                    {{- end }}
+                spec:
+                  namespaceSelector:
+                    matchNames:
+                      - {{ $tools.argocd.namespace }}
+                  selector:
+                    matchLabels:
+                      platform.kubecore.io/component: "argocd"
+                      platform.kubecore.io/metrics: "true"
+                  endpoints:
+                    - port: metrics
+                      path: /metrics
+                      interval: 30s
+                      scheme: http
+          {{- end }}
+
+          {{/* =================================================================== */}}
+          {{/* CERT-MANAGER METRICS SCRAPING (VMServiceScrape) */}}
+          {{/* =================================================================== */}}
+
+          {{- if and $shouldDeployVM $certManagerEnabled $tools.certManager $tools.certManager.enabled }}
+          {{/* Create dedicated metrics Services (avoid mutating Helm-managed Services) */}}
+          ---
+          apiVersion: kubernetes.crossplane.io/v1alpha2
+          kind: Object
+          metadata:
+            name: {{ $name }}-cert-manager-metrics-service-controller
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: cert-manager-metrics-service-controller
+            labels:
+              {{- range $key, $value := $commonLabels }}
+              {{ $key }}: "{{ $value }}"
+              {{- end }}
+              platform.kubecore.io/component: "cert-manager"
+          spec:
+            deletionPolicy: Orphan
+            managementPolicies: ["*"]
+            providerConfigRef:
+              name: {{ $kubernetesProvider }}
+            forProvider:
+              manifest:
+                apiVersion: v1
+                kind: Service
+                metadata:
+                  name: cert-manager-controller-metrics
+                  namespace: {{ $tools.certManager.namespace }}
+                  labels:
+                    platform.kubecore.io/component: "cert-manager"
+                    platform.kubecore.io/metrics: "true"
+                    {{- range $key, $value := $commonLabels }}
+                    {{ $key }}: "{{ $value }}"
+                    {{- end }}
+                spec:
+                  type: ClusterIP
+                  selector:
+                    app.kubernetes.io/instance: {{ printf "%s-system-cert-manager" $clusterName | quote }}
+                    app.kubernetes.io/name: "cert-manager"
+                    app.kubernetes.io/component: "controller"
+                  ports:
+                    - name: metrics
+                      port: 9402
+                      targetPort: http-metrics
+                      protocol: TCP
+
+          ---
+          apiVersion: kubernetes.crossplane.io/v1alpha2
+          kind: Object
+          metadata:
+            name: {{ $name }}-cert-manager-metrics-service-cainjector
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: cert-manager-metrics-service-cainjector
+            labels:
+              {{- range $key, $value := $commonLabels }}
+              {{ $key }}: "{{ $value }}"
+              {{- end }}
+              platform.kubecore.io/component: "cert-manager"
+          spec:
+            deletionPolicy: Orphan
+            managementPolicies: ["*"]
+            providerConfigRef:
+              name: {{ $kubernetesProvider }}
+            forProvider:
+              manifest:
+                apiVersion: v1
+                kind: Service
+                metadata:
+                  name: cert-manager-cainjector-metrics
+                  namespace: {{ $tools.certManager.namespace }}
+                  labels:
+                    platform.kubecore.io/component: "cert-manager"
+                    platform.kubecore.io/metrics: "true"
+                    {{- range $key, $value := $commonLabels }}
+                    {{ $key }}: "{{ $value }}"
+                    {{- end }}
+                spec:
+                  type: ClusterIP
+                  selector:
+                    app.kubernetes.io/instance: {{ printf "%s-system-cert-manager" $clusterName | quote }}
+                    app.kubernetes.io/name: "cainjector"
+                    app.kubernetes.io/component: "cainjector"
+                  ports:
+                    - name: metrics
+                      port: 9402
+                      targetPort: http-metrics
+                      protocol: TCP
+
+          ---
+          apiVersion: kubernetes.crossplane.io/v1alpha2
+          kind: Object
+          metadata:
+            name: {{ $name }}-cert-manager-metrics-service-webhook
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: cert-manager-metrics-service-webhook
+            labels:
+              {{- range $key, $value := $commonLabels }}
+              {{ $key }}: "{{ $value }}"
+              {{- end }}
+              platform.kubecore.io/component: "cert-manager"
+          spec:
+            deletionPolicy: Orphan
+            managementPolicies: ["*"]
+            providerConfigRef:
+              name: {{ $kubernetesProvider }}
+            forProvider:
+              manifest:
+                apiVersion: v1
+                kind: Service
+                metadata:
+                  name: cert-manager-webhook-metrics
+                  namespace: {{ $tools.certManager.namespace }}
+                  labels:
+                    platform.kubecore.io/component: "cert-manager"
+                    platform.kubecore.io/metrics: "true"
+                    {{- range $key, $value := $commonLabels }}
+                    {{ $key }}: "{{ $value }}"
+                    {{- end }}
+                spec:
+                  type: ClusterIP
+                  selector:
+                    app.kubernetes.io/instance: {{ printf "%s-system-cert-manager" $clusterName | quote }}
+                    app.kubernetes.io/name: "webhook"
+                    app.kubernetes.io/component: "webhook"
+                  ports:
+                    - name: metrics
+                      port: 9402
+                      targetPort: http-metrics
+                      protocol: TCP
+
+          {{/* Scrape cert-manager metrics Services via VMServiceScrape */}}
+          ---
+          apiVersion: kubernetes.crossplane.io/v1alpha2
+          kind: Object
+          metadata:
+            name: {{ $name }}-cert-manager-vmservicescrape
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: cert-manager-vmservicescrape
+            labels:
+              {{- range $key, $value := $commonLabels }}
+              {{ $key }}: "{{ $value }}"
+              {{- end }}
+              platform.kubecore.io/component: "observability"
+          spec:
+            deletionPolicy: Orphan
+            managementPolicies: ["*"]
+            providerConfigRef:
+              name: {{ $kubernetesProvider }}
+            forProvider:
+              manifest:
+                apiVersion: operator.victoriametrics.com/v1beta1
+                kind: VMServiceScrape
+                metadata:
+                  name: {{ $clusterName }}-cert-manager
+                  namespace: {{ $vmNamespace }}
+                  labels:
+                    platform.kubecore.io/component: "cert-manager"
+                    {{- range $key, $value := $commonLabels }}
+                    {{ $key }}: "{{ $value }}"
+                    {{- end }}
+                spec:
+                  namespaceSelector:
+                    matchNames:
+                      - {{ $tools.certManager.namespace }}
+                  selector:
+                    matchLabels:
+                      platform.kubecore.io/component: "cert-manager"
+                      platform.kubecore.io/metrics: "true"
+                  endpoints:
+                    - port: metrics
+                      path: /metrics
+                      interval: 30s
+                      scheme: http
+          {{- end }}
+
+          {{/* =================================================================== */}}
+          {{/* EXTERNAL-SECRETS METRICS SCRAPING (VMServiceScrape) */}}
+          {{/* =================================================================== */}}
+
+          {{- if and $shouldDeployVM $externalSecretsEnabled $tools.externalSecrets $tools.externalSecrets.enabled }}
+          {{/* Create dedicated metrics Services (avoid mutating Helm-managed Services) */}}
+          ---
+          apiVersion: kubernetes.crossplane.io/v1alpha2
+          kind: Object
+          metadata:
+            name: {{ $name }}-external-secrets-metrics-service-controller
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: external-secrets-metrics-service-controller
+            labels:
+              {{- range $key, $value := $commonLabels }}
+              {{ $key }}: "{{ $value }}"
+              {{- end }}
+              platform.kubecore.io/component: "external-secrets"
+          spec:
+            deletionPolicy: Orphan
+            managementPolicies: ["*"]
+            providerConfigRef:
+              name: {{ $kubernetesProvider }}
+            forProvider:
+              manifest:
+                apiVersion: v1
+                kind: Service
+                metadata:
+                  name: external-secrets-metrics
+                  namespace: {{ $tools.externalSecrets.namespace }}
+                  labels:
+                    platform.kubecore.io/component: "external-secrets"
+                    platform.kubecore.io/metrics: "true"
+                    {{- range $key, $value := $commonLabels }}
+                    {{ $key }}: "{{ $value }}"
+                    {{- end }}
+                spec:
+                  type: ClusterIP
+                  selector:
+                    app.kubernetes.io/instance: {{ printf "%s-system-external-secrets" $clusterName | quote }}
+                    app.kubernetes.io/name: "external-secrets"
+                  ports:
+                    - name: metrics
+                      port: 8080
+                      targetPort: metrics
+                      protocol: TCP
+
+          ---
+          apiVersion: kubernetes.crossplane.io/v1alpha2
+          kind: Object
+          metadata:
+            name: {{ $name }}-external-secrets-metrics-service-cert-controller
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: external-secrets-metrics-service-cert-controller
+            labels:
+              {{- range $key, $value := $commonLabels }}
+              {{ $key }}: "{{ $value }}"
+              {{- end }}
+              platform.kubecore.io/component: "external-secrets"
+          spec:
+            deletionPolicy: Orphan
+            managementPolicies: ["*"]
+            providerConfigRef:
+              name: {{ $kubernetesProvider }}
+            forProvider:
+              manifest:
+                apiVersion: v1
+                kind: Service
+                metadata:
+                  name: external-secrets-cert-controller-metrics
+                  namespace: {{ $tools.externalSecrets.namespace }}
+                  labels:
+                    platform.kubecore.io/component: "external-secrets"
+                    platform.kubecore.io/metrics: "true"
+                    {{- range $key, $value := $commonLabels }}
+                    {{ $key }}: "{{ $value }}"
+                    {{- end }}
+                spec:
+                  type: ClusterIP
+                  selector:
+                    app.kubernetes.io/instance: {{ printf "%s-system-external-secrets" $clusterName | quote }}
+                    app.kubernetes.io/name: "external-secrets-cert-controller"
+                  ports:
+                    - name: metrics
+                      port: 8080
+                      targetPort: metrics
+                      protocol: TCP
+
+          ---
+          apiVersion: kubernetes.crossplane.io/v1alpha2
+          kind: Object
+          metadata:
+            name: {{ $name }}-external-secrets-metrics-service-webhook
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: external-secrets-metrics-service-webhook
+            labels:
+              {{- range $key, $value := $commonLabels }}
+              {{ $key }}: "{{ $value }}"
+              {{- end }}
+              platform.kubecore.io/component: "external-secrets"
+          spec:
+            deletionPolicy: Orphan
+            managementPolicies: ["*"]
+            providerConfigRef:
+              name: {{ $kubernetesProvider }}
+            forProvider:
+              manifest:
+                apiVersion: v1
+                kind: Service
+                metadata:
+                  name: external-secrets-webhook-metrics
+                  namespace: {{ $tools.externalSecrets.namespace }}
+                  labels:
+                    platform.kubecore.io/component: "external-secrets"
+                    platform.kubecore.io/metrics: "true"
+                    {{- range $key, $value := $commonLabels }}
+                    {{ $key }}: "{{ $value }}"
+                    {{- end }}
+                spec:
+                  type: ClusterIP
+                  selector:
+                    app.kubernetes.io/instance: {{ printf "%s-system-external-secrets" $clusterName | quote }}
+                    app.kubernetes.io/name: "external-secrets-webhook"
+                  ports:
+                    - name: metrics
+                      port: 8080
+                      targetPort: metrics
+                      protocol: TCP
+
+          {{/* Scrape external-secrets metrics Services via VMServiceScrape */}}
+          ---
+          apiVersion: kubernetes.crossplane.io/v1alpha2
+          kind: Object
+          metadata:
+            name: {{ $name }}-external-secrets-vmservicescrape
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: external-secrets-vmservicescrape
+            labels:
+              {{- range $key, $value := $commonLabels }}
+              {{ $key }}: "{{ $value }}"
+              {{- end }}
+              platform.kubecore.io/component: "observability"
+          spec:
+            deletionPolicy: Orphan
+            managementPolicies: ["*"]
+            providerConfigRef:
+              name: {{ $kubernetesProvider }}
+            forProvider:
+              manifest:
+                apiVersion: operator.victoriametrics.com/v1beta1
+                kind: VMServiceScrape
+                metadata:
+                  name: {{ $clusterName }}-external-secrets
+                  namespace: {{ $vmNamespace }}
+                  labels:
+                    platform.kubecore.io/component: "external-secrets"
+                    {{- range $key, $value := $commonLabels }}
+                    {{ $key }}: "{{ $value }}"
+                    {{- end }}
+                spec:
+                  namespaceSelector:
+                    matchNames:
+                      - {{ $tools.externalSecrets.namespace }}
+                  selector:
+                    matchLabels:
+                      platform.kubecore.io/component: "external-secrets"
+                      platform.kubecore.io/metrics: "true"
+                  endpoints:
+                    - port: metrics
+                      path: /metrics
+                      interval: 30s
+                      scheme: http
           {{- end }}
 
           {{/* ArgoCD GitHub Integration ExternalSecret */}}
@@ -2298,12 +3591,592 @@ spec:
           {{- end }}
 
           {{/* =================================================================== */}}
-          {{/* STATUS EXTRACTION - Extract IAM role ARNs from observed resources */}}
+          {{/* VICTORIAMETRICS OBSERVABILITY STACK */}}
+          {{/* =================================================================== */}}
+
+          {{- if $shouldDeployVM }}
+          {{/* Replica counts are already determined above, just use them here */}}
+
+          {{/* Determine resource profiles based on runtime.resourceProfile */}}
+          {{- $vmSelectCPU := "200m" -}}
+          {{- $vmSelectMemory := "256Mi" -}}
+          {{- $vmInsertCPU := "200m" -}}
+          {{- $vmInsertMemory := "256Mi" -}}
+          {{- $vmStorageCPU := "500m" -}}
+          {{- $vmStorageMemory := "512Mi" -}}
+          {{- if eq $resourceProfile "small" }}
+            {{- $vmSelectCPU = "100m" -}}
+            {{- $vmSelectMemory = "128Mi" -}}
+            {{- $vmInsertCPU = "100m" -}}
+            {{- $vmInsertMemory = "256Mi" -}}
+            {{- $vmStorageCPU = "200m" -}}
+            {{- $vmStorageMemory = "512Mi" -}}
+            {{/* Small profile: vmstorage memory increased to 512Mi to prevent OOM (was 256Mi) */}}
+            {{/* Small profile: vminsert memory increased to 256Mi to prevent OOM (was 128Mi) */}}
+          {{- else if eq $resourceProfile "large" }}
+            {{- $vmSelectCPU = "500m" -}}
+            {{- $vmSelectMemory = "512Mi" -}}
+            {{- $vmInsertCPU = "500m" -}}
+            {{- $vmInsertMemory = "512Mi" -}}
+            {{- $vmStorageCPU = "1000m" -}}
+            {{- $vmStorageMemory = "1Gi" -}}
+          {{- end }}
+
+          {{/* VictoriaMetrics K8s Stack Helm Release - Replaces all individual CRDs */}}
+          ---
+          apiVersion: helm.crossplane.io/v1beta1
+          kind: Release
+          metadata:
+            name: {{ $clusterName }}-vm-stack
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: vm-stack-helm
+            labels:
+              {{- range $key, $value := $commonLabels }}
+              {{ $key }}: "{{ $value }}"
+              {{- end }}
+              platform.kubecore.io/component: "observability"
+          spec:
+            deletionPolicy: Orphan
+            managementPolicies: ["*"]
+            providerConfigRef:
+              name: {{ $helmProvider }}
+            forProvider:
+              chart:
+                name: victoria-metrics-k8s-stack
+                repository: oci://ghcr.io/victoriametrics/helm-charts
+                version: "0.65.1"
+              namespace: {{ $vmNamespace }}
+              values:
+                # Override fullname to keep resource names under 63 chars
+                fullnameOverride: {{ $clusterName }}-vm
+                global:
+                  clusterLabel: {{ $clusterLabel | quote }}
+                # VictoriaMetrics Operator configuration
+                victoria-metrics-operator:
+                  enabled: true
+                  {{- if $nodeSelector }}
+                  nodeSelector:
+                    {{- range $key, $value := $nodeSelector }}
+                    {{ $key }}: {{ $value | quote }}
+                    {{- end }}
+                  {{- end }}
+                  # Tolerations for all nodegroup taints (operator must run on all nodegroups)
+                  tolerations:
+                  - key: "kubecore.eu/computation-type"
+                    operator: "Equal"
+                    value: "kubecore-system"
+                    effect: "NoSchedule"
+                  - key: "kubecore.eu/computation-type"
+                    operator: "Equal"
+                    value: "compute"
+                    effect: "NoSchedule"
+                  - key: "kubecore.eu/computation-type"
+                    operator: "Equal"
+                    value: "gpu"
+                    effect: "NoSchedule"
+                  - key: "kubecore.eu/computation-type"
+                    operator: "Equal"
+                    value: "observability"
+                    effect: "NoSchedule"
+                  {{- if $tolerations }}
+                  {{- range $toleration := $tolerations }}
+                  {{- if and $toleration.effect (ne $toleration.effect "") (ne $toleration.effect "<no value>") }}
+                  - key: {{ $toleration.key | quote }}
+                    {{- if and $toleration.value (ne $toleration.value "") }}
+                    value: {{ $toleration.value | quote }}
+                    {{- end }}
+                    operator: {{ $toleration.operator | default "Equal" | quote }}
+                    effect: {{ $toleration.effect | quote }}
+                  {{- end }}
+                  {{- end }}
+                  {{- end }}
+                # Disable VMSingle - use VMCluster for both single and HA modes
+                vmsingle:
+                  enabled: false
+                # Enable VMCluster - use for both single and HA modes
+                vmcluster:
+                  enabled: true
+                  labels:
+                    {{- range $key, $value := $commonLabels }}
+                    {{ $key }}: "{{ $value }}"
+                    {{- end }}
+                    platform.kubecore.io/component: "observability"
+                  annotations: {}
+                  spec:
+                    retentionPeriod: {{ $vmRetention | quote }}
+                    replicationFactor: {{ if eq $vmMode "ha" }}2{{ else }}1{{ end }}
+                    vmstorage:
+                      replicaCount: {{ $vmStorageReplicas }}
+                      storage:
+                        volumeClaimTemplate:
+                          spec:
+                            storageClassName: {{ $vmStorageClass | quote }}
+                            resources:
+                              requests:
+                                storage: {{ $vmStorageSize | quote }}
+                      resources:
+                        requests:
+                          cpu: {{ $vmStorageCPU | quote }}
+                          memory: {{ $vmStorageMemory | quote }}
+                        limits:
+                          cpu: {{ $vmStorageCPU | quote }}
+                          memory: {{ $vmStorageMemory | quote }}
+                      # Core components schedule on observability nodegroup nodes (PRD-024 FR-5)
+                      nodeSelector:
+                        platform.kubecore.io/observability: "true"
+                      tolerations:
+                        # Observability nodegroup taint (required by PRD-024 FR-5)
+                        - key: "kubecore.eu/computation-type"
+                          operator: "Equal"
+                          value: "observability"
+                          effect: "NoSchedule"
+                      {{- if eq $vmMode "ha" }}
+                      affinity:
+                        podAntiAffinity:
+                          requiredDuringSchedulingIgnoredDuringExecution:
+                          - labelSelector:
+                              matchExpressions:
+                              - key: app.kubernetes.io/name
+                                operator: In
+                                values:
+                                - vmstorage
+                            topologyKey: kubernetes.io/hostname
+                      {{- end }}
+                    vmselect:
+                      enabled: true
+                      replicaCount: {{ $vmSelectReplicas }}
+                      resources:
+                        requests:
+                          cpu: {{ $vmSelectCPU | quote }}
+                          memory: {{ $vmSelectMemory | quote }}
+                        limits:
+                          cpu: {{ $vmSelectCPU | quote }}
+                          memory: {{ $vmSelectMemory | quote }}
+                      # Core components schedule on observability nodegroup nodes (PRD-024 FR-5)
+                      nodeSelector:
+                        platform.kubecore.io/observability: "true"
+                      tolerations:
+                        # Observability nodegroup taint (required by PRD-024 FR-5)
+                        - key: "kubecore.eu/computation-type"
+                          operator: "Equal"
+                          value: "observability"
+                          effect: "NoSchedule"
+                      {{- if eq $vmMode "ha" }}
+                      affinity:
+                        podAntiAffinity:
+                          requiredDuringSchedulingIgnoredDuringExecution:
+                          - labelSelector:
+                              matchExpressions:
+                              - key: app.kubernetes.io/name
+                                operator: In
+                                values:
+                                - vmselect
+                            topologyKey: kubernetes.io/hostname
+                      {{- end }}
+                    vminsert:
+                      enabled: true
+                      replicaCount: {{ $vmInsertReplicas }}
+                      resources:
+                        requests:
+                          cpu: {{ $vmInsertCPU | quote }}
+                          memory: {{ $vmInsertMemory | quote }}
+                        limits:
+                          cpu: {{ $vmInsertCPU | quote }}
+                          memory: {{ $vmInsertMemory | quote }}
+                      # Core components schedule on observability nodegroup nodes (PRD-024 FR-5)
+                      nodeSelector:
+                        platform.kubecore.io/observability: "true"
+                      tolerations:
+                        # Observability nodegroup taint (required by PRD-024 FR-5)
+                        - key: "kubecore.eu/computation-type"
+                          operator: "Equal"
+                          value: "observability"
+                          effect: "NoSchedule"
+                      {{- if eq $vmMode "ha" }}
+                      affinity:
+                        podAntiAffinity:
+                          requiredDuringSchedulingIgnoredDuringExecution:
+                          - labelSelector:
+                              matchExpressions:
+                              - key: app.kubernetes.io/name
+                                operator: In
+                                values:
+                                - vminsert
+                            topologyKey: kubernetes.io/hostname
+                      {{- end }}
+                # VMAgent configuration
+                vmagent:
+                  enabled: true
+                  labels:
+                    {{- range $key, $value := $commonLabels }}
+                    {{ $key }}: "{{ $value }}"
+                    {{- end }}
+                    platform.kubecore.io/component: "observability"
+                  annotations: {}
+                  spec:
+                    selectAllByDefault: true
+                    replicaCount: 1
+                    externalLabels:
+                      cluster: {{ $clusterName | quote }}
+                    inlineRelabelConfig:
+                      - target_label: cluster
+                        replacement: {{ $clusterName | quote }}
+                      - source_labels: [__meta_kubernetes_pod_label_environment]
+                        target_label: environment
+                      - source_labels: [__meta_kubernetes_pod_label_kubeapp]
+                        target_label: kubeapp
+                    resources:
+                      requests:
+                        cpu: "50m"
+                        memory: "128Mi"
+                      limits:
+                        cpu: "500m"
+                        memory: "512Mi"
+                    # VMAgent is part of the observability stack: schedule on observability nodegroup nodes (PRD-024 FR-5)
+                    nodeSelector:
+                      platform.kubecore.io/observability: "true"
+                    tolerations:
+                      # Observability nodegroup taint (required by PRD-024 FR-5)
+                      - key: "kubecore.eu/computation-type"
+                        operator: "Equal"
+                        value: "observability"
+                        effect: "NoSchedule"
+                # VMAlert configuration
+                vmalert:
+                  enabled: {{ if $vmAlertEnabled }}true{{ else }}false{{ end }}
+                  labels:
+                    {{- range $key, $value := $commonLabels }}
+                    {{ $key }}: "{{ $value }}"
+                    {{- end }}
+                    platform.kubecore.io/component: "observability"
+                  annotations: {}
+                  spec:
+                    selectAllByDefault: true
+                    replicaCount: {{ if eq $vmMode "ha" }}2{{ else }}1{{ end }}
+                    evaluationInterval: 1m
+                    externalLabels:
+                      cluster: {{ $clusterName | quote }}
+                    resources:
+                      requests:
+                        cpu: "50m"
+                        memory: "128Mi"
+                      limits:
+                        cpu: "200m"
+                        memory: "256Mi"
+                    {{- if eq $vmMode "ha" }}
+                    affinity:
+                      podAntiAffinity:
+                        requiredDuringSchedulingIgnoredDuringExecution:
+                        - labelSelector:
+                            matchExpressions:
+                            - key: app.kubernetes.io/name
+                              operator: In
+                              values:
+                              - vmalert
+                          topologyKey: kubernetes.io/hostname
+                    {{- end }}
+                    # VMAlert is part of the observability stack: schedule on observability nodegroup nodes (PRD-024 FR-5)
+                    nodeSelector:
+                      platform.kubecore.io/observability: "true"
+                    tolerations:
+                      # Observability nodegroup taint (required by PRD-024 FR-5)
+                      - key: "kubecore.eu/computation-type"
+                        operator: "Equal"
+                        value: "observability"
+                        effect: "NoSchedule"
+                # VMAlertmanager configuration
+                vmalertmanager:
+                  enabled: true
+                  labels:
+                    {{- range $key, $value := $commonLabels }}
+                    {{ $key }}: "{{ $value }}"
+                    {{- end }}
+                    platform.kubecore.io/component: "observability"
+                  annotations: {}
+                  spec:
+                    selectAllByDefault: true
+                    replicaCount: 1
+                    resources:
+                      requests:
+                        cpu: "30m"
+                        memory: "56Mi"
+                      limits:
+                        cpu: "100m"
+                        memory: "256Mi"
+                    podMetadata:
+                      labels:
+                        # Used to force Helm upgrades to apply scheduling fields consistently
+                        platform.kubecore.io/observability: "true"
+                    # Core components schedule on observability nodegroup nodes (PRD-024 FR-5)
+                    nodeSelector:
+                      platform.kubecore.io/observability: "true"
+                    tolerations:
+                      # Observability nodegroup taint (required by PRD-024 FR-5)
+                      - key: "kubecore.eu/computation-type"
+                        operator: "Equal"
+                        value: "observability"
+                        effect: "NoSchedule"
+                # Grafana configuration
+                grafana:
+                  enabled: {{ if $grafanaEnabled }}true{{ else }}false{{ end }}
+                  {{- if $grafanaEnabled }}
+                  replicas: {{ if eq $vmMode "ha" }}2{{ else }}1{{ end }}
+                  # Tolerations for observability nodegroup
+                  tolerations:
+                    # Observability nodegroup taint (required by PRD-024 FR-5)
+                    - key: "kubecore.eu/computation-type"
+                      operator: "Equal"
+                      value: "observability"
+                      effect: "NoSchedule"
+                  deployment:
+                    spec:
+                      template:
+                        spec:
+                          # Core components schedule on observability nodegroup nodes (PRD-024 FR-5)
+                          nodeSelector:
+                            platform.kubecore.io/observability: "true"
+                          {{- if eq $vmMode "ha" }}
+                          affinity:
+                            podAntiAffinity:
+                              requiredDuringSchedulingIgnoredDuringExecution:
+                              - labelSelector:
+                                  matchExpressions:
+                                  - key: app.kubernetes.io/name
+                                    operator: In
+                                    values:
+                                    - grafana
+                                topologyKey: kubernetes.io/hostname
+                          {{- end }}
+                  {{- if and $traefikEnabled $tlsIssuerEnabled $dns.clusterDomain }}
+                  ingress:
+                    enabled: true
+                    ingressClassName: traefik-system
+                    annotations:
+                      cert-manager.io/cluster-issuer: {{ $clusterIssuerName }}
+                    hosts:
+                    - grafana.{{ $dns.clusterDomain }}
+                    tlsEnabled: true
+                    tlsSecretName: grafana-tls
+                  {{- end }}
+                  {{- end }}
+                # Enable built-in rules and dashboards
+                defaultRules:
+                  create: true
+                  labels:
+                    {{- range $key, $value := $commonLabels }}
+                    {{ $key }}: "{{ $value }}"
+                    {{- end }}
+                    platform.kubecore.io/component: "observability"
+                  annotations: {}
+                defaultDashboards:
+                  enabled: {{ if $grafanaEnabled }}true{{ else }}false{{ end }}
+                  defaultTimezone: "utc"
+                  labels:
+                    {{- range $key, $value := $commonLabels }}
+                    {{ $key }}: "{{ $value }}"
+                    {{- end }}
+                    platform.kubecore.io/component: "observability"
+                  annotations: {}
+                # Enable kube-state-metrics
+                kube-state-metrics:
+                  enabled: true
+                  {{- if $nodeSelector }}
+                  nodeSelector:
+                    {{- range $key, $value := $nodeSelector }}
+                    {{ $key }}: {{ $value | quote }}
+                    {{- end }}
+                  {{- end }}
+                  tolerations:
+                    # System tolerations from runtime.tolerations
+                    {{- if $tolerations }}
+                    {{- range $toleration := $tolerations }}
+                    {{- if and $toleration.effect (ne $toleration.effect "") (ne $toleration.effect "<no value>") }}
+                    - key: {{ $toleration.key | quote }}
+                      {{- if and $toleration.value (ne $toleration.value "") }}
+                      value: {{ $toleration.value | quote }}
+                      {{- end }}
+                      operator: {{ $toleration.operator | default "Equal" | quote }}
+                      effect: {{ $toleration.effect | quote }}
+                    {{- end }}
+                    {{- end }}
+                    {{- end }}
+                    # Additional tolerations for all computation types
+                    - key: "kubecore.eu/computation-type"
+                      operator: "Equal"
+                      value: "system"
+                      effect: "NoSchedule"
+                    - key: "kubecore.eu/computation-type"
+                      operator: "Equal"
+                      value: "compute"
+                      effect: "NoSchedule"
+                    - key: "kubecore.eu/computation-type"
+                      operator: "Equal"
+                      value: "gpu"
+                      effect: "NoSchedule"
+                    - key: "kubecore.eu/computation-type"
+                      operator: "Equal"
+                      value: "observability"
+                      effect: "NoSchedule"
+                    - key: "kubecore.eu/computation-type"
+                      operator: "Equal"
+                      value: "kubecore-system"
+                      effect: "NoSchedule"
+                # Enable node-exporter
+                prometheus-node-exporter:
+                  enabled: true
+                  extraArgs:
+                    - --collector.filesystem.ignored-mount-points=^/(dev|proc|sys|var/lib/docker/.+|var/lib/kubelet/.+)($|/)
+                    - --collector.filesystem.ignored-fs-types=^(autofs|binfmt_misc|bpf|cgroup2?|configfs|debugfs|devpts|devtmpfs|fusectl|hugetlbfs|iso9660|mqueue|nsfs|overlay|proc|procfs|pstore|rpc_pipefs|securityfs|selinuxfs|squashfs|erofs|sysfs|tracefs)$
+                  tolerations:
+                    # System tolerations from runtime.tolerations
+                    {{- if $tolerations }}
+                    {{- range $toleration := $tolerations }}
+                    {{- if and $toleration.effect (ne $toleration.effect "") (ne $toleration.effect "<no value>") }}
+                    - key: {{ $toleration.key | quote }}
+                      {{- if and $toleration.value (ne $toleration.value "") }}
+                      value: {{ $toleration.value | quote }}
+                      {{- end }}
+                      operator: {{ $toleration.operator | default "Equal" | quote }}
+                      effect: {{ $toleration.effect | quote }}
+                    {{- end }}
+                    {{- end }}
+                    {{- end }}
+                    # Additional tolerations for all computation types
+                    - key: "kubecore.eu/computation-type"
+                      operator: "Equal"
+                      value: "system"
+                      effect: "NoSchedule"
+                    - key: "kubecore.eu/computation-type"
+                      operator: "Equal"
+                      value: "compute"
+                      effect: "NoSchedule"
+                    - key: "kubecore.eu/computation-type"
+                      operator: "Equal"
+                      value: "gpu"
+                      effect: "NoSchedule"
+                    - key: "kubecore.eu/computation-type"
+                      operator: "Equal"
+                      value: "observability"
+                      effect: "NoSchedule"
+                    - key: "kubecore.eu/computation-type"
+                      operator: "Equal"
+                      value: "kubecore-system"
+                      effect: "NoSchedule"
+          {{- end }}
+
+          {{- if $shouldDeployVM }}
+          # VMAlertmanager scheduling patch (required)
+          # The victoria-metrics-k8s-stack chart currently doesn't propagate vmalertmanager nodeSelector/tolerations
+          # into the VMAlertmanager CR. We enforce it via a Kubernetes Object so the pod can schedule.
+          ---
+          apiVersion: kubernetes.crossplane.io/v1alpha2
+          kind: Object
+          metadata:
+            name: {{ $clusterName }}-vmalertmanager-scheduling
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: vmalertmanager-scheduling
+            labels:
+              {{- range $key, $value := $commonLabels }}
+              {{ $key }}: "{{ $value }}"
+              {{- end }}
+              platform.kubecore.io/component: "observability"
+          spec:
+            deletionPolicy: Orphan
+            managementPolicies: ["*"]
+            providerConfigRef:
+              name: {{ $kubernetesProvider }}
+            forProvider:
+              manifest:
+                apiVersion: operator.victoriametrics.com/v1beta1
+                kind: VMAlertmanager
+                metadata:
+                  name: {{ $clusterName }}-vm
+                  namespace: {{ $vmNamespace }}
+                spec:
+                  nodeSelector:
+                    platform.kubecore.io/observability: "true"
+                  tolerations:
+                    - key: "kubecore.eu/computation-type"
+                      operator: "Equal"
+                      value: "observability"
+                      effect: "NoSchedule"
+          {{- end }}
+
+          {{/* =================================================================== */}}
+          {{/* OBSERVABILITY NODEGROUP - Create dedicated nodegroup for observability workloads */}}
+          {{/* =================================================================== */}}
+          
+          {{- if $shouldDeployVM }}
+          # Observability NodeGroup - Dedicated nodes for VictoriaMetrics components
+          ---
+          apiVersion: eks.aws.upbound.io/v1beta2
+          kind: NodeGroup
+          metadata:
+            name: {{ $clusterName }}-observability
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: observability-nodegroup
+            labels:
+              platform.kubecore.io/cluster: {{ $clusterName }}
+              platform.kubecore.io/node-group: observability
+              platform.kubecore.io/cloud-provider: aws
+          spec:
+            deletionPolicy: Delete
+            managementPolicies: ["*"]
+            forProvider:
+              region: {{ $region }}
+              clusterNameSelector:
+                matchLabels:
+                  crossplane.io/external-name: {{ $clusterName }}
+              nodeRoleArnSelector:
+                matchLabels:
+                  role: "node-instance-role"
+                  cluster: {{ $clusterName }}
+              instanceTypes:
+              {{- range $obsNodeGroupInstanceTypes }}
+              - {{ . }}
+              {{- end }}
+              scalingConfig:
+                minSize: {{ $obsNodeGroupMinSize }}
+                maxSize: {{ $obsNodeGroupMaxSize }}
+                desiredSize: {{ $obsNodeGroupDesiredSize }}
+              diskSize: {{ $obsNodeGroupDiskSize }}
+              capacityType: "ON_DEMAND"
+              labels:
+                platform.kubecore.io/observability: "true"
+              taint:
+              - key: "kubecore.eu/computation-type"
+                value: "observability"
+                effect: "NO_SCHEDULE"
+              # Use private subnets for observability nodes
+              subnetIdSelector:
+                matchLabels:
+                  platform.kubecore.io/cluster: {{ $clusterName }}
+                  platform.kubecore.io/subnet-type: "private"
+              tags:
+                Name: {{ $clusterName }}-observability
+                Cluster: {{ $clusterName }}
+                NodeGroupType: observability
+                "kubecore.eu/monitoring": "enabled"
+                "kubecore.eu/resource-tier": "observability"
+                {{- range $k, $v := $costTags }}
+                {{ $k }}: {{ $v | quote }}
+                {{- end }}
+            providerConfigRef:
+              name: {{ $awsProvider }}
+          {{- end }}
+
+          {{/* =================================================================== */}}
+          {{/* STATUS EXTRACTION - Extract IAM role ARNs and Observability status from observed resources */}}
           {{/* =================================================================== */}}
 
           {{- $ecrRoleArn := "" -}}
+          {{- $vmHelmReleaseReady := false -}}
+          {{- $vmHelmReleaseVersion := $vmAppVersion -}}
+          {{- $vmHelmReleaseState := "" -}}
+          {{- $vmHelmReleaseRevision := 0 -}}
+          {{- $vmHelmReleaseDescription := "" -}}
 
-          {{/* Iterate through observed resources to extract ECR role ARN */}}
+          {{/* Iterate through observed resources to extract status */}}
           {{- range $resourceName, $resource := .observed.resources -}}
             {{- if $resource.resource -}}
               {{/* Extract ECR Role ARN */}}
@@ -2311,6 +4184,50 @@ spec:
                 {{- if eq $resource.resource.kind "Role" -}}
                   {{- if $resource.resource.status.atProvider.arn -}}
                     {{- $ecrRoleArn = $resource.resource.status.atProvider.arn -}}
+                  {{- end -}}
+                {{- end -}}
+              {{- end -}}
+              {{/* Extract VictoriaMetrics Helm Release status and details */}}
+              {{- if eq $resourceName "vm-stack-helm" -}}
+                {{/* Check if Helm Release is ready via resource.ready flag */}}
+                {{- if $resource.ready -}}
+                  {{- $vmHelmReleaseReady = true -}}
+                {{- end -}}
+                {{/* Extract detailed Helm Release status */}}
+                {{- if and $resource.resource $resource.resource.status -}}
+                  {{- if $resource.resource.status.atProvider -}}
+                    {{/* Extract Helm Release state (deployed, failed, etc.) - path is atProvider.state */}}
+                    {{- if $resource.resource.status.atProvider.state -}}
+                      {{- $vmHelmReleaseState = $resource.resource.status.atProvider.state -}}
+                      {{/* Helm Release is ready if state is "deployed" */}}
+                      {{- if eq $vmHelmReleaseState "deployed" -}}
+                        {{- $vmHelmReleaseReady = true -}}
+                      {{- end -}}
+                    {{- end -}}
+                    {{/* Extract Helm Release revision number */}}
+                    {{- if $resource.resource.status.atProvider.revision -}}
+                      {{- $vmHelmReleaseRevision = $resource.resource.status.atProvider.revision -}}
+                    {{- end -}}
+                    {{/* Extract Helm Release description (e.g., "Upgrade complete", "Install complete") */}}
+                    {{- if $resource.resource.status.atProvider.releaseDescription -}}
+                      {{- $vmHelmReleaseDescription = $resource.resource.status.atProvider.releaseDescription -}}
+                    {{- end -}}
+                    {{/* Extract Helm Release version from spec (chart version) */}}
+                    {{- if and $resource.resource.spec $resource.resource.spec.forProvider -}}
+                      {{- if $resource.resource.spec.forProvider.chart -}}
+                        {{- if $resource.resource.spec.forProvider.chart.version -}}
+                          {{- $vmHelmReleaseVersion = $resource.resource.spec.forProvider.chart.version -}}
+                        {{- end -}}
+                      {{- end -}}
+                    {{- end -}}
+                  {{- end -}}
+                  {{/* Also check Ready condition from status.conditions */}}
+                  {{- if $resource.resource.status.conditions -}}
+                    {{- range $condition := $resource.resource.status.conditions -}}
+                      {{- if and (eq $condition.type "Ready") (eq $condition.status "True") -}}
+                        {{- $vmHelmReleaseReady = true -}}
+                      {{- end -}}
+                    {{- end -}}
                   {{- end -}}
                 {{- end -}}
               {{- end -}}
@@ -2328,6 +4245,10 @@ spec:
           metadata:
             name: {{ .observed.composite.resource.metadata.name }}
           status:
+            # Preserve existing conditions so auto-ready can mark XKubeSystem Ready=True
+            {{- if .observed.composite.resource.status.conditions }}
+            conditions: {{ toJson .observed.composite.resource.status.conditions }}
+            {{- end }}
             {{- if $ecrRoleArn }}
             iamRoles:
               ecrRoleArn: {{ $ecrRoleArn | quote }}
@@ -2356,6 +4277,64 @@ spec:
               {{- end }}
               {{- end }}
 
+            # Observability Status (top-level field, not under tools)
+            # Status extracted from Crossplane observed resources (Helm Release)
+            # 
+            # NOTE: Helm Release status provides installation state and chart version, but does NOT
+            # expose individual component (pod) status. Component ready status is derived from Helm
+            # Release ready state. For detailed component metrics (actual pod counts, storage usage,
+            # scrape targets, etc.), additional resources observing Kubernetes StatefulSets/Deployments
+            # or VictoriaMetrics API queries would be needed.
+            {{- if $shouldDeployVM }}
+            observability:
+              installed: {{ $vmHelmReleaseReady }}
+              mode: {{ $vmMode | quote }}
+              version: {{ $vmHelmReleaseVersion | quote }}
+              namespace: {{ $vmNamespace | quote }}
+              {{- if ne $vmHelmReleaseState "" }}
+              state: {{ $vmHelmReleaseState | quote }}
+              {{- end }}
+              {{- if gt $vmHelmReleaseRevision 0 }}
+              revision: {{ $vmHelmReleaseRevision }}
+              {{- end }}
+              {{- if ne $vmHelmReleaseDescription "" }}
+              description: {{ $vmHelmReleaseDescription | quote }}
+              {{- end }}
+              components:
+                # Component ready status derived from Helm Release ready state
+                # Replica counts reflect configured/expected values (from EnvironmentConfig)
+                # Actual running replica counts would require querying StatefulSets/Deployments
+                vmselect:
+                  ready: {{ $vmHelmReleaseReady }}
+                  replicas: {{ $vmSelectReplicas }}
+                vminsert:
+                  ready: {{ $vmHelmReleaseReady }}
+                  replicas: {{ $vmInsertReplicas }}
+                vmstorage:
+                  ready: {{ $vmHelmReleaseReady }}
+                  replicas: {{ $vmStorageReplicas }}
+                  storageUsedGB: 0
+                vmagent:
+                  ready: {{ $vmHelmReleaseReady }}
+                  scrapeTargets: 0
+                vmalert:
+                  ready: {{ $vmHelmReleaseReady }}
+                  activeRules: 0
+                  firingAlerts: 0
+                grafana:
+                  ready: {{ and $vmHelmReleaseReady $grafanaEnabled }}
+                  {{- if and $grafanaEnabled $traefikEnabled $tlsIssuerEnabled $dns.clusterDomain }}
+                  url: https://grafana.{{ $dns.clusterDomain }}
+                  {{- end }}
+              metrics:
+                # Detailed metrics (timeSeriesCount, samplesPerSecond, storageUsageGB) require
+                # querying VictoriaMetrics API or reading from VMCluster CRD status.
+                # These fields are placeholders until controller-level status enhancement is implemented.
+                timeSeriesCount: 0
+                samplesPerSecond: 0
+                storageUsageGB: 0
+            {{- end }}
+
   # Step 4: Sequence resources for proper installation order
   - step: sequence-resources
     functionRef:
@@ -2376,6 +4355,7 @@ spec:
           - external-secrets-namespace
           - gitops-promoter-namespace
           - external-dns-namespace
+          - observability-namespace
         # cert-manager must be installed before other tools that depend on certificates
         - sequence:
           - cert-manager-release
@@ -2458,6 +4438,18 @@ spec:
           - argocd-release
           - cluster-secret-store
           - argocd-github-externalsecret
+        # Observability namespace must be created first
+        - sequence:
+          - observability-namespace
+        # Operators must be installed after namespace
+        - sequence:
+          - observability-namespace
+          - grafana-operator-release
+        # VictoriaMetrics K8s Stack Helm Release after Grafana operator
+        # Note: VM Operator is included in the k8s-stack chart, no separate release needed
+        - sequence:
+          - grafana-operator-release
+          - vm-stack-helm
         # Finally application tools
         - sequence:
           - argocd-release

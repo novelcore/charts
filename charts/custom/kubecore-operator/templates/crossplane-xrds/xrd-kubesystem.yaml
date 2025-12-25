@@ -1,11 +1,8 @@
 {{- if .Values.crossplaneXRDs.enabled }}
----
 apiVersion: apiextensions.crossplane.io/v2
 kind: CompositeResourceDefinition
 metadata:
   name: xkubesystems.platform.kubecore.io
-  labels:
-    {{- include "chart.labels" . | nindent 4 }}
 spec:
   group: platform.kubecore.io
   names:
@@ -76,6 +73,10 @@ spec:
                   externalDns:
                     type: boolean
                     description: "Enable ExternalDNS installation"
+                    default: true
+                  observability:
+                    type: boolean
+                    description: "Enable VictoriaMetrics observability stack installation"
                     default: true
 
               # Provider Configuration References
@@ -274,6 +275,95 @@ spec:
                       namespace:
                         type: string
                         description: "Namespace where ExternalDNS is installed"
+
+              # Observability Status
+              observability:
+                type: object
+                description: "VictoriaMetrics observability stack status"
+                properties:
+                  installed:
+                    type: boolean
+                    description: "Whether observability stack is installed"
+                  mode:
+                    type: string
+                    description: "Deployment mode (single or ha)"
+                    enum: ["single", "ha"]
+                  version:
+                    type: string
+                    description: "Installed VictoriaMetrics version"
+                  namespace:
+                    type: string
+                    description: "Namespace where observability components are installed"
+                  state:
+                    type: string
+                    description: "Helm Release state for observability stack (e.g., deployed, failed)"
+                  revision:
+                    type: integer
+                    description: "Helm Release revision number for observability stack"
+                  description:
+                    type: string
+                    description: "Helm Release description (e.g., Install complete, Upgrade complete)"
+                  components:
+                    type: object
+                    description: "Status of individual observability components"
+                    properties:
+                      vmselect:
+                        type: object
+                        properties:
+                          ready:
+                            type: boolean
+                          replicas:
+                            type: integer
+                      vminsert:
+                        type: object
+                        properties:
+                          ready:
+                            type: boolean
+                          replicas:
+                            type: integer
+                      vmstorage:
+                        type: object
+                        properties:
+                          ready:
+                            type: boolean
+                          replicas:
+                            type: integer
+                          storageUsedGB:
+                            type: number
+                      vmagent:
+                        type: object
+                        properties:
+                          ready:
+                            type: boolean
+                          scrapeTargets:
+                            type: integer
+                      vmalert:
+                        type: object
+                        properties:
+                          ready:
+                            type: boolean
+                          activeRules:
+                            type: integer
+                          firingAlerts:
+                            type: integer
+                      grafana:
+                        type: object
+                        properties:
+                          ready:
+                            type: boolean
+                          url:
+                            type: string
+                            description: "Grafana ingress URL"
+                  metrics:
+                    type: object
+                    description: "Metrics statistics"
+                    properties:
+                      timeSeriesCount:
+                        type: integer
+                      samplesPerSecond:
+                        type: number
+                      storageUsageGB:
+                        type: number
 
               # Environment Configuration
               environmentConfig:
