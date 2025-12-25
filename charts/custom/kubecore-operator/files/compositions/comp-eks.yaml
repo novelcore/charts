@@ -364,7 +364,6 @@ spec:
                 - "arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy"
                 - "arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy"
                 - "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly"
-                - "arn:aws:iam::aws:policy/service-role/AmazonEBSCSIDriverPolicy"
               tags:
                 Name: {{ $name }}-node-group-role
                 Cluster: {{ $name }}
@@ -727,6 +726,8 @@ spec:
               clusterNameSelector:
                 matchLabels:
                   crossplane.io/external-name: {{ $name }}
+              # Use IRSA role created by composition for controller service account
+              serviceAccountRoleArn: "arn:aws:iam::{{ $accountId }}:role/{{ $name }}-ebs-csi-role"
               {{- if and $eksDefaults.addons $eksDefaults.addons.ebsCsiDriver $eksDefaults.addons.ebsCsiDriver.version }}
               addonVersion: {{ $eksDefaults.addons.ebsCsiDriver.version }}
               {{- end }}
@@ -860,6 +861,104 @@ spec:
               name: {{ $awsProviderConfig }}
           {{- end }}
 
+  # Step 4: Create EBS CSI IRSA Role after OIDC provider is ready
+  - step: create-ebs-csi-irsa-role
+    functionRef:
+      name: function-go-templating
+    input:
+      apiVersion: gotemplating.fn.crossplane.io/v1beta1
+      kind: GoTemplate
+      source: Inline
+      inline:
+        template: |
+          {{- $name := .observed.composite.resource.metadata.name -}}
+          {{- $spec := .observed.composite.resource.spec -}}
+          
+          {{/* Extract configuration from environment config */}}
+          {{- $envConfig := index .context "apiextensions.crossplane.io/environment" -}}
+          {{- if not $envConfig -}}
+            {{- fail "Environment configuration not found" -}}
+          {{- end -}}
+          
+          {{- $accountId := $envConfig.accountId -}}
+          {{- $primaryRegion := $envConfig.primaryRegion -}}
+          {{- $providerConfigName := $envConfig.providerConfig -}}
+          
+          {{/* Feature flags from spec with defaults from EnvironmentConfig */}}
+          {{- $features := $spec.features | default dict -}}
+          {{- $addonsSpec := $features.addons | default dict -}}
+          {{- $ebsCsiEnabled := $addonsSpec.ebsCsiDriver | default true -}}
+          
+          {{- $awsProviderConfig := "aws-default" -}}
+          {{- if $spec.providerConfigRef -}}
+            {{- $awsProviderConfig = $spec.providerConfigRef.name | default "aws-default" -}}
+          {{- end -}}
+          {{- if $providerConfigName -}}
+            {{- $awsProviderConfig = $providerConfigName -}}
+          {{- end -}}
+          
+          {{/* Extract OIDC issuer URL from cluster status (same as OIDC provider step) */}}
+          {{- $oidcIssuerUrl := "" }}
+          {{- if .observed.resources }}
+            {{- $cluster := index .observed.resources "cluster" }}
+            {{- if $cluster }}
+              {{- if $cluster.resource.status.atProvider.identity }}
+                {{- if (index $cluster.resource.status.atProvider.identity 0).oidc }}
+                  {{- $oidcIssuerUrl = (index (index $cluster.resource.status.atProvider.identity 0).oidc 0).issuer }}
+                {{- end }}
+              {{- end }}
+            {{- end }}
+          {{- end }}
+          
+          {{- if and $ebsCsiEnabled $oidcIssuerUrl $accountId }}
+          {{- $oidcHostPath := trimPrefix "https://" $oidcIssuerUrl }}
+          # IAM Role for EBS CSI Driver (IRSA)
+          ---
+          apiVersion: iam.aws.upbound.io/v1beta1
+          kind: Role
+          metadata:
+            name: {{ $name }}-ebs-csi-role
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: ebs-csi-irsa-role
+            labels:
+              platform.kubecore.io/cluster: {{ $name }}
+              platform.kubecore.io/role: "ebs-csi-driver"
+              platform.kubecore.io/cloud-provider: aws
+              role: "ebs-csi-driver-irsa"
+              cluster: {{ $name }}
+          spec:
+            deletionPolicy: Delete
+            managementPolicies: ["*"]
+            forProvider:
+              assumeRolePolicy: |
+                {
+                  "Version": "2012-10-17",
+                  "Statement": [
+                    {
+                      "Effect": "Allow",
+                      "Principal": {
+                        "Federated": "arn:aws:iam::{{ $accountId }}:oidc-provider/{{ $oidcHostPath }}"
+                      },
+                      "Action": "sts:AssumeRoleWithWebIdentity",
+                      "Condition": {
+                        "StringEquals": {
+                          "{{ $oidcHostPath }}:aud": "sts.amazonaws.com",
+                          "{{ $oidcHostPath }}:sub": "system:serviceaccount:kube-system:ebs-csi-controller-sa"
+                        }
+                      }
+                    }
+                  ]
+                }
+              managedPolicyArns:
+                - "arn:aws:iam::aws:policy/service-role/AmazonEBSCSIDriverPolicy"
+              tags:
+                Name: {{ $name }}-ebs-csi-role
+                Cluster: {{ $name }}
+                Purpose: "IRSA role for aws-ebs-csi-driver addon"
+            providerConfigRef:
+              name: {{ $awsProviderConfig }}
+          {{- end }}
+
   # Step 4: Create ProviderConfigs after cluster is ready
   - step: create-provider-configs
     functionRef:
@@ -989,6 +1088,11 @@ spec:
         - cluster
         - oidc-provider
 
+      # EBS CSI IRSA role must wait for OIDC provider
+      - sequence:
+        - oidc-provider
+        - ebs-csi-irsa-role
+
       # ProviderConfigs must wait for ClusterAuth (which creates the connection secret)
       - sequence:
         - cluster-auth
@@ -1019,6 +1123,7 @@ spec:
         - kube-proxy-addon
       - sequence:
         - cluster
+        - ebs-csi-irsa-role
         - ebs-csi-driver-addon
 
   # Step 7: Status Transformer - Extract cluster information and populate status
