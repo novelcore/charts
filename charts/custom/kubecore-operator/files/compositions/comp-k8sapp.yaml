@@ -146,6 +146,12 @@ spec:
           {{- $servicePort := $service.port | default 80 -}}
           {{- $serviceTargetPort := $service.targetPort | default $appPort -}}
 
+          {{/* Extract cost allocation tags from EnvironmentConfig */}}
+          {{- $costTags := dict -}}
+          {{- if $envConfig.costAllocationTags -}}
+            {{- $costTags = $envConfig.costAllocationTags -}}
+          {{- end -}}
+
           {{/* Base resources configuration */}}
           {{- $baseResources := $k8sapp.baseResources | default (dict) -}}
 
@@ -737,6 +743,9 @@ spec:
               encryptionConfiguration:
                 - encryptionType: AES256
               tags:
+                {{- range $key, $value := $costTags }}
+                {{ $key }}: {{ $value | quote }}
+                {{- end }}
                 Organization: {{ $org }}
                 Project: {{ $projectName }}
                 Application: {{ $appName }}

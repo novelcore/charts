@@ -66,6 +66,12 @@ spec:
           {{- $availabilityZones := $envConfig.availabilityZones -}}
           {{- $publicSubnets := $envConfig.subnets.public -}}
           {{- $privateSubnets := $envConfig.subnets.private -}}
+
+          {{/* Extract cost allocation tags from EnvironmentConfig */}}
+          {{- $costTags := dict -}}
+          {{- if $envConfig.costAllocationTags -}}
+            {{- $costTags = $envConfig.costAllocationTags -}}
+          {{- end -}}
           
           {{/* Feature toggles from spec with defaults */}}
           {{- $vpcEnabled := true -}}
@@ -96,7 +102,7 @@ spec:
           {{- $hostedZoneName := $domain -}}
           
           {{/* Common tags */}}
-          {{- $commonTags := dict 
+          {{- $commonTags := dict
             "Name" $name
             "kubernetes.io/cluster" $name
             "platform.kubecore.io/network" $name
@@ -105,6 +111,9 @@ spec:
             "crossplane.io/claim-name" $name
             "crossplane.io/composite" $name
           -}}
+
+          {{/* Merge common tags with cost allocation tags */}}
+          {{- $allTags := merge $commonTags $costTags -}}
           
           {{/* VPC Resources */}}
           {{- if $vpcEnabled }}
@@ -126,7 +135,7 @@ spec:
               cidrBlock: {{ $vpcCidr }}
               enableDnsHostnames: true
               enableDnsSupport: true
-              tags: {{ $commonTags | toYaml | nindent 8 }}
+              tags: {{ $allTags | toYaml | nindent 8 }}
               region: {{ $primaryRegion }}
             providerConfigRef:
               name: {{ $providerConfig }}
@@ -148,7 +157,7 @@ spec:
             forProvider:
               vpcIdRef:
                 name: {{ $vpcName }}
-              tags: {{ $commonTags | toYaml | nindent 8 }}
+              tags: {{ $allTags | toYaml | nindent 8 }}
               region: {{ $primaryRegion }}
             providerConfigRef:
               name: {{ $providerConfig }}
@@ -171,7 +180,7 @@ spec:
             forProvider:
               vpcIdRef:
                 name: {{ $vpcName }}
-              tags: {{ $commonTags | toYaml | nindent 8 }}
+              tags: {{ $allTags | toYaml | nindent 8 }}
               region: {{ $primaryRegion }}
             providerConfigRef:
               name: {{ $providerConfig }}
@@ -227,7 +236,7 @@ spec:
               mapPublicIpOnLaunch: true
               vpcIdRef:
                 name: {{ $vpcName }}
-              tags: {{ merge $commonTags (dict "Name" $subnetName "kubernetes.io/role/elb" "1") | toYaml | nindent 8 }}
+              tags: {{ merge $allTags (dict "Name" $subnetName "kubernetes.io/role/elb" "1") | toYaml | nindent 8 }}
               region: {{ $primaryRegion }}
             providerConfigRef:
               name: {{ $providerConfig }}
@@ -284,7 +293,7 @@ spec:
               mapPublicIpOnLaunch: false
               vpcIdRef:
                 name: {{ $vpcName }}
-              tags: {{ merge $commonTags (dict "Name" $subnetName "kubernetes.io/role/internal-elb" "1") | toYaml | nindent 8 }}
+              tags: {{ merge $allTags (dict "Name" $subnetName "kubernetes.io/role/internal-elb" "1") | toYaml | nindent 8 }}
               region: {{ $primaryRegion }}
             providerConfigRef:
               name: {{ $providerConfig }}
@@ -308,7 +317,7 @@ spec:
             forProvider:
               vpcIdRef:
                 name: {{ $vpcName }}
-              tags: {{ merge $commonTags (dict "Name" $privateRtName) | toYaml | nindent 8 }}
+              tags: {{ merge $allTags (dict "Name" $privateRtName) | toYaml | nindent 8 }}
               region: {{ $primaryRegion }}
             providerConfigRef:
               name: {{ $providerConfig }}
@@ -357,7 +366,7 @@ spec:
             managementPolicies: ["*"]
             forProvider:
               domain: vpc
-              tags: {{ merge $commonTags (dict "Name" $eipName) | toYaml | nindent 8 }}
+              tags: {{ merge $allTags (dict "Name" $eipName) | toYaml | nindent 8 }}
               region: {{ $primaryRegion }}
             providerConfigRef:
               name: {{ $providerConfig }}
@@ -382,7 +391,7 @@ spec:
                 name: {{ $eipName }}
               subnetIdRef:
                 name: {{ printf "%s-public-%s" $name $azSuffix }}
-              tags: {{ merge $commonTags (dict "Name" $natGatewayName) | toYaml | nindent 8 }}
+              tags: {{ merge $allTags (dict "Name" $natGatewayName) | toYaml | nindent 8 }}
               region: {{ $primaryRegion }}
             providerConfigRef:
               name: {{ $providerConfig }}
@@ -434,7 +443,7 @@ spec:
             forProvider:
               name: {{ $domain }}
               comment: {{ printf "Hosted zone for %s network" $name }}
-              tags: {{ merge $commonTags (dict "Name" $hostedZoneName "platform.kubecore.io/domain" $domain) | toYaml | nindent 8 }}
+              tags: {{ merge $allTags (dict "Name" $hostedZoneName "platform.kubecore.io/domain" $domain) | toYaml | nindent 8 }}
             providerConfigRef:
               name: {{ $providerConfig }}
 
@@ -478,7 +487,7 @@ spec:
                     }
                   ]
                 }
-              tags: {{ merge $commonTags (dict "Name" (printf "%s-external-dns-policy" $name) "platform.kubecore.io/role" "external-dns") | toYaml | nindent 8 }}
+              tags: {{ merge $allTags (dict "Name" (printf "%s-external-dns-policy" $name) "platform.kubecore.io/role" "external-dns") | toYaml | nindent 8 }}
           {{- end }}
 
   # Step 3: Auto-ready function for resource readiness

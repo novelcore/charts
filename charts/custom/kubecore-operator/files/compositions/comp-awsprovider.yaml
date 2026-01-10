@@ -58,7 +58,13 @@ spec:
           {{- $providerConfig := $envConfig.providerConfig -}}
           {{- $kubernetesProviderConfig := $envConfig.kubernetesProviderConfig -}}
           {{- $regions := $envConfig.regions -}}
-          
+
+          {{/* Extract cost allocation tags from EnvironmentConfig */}}
+          {{- $costTags := dict -}}
+          {{- if $envConfig.costAllocationTags -}}
+            {{- $costTags = $envConfig.costAllocationTags -}}
+          {{- end -}}
+
           {{/* OIDC configuration - reference existing EKS cluster OIDC provider */}}
           {{- $eksClusterId := $envConfig.eks.clusterId -}}
           {{- if not $eksClusterId -}}
@@ -148,6 +154,9 @@ spec:
                   ]
                 }
               tags:
+                {{- range $key, $value := $costTags }}
+                {{ $key }}: {{ $value | quote }}
+                {{- end }}
                 Organization: {{ $org }}
                 ManagedBy: crossplane
                 Purpose: secrets-management
@@ -207,6 +216,9 @@ spec:
                   ]
                 }
               tags:
+                {{- range $key, $value := $costTags }}
+                {{ $key }}: {{ $value | quote }}
+                {{- end }}
                 Organization: {{ $org }}
                 ManagedBy: crossplane
                 Purpose: ecr-access
@@ -255,6 +267,9 @@ spec:
                   ]
                 }
               tags:
+                {{- range $key, $value := $costTags }}
+                {{ $key }}: {{ $value | quote }}
+                {{- end }}
                 Organization: {{ $org }}
                 ManagedBy: crossplane
                 Purpose: ESO-IRSA

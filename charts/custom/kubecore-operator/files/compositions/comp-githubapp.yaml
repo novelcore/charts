@@ -87,6 +87,11 @@ spec:
           {{- $repositoryName := $spec.repositoryName | default $name -}}
           {{- $baseName := printf "%s-%s" $project.name $repositoryName -}}
 
+          {{/* Extract cost allocation tags from EnvironmentConfig */}}
+          {{- $costTags := dict -}}
+          {{- if $envConfig.costAllocationTags -}}
+            {{- $costTags = $envConfig.costAllocationTags -}}
+          {{- end -}}
 
           ---
           # Repository - Main application repository

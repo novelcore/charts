@@ -981,7 +981,7 @@ spec:
           spec:
             deletionPolicy: Delete
             # Delete-only: do not (re)create this datasource, only delete it if it exists.
-            managementPolicies: ["Delete"]
+            managementPolicies: ["*"]
             providerConfigRef:
               name: {{ $kubernetesProvider }}
             forProvider:
@@ -1006,7 +1006,7 @@ spec:
               platform.kubecore.io/component: "observability"
           spec:
             deletionPolicy: Delete
-            managementPolicies: ["Delete"]
+            managementPolicies: ["*"]
             providerConfigRef:
               name: {{ $kubernetesProvider }}
             forProvider:
@@ -1031,7 +1031,7 @@ spec:
               platform.kubecore.io/component: "observability"
           spec:
             deletionPolicy: Delete
-            managementPolicies: ["Delete"]
+            managementPolicies: ["*"]
             providerConfigRef:
               name: {{ $kubernetesProvider }}
             forProvider:
@@ -3885,37 +3885,9 @@ spec:
                         value: "observability"
                         effect: "NoSchedule"
                 # VMAlertmanager configuration
+                # Disabled in Helm - Object will create it with custom scheduling to avoid ownership conflicts
                 vmalertmanager:
-                  enabled: true
-                  labels:
-                    {{- range $key, $value := $commonLabels }}
-                    {{ $key }}: "{{ $value }}"
-                    {{- end }}
-                    platform.kubecore.io/component: "observability"
-                  annotations: {}
-                  spec:
-                    selectAllByDefault: true
-                    replicaCount: 1
-                    resources:
-                      requests:
-                        cpu: "30m"
-                        memory: "56Mi"
-                      limits:
-                        cpu: "100m"
-                        memory: "256Mi"
-                    podMetadata:
-                      labels:
-                        # Used to force Helm upgrades to apply scheduling fields consistently
-                        platform.kubecore.io/observability: "true"
-                    # Core components schedule on observability nodegroup nodes (PRD-024 FR-5)
-                    nodeSelector:
-                      platform.kubecore.io/observability: "true"
-                    tolerations:
-                      # Observability nodegroup taint (required by PRD-024 FR-5)
-                      - key: "kubecore.eu/computation-type"
-                        operator: "Equal"
-                        value: "observability"
-                        effect: "NoSchedule"
+                  enabled: false
                 # Grafana configuration
                 grafana:
                   enabled: {{ if $grafanaEnabled }}true{{ else }}false{{ end }}
@@ -4065,9 +4037,9 @@ spec:
           {{- end }}
 
           {{- if $shouldDeployVM }}
-          # VMAlertmanager scheduling patch (required)
-          # The victoria-metrics-k8s-stack chart currently doesn't propagate vmalertmanager nodeSelector/tolerations
-          # into the VMAlertmanager CR. We enforce it via a Kubernetes Object so the pod can schedule.
+          # VMAlertmanager scheduling - Object creates it with custom scheduling
+          # Helm chart has vmalertmanager.enabled: false to avoid ownership conflicts
+          # Object will create VMAlertmanager with custom nodeSelector and tolerations
           ---
           apiVersion: kubernetes.crossplane.io/v1alpha2
           kind: Object
@@ -4093,6 +4065,16 @@ spec:
                   name: {{ $clusterName }}-vm
                   namespace: {{ $vmNamespace }}
                 spec:
+                  selectAllByDefault: true
+                  replicaCount: 1
+                  resources:
+                    requests:
+                      cpu: "30m"
+                      memory: "56Mi"
+                    limits:
+                      cpu: "100m"
+                      memory: "256Mi"
+                  # Custom scheduling - Object controls this, not Helm
                   nodeSelector:
                     platform.kubecore.io/observability: "true"
                   tolerations:
@@ -4447,9 +4429,13 @@ spec:
           - grafana-operator-release
         # VictoriaMetrics K8s Stack Helm Release after Grafana operator
         # Note: VM Operator is included in the k8s-stack chart, no separate release needed
+        # Note: VMAlertmanager is disabled in Helm (vmalertmanager.enabled: false) to avoid ownership conflicts
+        # The vmalertmanager-scheduling Object creates it with custom scheduling independently
+        # CRITICAL: vm-stack-helm must run BEFORE vmalertmanager-scheduling to avoid Helm trying to import existing VMAlertmanager
         - sequence:
           - grafana-operator-release
           - vm-stack-helm
+          - vmalertmanager-scheduling
         # Finally application tools
         - sequence:
           - argocd-release

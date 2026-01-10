@@ -115,6 +115,12 @@ spec:
             {{- end -}}
           {{- end -}}
 
+          {{/* Extract cost allocation tags from EnvironmentConfig */}}
+          {{- $costTags := dict -}}
+          {{- if $envConfig.costAllocationTags -}}
+            {{- $costTags = $envConfig.costAllocationTags -}}
+          {{- end -}}
+
           {{/* Team configuration */}}
           {{- $teamMembers := dict -}}
 
@@ -788,6 +794,12 @@ spec:
             {{- $kubePools = $envConfig.kubePools -}}
           {{- end -}}
 
+          {{/* Extract cost allocation tags from EnvironmentConfig */}}
+          {{- $costTags := dict -}}
+          {{- if $envConfig.costAllocationTags -}}
+            {{- $costTags = $envConfig.costAllocationTags -}}
+          {{- end -}}
+
           {{- if eq (len $kubePools) 0 -}}
             {{/* Skip creating ArgoCD repo secrets if no KubePool configs available */}}
             {{/* This is expected when no environments are configured yet or XEKS not ready */}}
@@ -839,6 +851,9 @@ spec:
                   name: {{ $name }}-repo-creds
                   namespace: argocd
                   labels:
+                    {{- range $key, $value := $costTags }}
+                    {{ $key }}: {{ $value | quote }}
+                    {{- end }}
                     argocd.argoproj.io/secret-type: repository
                     project.kubecore.io/kubeproject: {{ $name }}
                     project.kubecore.io/managed-by: crossplane
