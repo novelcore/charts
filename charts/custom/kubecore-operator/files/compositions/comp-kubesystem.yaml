@@ -958,91 +958,6 @@ spec:
                       key: admin-password
           {{- end }}
 
-          {{/* =================================================================== */}}
-          {{/* GRAFANA DATASOURCE CLEANUP (remove legacy aliases) */}}
-          {{/* =================================================================== */}}
-
-          {{- if and $shouldDeployVM $grafanaEnabled }}
-          {{/* Older iterations created datasource aliases like k8s-qa/Prometheus/UID aliases. */}}
-          {{/* We now prefer mapping dashboards to the existing vm-stack datasource instead of creating duplicates. */}}
-          {{/* These delete-only objects remove the legacy alias datasources if present. */}}
-          ---
-          apiVersion: kubernetes.crossplane.io/v1alpha2
-          kind: Object
-          metadata:
-            name: {{ $name }}-grafana-datasource-delete-k8s-qa
-            annotations:
-              gotemplating.fn.crossplane.io/composition-resource-name: grafana-datasource-delete-k8s-qa
-            labels:
-              {{- range $key, $value := $commonLabels }}
-              {{ $key }}: "{{ $value }}"
-              {{- end }}
-              platform.kubecore.io/component: "observability"
-          spec:
-            deletionPolicy: Delete
-            # Delete-only: do not (re)create this datasource, only delete it if it exists.
-            managementPolicies: ["*"]
-            providerConfigRef:
-              name: {{ $kubernetesProvider }}
-            forProvider:
-              manifest:
-                apiVersion: grafana.integreatly.org/v1beta1
-                kind: GrafanaDatasource
-                metadata:
-                  name: {{ $clusterName }}-ds-k8s-qa
-                  namespace: {{ $vmNamespace }}
-
-          ---
-          apiVersion: kubernetes.crossplane.io/v1alpha2
-          kind: Object
-          metadata:
-            name: {{ $name }}-grafana-datasource-delete-prometheus
-            annotations:
-              gotemplating.fn.crossplane.io/composition-resource-name: grafana-datasource-delete-prometheus
-            labels:
-              {{- range $key, $value := $commonLabels }}
-              {{ $key }}: "{{ $value }}"
-              {{- end }}
-              platform.kubecore.io/component: "observability"
-          spec:
-            deletionPolicy: Delete
-            managementPolicies: ["*"]
-            providerConfigRef:
-              name: {{ $kubernetesProvider }}
-            forProvider:
-              manifest:
-                apiVersion: grafana.integreatly.org/v1beta1
-                kind: GrafanaDatasource
-                metadata:
-                  name: {{ $clusterName }}-ds-prometheus
-                  namespace: {{ $vmNamespace }}
-
-          ---
-          apiVersion: kubernetes.crossplane.io/v1alpha2
-          kind: Object
-          metadata:
-            name: {{ $name }}-grafana-datasource-delete-victoriametrics-uid
-            annotations:
-              gotemplating.fn.crossplane.io/composition-resource-name: grafana-datasource-delete-victoriametrics-uid
-            labels:
-              {{- range $key, $value := $commonLabels }}
-              {{ $key }}: "{{ $value }}"
-              {{- end }}
-              platform.kubecore.io/component: "observability"
-          spec:
-            deletionPolicy: Delete
-            managementPolicies: ["*"]
-            providerConfigRef:
-              name: {{ $kubernetesProvider }}
-            forProvider:
-              manifest:
-                apiVersion: grafana.integreatly.org/v1beta1
-                kind: GrafanaDatasource
-                metadata:
-                  name: {{ $clusterName }}-ds-victoriametrics-uid
-                  namespace: {{ $vmNamespace }}
-          {{- end }}
-
           {{/* KubeTools folder (for tool dashboards like ArgoCD, Traefik, etc.) */}}
           {{- if and $shouldDeployVM $grafanaEnabled }}
           ---
@@ -3854,6 +3769,8 @@ spec:
                     selectAllByDefault: true
                     replicaCount: {{ if eq $vmMode "ha" }}2{{ else }}1{{ end }}
                     evaluationInterval: 1m
+                    extraArgs:
+                      notifier.blackhole: "true"
                     externalLabels:
                       cluster: {{ $clusterName | quote }}
                     resources:
@@ -3885,9 +3802,26 @@ spec:
                         value: "observability"
                         effect: "NoSchedule"
                 # VMAlertmanager configuration
-                # Disabled in Helm - Object will create it with custom scheduling to avoid ownership conflicts
-                vmalertmanager:
-                  enabled: false
+                # Managed by Helm with explicit scheduling to avoid ownership conflicts
+                alertmanager:
+                  enabled: true
+                  spec:
+                    selectAllByDefault: true
+                    replicaCount: 1
+                    resources:
+                      requests:
+                        cpu: "30m"
+                        memory: "56Mi"
+                      limits:
+                        cpu: "100m"
+                        memory: "256Mi"
+                    nodeSelector:
+                      platform.kubecore.io/observability: "true"
+                    tolerations:
+                      - key: "kubecore.eu/computation-type"
+                        operator: "Equal"
+                        value: "observability"
+                        effect: "NoSchedule"
                 # Grafana configuration
                 grafana:
                   enabled: {{ if $grafanaEnabled }}true{{ else }}false{{ end }}
@@ -4037,51 +3971,6 @@ spec:
           {{- end }}
 
           {{- if $shouldDeployVM }}
-          # VMAlertmanager scheduling - Object creates it with custom scheduling
-          # Helm chart has vmalertmanager.enabled: false to avoid ownership conflicts
-          # Object will create VMAlertmanager with custom nodeSelector and tolerations
-          ---
-          apiVersion: kubernetes.crossplane.io/v1alpha2
-          kind: Object
-          metadata:
-            name: {{ $clusterName }}-vmalertmanager-scheduling
-            annotations:
-              gotemplating.fn.crossplane.io/composition-resource-name: vmalertmanager-scheduling
-            labels:
-              {{- range $key, $value := $commonLabels }}
-              {{ $key }}: "{{ $value }}"
-              {{- end }}
-              platform.kubecore.io/component: "observability"
-          spec:
-            deletionPolicy: Orphan
-            managementPolicies: ["*"]
-            providerConfigRef:
-              name: {{ $kubernetesProvider }}
-            forProvider:
-              manifest:
-                apiVersion: operator.victoriametrics.com/v1beta1
-                kind: VMAlertmanager
-                metadata:
-                  name: {{ $clusterName }}-vm
-                  namespace: {{ $vmNamespace }}
-                spec:
-                  selectAllByDefault: true
-                  replicaCount: 1
-                  resources:
-                    requests:
-                      cpu: "30m"
-                      memory: "56Mi"
-                    limits:
-                      cpu: "100m"
-                      memory: "256Mi"
-                  # Custom scheduling - Object controls this, not Helm
-                  nodeSelector:
-                    platform.kubecore.io/observability: "true"
-                  tolerations:
-                    - key: "kubecore.eu/computation-type"
-                      operator: "Equal"
-                      value: "observability"
-                      effect: "NoSchedule"
           {{- end }}
 
           {{/* =================================================================== */}}
@@ -4429,13 +4318,10 @@ spec:
           - grafana-operator-release
         # VictoriaMetrics K8s Stack Helm Release after Grafana operator
         # Note: VM Operator is included in the k8s-stack chart, no separate release needed
-        # Note: VMAlertmanager is disabled in Helm (vmalertmanager.enabled: false) to avoid ownership conflicts
-        # The vmalertmanager-scheduling Object creates it with custom scheduling independently
-        # CRITICAL: vm-stack-helm must run BEFORE vmalertmanager-scheduling to avoid Helm trying to import existing VMAlertmanager
+        # VMAlertmanager is managed by Helm (alertmanager.enabled: true)
         - sequence:
           - grafana-operator-release
           - vm-stack-helm
-          - vmalertmanager-scheduling
         # Finally application tools
         - sequence:
           - argocd-release
