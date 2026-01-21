@@ -3769,8 +3769,10 @@ spec:
                     selectAllByDefault: true
                     replicaCount: {{ if eq $vmMode "ha" }}2{{ else }}1{{ end }}
                     evaluationInterval: 1m
+                    {{- if not $vmAlertEnabled }}
                     extraArgs:
                       notifier.blackhole: "true"
+                    {{- end }}
                     externalLabels:
                       cluster: {{ $clusterName | quote }}
                     resources:
