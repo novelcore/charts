@@ -4,10 +4,10 @@ description: A Helm chart for GitOps Promoter - A tool for promoting changes bet
 type: application
 
 # Chart version - follows semantic versioning
-version: 0.7.0
+version: 0.8.0
 
 # Application version - matches the GitOps Promoter version
-appVersion: "0.17.0"
+appVersion: "0.20.3"
 
 # Maintainers
 maintainers:
@@ -39,16 +39,12 @@ annotations:
     - name: GitOps Promoter Documentation
       url: https://github.com/argoproj-labs/gitops-promoter/blob/main/README.md
     - name: Release Notes
-      url: https://github.com/argoproj-labs/gitops-promoter/releases/tag/v0.17.0
+      url: https://github.com/argoproj-labs/gitops-promoter/releases/tag/v0.20.3
 
   # Changes for this chart version
   artifacthub.io/changes: |
     - kind: changed
-      description: "Updated GitOps Promoter to v0.17.0"
-    - kind: changed
-      description: "Increased default memory limits to 2Gi (limit) and 1Gi (request) to prevent OOM issues with large projects"
-    - kind: fixed
-      description: "Fixed OOM crashes when managing multiple promotion strategies"
+      description: "Updated GitOps Promoter to v0.20.3"
   # - kind: changed
   #   description: CRDs now installed from crds/ directory for proper Helm lifecycle management
   # - kind: removed
@@ -62,7 +58,7 @@ annotations:
   # Images used by this chart
   artifacthub.io/images: |
     - name: gitops-promoter
-      image: quay.io/argoprojlabs/gitops-promoter:v0.17.0
+      image: quay.io/argoprojlabs/gitops-promoter:v0.20.3
     - name: kube-rbac-proxy
       image: quay.io/brancz/kube-rbac-proxy:v0.17.0
     - name: git-fetch-daemon
