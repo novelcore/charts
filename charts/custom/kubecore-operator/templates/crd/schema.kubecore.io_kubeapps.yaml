@@ -615,6 +615,13 @@ spec:
                 description: RepositoryUrl contains the URL of the created GitHub
                   repository
                 type: string
+              selectedEnvironments:
+                description: |-
+                  SelectedEnvironments tracks the environments currently selected by the environmentSelector
+                  This is used to detect environment removals and trigger cleanup
+                items:
+                  type: string
+                type: array
               templateInfo:
                 description: TemplateInfo contains information about the resolved
                   template

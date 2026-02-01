@@ -451,6 +451,15 @@ spec:
                   type: object
                 maxItems: 20
                 type: array
+              features:
+                description: Features defines which platform features are enabled
+                  for this cluster
+                properties:
+                  observability:
+                    description: Observability enables VictoriaMetrics observability
+                      stack
+                    type: boolean
+                type: object
               kubeOrgRef:
                 description: KubeOrgRef references the KubeOrg that provides AWS configuration
                   and network
@@ -787,6 +796,11 @@ spec:
                     description: VPCID is the ID of the VPC where the cluster is deployed
                     type: string
                 type: object
+              observabilityStatus:
+                description: |-
+                  ObservabilityStatus contains observability stack status extracted from the associated XKubeSystem.
+                  This is schemaless and may evolve with the underlying composition status fields.
+                x-kubernetes-preserve-unknown-fields: true
               observedGeneration:
                 description: ObservedGeneration is the most recent generation observed
                   by the controller

@@ -699,6 +699,12 @@ spec:
           {{- end -}}
           {{- $ecrRepositoryName := $customRepoName | default (printf "%s-%s-%s" $org $projectName $appName) -}}
 
+          {{/* Extract cost allocation tags from EnvironmentConfig */}}
+          {{- $costTags := dict -}}
+          {{- if $envConfig.costAllocationTags -}}
+            {{- $costTags = $envConfig.costAllocationTags -}}
+          {{- end -}}
+
           {{/* ECR lifecycle configuration */}}
           {{- $ecrConfig := dict -}}
           {{- if $k8sapp.ecr -}}
@@ -855,15 +861,6 @@ spec:
             {{- $ecrEnabled = true -}}
           {{- end -}}
 
-          {{/* Extract cluster name from kubernetesProviderConfig for IAM role ARN */}}
-          {{- $clusterName := "" -}}
-          {{- if $kubernetesProviderConfig -}}
-            {{- $parts := regexSplit "-kubernetes$" $kubernetesProviderConfig -1 -}}
-            {{- if gt (len $parts) 0 -}}
-              {{- $clusterName = index $parts 0 -}}
-            {{- end -}}
-          {{- end -}}
-
           {{- if and $ecrEnabled $clusterName }}
           {{/* Create ServiceAccount in each enabled environment namespace */}}
           {{- range $env := $k8sapp.environments }}
@@ -897,7 +894,8 @@ spec:
                   name: {{ $org }}-eso-sa
                   namespace: {{ $env.namespace | default (printf "%s-%s" $projectName $envName) }}
                   annotations:
-                    eks.amazonaws.com/role-arn: {{ $awsConfig.iamRoles.ecrRole | default (printf "arn:aws:iam::%s:role/%s-awsprovider-ecr-role" $accountId $org) }}
+                    # Must use cluster-level ECR role (not org-level awsprovider-ecr-role). See .docs/lessons/kubeapp-e2e-root-causes-and-prevention.md.
+                    eks.amazonaws.com/role-arn: {{ printf "arn:aws:iam::%s:role/%s-ecr-credentials-role" $accountId $clusterName }}
                   labels:
                     platform.kubecore.io/organization: {{ $org }}
                     platform.kubecore.io/project: {{ $projectName }}
@@ -996,9 +994,9 @@ spec:
                   region: {{ $region }}
                   auth:
                     jwt:
+                      # Do NOT add namespace: ESO uses SA in same namespace as generator. See .docs/lessons/kubeapp-e2e-root-causes-and-prevention.md.
                       serviceAccountRef:
                         name: {{ $org }}-eso-sa
-                        namespace: {{ $env.namespace | default (printf "%s-%s" $projectName $envName) }}
           {{- end }}
           {{- end }}
           {{- end }}

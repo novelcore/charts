@@ -3003,6 +3003,9 @@ spec:
             forProvider:
               description: "External Secrets Operator IRSA role for {{ $clusterName }}"
               # Trust policy for cluster-specific OIDC provider
+              # CRITICAL: Use StringEquals (not StringLike) for reliability and security
+              # StringLike with wildcards can fail with AWS STS AssumeRoleWithWebIdentity
+              # Exact match follows principle of least privilege and is more reliable
               assumeRolePolicy: |
                 {
                   "Version": "2012-10-17",
@@ -3015,10 +3018,8 @@ spec:
                       "Action": "sts:AssumeRoleWithWebIdentity",
                       "Condition": {
                         "StringEquals": {
-                          "{{ regexReplaceAll "^https://" $oidcIssuerUrl "" }}:aud": "sts.amazonaws.com"
-                        },
-                        "StringLike": {
-                          "{{ regexReplaceAll "^https://" $oidcIssuerUrl "" }}:sub": "system:serviceaccount:*:{{ $envConfig.organization.name }}-eso-sa"
+                          "{{ regexReplaceAll "^https://" $oidcIssuerUrl "" }}:aud": "sts.amazonaws.com",
+                          "{{ regexReplaceAll "^https://" $oidcIssuerUrl "" }}:sub": "system:serviceaccount:{{ $tools.externalSecrets.namespace }}:{{ $envConfig.organization.name }}-eso-sa"
                         }
                       }
                     }
@@ -3112,6 +3113,9 @@ spec:
               name: {{ $awsProvider }}
             forProvider:
               description: "ECR credentials access role for {{ $clusterName }} - allows app-level ECR credential generation"
+              # Use StringLike to allow ServiceAccounts from both external-secrets namespace (for ESO pod)
+              # and environment namespaces (for app-level generators)
+              # ECR SA lives in app env namespaces (e.g. novelcore-project-dev). Use StringLike so any namespace can assume this role. Do NOT change to StringEquals or ECR auth will break. See .docs/lessons/irsa-trust-policy-stringequals.md and kubeapp-e2e-root-causes-and-prevention.md.
               assumeRolePolicy: |
                 {
                   "Version": "2012-10-17",
