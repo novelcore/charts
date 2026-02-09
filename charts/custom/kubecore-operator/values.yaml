@@ -17,9 +17,18 @@ controllerManager:
     # Environment variables required by the operator
     # Note: EKS_CLUSTER_ID must be exactly 32 characters
     env:
+      # EKS Control Plane Configuration
       EKS_CLUSTER_ID: "KINDCLUSTER123456789012345678901"
       EKS_REGION: "us-east-1"
       KUBERNETES_PROVIDER_CONFIG: "kubesys-enhanced"
+
+      # Zitadel Integration Configuration
+      # Set ZITADEL_ENABLED=true to enable Zitadel identity management integration
+      # ZITADEL_SECRET_NAME: Name of the Kubernetes secret containing Zitadel credentials
+      # ZITADEL_SECRET_NAMESPACE: Namespace where the secret is located
+      ZITADEL_ENABLED: "true"
+      ZITADEL_SECRET_NAME: "zitadel-credentials"
+      ZITADEL_SECRET_NAMESPACE: "kubecore-system"
     resources:
       limits:
         cpu: 500m
