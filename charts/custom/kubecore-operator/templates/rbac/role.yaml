@@ -57,6 +57,14 @@ rules:
   - update
   - watch
 - apiGroups:
+  - aws.upbound.io
+  resources:
+  - providerconfigs
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
   - apiextensions.crossplane.io
   resources:
   - environmentconfigs/status

@@ -101,21 +101,45 @@ spec:
                   GithubConfig contains the GitHub provider configuration
                   When provided, enables GitHub provider integration
                 properties:
-                  credentialsSecretRef:
+                  installationId:
                     description: |-
-                      CredentialsSecretRef references the Kubernetes secret containing GitHub App credentials
-                      The secret must exist in the operator namespace (typically kubecore-system)
-                      Required keys in the secret: appId, installationId, privateKey
-                    properties:
-                      name:
-                        description: Name of the secret
-                        minLength: 1
-                        type: string
-                    required:
-                    - name
-                    type: object
+                      InstallationId is the GitHub App installation ID for this organization
+                      The appId and privateKey come from the global github-app-credentials secret
+                    minLength: 1
+                    type: string
                 required:
-                - credentialsSecretRef
+                - installationId
+                type: object
+              identity:
+                description: |-
+                  Identity configuration for Zitadel integration
+                  When provided, enables Zitadel organization and role management
+                properties:
+                  allowedDomains:
+                    description: |-
+                      AllowedDomains restricts which email domains can join
+                      If empty, any domain is allowed
+                    items:
+                      type: string
+                    type: array
+                  githubIDP:
+                    description: GitHubIDP configures GitHub identity provider for
+                      this organization
+                    properties:
+                      enabled:
+                        default: false
+                        description: |-
+                          Enabled activates the instance-level GitHub IDP for this organization
+                          Users can link their GitHub accounts but cannot auto-register
+                        type: boolean
+                    type: object
+                  initialAdmin:
+                    description: InitialAdmin email - will be granted admin role via
+                      project grant
+                    format: email
+                    type: string
+                required:
+                - initialAdmin
                 type: object
               network:
                 description: |-
@@ -426,6 +450,98 @@ spec:
                   uid:
                     description: UID of the resource
                     type: string
+                type: object
+              identityProvider:
+                description: IdentityProvider contains Zitadel integration status
+                properties:
+                  actionConfigured:
+                    description: ActionConfigured indicates if the action and flow
+                      triggers are configured
+                    type: boolean
+                  actionId:
+                    description: ActionID is the ID of the "addGroupsClaim" action
+                    type: string
+                  githubIdpEnabled:
+                    description: GitHubIDPEnabled indicates if GitHub IDP is activated
+                      for this organization
+                    type: boolean
+                  initialAdminAssigned:
+                    description: InitialAdminAssigned indicates if initial admin was
+                      granted access
+                    type: boolean
+                  lastUpdated:
+                    description: LastUpdated is when the status was last updated
+                    format: date-time
+                    type: string
+                  message:
+                    description: Message contains additional status information
+                    type: string
+                  orgProjectId:
+                    description: |-
+                      OrgProjectID is the organization-specific Zitadel project for RBAC roles
+                      This project is created within the org and contains org-level + project-level roles
+                    type: string
+                  orgProjectName:
+                    description: OrgProjectName is the name of the organization-specific
+                      project
+                    type: string
+                  orgRoles:
+                    description: OrgRoles contains org-level roles created in the
+                      org project
+                    items:
+                      description: RoleStatus contains the status of a Zitadel role
+                      properties:
+                        created:
+                          description: Created indicates if the role was successfully
+                            created
+                          type: boolean
+                        displayName:
+                          description: DisplayName is the human-readable role name
+                          type: string
+                        name:
+                          description: Name is the role key (e.g., "kubeorg:acme:admin")
+                          type: string
+                      type: object
+                    type: array
+                  orgRolesProjectConfigured:
+                    description: OrgRolesProjectConfigured indicates if projectRoleAssertion
+                      is enabled
+                    type: boolean
+                  organizationId:
+                    description: OrganizationID is the Zitadel organization ID
+                    type: string
+                  organizationName:
+                    description: OrganizationName is the Zitadel organization name
+                    type: string
+                  projectGrantId:
+                    description: ProjectGrantID is the ID of the project grant from
+                      KAOS org to this org
+                    type: string
+                  projectId:
+                    description: ProjectID is the KAOS kaos-app project ID
+                    type: string
+                  ready:
+                    description: Ready indicates if Zitadel organization is fully
+                      configured
+                    type: boolean
+                  roles:
+                    description: Roles contains the status of created roles (deprecated
+                      - roles are in kaos-app project)
+                    items:
+                      description: RoleStatus contains the status of a Zitadel role
+                      properties:
+                        created:
+                          description: Created indicates if the role was successfully
+                            created
+                          type: boolean
+                        displayName:
+                          description: DisplayName is the human-readable role name
+                          type: string
+                        name:
+                          description: Name is the role key (e.g., "kubeorg:acme:admin")
+                          type: string
+                      type: object
+                    type: array
                 type: object
               lastTransitionTime:
                 description: LastTransitionTime records when the status was last updated

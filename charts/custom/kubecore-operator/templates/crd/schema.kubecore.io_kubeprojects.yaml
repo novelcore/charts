@@ -589,6 +589,45 @@ spec:
                 required:
                 - state
                 type: object
+              identityProvider:
+                description: IdentityProvider contains Zitadel role status for this
+                  project
+                properties:
+                  lastUpdated:
+                    description: LastUpdated is when the status was last updated
+                    format: date-time
+                    type: string
+                  message:
+                    description: Message contains additional status information
+                    type: string
+                  organizationId:
+                    description: OrganizationID from parent KubeOrg
+                    type: string
+                  projectId:
+                    description: ProjectID from parent KubeOrg (Zitadel project, not
+                      KubeProject)
+                    type: string
+                  ready:
+                    description: Ready indicates if all roles are configured
+                    type: boolean
+                  roles:
+                    description: Roles contains the status of created roles
+                    items:
+                      description: RoleStatus contains the status of a Zitadel role
+                      properties:
+                        created:
+                          description: Created indicates if the role was successfully
+                            created
+                          type: boolean
+                        displayName:
+                          description: DisplayName is the human-readable role name
+                          type: string
+                        name:
+                          description: Name is the role key (e.g., "kubeorg:acme:admin")
+                          type: string
+                      type: object
+                    type: array
+                type: object
               lastTransitionTime:
                 description: LastTransitionTime records when the status was last updated
                 format: date-time
