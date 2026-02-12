@@ -537,6 +537,29 @@ spec:
           status:
             description: KubePoolStatus defines the observed state of KubePool
             properties:
+              argocdOIDC:
+                description: ArgocdOIDC contains the Zitadel OIDC app status for ArgoCD
+                  SSO
+                properties:
+                  appId:
+                    description: AppID is the Zitadel application ID
+                    type: string
+                  clientId:
+                    description: ClientID is the OIDC client ID
+                    type: string
+                  projectId:
+                    description: ProjectID is the Zitadel project the app belongs
+                      to
+                    type: string
+                  ready:
+                    description: Ready indicates the OIDC app is created and credentials
+                      are pushed to AWS SM
+                    type: boolean
+                  secretName:
+                    description: SecretName is the AWS Secrets Manager key name for
+                      OIDC credentials
+                    type: string
+                type: object
               availableTemplates:
                 description: AvailableTemplates contains summary information about
                   environment templates

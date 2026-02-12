@@ -782,6 +782,7 @@ spec:
               region: {{ $primaryRegion }}
               repositorySelector:
                 matchLabels:
+                  crossplane.io/composite: {{ $name }}
                   platform.kubecore.io/organization: {{ $org }}
                   platform.kubecore.io/project: {{ $projectName }}
                   platform.kubecore.io/region: {{ $primaryRegion }}

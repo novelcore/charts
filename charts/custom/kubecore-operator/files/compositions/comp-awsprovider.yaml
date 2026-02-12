@@ -403,7 +403,7 @@ spec:
                           serviceAccountRef:
                             name: {{ $org }}-eso-sa
                             namespace: external-secrets
-                      region: {{ $eksRegion }}
+                      region: {{ $primaryRegion }}
                       service: SecretsManager
 
   # Step 3: Enable automatic readiness detection

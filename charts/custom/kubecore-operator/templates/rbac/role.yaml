@@ -31,7 +31,6 @@ rules:
   resources:
   - secrets
   verbs:
-  - create
   - get
   - list
   - patch
@@ -56,14 +55,6 @@ rules:
   - list
   - patch
   - update
-  - watch
-- apiGroups:
-  - aws.upbound.io
-  resources:
-  - providerconfigs
-  verbs:
-  - get
-  - list
   - watch
 - apiGroups:
   - apiextensions.crossplane.io
@@ -112,12 +103,7 @@ rules:
 - apiGroups:
   - ec2.aws.upbound.io
   resources:
-  - eips
-  - internetgateways
   - natgateways
-  - routes
-  - routetableassociations
-  - routetables
   - subnets
   - vpcs
   verbs:
@@ -186,10 +172,21 @@ rules:
   - external-secrets.io
   resources:
   - externalsecrets
-  - pushsecrets
   verbs:
   - get
   - list
+  - watch
+- apiGroups:
+  - external-secrets.io
+  resources:
+  - pushsecrets
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
   - watch
 - apiGroups:
   - github.platform.kubecore.io

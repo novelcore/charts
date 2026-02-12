@@ -1346,6 +1346,69 @@ spec:
                     revision: 1
           {{- end }}
 
+          {{/* ArgoCD Zitadel OIDC ExternalSecret */}}
+          {{- $hasArgocdOIDC := false -}}
+          {{- if and $argoCdEnabled $tools.argocd $tools.argocd.enabled -}}
+            {{- if $tools.argocd.oidc -}}
+              {{- if $tools.argocd.oidc.enabled -}}
+                {{- $hasArgocdOIDC = true -}}
+              {{- end -}}
+            {{- end -}}
+          {{- end -}}
+          {{- if $hasArgocdOIDC }}
+          ---
+          apiVersion: kubernetes.crossplane.io/v1alpha2
+          kind: Object
+          metadata:
+            name: {{ $name }}-argocd-oidc-external-secret
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: argocd-oidc-external-secret
+            labels:
+              {{- range $key, $value := $commonLabels }}
+              {{ $key }}: "{{ $value }}"
+              {{- end }}
+              platform.kubecore.io/component: "argocd"
+          spec:
+            deletionPolicy: Delete
+            managementPolicies: ["*"]
+            providerConfigRef:
+              name: {{ $kubernetesProvider }}
+            forProvider:
+              manifest:
+                apiVersion: external-secrets.io/v1
+                kind: ExternalSecret
+                metadata:
+                  name: argocd-zitadel-oidc
+                  namespace: {{ $tools.argocd.namespace }}
+                  labels:
+                    platform.kubecore.io/kubesystem: {{ $name }}
+                    platform.kubecore.io/part-of: "system"
+                    {{- range $key, $value := $commonLabels }}
+                    {{ $key }}: "{{ $value }}"
+                    {{- end }}
+                spec:
+                  refreshInterval: 1h
+                  secretStoreRef:
+                    kind: ClusterSecretStore
+                    name: {{ $envConfig.organization.name }}-infrastructure-secrets
+                  target:
+                    name: argocd-zitadel-oidc
+                    creationPolicy: Owner
+                    template:
+                      metadata:
+                        labels:
+                          app.kubernetes.io/part-of: argocd
+                  data:
+                    - secretKey: zitadel_client_id
+                      remoteRef:
+                        key: {{ $tools.argocd.oidc.secretName }}
+                        property: zitadel_client_id
+                    - secretKey: zitadel_client_secret
+                      remoteRef:
+                        key: {{ $tools.argocd.oidc.secretName }}
+                        property: zitadel_client_secret
+          {{- end }}
+
           {{/* ArgoCD Installation */}}
           {{- if and $argoCdEnabled $tools.argocd $tools.argocd.enabled }}
           ---
@@ -1402,6 +1465,28 @@ spec:
                     server.enable.source.hydrator: true
                     # Enable hydrator feature (hydrator is in Alpha phase)
                     hydrator.enabled: true
+                  {{- if $hasArgocdOIDC }}
+                  cm:
+                    url: https://argocd.system.{{ $dns.clusterDomain }}
+                    oidc.config: |
+                      name: {{ $tools.argocd.oidc.name }}
+                      issuer: {{ $tools.argocd.oidc.issuer }}
+                      clientID: $argocd-zitadel-oidc:zitadel_client_id
+                      clientSecret: $argocd-zitadel-oidc:zitadel_client_secret
+                      requestedScopes:
+                        - openid
+                        - profile
+                        - email
+                        - groups
+                      logoutURL: {{ $tools.argocd.oidc.logoutURL }}
+                  rbac:
+                    scopes: '[groups]'
+                    policy.default: 'role:readonly'
+                    {{- if $tools.argocd.oidc.rbacPolicyCSV }}
+                    policy.csv: |
+                      {{ $tools.argocd.oidc.rbacPolicyCSV }}
+                    {{- end }}
+                  {{- end }}
                 server:
                   {{- if $tools.argocd.server.replicas }}
                   replicas: {{ $tools.argocd.server.replicas }}
