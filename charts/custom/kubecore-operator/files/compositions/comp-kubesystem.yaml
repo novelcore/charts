@@ -1371,6 +1371,9 @@ spec:
           spec:
             deletionPolicy: Delete
             managementPolicies: ["*"]
+            readiness:
+              policy: DeriveFromCelQuery
+              celQuery: 'object.status.conditions.exists(c, c.type == "Ready" && c.status == "True")'
             providerConfigRef:
               name: {{ $kubernetesProvider }}
             forProvider:
@@ -2618,6 +2621,9 @@ spec:
           spec:
             deletionPolicy: Delete
             managementPolicies: ["*"]
+            readiness:
+              policy: DeriveFromCelQuery
+              celQuery: 'object.status.conditions.exists(c, c.type == "Ready" && c.status == "True")'
             providerConfigRef:
               name: {{ $kubernetesProvider }}
             forProvider:
