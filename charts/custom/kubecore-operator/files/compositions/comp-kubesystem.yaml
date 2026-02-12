@@ -2593,6 +2593,69 @@ spec:
                 {{- end }}
           {{- end }}
           
+          {{/* Argo Workflows Zitadel OIDC ExternalSecret */}}
+          {{- $hasArgoWfOIDC := false -}}
+          {{- if and $argoWorkflowsEnabled $tools.argoWorkflows $tools.argoWorkflows.enabled -}}
+            {{- if $tools.argoWorkflows.oidc -}}
+              {{- if $tools.argoWorkflows.oidc.enabled -}}
+                {{- $hasArgoWfOIDC = true -}}
+              {{- end -}}
+            {{- end -}}
+          {{- end -}}
+          {{- if $hasArgoWfOIDC }}
+          ---
+          apiVersion: kubernetes.crossplane.io/v1alpha2
+          kind: Object
+          metadata:
+            name: {{ $name }}-argo-workflows-oidc-external-secret
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: argo-workflows-oidc-external-secret
+            labels:
+              {{- range $key, $value := $commonLabels }}
+              {{ $key }}: "{{ $value }}"
+              {{- end }}
+              platform.kubecore.io/component: "argo-workflows"
+          spec:
+            deletionPolicy: Delete
+            managementPolicies: ["*"]
+            providerConfigRef:
+              name: {{ $kubernetesProvider }}
+            forProvider:
+              manifest:
+                apiVersion: external-secrets.io/v1
+                kind: ExternalSecret
+                metadata:
+                  name: argo-workflows-zitadel-oidc
+                  namespace: {{ $tools.argoWorkflows.namespace }}
+                  labels:
+                    platform.kubecore.io/kubesystem: {{ $name }}
+                    platform.kubecore.io/part-of: "system"
+                    {{- range $key, $value := $commonLabels }}
+                    {{ $key }}: "{{ $value }}"
+                    {{- end }}
+                spec:
+                  refreshInterval: 1h
+                  secretStoreRef:
+                    kind: ClusterSecretStore
+                    name: {{ $envConfig.organization.name }}-infrastructure-secrets
+                  target:
+                    name: argo-workflows-zitadel-oidc
+                    creationPolicy: Owner
+                    template:
+                      metadata:
+                        labels:
+                          app.kubernetes.io/part-of: argo-workflows
+                  data:
+                    - secretKey: client-id
+                      remoteRef:
+                        key: {{ $tools.argoWorkflows.oidc.secretName }}
+                        property: client-id
+                    - secretKey: client-secret
+                      remoteRef:
+                        key: {{ $tools.argoWorkflows.oidc.secretName }}
+                        property: client-secret
+          {{- end }}
+
           {{/* Argo Workflows Installation */}}
           {{- if and $argoWorkflowsEnabled $tools.argoWorkflows $tools.argoWorkflows.enabled }}
           ---
@@ -2657,6 +2720,27 @@ spec:
                 {{- if $tools.argoWorkflows.server.enabled }}
                 server:
                   enabled: {{ $tools.argoWorkflows.server.enabled }}
+                  {{- if $hasArgoWfOIDC }}
+                  authModes:
+                    - sso
+                  sso:
+                    enabled: true
+                    issuer: {{ $tools.argoWorkflows.oidc.issuer }}
+                    redirectUrl: https://workflows.system.{{ $dns.clusterDomain }}/oauth2/callback
+                    clientId:
+                      name: argo-workflows-zitadel-oidc
+                      key: client-id
+                    clientSecret:
+                      name: argo-workflows-zitadel-oidc
+                      key: client-secret
+                    scopes:
+                      - openid
+                      - profile
+                      - email
+                      - groups
+                    rbac:
+                      enabled: true
+                  {{- end }}
                   {{- if $nodeSelector }}
                   nodeSelector:
                     {{- range $key, $value := $nodeSelector }}
@@ -2698,6 +2782,202 @@ spec:
                     {{- end }}
                   {{- end }}
                 {{- end }}
+          {{- end }}
+
+          {{/* Argo Workflows SSO RBAC ServiceAccounts and ClusterRoleBindings */}}
+          {{- if $hasArgoWfOIDC }}
+          ---
+          apiVersion: kubernetes.crossplane.io/v1alpha2
+          kind: Object
+          metadata:
+            name: {{ $name }}-argo-workflows-sso-admin-sa
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: argo-workflows-sso-admin-sa
+            labels:
+              {{- range $key, $value := $commonLabels }}
+              {{ $key }}: "{{ $value }}"
+              {{- end }}
+              platform.kubecore.io/component: "argo-workflows"
+          spec:
+            deletionPolicy: Delete
+            managementPolicies: ["*"]
+            providerConfigRef:
+              name: {{ $kubernetesProvider }}
+            forProvider:
+              manifest:
+                apiVersion: v1
+                kind: ServiceAccount
+                metadata:
+                  name: argo-workflows-sso-admin
+                  namespace: {{ $tools.argoWorkflows.namespace }}
+                  annotations:
+                    workflows.argoproj.io/rbac-rule: "'kubeorg:{{ $envConfig.organization.name }}:admin' in groups"
+                    workflows.argoproj.io/rbac-rule-precedence: "100"
+                  labels:
+                    platform.kubecore.io/kubesystem: {{ $name }}
+                    platform.kubecore.io/part-of: "system"
+          ---
+          apiVersion: kubernetes.crossplane.io/v1alpha2
+          kind: Object
+          metadata:
+            name: {{ $name }}-argo-workflows-sso-user-sa
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: argo-workflows-sso-user-sa
+            labels:
+              {{- range $key, $value := $commonLabels }}
+              {{ $key }}: "{{ $value }}"
+              {{- end }}
+              platform.kubecore.io/component: "argo-workflows"
+          spec:
+            deletionPolicy: Delete
+            managementPolicies: ["*"]
+            providerConfigRef:
+              name: {{ $kubernetesProvider }}
+            forProvider:
+              manifest:
+                apiVersion: v1
+                kind: ServiceAccount
+                metadata:
+                  name: argo-workflows-sso-user
+                  namespace: {{ $tools.argoWorkflows.namespace }}
+                  annotations:
+                    workflows.argoproj.io/rbac-rule: "'kubeorg:{{ $envConfig.organization.name }}:ops' in groups || 'kubeorg:{{ $envConfig.organization.name }}:dev' in groups"
+                    workflows.argoproj.io/rbac-rule-precedence: "50"
+                  labels:
+                    platform.kubecore.io/kubesystem: {{ $name }}
+                    platform.kubecore.io/part-of: "system"
+          ---
+          apiVersion: kubernetes.crossplane.io/v1alpha2
+          kind: Object
+          metadata:
+            name: {{ $name }}-argo-workflows-sso-readonly-sa
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: argo-workflows-sso-readonly-sa
+            labels:
+              {{- range $key, $value := $commonLabels }}
+              {{ $key }}: "{{ $value }}"
+              {{- end }}
+              platform.kubecore.io/component: "argo-workflows"
+          spec:
+            deletionPolicy: Delete
+            managementPolicies: ["*"]
+            providerConfigRef:
+              name: {{ $kubernetesProvider }}
+            forProvider:
+              manifest:
+                apiVersion: v1
+                kind: ServiceAccount
+                metadata:
+                  name: argo-workflows-sso-readonly
+                  namespace: {{ $tools.argoWorkflows.namespace }}
+                  annotations:
+                    workflows.argoproj.io/rbac-rule: "'kubeorg:{{ $envConfig.organization.name }}:business' in groups"
+                    workflows.argoproj.io/rbac-rule-precedence: "10"
+                  labels:
+                    platform.kubecore.io/kubesystem: {{ $name }}
+                    platform.kubecore.io/part-of: "system"
+          ---
+          apiVersion: kubernetes.crossplane.io/v1alpha2
+          kind: Object
+          metadata:
+            name: {{ $name }}-argo-workflows-sso-admin-crb
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: argo-workflows-sso-admin-crb
+            labels:
+              {{- range $key, $value := $commonLabels }}
+              {{ $key }}: "{{ $value }}"
+              {{- end }}
+              platform.kubecore.io/component: "argo-workflows"
+          spec:
+            deletionPolicy: Delete
+            managementPolicies: ["*"]
+            providerConfigRef:
+              name: {{ $kubernetesProvider }}
+            forProvider:
+              manifest:
+                apiVersion: rbac.authorization.k8s.io/v1
+                kind: ClusterRoleBinding
+                metadata:
+                  name: argo-workflows-sso-admin-binding
+                  labels:
+                    platform.kubecore.io/kubesystem: {{ $name }}
+                    platform.kubecore.io/part-of: "system"
+                roleRef:
+                  apiGroup: rbac.authorization.k8s.io
+                  kind: ClusterRole
+                  name: argo-admin
+                subjects:
+                  - kind: ServiceAccount
+                    name: argo-workflows-sso-admin
+                    namespace: {{ $tools.argoWorkflows.namespace }}
+          ---
+          apiVersion: kubernetes.crossplane.io/v1alpha2
+          kind: Object
+          metadata:
+            name: {{ $name }}-argo-workflows-sso-user-crb
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: argo-workflows-sso-user-crb
+            labels:
+              {{- range $key, $value := $commonLabels }}
+              {{ $key }}: "{{ $value }}"
+              {{- end }}
+              platform.kubecore.io/component: "argo-workflows"
+          spec:
+            deletionPolicy: Delete
+            managementPolicies: ["*"]
+            providerConfigRef:
+              name: {{ $kubernetesProvider }}
+            forProvider:
+              manifest:
+                apiVersion: rbac.authorization.k8s.io/v1
+                kind: ClusterRoleBinding
+                metadata:
+                  name: argo-workflows-sso-user-binding
+                  labels:
+                    platform.kubecore.io/kubesystem: {{ $name }}
+                    platform.kubecore.io/part-of: "system"
+                roleRef:
+                  apiGroup: rbac.authorization.k8s.io
+                  kind: ClusterRole
+                  name: argo-edit
+                subjects:
+                  - kind: ServiceAccount
+                    name: argo-workflows-sso-user
+                    namespace: {{ $tools.argoWorkflows.namespace }}
+          ---
+          apiVersion: kubernetes.crossplane.io/v1alpha2
+          kind: Object
+          metadata:
+            name: {{ $name }}-argo-workflows-sso-readonly-crb
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: argo-workflows-sso-readonly-crb
+            labels:
+              {{- range $key, $value := $commonLabels }}
+              {{ $key }}: "{{ $value }}"
+              {{- end }}
+              platform.kubecore.io/component: "argo-workflows"
+          spec:
+            deletionPolicy: Delete
+            managementPolicies: ["*"]
+            providerConfigRef:
+              name: {{ $kubernetesProvider }}
+            forProvider:
+              manifest:
+                apiVersion: rbac.authorization.k8s.io/v1
+                kind: ClusterRoleBinding
+                metadata:
+                  name: argo-workflows-sso-readonly-binding
+                  labels:
+                    platform.kubecore.io/kubesystem: {{ $name }}
+                    platform.kubecore.io/part-of: "system"
+                roleRef:
+                  apiGroup: rbac.authorization.k8s.io
+                  kind: ClusterRole
+                  name: argo-view
+                subjects:
+                  - kind: ServiceAccount
+                    name: argo-workflows-sso-readonly
+                    namespace: {{ $tools.argoWorkflows.namespace }}
           {{- end }}
           
           {{/* Traefik Installation */}}
@@ -4400,6 +4680,26 @@ spec:
           - argocd-release
           - cluster-secret-store
           - argocd-github-externalsecret
+        # Argo Workflows OIDC ExternalSecret after Argo Workflows release and ClusterSecretStore
+        - sequence:
+          - argo-workflows-release
+          - cluster-secret-store
+          - argo-workflows-oidc-external-secret
+        # Argo Workflows SSO RBAC after Argo Workflows release
+        - sequence:
+          - argo-workflows-release
+          - argo-workflows-sso-admin-sa
+          - argo-workflows-sso-user-sa
+          - argo-workflows-sso-readonly-sa
+        - sequence:
+          - argo-workflows-sso-admin-sa
+          - argo-workflows-sso-admin-crb
+        - sequence:
+          - argo-workflows-sso-user-sa
+          - argo-workflows-sso-user-crb
+        - sequence:
+          - argo-workflows-sso-readonly-sa
+          - argo-workflows-sso-readonly-crb
         # Observability namespace must be created first
         - sequence:
           - observability-namespace
