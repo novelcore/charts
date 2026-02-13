@@ -860,6 +860,29 @@ spec:
                     description: UID of the resource
                     type: string
                 type: object
+              grafanaOIDC:
+                description: GrafanaOIDC contains the Zitadel OIDC app status for
+                  Grafana SSO
+                properties:
+                  appId:
+                    description: AppID is the Zitadel application ID
+                    type: string
+                  clientId:
+                    description: ClientID is the OIDC client ID
+                    type: string
+                  projectId:
+                    description: ProjectID is the Zitadel project the app belongs
+                      to
+                    type: string
+                  ready:
+                    description: Ready indicates the OIDC app is created and credentials
+                      are pushed to AWS SM
+                    type: boolean
+                  secretName:
+                    description: SecretName is the AWS Secrets Manager key name for
+                      OIDC credentials
+                    type: string
+                type: object
               iamRoles:
                 description: IAMRoles contains IAM roles created for this cluster
                 properties:

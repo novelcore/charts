@@ -117,6 +117,16 @@ spec:
           {{/* FR-1: Dual-Level Feature Toggle - observability only deploys when both flags are true */}}
           {{- $shouldDeployVM := and $observabilityEnabled $vmEnabled -}}
 
+          {{/* Grafana OIDC toggle — requires VictoriaMetrics + Grafana both enabled */}}
+          {{- $hasGrafanaOIDC := false -}}
+          {{- if and $shouldDeployVM $grafanaEnabled -}}
+            {{- if $vmConfig.grafana.oidc -}}
+              {{- if $vmConfig.grafana.oidc.enabled -}}
+                {{- $hasGrafanaOIDC = true -}}
+              {{- end -}}
+            {{- end -}}
+          {{- end -}}
+
           {{/* Initialize observability variables (used in status even if not deploying) */}}
           {{- $vmSelectReplicas := 1 -}}
           {{- $vmInsertReplicas := 1 -}}
@@ -3912,6 +3922,64 @@ spec:
             {{- $vmStorageMemory = "1Gi" -}}
           {{- end }}
 
+          {{/* Grafana Zitadel OIDC ExternalSecret */}}
+          {{- if $hasGrafanaOIDC }}
+          ---
+          apiVersion: kubernetes.crossplane.io/v1alpha2
+          kind: Object
+          metadata:
+            name: {{ $name }}-grafana-oidc-external-secret
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: grafana-oidc-external-secret
+            labels:
+              {{- range $key, $value := $commonLabels }}
+              {{ $key }}: "{{ $value }}"
+              {{- end }}
+              platform.kubecore.io/component: "grafana"
+          spec:
+            deletionPolicy: Delete
+            managementPolicies: ["*"]
+            readiness:
+              policy: DeriveFromCelQuery
+              celQuery: 'object.status.conditions.exists(c, c.type == "Ready" && c.status == "True")'
+            providerConfigRef:
+              name: {{ $kubernetesProvider }}
+            forProvider:
+              manifest:
+                apiVersion: external-secrets.io/v1
+                kind: ExternalSecret
+                metadata:
+                  name: grafana-zitadel-oidc
+                  namespace: {{ $vmNamespace }}
+                  labels:
+                    platform.kubecore.io/kubesystem: {{ $name }}
+                    platform.kubecore.io/part-of: "system"
+                    {{- range $key, $value := $commonLabels }}
+                    {{ $key }}: "{{ $value }}"
+                    {{- end }}
+                spec:
+                  refreshInterval: 1h
+                  secretStoreRef:
+                    kind: ClusterSecretStore
+                    name: {{ $envConfig.organization.name }}-infrastructure-secrets
+                  target:
+                    name: grafana-zitadel-oidc
+                    creationPolicy: Owner
+                    template:
+                      metadata:
+                        labels:
+                          app.kubernetes.io/part-of: grafana
+                  data:
+                    - secretKey: client-id
+                      remoteRef:
+                        key: {{ $vmConfig.grafana.oidc.secretName }}
+                        property: client-id
+                    - secretKey: client-secret
+                      remoteRef:
+                        key: {{ $vmConfig.grafana.oidc.secretName }}
+                        property: client-secret
+          {{- end }}
+
           {{/* VictoriaMetrics K8s Stack Helm Release - Replaces all individual CRDs */}}
           ---
           apiVersion: helm.crossplane.io/v1beta1
@@ -4238,8 +4306,33 @@ spec:
                       cert-manager.io/cluster-issuer: {{ $clusterIssuerName }}
                     hosts:
                     - grafana.{{ $dns.clusterDomain }}
-                    tlsEnabled: true
-                    tlsSecretName: grafana-tls
+                    tls:
+                    - secretName: grafana-tls
+                      hosts:
+                      - grafana.{{ $dns.clusterDomain }}
+                  {{- end }}
+                  {{- if $hasGrafanaOIDC }}
+                  grafana.ini:
+                    server:
+                      root_url: https://grafana.{{ $dns.clusterDomain }}
+                    auth:
+                      disable_login_form: false
+                    auth.generic_oauth:
+                      enabled: true
+                      name: {{ $vmConfig.grafana.oidc.name }}
+                      client_id: $__file{/etc/secrets/grafana-zitadel-oidc/client-id}
+                      client_secret: $__file{/etc/secrets/grafana-zitadel-oidc/client-secret}
+                      scopes: {{ $vmConfig.grafana.oidc.scopes }}
+                      auth_url: {{ $vmConfig.grafana.oidc.authUrl }}
+                      token_url: {{ $vmConfig.grafana.oidc.tokenUrl }}
+                      api_url: {{ $vmConfig.grafana.oidc.apiUrl }}
+                      role_attribute_path: "contains(groups[*], 'admin') && 'Admin' || contains(groups[*], 'ops') && 'Editor' || 'Viewer'"
+                      allow_assign_grafana_admin: true
+                  extraSecretMounts:
+                  - name: grafana-zitadel-oidc
+                    secretName: grafana-zitadel-oidc
+                    mountPath: /etc/secrets/grafana-zitadel-oidc
+                    readOnly: true
                   {{- end }}
                   {{- end }}
                 # Enable built-in rules and dashboards
@@ -4713,6 +4806,11 @@ spec:
         - sequence:
           - observability-namespace
           - grafana-operator-release
+        # Grafana OIDC ExternalSecret after ClusterSecretStore (needs secret store to pull credentials)
+        - sequence:
+          - cluster-secret-store
+          - grafana-oidc-external-secret
+          - vm-stack-helm
         # VictoriaMetrics K8s Stack Helm Release after Grafana operator
         # Note: VM Operator is included in the k8s-stack chart, no separate release needed
         # VMAlertmanager is managed by Helm (alertmanager.enabled: true)
