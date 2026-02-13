@@ -615,6 +615,39 @@ spec:
                 description: ClusterEndpoint contains the endpoint URL of the EKS
                   cluster
                 type: string
+              clusterInfo:
+                description: ClusterInfo contains detailed cluster identity (name,
+                  ARN, actual version, region)
+                properties:
+                  arn:
+                    description: ARN is the EKS cluster ARN
+                    type: string
+                  clusterName:
+                    description: ClusterName is the EKS cluster name
+                    type: string
+                  region:
+                    description: Region is the AWS region where the cluster is deployed
+                    type: string
+                  version:
+                    description: Version is the actual running Kubernetes version
+                    type: string
+                type: object
+              clusterOIDC:
+                description: ClusterOIDC contains OIDC provider details for IRSA configuration
+                properties:
+                  clientId:
+                    description: ClientID is the OIDC client ID
+                    type: string
+                  issuerUrl:
+                    description: IssuerURL is the OIDC issuer URL
+                    type: string
+                  providerArn:
+                    description: ProviderARN is the OIDC provider ARN
+                    type: string
+                  providerName:
+                    description: ProviderName is the OIDC provider resource name
+                    type: string
+                type: object
               clusterStatus:
                 description: ClusterStatus contains the current status of the EKS
                   cluster
@@ -684,6 +717,17 @@ spec:
                 description: DeletionRetryCount tracks retry attempts during deletion
                   phase for timeout/backoff logic
                 type: integer
+              deploymentTiming:
+                description: DeploymentTiming contains system deployment lifecycle
+                  timestamps
+                properties:
+                  lastUpdate:
+                    description: LastUpdate is the last status update time
+                    type: string
+                  startTime:
+                    description: StartTime is when deployment started
+                    type: string
+                type: object
               directCost:
                 description: DirectCost contains the cost information for this cluster
                   pool
@@ -761,6 +805,22 @@ spec:
                     format: date-time
                     type: string
                 type: object
+              eksAddons:
+                description: EksAddons contains status of EKS managed add-ons
+                items:
+                  description: EksAddonStatus contains the status of an EKS add-on
+                  properties:
+                    name:
+                      description: Name of the add-on
+                      type: string
+                    status:
+                      description: Status of the add-on
+                      type: string
+                    version:
+                      description: Version of the add-on
+                      type: string
+                  type: object
+                type: array
               eksCluster:
                 description: EKSCluster contains a reference to the created XEKS resource
                 properties:
@@ -842,6 +902,106 @@ spec:
                     description: VPCID is the ID of the VPC where the cluster is deployed
                     type: string
                 type: object
+              observability:
+                description: Observability contains structured observability stack
+                  status
+                properties:
+                  components:
+                    description: Components contains individual component statuses
+                    properties:
+                      grafana:
+                        description: Grafana component status
+                        properties:
+                          ready:
+                            description: Ready indicates if the component is ready
+                            type: boolean
+                          replicas:
+                            description: Replicas is the number of replicas
+                            type: integer
+                        type: object
+                      vmagent:
+                        description: VMAgent component status
+                        properties:
+                          ready:
+                            description: Ready indicates if the component is ready
+                            type: boolean
+                          replicas:
+                            description: Replicas is the number of replicas
+                            type: integer
+                        type: object
+                      vmalert:
+                        description: VMAlert component status
+                        properties:
+                          ready:
+                            description: Ready indicates if the component is ready
+                            type: boolean
+                          replicas:
+                            description: Replicas is the number of replicas
+                            type: integer
+                        type: object
+                      vminsert:
+                        description: VMInsert component status
+                        properties:
+                          ready:
+                            description: Ready indicates if the component is ready
+                            type: boolean
+                          replicas:
+                            description: Replicas is the number of replicas
+                            type: integer
+                        type: object
+                      vmselect:
+                        description: VMSelect component status
+                        properties:
+                          ready:
+                            description: Ready indicates if the component is ready
+                            type: boolean
+                          replicas:
+                            description: Replicas is the number of replicas
+                            type: integer
+                        type: object
+                      vmstorage:
+                        description: VMStorage component status
+                        properties:
+                          ready:
+                            description: Ready indicates if the component is ready
+                            type: boolean
+                          replicas:
+                            description: Replicas is the number of replicas
+                            type: integer
+                        type: object
+                    type: object
+                  grafanaUrl:
+                    description: GrafanaURL is the Grafana access URL
+                    type: string
+                  installed:
+                    description: Installed indicates if the observability stack is
+                      installed
+                    type: boolean
+                  metrics:
+                    description: Metrics contains aggregated observability metrics
+                    properties:
+                      samplesPerSecond:
+                        description: SamplesPerSecond is the ingestion rate (serialized
+                          as string)
+                        type: string
+                      storageUsageGB:
+                        description: StorageUsageGB is the total storage usage in
+                          GB (serialized as string)
+                        type: string
+                      timeSeriesCount:
+                        description: TimeSeriesCount is the total number of time series
+                        type: integer
+                    type: object
+                  mode:
+                    description: Mode is the deployment mode (single, ha)
+                    type: string
+                  namespace:
+                    description: Namespace where observability components are installed
+                    type: string
+                  version:
+                    description: Version is the installed VictoriaMetrics version
+                    type: string
+                type: object
               observabilityStatus:
                 description: |-
                   ObservabilityStatus contains observability stack status extracted from the associated XKubeSystem.
@@ -862,10 +1022,287 @@ spec:
                 - Failed
                 - Deleting
                 type: string
+              platformTools:
+                description: PlatformTools contains aggregated status of all platform
+                  tools with endpoints
+                properties:
+                  argoRollouts:
+                    description: ArgoRollouts tool status
+                    properties:
+                      enabled:
+                        description: Enabled indicates if the tool is enabled
+                        type: boolean
+                      namespace:
+                        description: Namespace where the tool is installed
+                        type: string
+                      status:
+                        description: Status of the tool (Pending, Installing, Ready,
+                          Error)
+                        type: string
+                      url:
+                        description: URL is the access URL for the tool (if applicable)
+                        type: string
+                      version:
+                        description: Version of the tool
+                        type: string
+                    type: object
+                  argoWorkflows:
+                    description: ArgoWorkflows tool status
+                    properties:
+                      enabled:
+                        description: Enabled indicates if the tool is enabled
+                        type: boolean
+                      namespace:
+                        description: Namespace where the tool is installed
+                        type: string
+                      status:
+                        description: Status of the tool (Pending, Installing, Ready,
+                          Error)
+                        type: string
+                      url:
+                        description: URL is the access URL for the tool (if applicable)
+                        type: string
+                      version:
+                        description: Version of the tool
+                        type: string
+                    type: object
+                  argocd:
+                    description: ArgoCD tool status
+                    properties:
+                      enabled:
+                        description: Enabled indicates if the tool is enabled
+                        type: boolean
+                      namespace:
+                        description: Namespace where the tool is installed
+                        type: string
+                      status:
+                        description: Status of the tool (Pending, Installing, Ready,
+                          Error)
+                        type: string
+                      url:
+                        description: URL is the access URL for the tool (if applicable)
+                        type: string
+                      version:
+                        description: Version of the tool
+                        type: string
+                    type: object
+                  certManager:
+                    description: CertManager tool status
+                    properties:
+                      enabled:
+                        description: Enabled indicates if the tool is enabled
+                        type: boolean
+                      namespace:
+                        description: Namespace where the tool is installed
+                        type: string
+                      status:
+                        description: Status of the tool (Pending, Installing, Ready,
+                          Error)
+                        type: string
+                      url:
+                        description: URL is the access URL for the tool (if applicable)
+                        type: string
+                      version:
+                        description: Version of the tool
+                        type: string
+                    type: object
+                  crossplane:
+                    description: Crossplane tool status
+                    properties:
+                      enabled:
+                        description: Enabled indicates if the tool is enabled
+                        type: boolean
+                      namespace:
+                        description: Namespace where the tool is installed
+                        type: string
+                      status:
+                        description: Status of the tool (Pending, Installing, Ready,
+                          Error)
+                        type: string
+                      url:
+                        description: URL is the access URL for the tool (if applicable)
+                        type: string
+                      version:
+                        description: Version of the tool
+                        type: string
+                    type: object
+                  externalDns:
+                    description: ExternalDNS tool status
+                    properties:
+                      enabled:
+                        description: Enabled indicates if the tool is enabled
+                        type: boolean
+                      namespace:
+                        description: Namespace where the tool is installed
+                        type: string
+                      status:
+                        description: Status of the tool (Pending, Installing, Ready,
+                          Error)
+                        type: string
+                      url:
+                        description: URL is the access URL for the tool (if applicable)
+                        type: string
+                      version:
+                        description: Version of the tool
+                        type: string
+                    type: object
+                  externalSecrets:
+                    description: ExternalSecrets tool status
+                    properties:
+                      enabled:
+                        description: Enabled indicates if the tool is enabled
+                        type: boolean
+                      namespace:
+                        description: Namespace where the tool is installed
+                        type: string
+                      status:
+                        description: Status of the tool (Pending, Installing, Ready,
+                          Error)
+                        type: string
+                      url:
+                        description: URL is the access URL for the tool (if applicable)
+                        type: string
+                      version:
+                        description: Version of the tool
+                        type: string
+                    type: object
+                  gitopsPromoter:
+                    description: GitOpsPromoter tool status
+                    properties:
+                      enabled:
+                        description: Enabled indicates if the tool is enabled
+                        type: boolean
+                      namespace:
+                        description: Namespace where the tool is installed
+                        type: string
+                      status:
+                        description: Status of the tool (Pending, Installing, Ready,
+                          Error)
+                        type: string
+                      url:
+                        description: URL is the access URL for the tool (if applicable)
+                        type: string
+                      version:
+                        description: Version of the tool
+                        type: string
+                    type: object
+                  systemStatus:
+                    description: SystemStatus is the overall system deployment status
+                      (Pending/Deploying/Ready/Error)
+                    type: string
+                  traefik:
+                    description: Traefik tool status
+                    properties:
+                      enabled:
+                        description: Enabled indicates if the tool is enabled
+                        type: boolean
+                      namespace:
+                        description: Namespace where the tool is installed
+                        type: string
+                      status:
+                        description: Status of the tool (Pending, Installing, Ready,
+                          Error)
+                        type: string
+                      url:
+                        description: URL is the access URL for the tool (if applicable)
+                        type: string
+                      version:
+                        description: Version of the tool
+                        type: string
+                    type: object
+                type: object
+              providerConfigs:
+                description: ProviderConfigs contains Crossplane provider configuration
+                  readiness
+                properties:
+                  helm:
+                    description: Helm provider config status
+                    properties:
+                      name:
+                        description: Name of the provider config
+                        type: string
+                      ready:
+                        description: Ready indicates if the provider config is ready
+                        type: boolean
+                    type: object
+                  kubernetes:
+                    description: Kubernetes provider config status
+                    properties:
+                      name:
+                        description: Name of the provider config
+                        type: string
+                      ready:
+                        description: Ready indicates if the provider config is ready
+                        type: boolean
+                    type: object
+                type: object
               reconciliationAttempts:
                 description: ReconciliationAttempts tracks the number of reconciliation
                   attempts for backoff
                 type: integer
+              resourceSummary:
+                description: ResourceSummary contains a summary of composed resource
+                  counts
+                properties:
+                  pending:
+                    description: Pending is the number of pending resources
+                    type: integer
+                  ready:
+                    description: Ready is the number of ready resources
+                    type: integer
+                  total:
+                    description: Total number of resources
+                    type: integer
+                type: object
+              subnets:
+                description: Subnets contains categorized subnet IDs (public/private)
+                properties:
+                  private:
+                    description: Private subnet IDs
+                    items:
+                      type: string
+                    type: array
+                  public:
+                    description: Public subnet IDs
+                    items:
+                      type: string
+                    type: array
+                type: object
+              systemNodeGroups:
+                description: SystemNodeGroups contains status of system node groups
+                items:
+                  description: SystemNodeGroupStatus contains the status of a system
+                    node group
+                  properties:
+                    arn:
+                      description: ARN of the node group
+                      type: string
+                    instanceTypes:
+                      description: InstanceTypes used by the node group
+                      items:
+                        type: string
+                      type: array
+                    name:
+                      description: Name of the node group
+                      type: string
+                    scalingConfig:
+                      description: ScalingConfig contains the scaling configuration
+                      properties:
+                        desiredSize:
+                          description: DesiredSize is the desired number of nodes
+                          type: integer
+                        maxSize:
+                          description: MaxSize is the maximum number of nodes
+                          type: integer
+                        minSize:
+                          description: MinSize is the minimum number of nodes
+                          type: integer
+                      type: object
+                    status:
+                      description: Status of the node group
+                      type: string
+                  type: object
+                type: array
               xKubeSystemResource:
                 description: XKubeSystemResource contains a reference to the created
                   XKubeSystem resource
