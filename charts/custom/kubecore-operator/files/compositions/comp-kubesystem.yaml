@@ -4314,18 +4314,18 @@ spec:
                   {{- if $hasGrafanaOIDC }}
                   grafana.ini:
                     server:
-                      root_url: https://grafana.{{ $dns.clusterDomain }}
+                      root_url: "https://grafana.{{ $dns.clusterDomain }}"
                     auth:
                       disable_login_form: false
                     auth.generic_oauth:
                       enabled: true
-                      name: {{ $vmConfig.grafana.oidc.name }}
-                      client_id: $__file{/etc/secrets/grafana-zitadel-oidc/client-id}
-                      client_secret: $__file{/etc/secrets/grafana-zitadel-oidc/client-secret}
-                      scopes: {{ $vmConfig.grafana.oidc.scopes }}
-                      auth_url: {{ $vmConfig.grafana.oidc.authUrl }}
-                      token_url: {{ $vmConfig.grafana.oidc.tokenUrl }}
-                      api_url: {{ $vmConfig.grafana.oidc.apiUrl }}
+                      name: {{ $vmConfig.grafana.oidc.name | quote }}
+                      client_id: "$__file{/etc/secrets/grafana-zitadel-oidc/client-id}"
+                      client_secret: "$__file{/etc/secrets/grafana-zitadel-oidc/client-secret}"
+                      scopes: {{ $vmConfig.grafana.oidc.scopes | quote }}
+                      auth_url: {{ $vmConfig.grafana.oidc.authUrl | quote }}
+                      token_url: {{ $vmConfig.grafana.oidc.tokenUrl | quote }}
+                      api_url: {{ $vmConfig.grafana.oidc.apiUrl | quote }}
                       role_attribute_path: "contains(groups[*], 'admin') && 'Admin' || contains(groups[*], 'ops') && 'Editor' || 'Viewer'"
                       allow_assign_grafana_admin: true
                   extraSecretMounts:
