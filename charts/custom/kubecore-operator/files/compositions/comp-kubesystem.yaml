@@ -4627,6 +4627,18 @@ spec:
             {{- end -}}
           {{- end -}}
 
+          {{/* Derive systemStatus from individual tool statuses */}}
+          {{- $hasError := false -}}
+          {{- $allReady := true -}}
+          {{- $statuses := list $crossplaneStatus $certManagerStatus $argocdStatus $argoRolloutsStatus $argoWorkflowsStatus $traefikStatus $externalSecretsStatus $gitopsPromoterStatus $externalDnsStatus -}}
+          {{- range $s := $statuses -}}
+            {{- if eq $s "Error" -}}{{ $hasError = true }}{{- end -}}
+            {{- if ne $s "Ready" -}}{{ $allReady = false }}{{- end -}}
+          {{- end -}}
+          {{- $systemStatus := "Deploying" -}}
+          {{- if $hasError -}}{{ $systemStatus = "Error" }}{{- end -}}
+          {{- if $allReady -}}{{ $systemStatus = "Ready" }}{{- end -}}
+
           {{/* =================================================================== */}}
           {{/* STATUS PROPAGATION - Populate status fields */}}
           {{/* Pattern from XAWSProvider composition - uses observed composite resource */}}
@@ -4646,7 +4658,7 @@ spec:
             iamRoles:
               ecrRoleArn: {{ $ecrRoleArn | quote }}
             {{- end }}
-            systemStatus: Deploying
+            systemStatus: {{ $systemStatus }}
             tools:
               {{- if and $crossplaneEnabled $tools.crossplane $tools.crossplane.enabled }}
               crossplane:
