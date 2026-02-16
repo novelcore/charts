@@ -4517,6 +4517,31 @@ spec:
           {{- $vmHelmReleaseRevision := 0 -}}
           {{- $vmHelmReleaseDescription := "" -}}
 
+          {{/* Platform tool Helm release status — one variable per tool */}}
+          {{- $crossplaneStatus := "Pending" -}}
+          {{- $certManagerStatus := "Pending" -}}
+          {{- $argocdStatus := "Pending" -}}
+          {{- $argoRolloutsStatus := "Pending" -}}
+          {{- $argoWorkflowsStatus := "Pending" -}}
+          {{- $traefikStatus := "Pending" -}}
+          {{- $externalSecretsStatus := "Pending" -}}
+          {{- $gitopsPromoterStatus := "Pending" -}}
+          {{- $externalDnsStatus := "Pending" -}}
+
+          {{/* Map of resource name → status variable setter.
+               Each Helm release gets the same simple check: atProvider.state or resource.ready */}}
+          {{- $toolReleaseNames := dict
+                "crossplane-release" "crossplane"
+                "cert-manager-release" "certManager"
+                "argocd-release" "argocd"
+                "argo-rollouts-release" "argoRollouts"
+                "argo-workflows-release" "argoWorkflows"
+                "traefik-release" "traefik"
+                "external-secrets-release" "externalSecrets"
+                "gitops-promoter-release" "gitopsPromoter"
+                "external-dns-release" "externalDns"
+          -}}
+
           {{/* Iterate through observed resources to extract status */}}
           {{- range $resourceName, $resource := .observed.resources -}}
             {{- if $resource.resource -}}
@@ -4528,6 +4553,33 @@ spec:
                   {{- end -}}
                 {{- end -}}
               {{- end -}}
+
+              {{/* Extract platform tool Helm release status */}}
+              {{- $toolKey := index $toolReleaseNames $resourceName -}}
+              {{- if $toolKey -}}
+                {{- $state := "Installing" -}}
+                {{- if and $resource.resource.status $resource.resource.status.atProvider $resource.resource.status.atProvider.state -}}
+                  {{- if eq $resource.resource.status.atProvider.state "deployed" -}}
+                    {{- $state = "Ready" -}}
+                  {{- else if eq $resource.resource.status.atProvider.state "failed" -}}
+                    {{- $state = "Error" -}}
+                  {{- else -}}
+                    {{- $state = "Installing" -}}
+                  {{- end -}}
+                {{- else if $resource.ready -}}
+                  {{- $state = "Ready" -}}
+                {{- end -}}
+                {{- if eq $toolKey "crossplane" -}}{{ $crossplaneStatus = $state }}{{- end -}}
+                {{- if eq $toolKey "certManager" -}}{{ $certManagerStatus = $state }}{{- end -}}
+                {{- if eq $toolKey "argocd" -}}{{ $argocdStatus = $state }}{{- end -}}
+                {{- if eq $toolKey "argoRollouts" -}}{{ $argoRolloutsStatus = $state }}{{- end -}}
+                {{- if eq $toolKey "argoWorkflows" -}}{{ $argoWorkflowsStatus = $state }}{{- end -}}
+                {{- if eq $toolKey "traefik" -}}{{ $traefikStatus = $state }}{{- end -}}
+                {{- if eq $toolKey "externalSecrets" -}}{{ $externalSecretsStatus = $state }}{{- end -}}
+                {{- if eq $toolKey "gitopsPromoter" -}}{{ $gitopsPromoterStatus = $state }}{{- end -}}
+                {{- if eq $toolKey "externalDns" -}}{{ $externalDnsStatus = $state }}{{- end -}}
+              {{- end -}}
+
               {{/* Extract VictoriaMetrics Helm Release status and details */}}
               {{- if eq $resourceName "vm-stack-helm" -}}
                 {{/* Check if Helm Release is ready via resource.ready flag */}}
@@ -4594,28 +4646,83 @@ spec:
             iamRoles:
               ecrRoleArn: {{ $ecrRoleArn | quote }}
             {{- end }}
+            systemStatus: Deploying
             tools:
-              {{- if and $argoCdEnabled $tools.argocd $tools.argocd.enabled }}
-              {{- if $tools.argocd.server.ingress.enabled }}
-              argocd:
-                url: argocd.system.{{ $dns.clusterDomain }}
+              {{- if and $crossplaneEnabled $tools.crossplane $tools.crossplane.enabled }}
+              crossplane:
+                enabled: true
+                status: {{ $crossplaneStatus }}
+                version: {{ $tools.crossplane.version | quote }}
+                namespace: {{ $tools.crossplane.namespace }}
               {{- end }}
+              {{- if and $certManagerEnabled $tools.certManager $tools.certManager.enabled }}
+              certManager:
+                enabled: true
+                status: {{ $certManagerStatus }}
+                version: {{ $tools.certManager.version | quote }}
+                namespace: {{ $tools.certManager.namespace }}
+              {{- end }}
+              {{- if and $argoCdEnabled $tools.argocd $tools.argocd.enabled }}
+              argocd:
+                enabled: true
+                status: {{ $argocdStatus }}
+                version: {{ $tools.argocd.version | quote }}
+                namespace: {{ $tools.argocd.namespace }}
+                {{- if and $tools.argocd.server $tools.argocd.server.ingress $tools.argocd.server.ingress.enabled }}
+                url: argocd.system.{{ $dns.clusterDomain }}
+                {{- end }}
+              {{- end }}
+              {{- if and $argoRolloutsEnabled $tools.argoRollouts $tools.argoRollouts.enabled }}
+              argoRollouts:
+                enabled: true
+                status: {{ $argoRolloutsStatus }}
+                version: {{ $tools.argoRollouts.version | quote }}
+                namespace: {{ $tools.argoRollouts.namespace }}
               {{- end }}
               {{- if and $argoWorkflowsEnabled $tools.argoWorkflows $tools.argoWorkflows.enabled }}
-              {{- if and $tools.argoWorkflows.server.enabled $tools.argoWorkflows.server.ingress.enabled }}
               argoWorkflows:
+                enabled: true
+                status: {{ $argoWorkflowsStatus }}
+                version: {{ $tools.argoWorkflows.version | quote }}
+                namespace: {{ $tools.argoWorkflows.namespace }}
+                {{- if and $tools.argoWorkflows.server $tools.argoWorkflows.server.enabled $tools.argoWorkflows.server.ingress $tools.argoWorkflows.server.ingress.enabled }}
                 url: workflows.system.{{ $dns.clusterDomain }}
+                {{- end }}
               {{- end }}
+              {{- if and $traefikEnabled $tools.traefik $tools.traefik.enabled }}
+              traefik:
+                enabled: true
+                status: {{ $traefikStatus }}
+                version: {{ $tools.traefik.version | quote }}
+                namespace: {{ $tools.traefik.namespace }}
+              {{- end }}
+              {{- if and $externalSecretsEnabled $tools.externalSecrets $tools.externalSecrets.enabled }}
+              externalSecrets:
+                enabled: true
+                ready: {{ eq $externalSecretsStatus "Ready" }}
+                version: {{ $tools.externalSecrets.version | quote }}
+                namespace: {{ $tools.externalSecrets.namespace }}
               {{- end }}
               {{- if and $gitopsPromoterEnabled $tools.gitopsPromoter $tools.gitopsPromoter.enabled }}
-              {{- if and $tools.gitopsPromoter.ingress $tools.gitopsPromoter.ingress.enabled }}
               gitopsPromoter:
+                enabled: true
+                status: {{ $gitopsPromoterStatus }}
+                version: {{ $tools.gitopsPromoter.version | quote }}
+                namespace: {{ $tools.gitopsPromoter.namespace }}
+                {{- if and $tools.gitopsPromoter.ingress $tools.gitopsPromoter.ingress.enabled }}
                 url: {{ regexReplaceAll "\\{cluster-domain\\}" $tools.gitopsPromoter.ingress.hostname $dns.clusterDomain }}
+                {{- end }}
                 {{- if $hasGithub }}
                 githubSecretName: {{ $clusterName }}-gitops-promoter-github-secret
                 clusterScmProviderName: {{ $envConfig.organization.name }}-github-scm-provider
                 {{- end }}
               {{- end }}
+              {{- if and $externalDnsEnabled $tools.externalDns $tools.externalDns.enabled }}
+              externalDns:
+                enabled: true
+                status: {{ $externalDnsStatus }}
+                version: {{ $tools.externalDns.version | default "1.18.0" | quote }}
+                namespace: {{ $tools.externalDns.namespace }}
               {{- end }}
 
             # Observability Status (top-level field, not under tools)
