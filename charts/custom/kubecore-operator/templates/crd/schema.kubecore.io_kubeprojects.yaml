@@ -475,6 +475,10 @@ spec:
                     name:
                       description: Name of the environment
                       type: string
+                    namespace:
+                      description: Namespace is the Kubernetes namespace created for
+                        this environment
+                      type: string
                     nodeGroup:
                       description: NodeGroup contains information about the node group
                       properties:
@@ -504,6 +508,42 @@ spec:
                       description: Priority shows the deployment priority for this
                         environment
                       type: integer
+                    schedulingProfile:
+                      description: SchedulingProfile contains the scheduling configuration
+                        for workloads in this environment
+                      properties:
+                        availabilityZones:
+                          description: AvailabilityZones are the availability zones
+                            where environment nodes run
+                          items:
+                            type: string
+                          type: array
+                        nodeSelectors:
+                          additionalProperties:
+                            type: string
+                          description: NodeSelectors are the node labels to use as
+                            scheduling constraints
+                          type: object
+                        tolerations:
+                          description: Tolerations are the tolerations required to
+                            schedule on environment nodes
+                          items:
+                            description: TolerationStatus represents a single Kubernetes
+                              toleration
+                            properties:
+                              effect:
+                                type: string
+                              key:
+                                type: string
+                              operator:
+                                type: string
+                              value:
+                                type: string
+                            required:
+                            - key
+                            type: object
+                          type: array
+                      type: object
                     state:
                       description: State represents the current state of the environment
                       type: string
@@ -537,6 +577,9 @@ spec:
               gitHubStatus:
                 description: GitHubStatus tracks the status of GitHub resources (project-level)
                 properties:
+                  defaultBranch:
+                    description: DefaultBranch is the default branch of the repository
+                    type: string
                   gitHubEnvironmentConfigRef:
                     description: GitHubEnvironmentConfigRef reference to GitHub EnvironmentConfig
                     properties:
@@ -582,10 +625,35 @@ spec:
                   message:
                     description: Message contains details about the current state
                     type: string
+                  repositoryName:
+                    description: RepositoryName is the full name of the repository
+                      (owner/repo)
+                    type: string
+                  repositoryURL:
+                    description: RepositoryURL is the HTML URL of the created GitHub
+                      repository
+                    type: string
                   state:
                     description: 'State of GitHub resources: "Pending", "Creating",
                       "Ready", "Failed"'
                     type: string
+                  teams:
+                    description: Teams contains the GitHub team IDs created for this
+                      project
+                    properties:
+                      business:
+                        description: Business is the ID of the business team
+                        type: string
+                      main:
+                        description: Main is the ID of the main team
+                        type: string
+                      ops:
+                        description: Ops is the ID of the ops team
+                        type: string
+                      software:
+                        description: Software is the ID of the software team
+                        type: string
+                    type: object
                 required:
                 - state
                 type: object
