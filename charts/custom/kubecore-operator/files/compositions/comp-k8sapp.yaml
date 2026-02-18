@@ -848,6 +848,10 @@ spec:
           {{- $awsConfig := $envConfig.aws -}}
           {{- $accountId := $awsConfig.accountId -}}
           {{- $kubernetesProviderConfig := $awsConfig.kubernetesProviderConfig -}}
+          {{- $clusterName := "" -}}
+          {{- if $envConfig.aws -}}
+            {{- $clusterName = $envConfig.aws.clusterName | default "" -}}
+          {{- end -}}
 
           {{/* App configuration */}}
           {{- $appName := $k8sapp.appName | default ($spec.appName | default $name) -}}
