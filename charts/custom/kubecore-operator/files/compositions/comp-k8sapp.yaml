@@ -497,9 +497,9 @@ spec:
           apiVersion: repo.github.upbound.io/v1alpha1
           kind: RepositoryFile
           metadata:
-            name: {{ $name }}-{{ $envName }}-overlay
+            name: {{ $name }}-{{ $overlayName }}-overlay
             annotations:
-              gotemplating.fn.crossplane.io/composition-resource-name: {{ $envName }}-overlay
+              gotemplating.fn.crossplane.io/composition-resource-name: {{ $overlayName }}-overlay
               kubecore.eu/app: {{ $resourceName }}
               kubecore.eu/environment: {{ $envName }}
           spec:
@@ -605,9 +605,9 @@ spec:
           apiVersion: repo.github.upbound.io/v1alpha1
           kind: RepositoryFile
           metadata:
-            name: {{ $name }}-{{ $envName }}-kustomization
+            name: {{ $name }}-{{ $overlayName }}-kustomization
             annotations:
-              gotemplating.fn.crossplane.io/composition-resource-name: {{ $envName }}-kustomization
+              gotemplating.fn.crossplane.io/composition-resource-name: {{ $overlayName }}-kustomization
               kubecore.eu/app: {{ $resourceName }}
               kubecore.eu/environment: {{ $envName }}
           spec:
