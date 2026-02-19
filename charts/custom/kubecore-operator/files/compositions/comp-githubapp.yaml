@@ -702,9 +702,16 @@ spec:
           {{- if and $promoterEnabled (gt (len $kubePools) 0) }}
           {{/* Find first enabled environment to observe */}}
           {{- $firstEnv := "" -}}
+          {{- $firstOverlayName := "" -}}
           {{- range $env := $k8sapp.environments }}
             {{- if and $env.enabled (not $firstEnv) }}
               {{- $firstEnv = $env.name -}}
+              {{- $envType := $env.environmentType | default "" -}}
+              {{- if and $envType (ne $firstEnv $envType) (not (hasPrefix (printf "%s-" $envType) $firstEnv)) -}}
+                {{- $firstOverlayName = printf "%s-%s" $envType $firstEnv -}}
+              {{- else -}}
+                {{- $firstOverlayName = $firstEnv -}}
+              {{- end -}}
             {{- end }}
           {{- end }}
 
@@ -724,7 +731,7 @@ spec:
               kubecore.eu/app: {{ $resourceName }}
               kubecore.eu/project: {{ $projectName }}
               kubecore.eu/observed-environment: {{ $firstEnv }}
-              kubecore.eu/observed-application: {{ $resourceName }}-{{ $firstEnv }}
+              kubecore.eu/observed-application: {{ $resourceName }}-{{ $firstOverlayName }}
             labels:
               platform.kubecore.io/organization: {{ $org }}
               platform.kubecore.io/project: {{ $projectName }}
@@ -740,7 +747,7 @@ spec:
                 apiVersion: argoproj.io/v1alpha1
                 kind: Application
                 metadata:
-                  name: {{ $resourceName }}-{{ $firstEnv }}
+                  name: {{ $resourceName }}-{{ $firstOverlayName }}
                   namespace: argocd
             # Wait for hydrator to complete successfully before becoming Ready
             readiness:
@@ -860,7 +867,12 @@ spec:
                   environments:
                     {{- range $env := $k8sapp.environments }}
                     {{- if $env.enabled }}
-                    - branch: kubeapp/{{ $resourceName }}/kubenv/{{ $env.name }}
+                    {{- $envType := $env.environmentType | default "" -}}
+                    {{- $overlayName := $env.name -}}
+                    {{- if and $envType (ne $env.name $envType) (not (hasPrefix (printf "%s-" $envType) $env.name)) -}}
+                      {{- $overlayName = printf "%s-%s" $envType $env.name -}}
+                    {{- end -}}
+                    - branch: kubeapp/{{ $resourceName }}/kubenv/{{ $overlayName }}
                       autoMerge: {{ $env.autoMerge | default true }}
                     {{- end }}
                     {{- end }}
