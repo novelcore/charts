@@ -871,7 +871,7 @@ spec:
                     {{- $overlayName := $env.name -}}
                     {{- if and $envType (ne $env.name $envType) (not (hasPrefix (printf "%s-" $envType) $env.name)) -}}
                       {{- $overlayName = printf "%s-%s" $envType $env.name -}}
-                    {{- end -}}
+                    {{- end }}
                     - branch: kubeapp/{{ $resourceName }}/kubenv/{{ $overlayName }}
                       autoMerge: {{ $env.autoMerge | default true }}
                     {{- end }}
