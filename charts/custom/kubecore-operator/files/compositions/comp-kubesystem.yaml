@@ -98,6 +98,7 @@ spec:
           {{- $vmEnabled := $vmConfig.enabled | default false -}}
           {{- $vmMode := $vmConfig.mode | default "single" -}}
           {{- $vmChartVersion := $vmConfig.chartVersion | default "0.29.5" -}}
+          {{- $vmOperatorChartVersion := $vmConfig.operatorChartVersion | default "0.57.1" -}}
           {{- $vmNamespace := $vmConfig.namespace | default "observability" -}}
           {{- $vmRetention := $vmConfig.retention | default "90d" -}}
           {{- $vmStorageSize := $vmConfig.storage.size | default "50Gi" -}}
@@ -3980,6 +3981,73 @@ spec:
                         property: client-secret
           {{- end }}
 
+          {{/* VictoriaMetrics Operator Helm Release - Installed BEFORE the k8s-stack to ensure
+               webhook endpoints are available before stack resources are patched/upgraded.
+               This eliminates the race condition where Crossplane upgrades vm-stack-helm
+               before the operator pod is ready to serve admission webhooks. */}}
+          ---
+          apiVersion: helm.crossplane.io/v1beta1
+          kind: Release
+          metadata:
+            name: {{ $clusterName }}-vm-operator
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: vm-operator-release
+            labels:
+              {{- range $key, $value := $commonLabels }}
+              {{ $key }}: "{{ $value }}"
+              {{- end }}
+              platform.kubecore.io/component: "observability"
+          spec:
+            deletionPolicy: Orphan
+            managementPolicies: ["*"]
+            providerConfigRef:
+              name: {{ $helmProvider }}
+            forProvider:
+              chart:
+                name: victoria-metrics-operator
+                repository: https://victoriametrics.github.io/helm-charts
+                version: "{{ $vmOperatorChartVersion }}"
+              namespace: {{ $vmNamespace }}
+              wait: true
+              values:
+                # Keep resource names predictable and under 63 chars regardless of cluster name length
+                fullnameOverride: {{ $clusterName }}-vm-operator
+                {{- if $nodeSelector }}
+                nodeSelector:
+                  {{- range $key, $value := $nodeSelector }}
+                  {{ $key }}: {{ $value | quote }}
+                  {{- end }}
+                {{- end }}
+                tolerations:
+                - key: "kubecore.eu/computation-type"
+                  operator: "Equal"
+                  value: "kubecore-system"
+                  effect: "NoSchedule"
+                - key: "kubecore.eu/computation-type"
+                  operator: "Equal"
+                  value: "compute"
+                  effect: "NoSchedule"
+                - key: "kubecore.eu/computation-type"
+                  operator: "Equal"
+                  value: "gpu"
+                  effect: "NoSchedule"
+                - key: "kubecore.eu/computation-type"
+                  operator: "Equal"
+                  value: "observability"
+                  effect: "NoSchedule"
+                {{- if $tolerations }}
+                {{- range $toleration := $tolerations }}
+                {{- if and $toleration.effect (ne $toleration.effect "") (ne $toleration.effect "<no value>") }}
+                - key: {{ $toleration.key | quote }}
+                  {{- if and $toleration.value (ne $toleration.value "") }}
+                  value: {{ $toleration.value | quote }}
+                  {{- end }}
+                  operator: {{ $toleration.operator | default "Equal" | quote }}
+                  effect: {{ $toleration.effect | quote }}
+                {{- end }}
+                {{- end }}
+                {{- end }}
+
           {{/* VictoriaMetrics K8s Stack Helm Release - Replaces all individual CRDs */}}
           ---
           apiVersion: helm.crossplane.io/v1beta1
@@ -4004,50 +4072,16 @@ spec:
                 repository: oci://ghcr.io/victoriametrics/helm-charts
                 version: "0.65.1"
               namespace: {{ $vmNamespace }}
+              wait: true
               values:
                 # Override fullname to keep resource names under 63 chars
                 fullnameOverride: {{ $clusterName }}-vm
                 global:
                   clusterLabel: {{ $clusterLabel | quote }}
-                # VictoriaMetrics Operator configuration
+                # VictoriaMetrics Operator is installed as a separate release (vm-operator-release)
+                # to ensure webhook endpoints are ready before stack resources are patched.
                 victoria-metrics-operator:
-                  enabled: true
-                  {{- if $nodeSelector }}
-                  nodeSelector:
-                    {{- range $key, $value := $nodeSelector }}
-                    {{ $key }}: {{ $value | quote }}
-                    {{- end }}
-                  {{- end }}
-                  # Tolerations for all nodegroup taints (operator must run on all nodegroups)
-                  tolerations:
-                  - key: "kubecore.eu/computation-type"
-                    operator: "Equal"
-                    value: "kubecore-system"
-                    effect: "NoSchedule"
-                  - key: "kubecore.eu/computation-type"
-                    operator: "Equal"
-                    value: "compute"
-                    effect: "NoSchedule"
-                  - key: "kubecore.eu/computation-type"
-                    operator: "Equal"
-                    value: "gpu"
-                    effect: "NoSchedule"
-                  - key: "kubecore.eu/computation-type"
-                    operator: "Equal"
-                    value: "observability"
-                    effect: "NoSchedule"
-                  {{- if $tolerations }}
-                  {{- range $toleration := $tolerations }}
-                  {{- if and $toleration.effect (ne $toleration.effect "") (ne $toleration.effect "<no value>") }}
-                  - key: {{ $toleration.key | quote }}
-                    {{- if and $toleration.value (ne $toleration.value "") }}
-                    value: {{ $toleration.value | quote }}
-                    {{- end }}
-                    operator: {{ $toleration.operator | default "Equal" | quote }}
-                    effect: {{ $toleration.effect | quote }}
-                  {{- end }}
-                  {{- end }}
-                  {{- end }}
+                  enabled: false
                 # Disable VMSingle - use VMCluster for both single and HA modes
                 vmsingle:
                   enabled: false
@@ -4925,16 +4959,20 @@ spec:
         - sequence:
           - observability-namespace
           - grafana-operator-release
-        # Grafana OIDC ExternalSecret after ClusterSecretStore (needs secret store to pull credentials)
+        # VM Operator must be ready (webhook endpoints live) before the stack is applied
+        - sequence:
+          - observability-namespace
+          - vm-operator-release
+        # Grafana OIDC ExternalSecret and VM Operator must both be ready before vm-stack-helm
         - sequence:
           - cluster-secret-store
           - grafana-oidc-external-secret
+          - vm-operator-release
           - vm-stack-helm
-        # VictoriaMetrics K8s Stack Helm Release after Grafana operator
-        # Note: VM Operator is included in the k8s-stack chart, no separate release needed
-        # VMAlertmanager is managed by Helm (alertmanager.enabled: true)
+        # VictoriaMetrics K8s Stack after VM Operator and Grafana Operator
         - sequence:
           - grafana-operator-release
+          - vm-operator-release
           - vm-stack-helm
         # Finally application tools
         - sequence:
