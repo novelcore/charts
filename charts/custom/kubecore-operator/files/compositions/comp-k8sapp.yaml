@@ -1813,7 +1813,7 @@ spec:
       config:
         respectDeletionOrder: true
         finalizerStrategy:
-          mode: Strict
+          mode: Lenient
           cleanupRules: []
       rules:
       # Simplified sequencer - allow all GitOps resources to create in parallel
