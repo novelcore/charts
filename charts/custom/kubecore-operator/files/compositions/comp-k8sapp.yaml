@@ -1558,7 +1558,10 @@ spec:
                   namespace: {{ $firstEnabledEnv.namespace | default (printf "%s-%s" $projectName $firstEnabledEnv.name) }}
                 spec:
                   refreshInterval: "11h"  # Sync every 11 hours (before 12-hour ECR token expiration)
-                  deletionPolicy: Delete
+                  deletionPolicy: Merge  # Do not delete remote GitHub Actions secrets on PushSecret deletion.
+                  # deletionPolicy: Delete is avoided because the SecretStore may already be gone when
+                  # the PushSecret is deleted (parallel deletion), leaving the finalizer permanently stuck.
+                  # ECR credentials become invalid naturally once the ECR repository is deleted.
                   secretStoreRefs:
                     - name: {{ $resourceName }}-github-actions
                       kind: SecretStore
@@ -1837,5 +1840,13 @@ spec:
       - sequence:
         - control-k8s-store
         - github-parser
+
+      # ECR → GitHub Actions credential sync: PushSecret must be deleted BEFORE the SecretStore.
+      # With respectDeletionOrder: true the sequence is reversed on deletion, so listing
+      # the SecretStore first ensures: creation = SecretStore→PushSecret, deletion = PushSecret→SecretStore.
+      # This prevents the PushSecret finalizer from getting stuck when the SecretStore is already gone.
+      - sequence:
+        - thc-github-secret-store
+        - ecr-push-github
 
       # All other resources can be created in parallel - no hard dependencies
