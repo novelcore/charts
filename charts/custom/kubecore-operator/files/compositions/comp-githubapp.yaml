@@ -1188,7 +1188,7 @@ spec:
             {{- range $env := $k8sapp.environments -}}
               {{- if $env.enabled -}}
                 {{- $appName := $k8sapp.appName | default $name -}}
-                {{- $envPromotion := dict "name" $env.name "branch" (printf "kubeapp/%s-%s/kubenv/%s" $project.name $appName $env.name) "autoMerge" ($env.autoMerge | default true) -}}
+                {{- $envPromotion := dict "name" $env.name "branch" (printf "kubeapp/%s-%s/kubenv/%s" $project.name $appName $env.name) "autoMerge" ($env.autoMerge | default true) "activeCommitStatuses" (list) "proposedCommitStatuses" (list) -}}
                 {{- $promoterEnvironments = append $promoterEnvironments $envPromotion -}}
               {{- end -}}
             {{- end -}}
@@ -1283,6 +1283,9 @@ spec:
                 observersReady: {{ $observersReady }}
                 promotionStrategyCreated: {{ $promotionStrategyCreated }}
                 argoCDCommitStatusCreated: {{ $argoCDCommitStatusCreated }}
+                activeCommitStatuses:
+                  - key: argocd-app-health
+                proposedCommitStatuses: []
                 kubePools: {{ $promoterKubePoolStatus | toJson }}
                 environments: {{ $promoterEnvironments | toJson }}
                 {{- end }}

@@ -564,6 +564,17 @@ spec:
                 description: GitHubProviderConfig contains the GitHub provider configuration
                   name
                 type: string
+              gitOpsStatus:
+                description: GitOpsStatus contains GitOps workflow configuration status
+                properties:
+                  basePath:
+                    description: BasePath is the base path for GitOps files in the
+                      repository
+                    type: string
+                  branchName:
+                    description: BranchName is the branch used for GitOps operations
+                    type: string
+                type: object
               k8sAppStatus:
                 description: K8sAppStatus contains K8s application status information
                 properties:
@@ -607,6 +618,98 @@ spec:
                 - Failed
                 - Deleting
                 type: string
+              promotionStatus:
+                description: PromotionStatus contains GitOps Promoter integration
+                  status
+                properties:
+                  activeCommitStatuses:
+                    description: ActiveCommitStatuses lists global active commit status
+                      gates
+                    items:
+                      description: CommitStatusGate defines a commit status gate key
+                      properties:
+                        key:
+                          description: Key is the commit status gate key
+                          type: string
+                      required:
+                      - key
+                      type: object
+                    type: array
+                  argoCDCommitStatusCreated:
+                    description: ArgoCDCommitStatusCreated indicates whether the ArgoCDCommitStatus
+                      resource was created
+                    type: boolean
+                  enabled:
+                    description: Enabled indicates whether GitOps Promoter is enabled
+                    type: boolean
+                  environments:
+                    description: Environments lists per-environment promotion configuration
+                    items:
+                      description: PromotionEnvironmentStatus contains per-environment
+                        promotion status
+                      properties:
+                        activeCommitStatuses:
+                          description: ActiveCommitStatuses lists per-environment
+                            active commit status gates
+                          items:
+                            description: CommitStatusGate defines a commit status
+                              gate key
+                            properties:
+                              key:
+                                description: Key is the commit status gate key
+                                type: string
+                            required:
+                            - key
+                            type: object
+                          type: array
+                        autoMerge:
+                          description: AutoMerge indicates whether auto-merge is enabled
+                            for this environment
+                          type: boolean
+                        branch:
+                          description: Branch used for promotion
+                          type: string
+                        name:
+                          description: Name of the environment
+                          type: string
+                        proposedCommitStatuses:
+                          description: ProposedCommitStatuses lists per-environment
+                            proposed commit status gates
+                          items:
+                            description: CommitStatusGate defines a commit status
+                              gate key
+                            properties:
+                              key:
+                                description: Key is the commit status gate key
+                                type: string
+                            required:
+                            - key
+                            type: object
+                          type: array
+                      type: object
+                    type: array
+                  observersReady:
+                    description: ObserversReady indicates whether ArgoCD application
+                      observers are ready
+                    type: boolean
+                  promotionStrategyCreated:
+                    description: PromotionStrategyCreated indicates whether the PromotionStrategy
+                      resource was created
+                    type: boolean
+                  proposedCommitStatuses:
+                    description: ProposedCommitStatuses lists global proposed commit
+                      status gates
+                    items:
+                      description: CommitStatusGate defines a commit status gate key
+                      properties:
+                        key:
+                          description: Key is the commit status gate key
+                          type: string
+                      required:
+                      - key
+                      type: object
+                    type: array
+                type: object
               reconciliationAttempts:
                 description: ReconciliationAttempts tracks the number of reconciliation
                   attempts for backoff
