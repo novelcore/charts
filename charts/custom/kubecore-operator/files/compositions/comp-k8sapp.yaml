@@ -752,6 +752,7 @@ spec:
               name: {{ $providerConfig }}
             forProvider:
               region: {{ $primaryRegion }}
+              forceDelete: true  # Allow deletion even when images are present
               imageScanningConfiguration:
                 scanOnPush: true
               imageTagMutability: MUTABLE
