@@ -1,11 +1,12 @@
 {{- if .Values.crossplaneXRDs.enabled }}
 ---
+---
 apiVersion: apiextensions.crossplane.io/v2
 kind: CompositeResourceDefinition
 metadata:
-  name: xawsnetworks.platform.kubecore.io
   labels:
     {{- include "chart.labels" . | nindent 4 }}
+  name: xawsnetworks.platform.kubecore.io
 spec:
   scope: Cluster
   group: platform.kubecore.io

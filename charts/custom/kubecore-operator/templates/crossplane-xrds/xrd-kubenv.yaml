@@ -1,11 +1,12 @@
 {{- if .Values.crossplaneXRDs.enabled }}
 ---
+---
 apiVersion: apiextensions.crossplane.io/v2
 kind: CompositeResourceDefinition
 metadata:
-  name: xkubenvs.platform.kubecore.io
   labels:
     {{- include "chart.labels" . | nindent 4 }}
+  name: xkubenvs.platform.kubecore.io
 spec:
   group: platform.kubecore.io
   names:

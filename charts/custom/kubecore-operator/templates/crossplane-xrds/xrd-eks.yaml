@@ -4,6 +4,8 @@
 apiVersion: apiextensions.crossplane.io/v2
 kind: CompositeResourceDefinition
 metadata:
+  labels:
+    {{- include "chart.labels" . | nindent 4 }}
   name: xeks.platform.kubecore.io
 spec:
   scope: Cluster

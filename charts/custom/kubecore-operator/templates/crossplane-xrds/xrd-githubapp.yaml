@@ -3,9 +3,9 @@
 apiVersion: apiextensions.crossplane.io/v2
 kind: CompositeResourceDefinition
 metadata:
-  name: xgithubapps.github.platform.kubecore.io
   labels:
     {{- include "chart.labels" . | nindent 4 }}
+  name: xgithubapps.github.platform.kubecore.io
 spec:
   scope: Cluster
   group: github.platform.kubecore.io
@@ -304,6 +304,22 @@ spec:
                       argoCDCommitStatusCreated:
                         type: boolean
                         description: "ArgoCDCommitStatus resource creation status"
+                      activeCommitStatuses:
+                        type: array
+                        description: "Global active commit status gates applied to all environments"
+                        items:
+                          type: object
+                          properties:
+                            key:
+                              type: string
+                      proposedCommitStatuses:
+                        type: array
+                        description: "Global proposed commit status gates"
+                        items:
+                          type: object
+                          properties:
+                            key:
+                              type: string
                       kubePools:
                         type: object
                         description: "Per-KubePool promoter status"
@@ -320,6 +336,20 @@ spec:
                               type: string
                             autoMerge:
                               type: boolean
+                            activeCommitStatuses:
+                              type: array
+                              items:
+                                type: object
+                                properties:
+                                  key:
+                                    type: string
+                            proposedCommitStatuses:
+                              type: array
+                              items:
+                                type: object
+                                properties:
+                                  key:
+                                    type: string
 
               # Template information (OPTIONAL enhancement)
               templateName:

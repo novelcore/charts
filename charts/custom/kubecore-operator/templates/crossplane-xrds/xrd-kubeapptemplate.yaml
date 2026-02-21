@@ -3,9 +3,9 @@
 apiVersion: apiextensions.crossplane.io/v2
 kind: CompositeResourceDefinition
 metadata:
-  name: xkubeapptemplates.platform.kubecore.io
   labels:
     {{- include "chart.labels" . | nindent 4 }}
+  name: xkubeapptemplates.platform.kubecore.io
 spec:
   scope: Cluster
   group: platform.kubecore.io
