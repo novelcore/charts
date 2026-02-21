@@ -1559,7 +1559,7 @@ spec:
                   namespace: {{ $firstEnabledEnv.namespace | default (printf "%s-%s" $projectName $firstEnabledEnv.name) }}
                 spec:
                   refreshInterval: "11h"  # Sync every 11 hours (before 12-hour ECR token expiration)
-                  deletionPolicy: Merge  # Do not delete remote GitHub Actions secrets on PushSecret deletion.
+                  deletionPolicy: None  # Do not delete remote GitHub Actions secrets on PushSecret deletion.
                   # deletionPolicy: Delete is avoided because the SecretStore may already be gone when
                   # the PushSecret is deleted (parallel deletion), leaving the finalizer permanently stuck.
                   # ECR credentials become invalid naturally once the ECR repository is deleted.
