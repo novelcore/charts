@@ -863,7 +863,7 @@ spec:
                   gitRepositoryRef:
                     name: {{ $projectName }}
                   activeCommitStatuses:
-                    - key: argocd-app-health
+                    - key: argocd-health
                   environments:
                     {{- range $env := $k8sapp.environments }}
                     {{- if $env.enabled }}
@@ -1284,7 +1284,7 @@ spec:
                 promotionStrategyCreated: {{ $promotionStrategyCreated }}
                 argoCDCommitStatusCreated: {{ $argoCDCommitStatusCreated }}
                 activeCommitStatuses:
-                  - key: argocd-app-health
+                  - key: argocd-health
                 proposedCommitStatuses: []
                 kubePools: {{ $promoterKubePoolStatus | toJson }}
                 environments: {{ $promoterEnvironments | toJson }}
