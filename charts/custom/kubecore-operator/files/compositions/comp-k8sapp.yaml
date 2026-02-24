@@ -1424,6 +1424,13 @@ spec:
           {{- end -}}
 
           {{- if $ecrEnabled }}
+          {{/* Determine the first enabled environment to assign a stable sequencer anchor name */}}
+          {{- $firstEnabledEnvName := "" -}}
+          {{- range $env := $k8sapp.environments -}}
+            {{- if and $env.enabled (not $firstEnabledEnvName) -}}
+              {{- $firstEnabledEnvName = $env.name -}}
+            {{- end -}}
+          {{- end -}}
           {{/* Create GitHub SecretStore per environment in child cluster */}}
           {{- range $env := $k8sapp.environments }}
           {{- $envName := $env.name -}}
@@ -1437,6 +1444,11 @@ spec:
               {{- end -}}
             {{- end -}}
           {{- end -}}
+          {{/* Use a fixed anchor name for the first env so the sequencer rule stays generic */}}
+          {{- $compResName := printf "%s-github-secret-store" $envName -}}
+          {{- if eq $envName $firstEnabledEnvName -}}
+            {{- $compResName = "primary-github-secret-store" -}}
+          {{- end -}}
           ---
           # GitHub SecretStore in child cluster for {{ $envName }}
           apiVersion: kubernetes.crossplane.io/v1alpha2
@@ -1444,7 +1456,7 @@ spec:
           metadata:
             name: {{ $name }}-{{ $envName }}-github-secret-store
             annotations:
-              gotemplating.fn.crossplane.io/composition-resource-name: {{ $envName }}-github-secret-store
+              gotemplating.fn.crossplane.io/composition-resource-name: {{ $compResName }}
           spec:
             deletionPolicy: Delete
             providerConfigRef:
@@ -1846,8 +1858,9 @@ spec:
       # With respectDeletionOrder: true the sequence is reversed on deletion, so listing
       # the SecretStore first ensures: creation = SecretStore→PushSecret, deletion = PushSecret→SecretStore.
       # This prevents the PushSecret finalizer from getting stuck when the SecretStore is already gone.
+      # "primary-github-secret-store" is always the first enabled environment's SecretStore (see step 7.7).
       - sequence:
-        - thc-github-secret-store
+        - primary-github-secret-store
         - ecr-push-github
 
       # All other resources can be created in parallel - no hard dependencies

@@ -1263,8 +1263,8 @@ spec:
               branchStrategy:
                 implemented: {{ $branchStrategyImplemented }}
                 type: {{ $branchStrategyType | default "gitFlow" | quote }}
-                branchesCreated: {{ if gt $branchResources 0 }}["main", "develop"]{{ else }}[]{{ end }}
-                protectionRulesApplied: {{ if gt $branchProtectionResources 0 }}["main", "develop"]{{ else }}[]{{ end }}
+                branchesCreated: {{ if gt $branchResources 0 }}["main", "dev"]{{ else }}[]{{ end }}
+                protectionRulesApplied: {{ if gt $branchProtectionResources 0 }}["main", "dev"]{{ else }}[]{{ end }}
 
             # Template Information - with safe defaults
             templateName: {{ $templateName | default "" | quote }}
