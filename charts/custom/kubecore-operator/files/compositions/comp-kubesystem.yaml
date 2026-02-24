@@ -4048,6 +4048,22 @@ spec:
                 {{- end }}
                 {{- end }}
 
+          {{/* Guard: only generate vm-stack-helm once vm-operator-release is confirmed Ready in
+               observed.resources. On the very first XKubeSystem reconciliation vm-operator-release
+               is not yet in observed (it doesn't exist yet), so this prevents the webhook-race
+               where both releases are installed in parallel and vm-stack fires before the operator
+               pod has registered its admission webhook endpoints. */}}
+          {{- $vmOperatorReady := false -}}
+          {{- range $rName, $rObj := .observed.resources -}}
+            {{- if and (eq $rName "vm-operator-release") $rObj.resource -}}
+              {{- range $rObj.resource.status.conditions -}}
+                {{- if and (eq .type "Ready") (eq .status "True") -}}
+                  {{- $vmOperatorReady = true -}}
+                {{- end -}}
+              {{- end -}}
+            {{- end -}}
+          {{- end -}}
+          {{- if $vmOperatorReady }}
           {{/* VictoriaMetrics K8s Stack Helm Release - Replaces all individual CRDs */}}
           ---
           apiVersion: helm.crossplane.io/v1beta1
@@ -4472,6 +4488,7 @@ spec:
                       operator: "Equal"
                       value: "kubecore-system"
                       effect: "NoSchedule"
+          {{- end }}
           {{- end }}
 
           {{- if $shouldDeployVM }}
