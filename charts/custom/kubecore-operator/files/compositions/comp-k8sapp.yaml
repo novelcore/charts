@@ -155,6 +155,14 @@ spec:
           {{/* Base resources configuration */}}
           {{- $baseResources := $k8sapp.baseResources | default (dict) -}}
 
+          {{/* Ingress enablement detection - check if any environment has ingress enabled */}}
+          {{- $ingressEnabled := false -}}
+          {{- range $env := $k8sapp.environments -}}
+            {{- if and $env.ingress $env.ingress.enabled -}}
+              {{- $ingressEnabled = true -}}
+            {{- end -}}
+          {{- end -}}
+
           {{- if $baseResourcesEnabled }}
           ---
           # Base Kubernetes Resources
@@ -297,6 +305,20 @@ spec:
                     app.kubernetes.io/name: {{ $appName }}
                     app.kubernetes.io/part-of: {{ $projectName }}
                     app.kubernetes.io/managed-by: kubecore
+                {{ end }}
+
+                {{ if $ingressEnabled }}
+                ---
+                apiVersion: networking.k8s.io/v1
+                kind: Ingress
+                metadata:
+                  name: {{ $resourceName }}-ingress
+                  labels:
+                    app: {{ $resourceName }}
+                    app.kubernetes.io/name: {{ $appName }}
+                    app.kubernetes.io/part-of: {{ $projectName }}
+                    app.kubernetes.io/managed-by: kubecore
+                spec: {}
                 {{ end }}
               file: {{ $basePath }}/{{ $resourceName }}/base/resources.yaml
               overwriteOnCreate: true
@@ -591,6 +613,38 @@ spec:
                             {{ end }}
                           {{ end }}
                         {{ end }}
+
+                {{ if and $env.ingress $env.ingress.enabled }}
+                {{- $ingressClass := index $env.ingress.annotations "kubernetes.io/ingress.class" | default "traefik-system" -}}
+                ---
+                apiVersion: networking.k8s.io/v1
+                kind: Ingress
+                metadata:
+                  name: {{ $resourceName }}-ingress
+                  annotations:
+                    {{ range $key, $value := $env.ingress.annotations }}
+                    {{ $key }}: {{ $value | quote }}
+                    {{ end }}
+                spec:
+                  ingressClassName: {{ $ingressClass }}
+                  {{ if $env.ingress.tls.enabled }}
+                  tls:
+                  - hosts:
+                    - {{ $env.ingress.host }}
+                    secretName: {{ $env.ingress.tls.secretName }}
+                  {{ end }}
+                  rules:
+                  - host: {{ $env.ingress.host }}
+                    http:
+                      paths:
+                      - path: {{ $env.ingress.path | default "/" }}
+                        pathType: {{ $env.ingress.pathType | default "Prefix" }}
+                        backend:
+                          service:
+                            name: {{ $resourceName }}-svc
+                            port:
+                              number: {{ $k8sapp.service.port | default 80 }}
+                {{ end }}
               file: {{ $basePath }}/{{ $resourceName }}/overlays/{{ $overlayName }}/deployment-patch.yaml
               overwriteOnCreate: true
               repositorySelector:
