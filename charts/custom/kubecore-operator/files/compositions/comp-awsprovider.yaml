@@ -360,6 +360,8 @@ spec:
                   namespace: external-secrets
                   annotations:
                     eks.amazonaws.com/role-arn: {{ printf "arn:aws:iam::%s:role/%s-awsprovider-eso-role" $accountId $org }}
+                    # Use regional STS to avoid latency/timeouts; do NOT set eks.amazonaws.com/audience when using ESO (causes double-audience token)
+                    eks.amazonaws.com/sts-regional-endpoints: "true"
                   labels:
                     platform.kubecore.io/organization: {{ $org }}
                     platform.kubecore.io/resource-type: service-account
@@ -403,7 +405,8 @@ spec:
                           serviceAccountRef:
                             name: {{ $org }}-eso-sa
                             namespace: external-secrets
-                      region: {{ $primaryRegion }}
+                      # Use EKS region so STS AssumeRoleWithWebIdentity succeeds (OIDC lookup); Secrets Manager calls still work cross-region via SDK
+                      region: {{ $eksRegion }}
                       service: SecretsManager
 
   # Step 3: Enable automatic readiness detection

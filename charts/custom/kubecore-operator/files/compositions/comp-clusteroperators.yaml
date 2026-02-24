@@ -1,0 +1,335 @@
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: clusteroperators
+  labels:
+    platform.kubecore.io/type: clusteroperators
+    provider: helm
+    service: cluster-operators
+    layer: platform
+spec:
+  writeConnectionSecretsToNamespace: crossplane-system
+  compositeTypeRef:
+    apiVersion: platform.kubecore.io/v1alpha1
+    kind: XClusterOperators
+  mode: Pipeline
+  pipeline:
+
+  - step: load-environment-configs
+    functionRef:
+      name: function-environment-configs
+    input:
+      apiVersion: environmentconfigs.fn.crossplane.io/v1beta1
+      kind: Input
+      spec:
+        environmentConfigs:
+        - type: Selector
+          selector:
+            matchLabels:
+            - key: platform.kubecore.io/cluster-name
+              type: FromCompositeFieldPath
+              valueFromFieldPath: spec.clusterRef.name
+            - key: platform.kubecore.io/type
+              type: Value
+              value: cluster-operators-config
+
+  - step: generate-operator-resources
+    functionRef:
+      name: function-go-templating
+    input:
+      apiVersion: gotemplating.fn.crossplane.io/v1beta1
+      kind: GoTemplate
+      source: Inline
+      inline:
+        template: |
+          {{- $name := .observed.composite.resource.metadata.name -}}
+          {{- $spec := .observed.composite.resource.spec -}}
+          {{- $envConfig := index .context "apiextensions.crossplane.io/environment" -}}
+          {{- if not $envConfig -}}
+            {{- fail "Environment configuration not found. Ensure EnvironmentConfig exists with label platform.kubecore.io/cluster-name matching this XClusterOperators clusterRef.name" -}}
+          {{- end -}}
+          {{- if $envConfig.clusterName -}}
+            {{- if ne $envConfig.clusterName $spec.clusterRef.name -}}
+              {{- fail (printf "EnvironmentConfig cluster name '%s' does not match XClusterOperators clusterRef.name '%s'" $envConfig.clusterName $spec.clusterRef.name) -}}
+            {{- end -}}
+          {{- end -}}
+          {{- $clusterName := $spec.clusterRef.name -}}
+          {{- $providerConfigs := $envConfig.providerConfigs -}}
+          {{- $helmProvider := $providerConfigs.helm | default (printf "%s-eks-helm" $clusterName) -}}
+          {{- $k8sProvider := $providerConfigs.kubernetes | default (printf "%s-eks-kubernetes" $clusterName) -}}
+          {{- $postgresEnabled := $spec.operators.postgres | default false -}}
+          {{/* Inherit scheduling from XKubeSystem (same nodeSelector, tolerations, affinity) */}}
+          {{- $runtime := $envConfig.runtime | default dict -}}
+          {{- $nodeSelector := $runtime.nodeSelector | default dict -}}
+          {{- $tolerations := $runtime.tolerations | default list -}}
+          {{- $affinity := $runtime.affinity | default dict -}}
+          {{- $commonLabels := dict
+            "platform.kubecore.io/system" $name
+            "platform.kubecore.io/cluster" (printf "%s-eks" $clusterName)
+            "platform.kubecore.io/managed-by" "crossplane"
+            "platform.kubecore.io/composition" "clusteroperators"
+            "crossplane.io/composite" $name
+          -}}
+          {{- $pgClusterName := printf "%s-pg" $clusterName -}}
+          {{- $pgSecretName := printf "%s-pg-mlflow-credentials" $clusterName -}}
+
+          {{/* Namespaces for operators and shared resources */}}
+          {{- if $postgresEnabled }}
+          ---
+          apiVersion: kubernetes.crossplane.io/v1alpha2
+          kind: Object
+          metadata:
+            name: {{ $name }}-ns-cnpg-system
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: ns-cnpg-system
+            labels:
+              {{- range $key, $value := $commonLabels }}
+              {{ $key }}: "{{ $value }}"
+              {{- end }}
+          spec:
+            deletionPolicy: Orphan
+            managementPolicies: ["*"]
+            providerConfigRef:
+              name: {{ $k8sProvider }}
+            forProvider:
+              manifest:
+                apiVersion: v1
+                kind: Namespace
+                metadata:
+                  name: cnpg-system
+          ---
+          apiVersion: kubernetes.crossplane.io/v1alpha2
+          kind: Object
+          metadata:
+            name: {{ $name }}-ns-ml-system
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: ns-ml-system
+            labels:
+              {{- range $key, $value := $commonLabels }}
+              {{ $key }}: "{{ $value }}"
+              {{- end }}
+          spec:
+            deletionPolicy: Orphan
+            managementPolicies: ["*"]
+            providerConfigRef:
+              name: {{ $k8sProvider }}
+            forProvider:
+              manifest:
+                apiVersion: v1
+                kind: Namespace
+                metadata:
+                  name: ml-system
+          ---
+          apiVersion: kubernetes.crossplane.io/v1alpha2
+          kind: Object
+          metadata:
+            name: {{ $name }}-ns-mlflow
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: ns-mlflow
+            labels:
+              {{- range $key, $value := $commonLabels }}
+              {{ $key }}: "{{ $value }}"
+              {{- end }}
+          spec:
+            deletionPolicy: Orphan
+            managementPolicies: ["*"]
+            providerConfigRef:
+              name: {{ $k8sProvider }}
+            forProvider:
+              manifest:
+                apiVersion: v1
+                kind: Namespace
+                metadata:
+                  name: mlflow
+          {{- end }}
+
+          {{/* CloudNativePG operator (Helm) - same scheduling as XKubeSystem */}}
+          {{- if $postgresEnabled }}
+          ---
+          apiVersion: helm.crossplane.io/v1beta1
+          kind: Release
+          metadata:
+            name: {{ $clusterName }}-cnpg-operator
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: cnpg-operator
+            labels:
+              {{- range $key, $value := $commonLabels }}
+              {{ $key }}: "{{ $value }}"
+              {{- end }}
+              platform.kubecore.io/component: "cnpg-operator"
+          spec:
+            deletionPolicy: Delete
+            managementPolicies: ["*"]
+            providerConfigRef:
+              name: {{ $helmProvider }}
+            forProvider:
+              wait: true
+              waitTimeout: "5m"
+              chart:
+                name: cloudnative-pg
+                repository: https://cloudnative-pg.github.io/charts
+                version: "0.27.1"
+              namespace: cnpg-system
+              values:
+                nodeSelector:
+                  {{- range $key, $value := $nodeSelector }}
+                  {{ $key }}: {{ $value | quote }}
+                  {{- end }}
+                tolerations:
+                  {{- range $toleration := $tolerations }}
+                  - key: {{ $toleration.key | quote }}
+                    operator: {{ $toleration.operator | default "Equal" | quote }}
+                    {{- if $toleration.value }}
+                    value: {{ $toleration.value | quote }}
+                    {{- end }}
+                    {{- if $toleration.effect }}
+                    effect: {{ $toleration.effect | quote }}
+                    {{- end }}
+                    {{- if $toleration.tolerationSeconds }}
+                    tolerationSeconds: {{ $toleration.tolerationSeconds }}
+                    {{- end }}
+                  {{- end }}
+                {{- if $affinity }}
+                affinity: {{ $affinity | toJson }}
+                {{- end }}
+          {{- end }}
+
+          {{/* Secret for shared Postgres cluster bootstrap (mlflow user) in ml-system */}}
+          {{- if $postgresEnabled }}
+          ---
+          apiVersion: kubernetes.crossplane.io/v1alpha2
+          kind: Object
+          metadata:
+            name: {{ $name }}-{{ $pgSecretName }}
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: pg-mlflow-secret
+            labels:
+              {{- range $key, $value := $commonLabels }}
+              {{ $key }}: "{{ $value }}"
+              {{- end }}
+          spec:
+            deletionPolicy: Delete
+            managementPolicies: ["*"]
+            providerConfigRef:
+              name: {{ $k8sProvider }}
+            forProvider:
+              manifest:
+                apiVersion: v1
+                kind: Secret
+                metadata:
+                  name: {{ $pgSecretName }}
+                  namespace: ml-system
+                type: kubernetes.io/basic-auth
+                stringData:
+                  username: mlflow
+                  password: "mlflow-change-me"
+          {{- end }}
+
+          {{/* Shared CloudNativePG Cluster (30Gi, 1 instance) - same scheduling as XKubeSystem */}}
+          {{- if $postgresEnabled }}
+          ---
+          apiVersion: kubernetes.crossplane.io/v1alpha2
+          kind: Object
+          metadata:
+            name: {{ $name }}-cnpg-cluster
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: cnpg-cluster
+            labels:
+              {{- range $key, $value := $commonLabels }}
+              {{ $key }}: "{{ $value }}"
+              {{- end }}
+              platform.kubecore.io/component: "cnpg-cluster"
+          spec:
+            deletionPolicy: Delete
+            managementPolicies: ["*"]
+            providerConfigRef:
+              name: {{ $k8sProvider }}
+            forProvider:
+              manifest:
+                apiVersion: postgresql.cnpg.io/v1
+                kind: Cluster
+                metadata:
+                  name: {{ $pgClusterName }}
+                  namespace: ml-system
+                spec:
+                  instances: 1
+                  storage:
+                    size: "30Gi"
+                  bootstrap:
+                    initdb:
+                      database: mlflow
+                      owner: mlflow
+                      secret:
+                        name: {{ $pgSecretName }}
+                  resources:
+                    requests:
+                      memory: "256Mi"
+                      cpu: "100m"
+                    limits:
+                      memory: "512Mi"
+                      cpu: "500m"
+                  affinity:
+                    {{- if $nodeSelector }}
+                    nodeSelector:
+                      {{- range $key, $value := $nodeSelector }}
+                      {{ $key }}: {{ $value | quote }}
+                      {{- end }}
+                    {{- end }}
+                    {{- if $tolerations }}
+                    tolerations:
+                      {{- range $toleration := $tolerations }}
+                      - key: {{ $toleration.key | quote }}
+                        operator: {{ $toleration.operator | default "Equal" | quote }}
+                        {{- if $toleration.value }}
+                        value: {{ $toleration.value | quote }}
+                        {{- end }}
+                        {{- if $toleration.effect }}
+                        effect: {{ $toleration.effect | quote }}
+                        {{- end }}
+                        {{- if $toleration.tolerationSeconds }}
+                        tolerationSeconds: {{ $toleration.tolerationSeconds }}
+                        {{- end }}
+                      {{- end }}
+                    {{- end }}
+                    enablePodAntiAffinity: false
+          {{- end }}
+
+          {{/* Secret in mlflow namespace so MLflow Helm chart can use existingSecret (same credentials) */}}
+          {{- if $postgresEnabled }}
+          ---
+          apiVersion: kubernetes.crossplane.io/v1alpha2
+          kind: Object
+          metadata:
+            name: {{ $name }}-mlflow-pg-secret
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: mlflow-pg-secret
+            labels:
+              {{- range $key, $value := $commonLabels }}
+              {{ $key }}: "{{ $value }}"
+              {{- end }}
+          spec:
+            deletionPolicy: Delete
+            managementPolicies: ["*"]
+            providerConfigRef:
+              name: {{ $k8sProvider }}
+            forProvider:
+              manifest:
+                apiVersion: v1
+                kind: Secret
+                metadata:
+                  name: mlflow-pg-credentials
+                  namespace: mlflow
+                type: kubernetes.io/basic-auth
+                stringData:
+                  username: mlflow
+                  password: "mlflow-change-me"
+          {{- end }}
+
+  - step: auto-ready
+    functionRef:
+      name: function-auto-ready
+    input:
+      apiVersion: autoready.fn.crossplane.io/v1beta1
+      kind: Input
+      spec:
+        policy: All

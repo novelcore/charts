@@ -1,0 +1,347 @@
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: mlsystem
+  labels:
+    platform.kubecore.io/type: mlsystem
+    provider: helm
+    service: ml-platform
+    layer: platform
+spec:
+  writeConnectionSecretsToNamespace: crossplane-system
+  compositeTypeRef:
+    apiVersion: platform.kubecore.io/v1alpha1
+    kind: XMLSystem
+  mode: Pipeline
+  pipeline:
+
+  - step: load-environment-configs
+    functionRef:
+      name: function-environment-configs
+    input:
+      apiVersion: environmentconfigs.fn.crossplane.io/v1beta1
+      kind: Input
+      spec:
+        environmentConfigs:
+        - type: Selector
+          selector:
+            matchLabels:
+            - key: platform.kubecore.io/cluster-name
+              type: FromCompositeFieldPath
+              valueFromFieldPath: spec.clusterRef.name
+            - key: platform.kubecore.io/type
+              type: Value
+              value: ml-system-config
+
+  - step: generate-ml-resources
+    functionRef:
+      name: function-go-templating
+    input:
+      apiVersion: gotemplating.fn.crossplane.io/v1beta1
+      kind: GoTemplate
+      source: Inline
+      inline:
+        template: |
+          {{- $name := .observed.composite.resource.metadata.name -}}
+          {{- $spec := .observed.composite.resource.spec -}}
+          
+          {{- $envConfig := index .context "apiextensions.crossplane.io/environment" -}}
+          {{- if not $envConfig -}}
+            {{- fail "Environment configuration not found. Ensure EnvironmentConfig exists with label platform.kubecore.io/cluster-name matching this XMLSystem clusterRef.name" -}}
+          {{- end -}}
+          
+          {{- if $envConfig.clusterName -}}
+            {{- if ne $envConfig.clusterName $spec.clusterRef.name -}}
+              {{- fail (printf "EnvironmentConfig cluster name '%s' does not match XMLSystem clusterRef.name '%s'" $envConfig.clusterName $spec.clusterRef.name) -}}
+            {{- end -}}
+          {{- end -}}
+          
+          {{- $clusterName := $spec.clusterRef.name -}}
+          {{- $providerConfigs := $envConfig.providerConfigs -}}
+          {{- $helmProvider := $providerConfigs.helm | default (printf "%s-eks-helm" $clusterName) -}}
+          {{- $mlflowEnabled := $spec.features.mlflow | default true -}}
+          {{- $s3Enabled := $spec.features.s3 | default true -}}
+          {{/* Inherit scheduling from XKubeSystem; defaults so chart's required nodeSelector/tolerations are always set */}}
+          {{- $runtime := $envConfig.runtime | default dict -}}
+          {{- $defaultNodeSelector := dict "platform.kubecore.io/system" "true" -}}
+          {{- $defaultTolerations := list (dict "key" "kubecore.eu/computation-type" "operator" "Equal" "value" "kubecore-system" "effect" "NoSchedule") (dict "key" "CriticalAddonsOnly" "operator" "Exists") (dict "operator" "Exists" "effect" "NoExecute" "tolerationSeconds" 300) -}}
+          {{- $nodeSelector := $runtime.nodeSelector | default $defaultNodeSelector -}}
+          {{- $tolerations := $runtime.tolerations | default $defaultTolerations -}}
+          {{- $affinity := $runtime.affinity | default dict -}}
+          
+          {{- $commonLabels := dict 
+            "platform.kubecore.io/system" $name
+            "platform.kubecore.io/cluster" (printf "%s-eks" $clusterName)
+            "platform.kubecore.io/managed-by" "crossplane"
+            "platform.kubecore.io/composition" "mlsystem"
+            "crossplane.io/composite" $name
+          -}}
+          {{/* Shared Postgres is provided by XClusterOperators (CloudNativePG). Host: {cluster}-pg-rw.ml-system.svc */}}
+          {{- $pgHost := printf "%s-pg-rw.ml-system.svc" $clusterName -}}
+          {{/* S3 bucket for ML artifacts in pool region; requires provider-aws-s3 */}}
+          {{- $awsProvider := $providerConfigs.aws | default "aws-default" -}}
+          {{- $region := $envConfig.region | default "us-east-1" -}}
+          {{- $bucketName := printf "%s-ml-artifacts-%s" $clusterName $region -}}
+          {{- $k8sProvider := $providerConfigs.kubernetes | default (printf "%s-eks-kubernetes" $clusterName) -}}
+          {{/* OIDC for IRSA when AWS/EKS data present */}}
+          {{- $accountId := "" -}}{{- if $envConfig.aws }}{{ $accountId = $envConfig.aws.accountId | default "" }}{{ end -}}
+          {{- $oidcId := "" -}}{{- if $envConfig.eks }}{{ $oidcId = $envConfig.eks.clusterId | default "" }}{{ end -}}
+          {{- $oidcIssuerHost := "" -}}{{- if and $accountId $oidcId }}{{ $oidcIssuerHost = printf "oidc.eks.%s.amazonaws.com/id/%s" $region $oidcId }}{{ end -}}
+          {{- $oidcProviderArn := "" -}}{{- if and $accountId $oidcId }}{{ $oidcProviderArn = printf "arn:aws:iam::%s:oidc-provider/%s" $accountId $oidcIssuerHost }}{{ end -}}
+          {{- $hasOIDC := and $oidcIssuerHost $oidcProviderArn -}}
+          {{/* MLflow auth from env (operator-generated or default) */}}
+          {{- $mlflowAuth := $envConfig.mlflow.auth | default dict -}}
+          {{- $authUser := $mlflowAuth.adminUsername | default "admin" -}}
+          {{- $authPass := $mlflowAuth.adminPassword | default "mlflow-change-me" -}}
+
+          {{/* S3 Bucket for MLflow artifacts (pool region); install provider-aws-s3 to satisfy */}}
+          {{- if and $mlflowEnabled $s3Enabled }}
+          ---
+          apiVersion: s3.aws.upbound.io/v1beta1
+          kind: Bucket
+          metadata:
+            name: {{ $bucketName | quote }}
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: ml-bucket
+            labels:
+              {{- range $key, $value := $commonLabels }}
+              {{ $key }}: "{{ $value }}"
+              {{- end }}
+              platform.kubecore.io/component: "ml-bucket"
+          spec:
+            deletionPolicy: Delete
+            managementPolicies: ["*"]
+            providerConfigRef:
+              name: {{ $awsProvider }}
+            forProvider:
+              region: {{ $region | quote }}
+              tags:
+                platform.kubecore.io/system: {{ $name | quote }}
+                platform.kubecore.io/cluster: {{ printf "%s-eks" $clusterName | quote }}
+          ---
+          {{- end }}
+
+          {{/* IAM Role for MLflow S3 (IRSA) — trust MLflow SA in namespace mlflow */}}
+          {{- if and $mlflowEnabled $s3Enabled $hasOIDC }}
+          ---
+          apiVersion: iam.aws.upbound.io/v1beta1
+          kind: Role
+          metadata:
+            name: {{ $clusterName }}-mlflow-s3-role
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: mlflow-s3-role
+            labels:
+              {{- range $key, $value := $commonLabels }}
+              {{ $key }}: "{{ $value }}"
+              {{- end }}
+              platform.kubecore.io/component: "mlflow-s3-role"
+          spec:
+            deletionPolicy: Delete
+            managementPolicies: ["*"]
+            providerConfigRef:
+              name: {{ $awsProvider }}
+            forProvider:
+              description: "MLflow S3 artifact access for {{ $clusterName }}"
+              assumeRolePolicy: |
+                {
+                  "Version": "2012-10-17",
+                  "Statement": [
+                    {
+                      "Effect": "Allow",
+                      "Principal": {
+                        "Federated": "{{ $oidcProviderArn }}"
+                      },
+                      "Action": "sts:AssumeRoleWithWebIdentity",
+                      "Condition": {
+                        "StringEquals": {
+                          "{{ $oidcIssuerHost }}:aud": "sts.amazonaws.com",
+                          "{{ $oidcIssuerHost }}:sub": "system:serviceaccount:mlflow:{{ $clusterName }}-mlflow"
+                        }
+                      }
+                    }
+                  ]
+                }
+              tags:
+                platform.kubecore.io/system: {{ $name | quote }}
+                platform.kubecore.io/cluster: {{ printf "%s-eks" $clusterName | quote }}
+          ---
+          apiVersion: iam.aws.upbound.io/v1beta1
+          kind: Policy
+          metadata:
+            name: {{ $clusterName }}-mlflow-s3-policy
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: mlflow-s3-policy
+            labels:
+              {{- range $key, $value := $commonLabels }}
+              {{ $key }}: "{{ $value }}"
+              {{- end }}
+              platform.kubecore.io/component: "mlflow-s3-policy"
+          spec:
+            deletionPolicy: Delete
+            managementPolicies: ["*"]
+            providerConfigRef:
+              name: {{ $awsProvider }}
+            forProvider:
+              description: "MLflow S3 access to {{ $bucketName }}"
+              policy: |
+                {
+                  "Version": "2012-10-17",
+                  "Statement": [
+                    {
+                      "Effect": "Allow",
+                      "Action": ["s3:GetObject", "s3:PutObject", "s3:DeleteObject", "s3:ListBucket"],
+                      "Resource": [
+                        "arn:aws:s3:::{{ $bucketName }}",
+                        "arn:aws:s3:::{{ $bucketName }}/*"
+                      ]
+                    }
+                  ]
+                }
+          ---
+          apiVersion: iam.aws.upbound.io/v1beta1
+          kind: RolePolicyAttachment
+          metadata:
+            name: {{ $clusterName }}-mlflow-s3-attachment
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: mlflow-s3-attachment
+            labels:
+              {{- range $key, $value := $commonLabels }}
+              {{ $key }}: "{{ $value }}"
+              {{- end }}
+          spec:
+            deletionPolicy: Delete
+            managementPolicies: ["*"]
+            providerConfigRef:
+              name: {{ $awsProvider }}
+            forProvider:
+              policyArnSelector:
+                matchLabels:
+                  platform.kubecore.io/cluster: {{ printf "%s-eks" $clusterName | quote }}
+                  platform.kubecore.io/component: "mlflow-s3-policy"
+              roleRef:
+                name: {{ $clusterName }}-mlflow-s3-role
+          ---
+          {{- end }}
+
+          {{/* Kubernetes Secret for MLflow admin credentials (operator-generated or default) */}}
+          {{- if $mlflowEnabled }}
+          ---
+          apiVersion: kubernetes.crossplane.io/v1alpha2
+          kind: Object
+          metadata:
+            name: {{ $name }}-mlflow-auth-secret
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: mlflow-auth-secret
+            labels:
+              {{- range $key, $value := $commonLabels }}
+              {{ $key }}: "{{ $value }}"
+              {{- end }}
+              platform.kubecore.io/component: "mlflow-auth-secret"
+          spec:
+            deletionPolicy: Delete
+            managementPolicies: ["*"]
+            providerConfigRef:
+              name: {{ $k8sProvider }}
+            forProvider:
+              manifest:
+                apiVersion: v1
+                kind: Secret
+                metadata:
+                  name: mlflow-auth
+                  namespace: mlflow
+                type: Opaque
+                stringData:
+                  username: {{ $authUser | quote }}
+                  password: {{ $authPass | quote }}
+          ---
+          {{- end }}
+
+          {{/* MLflow Helm Release — uses shared CloudNativePG cluster from XClusterOperators */}}
+          {{- if $mlflowEnabled }}
+          ---
+          apiVersion: helm.crossplane.io/v1beta1
+          kind: Release
+          metadata:
+            name: {{ $clusterName }}-mlflow
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: mlflow
+            labels:
+              {{- range $key, $value := $commonLabels }}
+              {{ $key }}: "{{ $value }}"
+              {{- end }}
+              platform.kubecore.io/component: "mlflow"
+          spec:
+            deletionPolicy: Delete
+            managementPolicies: ["*"]
+            providerConfigRef:
+              name: {{ $helmProvider }}
+            forProvider:
+              wait: true
+              waitTimeout: "20m"
+              chart:
+                name: mlflow
+                repository: https://community-charts.github.io/helm-charts
+                version: "0.12.0"
+              namespace: mlflow
+              values:
+                nodeSelector:
+                  {{- range $key, $value := $nodeSelector }}
+                  {{ $key }}: {{ $value | quote }}
+                  {{- end }}
+                tolerations:
+                  {{- range $toleration := $tolerations }}
+                  - key: {{ $toleration.key | quote }}
+                    operator: {{ $toleration.operator | default "Equal" | quote }}
+                    {{- if $toleration.value }}
+                    value: {{ $toleration.value | quote }}
+                    {{- end }}
+                    {{- if $toleration.effect }}
+                    effect: {{ $toleration.effect | quote }}
+                    {{- end }}
+                    {{- if $toleration.tolerationSeconds }}
+                    tolerationSeconds: {{ $toleration.tolerationSeconds }}
+                    {{- end }}
+                  {{- end }}
+                {{- if $affinity }}
+                affinity: {{ $affinity | toJson }}
+                {{- end }}
+                auth:
+                  enabled: true
+                  adminUsername: {{ $authUser | quote }}
+                  adminPassword: {{ $authPass | quote }}
+                backendStore:
+                  databaseMigration: true
+                  postgres:
+                    enabled: true
+                    host: {{ $pgHost | quote }}
+                    port: 5432
+                    database: mlflow
+                    user: mlflow
+                    password: "mlflow-change-me"
+                artifactRoot:
+                  proxiedArtifactStorage: false
+                  {{- if $s3Enabled }}
+                  s3:
+                    enabled: true
+                    bucket: {{ $bucketName | quote }}
+                    path: "mlflow-artifacts"
+                  {{- else }}
+                  s3:
+                    enabled: false
+                  {{- end }}
+                {{- if and $s3Enabled $hasOIDC }}
+                serviceAccount:
+                  create: true
+                  annotations:
+                    eks.amazonaws.com/role-arn: {{ printf "arn:aws:iam::%s:role/%s-mlflow-s3-role" $accountId $clusterName | quote }}
+                {{- end }}
+          {{- end }}
+
+  - step: auto-ready
+    functionRef:
+      name: function-auto-ready
+    input:
+      apiVersion: autoready.fn.crossplane.io/v1beta1
+      kind: Input
+      spec:
+        policy: All
