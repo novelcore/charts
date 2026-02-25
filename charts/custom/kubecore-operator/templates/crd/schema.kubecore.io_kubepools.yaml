@@ -645,6 +645,11 @@ spec:
                   - name
                   type: object
                 type: array
+              baseDns:
+                description: |-
+                  BaseDns is the base DNS domain for this cluster: {poolName}.{orgDns}
+                  e.g., "wow-dev.kaos.io.kubecore.eu"
+                type: string
               clusterEndpoint:
                 description: ClusterEndpoint contains the endpoint URL of the EKS
                   cluster

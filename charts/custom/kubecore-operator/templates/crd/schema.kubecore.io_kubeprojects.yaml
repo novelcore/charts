@@ -432,6 +432,11 @@ spec:
                 items:
                   description: EnvironmentStatus defines the status of a single environment
                   properties:
+                    baseDns:
+                      description: |-
+                        BaseDns is the per-environment DNS base: {envName}.{projectName}.{kubePool.Status.BaseDns}
+                        e.g., "sandbox.snoopy.wow-dev.kaos.io.kubecore.eu"
+                      type: string
                     environmentConfigRef:
                       description: EnvironmentConfigRef contains a reference to the
                         created EnvironmentConfig resource
