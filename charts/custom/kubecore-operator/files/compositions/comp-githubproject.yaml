@@ -615,7 +615,7 @@ spec:
                       annotations:
                         argocd.argoproj.io/sync-wave: "1"
                     spec:
-                      project: default
+                      project: {{ $name }}
                       destination:
                         server: https://kubernetes.default.svc
                         # namespace: '{{"{{index .path.segments 1}}-{{.path.basename}}"}}'
