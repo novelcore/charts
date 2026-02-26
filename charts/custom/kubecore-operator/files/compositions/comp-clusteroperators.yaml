@@ -58,6 +58,8 @@ spec:
           {{- $helmProvider := $providerConfigs.helm | default (printf "%s-eks-helm" $clusterName) -}}
           {{- $k8sProvider := $providerConfigs.kubernetes | default (printf "%s-eks-kubernetes" $clusterName) -}}
           {{- $postgresEnabled := $spec.operators.postgres | default false -}}
+          {{- $provisionSharedPostgres := $spec.provisionSharedPostgres | default true -}}
+          {{/* When provisionSharedPostgres is false, only install the operator; ML stack is per KubeProject environment */}}
           {{/* Inherit scheduling from XKubeSystem (same nodeSelector, tolerations, affinity) */}}
           {{- $runtime := $envConfig.runtime | default dict -}}
           {{- $nodeSelector := $runtime.nodeSelector | default dict -}}
@@ -97,6 +99,7 @@ spec:
                 kind: Namespace
                 metadata:
                   name: cnpg-system
+          {{- if $provisionSharedPostgres }}
           ---
           apiVersion: kubernetes.crossplane.io/v1alpha2
           kind: Object
@@ -141,6 +144,7 @@ spec:
                 kind: Namespace
                 metadata:
                   name: mlflow
+          {{- end }}
           {{- end }}
 
           {{/* CloudNativePG operator (Helm) - same scheduling as XKubeSystem */}}
@@ -195,7 +199,7 @@ spec:
           {{- end }}
 
           {{/* Secret for shared Postgres cluster bootstrap (mlflow user) in ml-system */}}
-          {{- if $postgresEnabled }}
+          {{- if and $postgresEnabled $provisionSharedPostgres }}
           ---
           apiVersion: kubernetes.crossplane.io/v1alpha2
           kind: Object
@@ -226,7 +230,7 @@ spec:
           {{- end }}
 
           {{/* Shared CloudNativePG Cluster (30Gi, 1 instance) - same scheduling as XKubeSystem */}}
-          {{- if $postgresEnabled }}
+          {{- if and $postgresEnabled $provisionSharedPostgres }}
           ---
           apiVersion: kubernetes.crossplane.io/v1alpha2
           kind: Object
@@ -295,7 +299,7 @@ spec:
           {{- end }}
 
           {{/* Secret in mlflow namespace so MLflow Helm chart can use existingSecret (same credentials) */}}
-          {{- if $postgresEnabled }}
+          {{- if and $postgresEnabled $provisionSharedPostgres }}
           ---
           apiVersion: kubernetes.crossplane.io/v1alpha2
           kind: Object

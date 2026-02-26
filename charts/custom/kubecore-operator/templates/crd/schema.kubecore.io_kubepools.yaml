@@ -173,6 +173,28 @@ spec:
                           default: true
                           description: Logging enables logging stack for the environment
                           type: boolean
+                        mlStack:
+                          description: |-
+                            MLStack defines ML stack toggles for environments using this template.
+                            Only applied when the KubePool has features.ml and operators.postgres (cluster is ML capable).
+                            Provisions one Postgres + MLflow + optional S3 per project environment when enabled.
+                          properties:
+                            mlflow:
+                              default: false
+                              description: MLflow enables MLflow for this environment
+                                (requires Postgres as backend)
+                              type: boolean
+                            postgres:
+                              default: false
+                              description: Postgres enables a Postgres instance for
+                                this environment's ML stack (MLflow backend)
+                              type: boolean
+                            s3:
+                              default: false
+                              description: S3 enables S3 bucket and IRSA for MLflow
+                                artifact storage (only used when MLflow is enabled)
+                              type: boolean
+                          type: object
                         monitoring:
                           default: true
                           description: Monitoring enables monitoring stack for the

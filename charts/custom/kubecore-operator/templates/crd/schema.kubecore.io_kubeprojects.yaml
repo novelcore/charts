@@ -135,6 +135,23 @@ spec:
                           description: Labels to add to the environment (merged with
                             template labels)
                           type: object
+                        mlStack:
+                          description: MLStack overrides for ML stack toggles (within
+                            template limits; only applied when pool is ML capable)
+                          properties:
+                            mlflow:
+                              description: MLflow overrides MLflow enablement for
+                                this environment
+                              type: boolean
+                            postgres:
+                              description: Postgres overrides Postgres instance enablement
+                                for this environment
+                              type: boolean
+                            s3:
+                              description: S3 overrides S3 artifact store enablement
+                                for this environment
+                              type: boolean
+                          type: object
                         scaling:
                           description: Scaling overrides for node group scaling configuration
                           properties:
