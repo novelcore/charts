@@ -4991,12 +4991,20 @@ spec:
           - grafana-operator-release
           - vm-operator-release
           - vm-stack-helm
-        # Finally application tools
+        # Traefik must be Ready (LB provisioned) before apps that create TLS Ingresses
+        # to avoid ACME HTTP-01 challenge timeouts during ELB warm-up
         - sequence:
-          - argocd-release
-          - argo-rollouts-release
-          - argo-workflows-release
           - traefik-release
+          - argocd-release
+        - sequence:
+          - traefik-release
+          - argo-rollouts-release
+        - sequence:
+          - traefik-release
+          - argo-workflows-release
+        - sequence:
+          - traefik-release
+          - gitops-promoter-release
 
   # Step 5: Auto-ready function for status management
   - step: auto-ready
