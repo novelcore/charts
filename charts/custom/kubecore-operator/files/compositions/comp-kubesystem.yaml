@@ -1479,6 +1479,8 @@ spec:
                     server.enable.source.hydrator: true
                     # Enable hydrator feature (hydrator is in Alpha phase)
                     hydrator.enabled: true
+                    # Preserve pre-9.0.0 ApplicationSet sync behavior (chart 9.0.0 changed default from 'sync' to '')
+                    applicationsetcontroller.policy: 'sync'
                   {{- if $hasArgocdOIDC }}
                   cm:
                     url: https://argocd.system.{{ $dns.clusterDomain }}
