@@ -31,4 +31,12 @@ spec:
   pullRequest:
     {{- toYaml . | nindent 4 }}
   {{- end }}
+  {{- with .Values.controllerConfiguration.gitCommitStatus }}
+  gitCommitStatus:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with .Values.controllerConfiguration.timedCommitStatus }}
+  timedCommitStatus:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
 {{- end }}

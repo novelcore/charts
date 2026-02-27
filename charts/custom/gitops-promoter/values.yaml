@@ -4,15 +4,14 @@
 # Name overrides
 nameOverride: ""
 fullnameOverride: ""
-
 # Global settings
 global:
   # Image pull secrets for private registries
   imagePullSecrets: []
   # Example:
   # - name: regcred
+# Namespace configuration
 
-  # Namespace configuration
 namespace:
   # Create namespace if it doesn't exist
   create: true
@@ -22,24 +21,20 @@ namespace:
   labels: {}
   # Additional annotations for the namespace
   annotations: {}
-
 # Controller manager configuration
 controllerManager:
   # Image configuration
   image:
     repository: quay.io/argoprojlabs/gitops-promoter
-    tag: "v0.20.3"
+    tag: "v0.22.6"
     pullPolicy: IfNotPresent
-
   # Replica count
   replicaCount: 1
-
   # Command line arguments
   args:
     healthProbeBindAddress: ":8081"
     metricsBindAddress: "127.0.0.1:8080"
     leaderElect: true
-
   # Resource limits and requests
   resources:
     limits:
@@ -48,7 +43,6 @@ controllerManager:
     requests:
       cpu: 10m
       memory: 256Mi
-
   # Liveness probe configuration
   livenessProbe:
     httpGet:
@@ -59,7 +53,6 @@ controllerManager:
     timeoutSeconds: 1
     failureThreshold: 3
     successThreshold: 1
-
   # Readiness probe configuration
   readinessProbe:
     httpGet:
@@ -70,17 +63,15 @@ controllerManager:
     timeoutSeconds: 1
     failureThreshold: 3
     successThreshold: 1
-
   # Security context for the container
   securityContext:
     allowPrivilegeEscalation: false
     capabilities:
       drop:
-      - ALL
+        - ALL
     readOnlyRootFilesystem: true
     runAsNonRoot: true
     runAsUser: 65532
-
   # Environment variables
   env: []
   # Example:
@@ -90,28 +81,26 @@ controllerManager:
   # Volume mounts
   # Default includes /tmp mount for git operations (required due to readOnlyRootFilesystem)
   volumeMounts:
-  - name: tmp
-    mountPath: /tmp
-  # Additional volume mounts can be added:
-  # - name: config
-  #   mountPath: /etc/promoter
-  #   readOnly: true
+    - name: tmp
+      mountPath: /tmp
+      # Additional volume mounts can be added:
+      # - name: config
+      #   mountPath: /etc/promoter
+      #   readOnly: true
+# Kube RBAC Proxy configuration (sidecar container)
 
-  # Kube RBAC Proxy configuration (sidecar container)
 kubeRbacProxy:
   # Image configuration
   image:
     repository: quay.io/brancz/kube-rbac-proxy
-    tag: "v0.17.0"
+    tag: "v0.20.2"
     pullPolicy: IfNotPresent
-
   # Command line arguments
   args:
     secureListenAddress: "0.0.0.0:8443"
     upstream: "http://127.0.0.1:8080/"
     logtostderr: true
     v: "0"
-
   # Resource limits and requests
   resources:
     limits:
@@ -120,17 +109,15 @@ kubeRbacProxy:
     requests:
       cpu: 5m
       memory: 64Mi
-
   # Security context for the container
   securityContext:
     allowPrivilegeEscalation: false
     capabilities:
       drop:
-      - ALL
+        - ALL
     readOnlyRootFilesystem: true
     runAsNonRoot: true
     runAsUser: 65532
-
 # Pod configuration
 pod:
   # Security context for the pod
@@ -139,50 +126,43 @@ pod:
     seccompProfile:
       type: RuntimeDefault
     fsGroup: 65532
-
   # Termination grace period
   terminationGracePeriodSeconds: 10
-
   # Pod annotations
   annotations: {}
-
   # Pod labels
   labels: {}
-
   # Node selector
   nodeSelector: {}
-
   # Tolerations
   tolerations: []
-
   # Affinity configuration
   affinity:
     podAntiAffinity:
       preferredDuringSchedulingIgnoredDuringExecution:
-      - weight: 100
-        podAffinityTerm:
-          labelSelector:
-            matchLabels:
-              app.kubernetes.io/component: manager
-          topologyKey: kubernetes.io/hostname
-      - weight: 5
-        podAffinityTerm:
-          labelSelector:
-            matchLabels:
-              app.kubernetes.io/name: deployment
-          topologyKey: kubernetes.io/hostname
-
+        - weight: 100
+          podAffinityTerm:
+            labelSelector:
+              matchLabels:
+                app.kubernetes.io/component: manager
+            topologyKey: kubernetes.io/hostname
+        - weight: 5
+          podAffinityTerm:
+            labelSelector:
+              matchLabels:
+                app.kubernetes.io/name: deployment
+            topologyKey: kubernetes.io/hostname
   # Volumes
   # Default includes emptyDir for /tmp (required for git clone operations with readOnlyRootFilesystem)
   volumes:
-  - name: tmp
-    emptyDir: {}
-  # Additional volumes can be added:
-  # - name: config
-  #   configMap:
-  #     name: promoter-config
+    - name: tmp
+      emptyDir: {}
+      # Additional volumes can be added:
+      # - name: config
+      #   configMap:
+      #     name: promoter-config
+# Service Account configuration
 
-  # Service Account configuration
 serviceAccount:
   # Create service account
   create: true
@@ -192,14 +172,12 @@ serviceAccount:
   labels: {}
   # Additional annotations
   annotations: {}
-
 # RBAC configuration
 rbac:
   # Create RBAC resources
   create: true
   # Additional rules for the ClusterRole
   additionalRules: []
-
 # Services configuration
 services:
   # Metrics service configuration
@@ -218,7 +196,6 @@ services:
     labels: {}
     # Additional annotations
     annotations: {}
-
   # Webhook receiver service configuration
   webhookReceiver:
     # Enable webhook receiver service
@@ -235,7 +212,6 @@ services:
     labels: {}
     # Additional annotations
     annotations: {}
-
 # Controller Configuration (GitOps Promoter v0.14.0+ configuration)
 # NOTE: This configuration structure changed significantly in v0.14.0
 # For migration from older versions, see the chart README
@@ -246,7 +222,6 @@ controllerConfiguration:
   # IMPORTANT: The GitOps Promoter controller expects this specific name.
   # Only change this if you know what you're doing.
   name: promoter-controller-configuration
-
   # ArgoCDCommitStatus controller configuration
   argocdCommitStatus:
     # Watch local Argo CD applications in the same cluster
@@ -273,7 +248,6 @@ controllerConfiguration:
               slowDelay: 5m
       # How often to requeue for reconciliation
       requeueDuration: 5m
-
   # ChangeTransferPolicy controller configuration
   changeTransferPolicy:
     workQueue:
@@ -288,7 +262,6 @@ controllerConfiguration:
               maxFastAttempts: 3
               slowDelay: 5m
       requeueDuration: 5m
-
   # CommitStatus controller configuration
   commitStatus:
     workQueue:
@@ -303,7 +276,6 @@ controllerConfiguration:
               maxFastAttempts: 3
               slowDelay: 5m
       requeueDuration: 5m
-
   # PromotionStrategy controller configuration
   promotionStrategy:
     workQueue:
@@ -318,61 +290,27 @@ controllerConfiguration:
               maxFastAttempts: 3
               slowDelay: 5m
       requeueDuration: 5m
-
   # PullRequest controller configuration
   pullRequest:
     # Pull request template configuration
     template:
       title: "Promote {{ trunc 7 .ChangeTransferPolicy.Status.Proposed.Dry.Sha }} to `{{ .ChangeTransferPolicy.Spec.ActiveBranch }}`"
-      description: |
-        ## 🚀 Promotion Summary
-        This PR promotes changes from **{{ .ChangeTransferPolicy.Spec.ProposedBranch }}** to **{{ .ChangeTransferPolicy.Spec.ActiveBranch }}**.
-
-        ## 📊 Branch Details
-        | | Active | Proposed |
-        |---|---|---|
-        | **Branch** | `{{ .ChangeTransferPolicy.Spec.ActiveBranch }}` | `{{ .ChangeTransferPolicy.Spec.ProposedBranch }}` |
-        | **Dry SHA** | `{{ trunc 7 .ChangeTransferPolicy.Status.Active.Dry.Sha }}` | `{{ trunc 7 .ChangeTransferPolicy.Status.Proposed.Dry.Sha }}` |
-        | **Hydrated SHA** | `{{ trunc 7 .ChangeTransferPolicy.Status.Active.Hydrated.Sha }}` | `{{ trunc 7 .ChangeTransferPolicy.Status.Proposed.Hydrated.Sha }}` |
-        | **Commit Time** | {{ .ChangeTransferPolicy.Status.Active.Dry.CommitTime }} | {{ .ChangeTransferPolicy.Status.Proposed.Dry.CommitTime }} |
-
-        ## 💡 Change Links
-        * [View Active Branch](https://github.com/[[OWNER]]/[[REPO]]/tree/{{ .ChangeTransferPolicy.Spec.ActiveBranch }})
-        * [View Proposed Branch](https://github.com/[[OWNER]]/[[REPO]]/tree/{{ .ChangeTransferPolicy.Spec.ProposedBranch }})
-        * [View Active Commit](https://github.com/[[OWNER]]/[[REPO]]/commit/{{ .ChangeTransferPolicy.Status.Active.Dry.Sha }})
-        * [View Proposed Commit](https://github.com/[[OWNER]]/[[REPO]]/commit/{{ .ChangeTransferPolicy.Status.Proposed.Dry.Sha }})
-        * [Compare Changes](https://github.com/[[OWNER]]/[[REPO]]/compare/{{ .ChangeTransferPolicy.Status.Active.Dry.Sha }}...{{ .ChangeTransferPolicy.Status.Proposed.Dry.Sha }})
-
-        ## 🔍 Current Status Checks
-
-        ### ❗Active commit statuses
-        {{ range .ChangeTransferPolicy.Status.Active.CommitStatuses }}
-        * {{ .Key }}: **{{ .Phase }}**
-        {{- end }}
-
-        ### 👀 Proposed commit statuses
-        {{ range .ChangeTransferPolicy.Status.Proposed.CommitStatuses }}
-        * {{ .Key }}: **{{ .Phase }}**
-        {{- end }}
-
-        ## ✅ Acceptance Criteria
-        This promotion can be merged when all of the following checks pass:
-        {{ range .ChangeTransferPolicy.Spec.ActiveCommitStatuses }}
-        - [ ] {{ .Key }} status is successful on active branch
-        {{- end }}
-        {{ range .ChangeTransferPolicy.Spec.ProposedCommitStatuses }}
-        - [ ] {{ .Key }} status is successful on proposed branch
-        {{- end }}
-        - [ ] Code review approval from at least one team member
-
-        ## 👥 Reviewers
-        @[[OWNER]]/[[REPO]]-ops
-
-        ## Additional Information
-        * **Auto-Merge**: {{ .ChangeTransferPolicy.Spec.AutoMerge }}
-        * **Full Active Dry SHA**: `{{ .ChangeTransferPolicy.Status.Active.Dry.Sha }}`
-        * **Full Proposed Dry SHA**: `{{ .ChangeTransferPolicy.Status.Proposed.Dry.Sha }}`
+      description: "## \U0001F680 Promotion Summary\nThis PR promotes changes from **{{ .ChangeTransferPolicy.Spec.ProposedBranch }}** to **{{ .ChangeTransferPolicy.Spec.ActiveBranch }}**.\n\n## \U0001F4CA Branch Details\n| | Active | Proposed |\n|---|---|---|\n| **Branch** | `{{ .ChangeTransferPolicy.Spec.ActiveBranch }}` | `{{ .ChangeTransferPolicy.Spec.ProposedBranch }}` |\n| **Dry SHA** | `{{ trunc 7 .ChangeTransferPolicy.Status.Active.Dry.Sha }}` | `{{ trunc 7 .ChangeTransferPolicy.Status.Proposed.Dry.Sha }}` |\n| **Hydrated SHA** | `{{ trunc 7 .ChangeTransferPolicy.Status.Active.Hydrated.Sha }}` | `{{ trunc 7 .ChangeTransferPolicy.Status.Proposed.Hydrated.Sha }}` |\n| **Commit Time** | {{ .ChangeTransferPolicy.Status.Active.Dry.CommitTime }} | {{ .ChangeTransferPolicy.Status.Proposed.Dry.CommitTime }} |\n\n## \U0001F4A1 Change Links\n* [View Active Branch](https://github.com/[[OWNER]]/[[REPO]]/tree/{{ .ChangeTransferPolicy.Spec.ActiveBranch }})\n* [View Proposed Branch](https://github.com/[[OWNER]]/[[REPO]]/tree/{{ .ChangeTransferPolicy.Spec.ProposedBranch }})\n* [View Active Commit](https://github.com/[[OWNER]]/[[REPO]]/commit/{{ .ChangeTransferPolicy.Status.Active.Dry.Sha }})\n* [View Proposed Commit](https://github.com/[[OWNER]]/[[REPO]]/commit/{{ .ChangeTransferPolicy.Status.Proposed.Dry.Sha }})\n* [Compare Changes](https://github.com/[[OWNER]]/[[REPO]]/compare/{{ .ChangeTransferPolicy.Status.Active.Dry.Sha }}...{{ .ChangeTransferPolicy.Status.Proposed.Dry.Sha }})\n\n## \U0001F50D Current Status Checks\n\n### ❗Active commit statuses\n{{ range .ChangeTransferPolicy.Status.Active.CommitStatuses }}\n* {{ .Key }}: **{{ .Phase }}**\n{{- end }}\n\n### \U0001F440 Proposed commit statuses\n{{ range .ChangeTransferPolicy.Status.Proposed.CommitStatuses }}\n* {{ .Key }}: **{{ .Phase }}**\n{{- end }}\n\n## ✅ Acceptance Criteria\nThis promotion can be merged when all of the following checks pass:\n{{ range .ChangeTransferPolicy.Spec.ActiveCommitStatuses }}\n- [ ] {{ .Key }} status is successful on active branch\n{{- end }}\n{{ range .ChangeTransferPolicy.Spec.ProposedCommitStatuses }}\n- [ ] {{ .Key }} status is successful on proposed branch\n{{- end }}\n- [ ] Code review approval from at least one team member\n\n## \U0001F465 Reviewers\n@[[OWNER]]/[[REPO]]-ops\n\n## Additional Information\n* **Auto-Merge**: {{ .ChangeTransferPolicy.Spec.AutoMerge }}\n* **Full Active Dry SHA**: `{{ .ChangeTransferPolicy.Status.Active.Dry.Sha }}`\n* **Full Proposed Dry SHA**: `{{ .ChangeTransferPolicy.Status.Proposed.Dry.Sha }}`\n"
     # Work queue configuration for the PullRequest controller
+    workQueue:
+      maxConcurrentReconciles: 10
+      rateLimiter:
+        maxOf:
+          - bucket:
+              bucket: 100
+              qps: 10
+          - fastSlow:
+              fastDelay: 1s
+              maxFastAttempts: 3
+              slowDelay: 5m
+      requeueDuration: 5m
+  # GitCommitStatus controller configuration (v0.19.0+)
+  gitCommitStatus:
     workQueue:
       maxConcurrentReconciles: 10
       rateLimiter:
@@ -400,7 +338,6 @@ controllerConfiguration:
               maxFastAttempts: 3
               slowDelay: 5m
       requeueDuration: 5m
-
 # Custom Resource Definitions
 crds:
   # Install CRDs
@@ -408,7 +345,6 @@ crds:
   # Keep CRDs on uninstall (true for production, false for development)
   # When false, CRDs will be deleted on helm uninstall to prevent conflicts on reinstall
   keep: true
-
 # Monitoring configuration
 monitoring:
   # Enable ServiceMonitor for Prometheus
@@ -424,7 +360,6 @@ monitoring:
     scrapeTimeout: 10s
     # Metrics path
     path: /metrics
-
   # Enable PodMonitor for Prometheus
   podMonitor:
     enabled: false
@@ -432,7 +367,6 @@ monitoring:
     labels: {}
     # Additional annotations for PodMonitor
     annotations: {}
-
 # Ingress configuration for webhook receiver
 ingress:
   # Enable ingress
@@ -462,7 +396,6 @@ ingress:
     # traefik.ingress.kubernetes.io/router.entrypoints: "websecure"
     # Additional labels
   labels: {}
-
 # Network Policy
 networkPolicy:
   # Enable network policy
@@ -471,7 +404,6 @@ networkPolicy:
   ingress: []
   # Egress rules
   egress: []
-
 # Pod Disruption Budget
 podDisruptionBudget:
   # Enable PDB
@@ -480,8 +412,8 @@ podDisruptionBudget:
   minAvailable: 1
   # Maximum unavailable pods
   # maxUnavailable: 1
+# Horizontal Pod Autoscaler
 
-  # Horizontal Pod Autoscaler
 hpa:
   # Enable HPA
   enabled: false
@@ -493,13 +425,11 @@ hpa:
   targetCPUUtilizationPercentage: 80
   # Target memory utilization percentage
   # targetMemoryUtilizationPercentage: 80
+# Additional labels to apply to all resources
 
-  # Additional labels to apply to all resources
 commonLabels: {}
-
 # Additional annotations to apply to all resources
 commonAnnotations: {}
-
 # Git Fetch Daemon (Periodic repository sync with ESO-generated token)
 # NOTE: This requires External Secrets Operator to be installed and configured
 # to generate GitHub installation access tokens from your GitHub App credentials.
@@ -509,8 +439,7 @@ gitFetchDaemon:
   # Enable git fetch daemon sidecar
   # When enabled, periodically runs 'git fetch --all --prune' on all cloned repositories
   # to discover new branches created by ArgoCD hydrator or other tools
-  enabled: false  # Default disabled for backward compatibility
-
+  enabled: false # Default disabled for backward compatibility
   # ESO-generated secret configuration
   # This secret should be created by an ExternalSecret that uses a GithubAccessToken generator
   secret:
@@ -518,23 +447,19 @@ gitFetchDaemon:
     # Example: "gitops-promoter-github-token" (created by your ESO ExternalSecret)
     # REQUIRED when gitFetchDaemon.enabled is true
     name: ""
-
     # Key in the secret that contains the GitHub installation access token
     # Default matches ESO GithubAccessToken generator output
     tokenKey: "token"
-
   # Fetch interval in seconds
   # How often to run git fetch on all cloned repositories
   # Recommended: 300-600 seconds (5-10 minutes)
   # Lower values = faster branch discovery, higher API usage
   fetchIntervalSeconds: 300
-
   # Image configuration for the git-fetch-daemon container
   image:
     repository: alpine/git
-    tag: "2.47.0"  # Pinned for reproducibility
+    tag: "2.47.0" # Pinned for reproducibility
     pullPolicy: IfNotPresent
-
   # Resource limits and requests
   resources:
     limits:
@@ -543,13 +468,12 @@ gitFetchDaemon:
     requests:
       cpu: 10m
       memory: 32Mi
-
   # Security context (matches existing containers)
   securityContext:
     allowPrivilegeEscalation: false
     capabilities:
       drop:
-      - ALL
+        - ALL
     readOnlyRootFilesystem: true
     runAsNonRoot: true
     runAsUser: 65532
