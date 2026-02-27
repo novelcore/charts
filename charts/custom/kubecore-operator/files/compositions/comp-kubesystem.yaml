@@ -3322,25 +3322,72 @@ spec:
 
                 controllerConfiguration:
                   enabled: true
-                  {{- if $tools.gitopsPromoter.controllerConfiguration.argocdCommitStatusRequeueDuration }}
-                  argocdCommitStatusRequeueDuration: {{ $tools.gitopsPromoter.controllerConfiguration.argocdCommitStatusRequeueDuration | quote }}
+                  {{- $ctrlConfig := $tools.gitopsPromoter.controllerConfiguration }}
+                  {{- if $ctrlConfig.argocdCommitStatus }}
+                  argocdCommitStatus:
+                    {{- if $ctrlConfig.argocdCommitStatus.watchLocalApplications }}
+                    watchLocalApplications: {{ $ctrlConfig.argocdCommitStatus.watchLocalApplications }}
+                    {{- end }}
+                    {{- if $ctrlConfig.argocdCommitStatus.workQueue }}
+                    workQueue:
+                      maxConcurrentReconciles: {{ $ctrlConfig.argocdCommitStatus.workQueue.maxConcurrentReconciles }}
+                      requeueDuration: {{ $ctrlConfig.argocdCommitStatus.workQueue.requeueDuration | quote }}
+                    {{- end }}
                   {{- end }}
-                  {{- if $tools.gitopsPromoter.controllerConfiguration.changeTransferPolicyRequeueDuration }}
-                  changeTransferPolicyRequeueDuration: {{ $tools.gitopsPromoter.controllerConfiguration.changeTransferPolicyRequeueDuration | quote }}
+                  {{- if $ctrlConfig.changeTransferPolicy }}
+                  changeTransferPolicy:
+                    {{- if $ctrlConfig.changeTransferPolicy.workQueue }}
+                    workQueue:
+                      maxConcurrentReconciles: {{ $ctrlConfig.changeTransferPolicy.workQueue.maxConcurrentReconciles }}
+                      requeueDuration: {{ $ctrlConfig.changeTransferPolicy.workQueue.requeueDuration | quote }}
+                    {{- end }}
                   {{- end }}
-                  {{- if $tools.gitopsPromoter.controllerConfiguration.promotionStrategyRequeueDuration }}
-                  promotionStrategyRequeueDuration: {{ $tools.gitopsPromoter.controllerConfiguration.promotionStrategyRequeueDuration | quote }}
+                  {{- if $ctrlConfig.commitStatus }}
+                  commitStatus:
+                    {{- if $ctrlConfig.commitStatus.workQueue }}
+                    workQueue:
+                      maxConcurrentReconciles: {{ $ctrlConfig.commitStatus.workQueue.maxConcurrentReconciles }}
+                      requeueDuration: {{ $ctrlConfig.commitStatus.workQueue.requeueDuration | quote }}
+                    {{- end }}
                   {{- end }}
-                  {{- if $tools.gitopsPromoter.controllerConfiguration.pullRequestRequeueDuration }}
-                  pullRequestRequeueDuration: {{ $tools.gitopsPromoter.controllerConfiguration.pullRequestRequeueDuration | quote }}
+                  {{- if $ctrlConfig.promotionStrategy }}
+                  promotionStrategy:
+                    {{- if $ctrlConfig.promotionStrategy.workQueue }}
+                    workQueue:
+                      maxConcurrentReconciles: {{ $ctrlConfig.promotionStrategy.workQueue.maxConcurrentReconciles }}
+                      requeueDuration: {{ $ctrlConfig.promotionStrategy.workQueue.requeueDuration | quote }}
+                    {{- end }}
                   {{- end }}
-                  {{- if $tools.gitopsPromoter.controllerConfiguration.pullRequest }}
+                  {{- if $ctrlConfig.gitCommitStatus }}
+                  gitCommitStatus:
+                    {{- if $ctrlConfig.gitCommitStatus.workQueue }}
+                    workQueue:
+                      maxConcurrentReconciles: {{ $ctrlConfig.gitCommitStatus.workQueue.maxConcurrentReconciles }}
+                      requeueDuration: {{ $ctrlConfig.gitCommitStatus.workQueue.requeueDuration | quote }}
+                    {{- end }}
+                  {{- end }}
+                  {{- if $ctrlConfig.timedCommitStatus }}
+                  timedCommitStatus:
+                    {{- if $ctrlConfig.timedCommitStatus.workQueue }}
+                    workQueue:
+                      maxConcurrentReconciles: {{ $ctrlConfig.timedCommitStatus.workQueue.maxConcurrentReconciles }}
+                      requeueDuration: {{ $ctrlConfig.timedCommitStatus.workQueue.requeueDuration | quote }}
+                    {{- end }}
+                  {{- end }}
+                  {{- if $ctrlConfig.pullRequest }}
                   pullRequest:
+                    {{- if $ctrlConfig.pullRequest.workQueue }}
+                    workQueue:
+                      maxConcurrentReconciles: {{ $ctrlConfig.pullRequest.workQueue.maxConcurrentReconciles }}
+                      requeueDuration: {{ $ctrlConfig.pullRequest.workQueue.requeueDuration | quote }}
+                    {{- end }}
+                    {{- if $ctrlConfig.pullRequest.template }}
                     template:
-                      title: {{ $tools.gitopsPromoter.controllerConfiguration.pullRequest.template.title | quote }}
-                      {{- if $tools.gitopsPromoter.controllerConfiguration.pullRequest.template.description }}
-                      description: {{ $tools.gitopsPromoter.controllerConfiguration.pullRequest.template.description | quote }}
+                      title: {{ $ctrlConfig.pullRequest.template.title | quote }}
+                      {{- if $ctrlConfig.pullRequest.template.description }}
+                      description: {{ $ctrlConfig.pullRequest.template.description | quote }}
                       {{- end }}
+                    {{- end }}
                   {{- end }}
 
                 gitFetchDaemon:
