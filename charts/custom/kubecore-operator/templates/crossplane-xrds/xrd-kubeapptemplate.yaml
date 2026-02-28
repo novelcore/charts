@@ -65,6 +65,7 @@ spec:
                           - configmap
                           - secret
                           - pvc
+                          - rollout
                         ports:
                           type: array
                           description: "Ports exposed by this component"
@@ -175,6 +176,21 @@ spec:
                             description: "Memory limit (e.g., 512Mi, 2Gi)"
                         required: [cpu, memory]
                     required: [requests, limits]
+              healthCheck:
+                type: object
+                description: "Health check probe configuration for liveness and readiness probes"
+                properties:
+                  path:
+                    type: string
+                    description: "HTTP path for liveness and readiness probes (e.g., /healthz, /health)"
+                  initialDelaySeconds:
+                    type: integer
+                    description: "Seconds before starting health checks"
+                    minimum: 0
+                  periodSeconds:
+                    type: integer
+                    description: "Seconds between health checks"
+                    minimum: 1
               environmentSchema:
                 type: object
                 description: "Schema for environment variables"

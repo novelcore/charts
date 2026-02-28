@@ -3615,63 +3615,206 @@ spec:
                 controllerConfiguration:
                   enabled: true
                   {{- $ctrlConfig := $tools.gitopsPromoter.controllerConfiguration }}
+                  {{- if $ctrlConfig.name }}
+                  name: {{ $ctrlConfig.name }}
+                  {{- end }}
                   {{- if $ctrlConfig.argocdCommitStatus }}
                   argocdCommitStatus:
                     {{- if $ctrlConfig.argocdCommitStatus.watchLocalApplications }}
                     watchLocalApplications: {{ $ctrlConfig.argocdCommitStatus.watchLocalApplications }}
                     {{- end }}
                     {{- if $ctrlConfig.argocdCommitStatus.workQueue }}
+                    {{- $wq := $ctrlConfig.argocdCommitStatus.workQueue }}
                     workQueue:
-                      maxConcurrentReconciles: {{ $ctrlConfig.argocdCommitStatus.workQueue.maxConcurrentReconciles }}
-                      requeueDuration: {{ $ctrlConfig.argocdCommitStatus.workQueue.requeueDuration | quote }}
+                      maxConcurrentReconciles: {{ $wq.maxConcurrentReconciles }}
+                      requeueDuration: {{ $wq.requeueDuration | quote }}
+                      {{- if $wq.rateLimiter }}
+                      rateLimiter:
+                        {{- if $wq.rateLimiter.maxOf }}
+                        maxOf:
+                          {{- range $rl := $wq.rateLimiter.maxOf }}
+                          {{- if $rl.bucket }}
+                          - bucket:
+                              bucket: {{ $rl.bucket.bucket }}
+                              qps: {{ $rl.bucket.qps }}
+                          {{- end }}
+                          {{- if $rl.fastSlow }}
+                          - fastSlow:
+                              fastDelay: {{ $rl.fastSlow.fastDelay | quote }}
+                              maxFastAttempts: {{ $rl.fastSlow.maxFastAttempts }}
+                              slowDelay: {{ $rl.fastSlow.slowDelay | quote }}
+                          {{- end }}
+                          {{- end }}
+                        {{- end }}
+                      {{- end }}
                     {{- end }}
                   {{- end }}
                   {{- if $ctrlConfig.changeTransferPolicy }}
                   changeTransferPolicy:
                     {{- if $ctrlConfig.changeTransferPolicy.workQueue }}
+                    {{- $wq := $ctrlConfig.changeTransferPolicy.workQueue }}
                     workQueue:
-                      maxConcurrentReconciles: {{ $ctrlConfig.changeTransferPolicy.workQueue.maxConcurrentReconciles }}
-                      requeueDuration: {{ $ctrlConfig.changeTransferPolicy.workQueue.requeueDuration | quote }}
+                      maxConcurrentReconciles: {{ $wq.maxConcurrentReconciles }}
+                      requeueDuration: {{ $wq.requeueDuration | quote }}
+                      {{- if $wq.rateLimiter }}
+                      rateLimiter:
+                        {{- if $wq.rateLimiter.maxOf }}
+                        maxOf:
+                          {{- range $rl := $wq.rateLimiter.maxOf }}
+                          {{- if $rl.bucket }}
+                          - bucket:
+                              bucket: {{ $rl.bucket.bucket }}
+                              qps: {{ $rl.bucket.qps }}
+                          {{- end }}
+                          {{- if $rl.fastSlow }}
+                          - fastSlow:
+                              fastDelay: {{ $rl.fastSlow.fastDelay | quote }}
+                              maxFastAttempts: {{ $rl.fastSlow.maxFastAttempts }}
+                              slowDelay: {{ $rl.fastSlow.slowDelay | quote }}
+                          {{- end }}
+                          {{- end }}
+                        {{- end }}
+                      {{- end }}
                     {{- end }}
                   {{- end }}
                   {{- if $ctrlConfig.commitStatus }}
                   commitStatus:
                     {{- if $ctrlConfig.commitStatus.workQueue }}
+                    {{- $wq := $ctrlConfig.commitStatus.workQueue }}
                     workQueue:
-                      maxConcurrentReconciles: {{ $ctrlConfig.commitStatus.workQueue.maxConcurrentReconciles }}
-                      requeueDuration: {{ $ctrlConfig.commitStatus.workQueue.requeueDuration | quote }}
+                      maxConcurrentReconciles: {{ $wq.maxConcurrentReconciles }}
+                      requeueDuration: {{ $wq.requeueDuration | quote }}
+                      {{- if $wq.rateLimiter }}
+                      rateLimiter:
+                        {{- if $wq.rateLimiter.maxOf }}
+                        maxOf:
+                          {{- range $rl := $wq.rateLimiter.maxOf }}
+                          {{- if $rl.bucket }}
+                          - bucket:
+                              bucket: {{ $rl.bucket.bucket }}
+                              qps: {{ $rl.bucket.qps }}
+                          {{- end }}
+                          {{- if $rl.fastSlow }}
+                          - fastSlow:
+                              fastDelay: {{ $rl.fastSlow.fastDelay | quote }}
+                              maxFastAttempts: {{ $rl.fastSlow.maxFastAttempts }}
+                              slowDelay: {{ $rl.fastSlow.slowDelay | quote }}
+                          {{- end }}
+                          {{- end }}
+                        {{- end }}
+                      {{- end }}
                     {{- end }}
                   {{- end }}
                   {{- if $ctrlConfig.promotionStrategy }}
                   promotionStrategy:
                     {{- if $ctrlConfig.promotionStrategy.workQueue }}
+                    {{- $wq := $ctrlConfig.promotionStrategy.workQueue }}
                     workQueue:
-                      maxConcurrentReconciles: {{ $ctrlConfig.promotionStrategy.workQueue.maxConcurrentReconciles }}
-                      requeueDuration: {{ $ctrlConfig.promotionStrategy.workQueue.requeueDuration | quote }}
+                      maxConcurrentReconciles: {{ $wq.maxConcurrentReconciles }}
+                      requeueDuration: {{ $wq.requeueDuration | quote }}
+                      {{- if $wq.rateLimiter }}
+                      rateLimiter:
+                        {{- if $wq.rateLimiter.maxOf }}
+                        maxOf:
+                          {{- range $rl := $wq.rateLimiter.maxOf }}
+                          {{- if $rl.bucket }}
+                          - bucket:
+                              bucket: {{ $rl.bucket.bucket }}
+                              qps: {{ $rl.bucket.qps }}
+                          {{- end }}
+                          {{- if $rl.fastSlow }}
+                          - fastSlow:
+                              fastDelay: {{ $rl.fastSlow.fastDelay | quote }}
+                              maxFastAttempts: {{ $rl.fastSlow.maxFastAttempts }}
+                              slowDelay: {{ $rl.fastSlow.slowDelay | quote }}
+                          {{- end }}
+                          {{- end }}
+                        {{- end }}
+                      {{- end }}
                     {{- end }}
                   {{- end }}
                   {{- if $ctrlConfig.gitCommitStatus }}
                   gitCommitStatus:
                     {{- if $ctrlConfig.gitCommitStatus.workQueue }}
+                    {{- $wq := $ctrlConfig.gitCommitStatus.workQueue }}
                     workQueue:
-                      maxConcurrentReconciles: {{ $ctrlConfig.gitCommitStatus.workQueue.maxConcurrentReconciles }}
-                      requeueDuration: {{ $ctrlConfig.gitCommitStatus.workQueue.requeueDuration | quote }}
+                      maxConcurrentReconciles: {{ $wq.maxConcurrentReconciles }}
+                      requeueDuration: {{ $wq.requeueDuration | quote }}
+                      {{- if $wq.rateLimiter }}
+                      rateLimiter:
+                        {{- if $wq.rateLimiter.maxOf }}
+                        maxOf:
+                          {{- range $rl := $wq.rateLimiter.maxOf }}
+                          {{- if $rl.bucket }}
+                          - bucket:
+                              bucket: {{ $rl.bucket.bucket }}
+                              qps: {{ $rl.bucket.qps }}
+                          {{- end }}
+                          {{- if $rl.fastSlow }}
+                          - fastSlow:
+                              fastDelay: {{ $rl.fastSlow.fastDelay | quote }}
+                              maxFastAttempts: {{ $rl.fastSlow.maxFastAttempts }}
+                              slowDelay: {{ $rl.fastSlow.slowDelay | quote }}
+                          {{- end }}
+                          {{- end }}
+                        {{- end }}
+                      {{- end }}
                     {{- end }}
                   {{- end }}
                   {{- if $ctrlConfig.timedCommitStatus }}
                   timedCommitStatus:
                     {{- if $ctrlConfig.timedCommitStatus.workQueue }}
+                    {{- $wq := $ctrlConfig.timedCommitStatus.workQueue }}
                     workQueue:
-                      maxConcurrentReconciles: {{ $ctrlConfig.timedCommitStatus.workQueue.maxConcurrentReconciles }}
-                      requeueDuration: {{ $ctrlConfig.timedCommitStatus.workQueue.requeueDuration | quote }}
+                      maxConcurrentReconciles: {{ $wq.maxConcurrentReconciles }}
+                      requeueDuration: {{ $wq.requeueDuration | quote }}
+                      {{- if $wq.rateLimiter }}
+                      rateLimiter:
+                        {{- if $wq.rateLimiter.maxOf }}
+                        maxOf:
+                          {{- range $rl := $wq.rateLimiter.maxOf }}
+                          {{- if $rl.bucket }}
+                          - bucket:
+                              bucket: {{ $rl.bucket.bucket }}
+                              qps: {{ $rl.bucket.qps }}
+                          {{- end }}
+                          {{- if $rl.fastSlow }}
+                          - fastSlow:
+                              fastDelay: {{ $rl.fastSlow.fastDelay | quote }}
+                              maxFastAttempts: {{ $rl.fastSlow.maxFastAttempts }}
+                              slowDelay: {{ $rl.fastSlow.slowDelay | quote }}
+                          {{- end }}
+                          {{- end }}
+                        {{- end }}
+                      {{- end }}
                     {{- end }}
                   {{- end }}
                   {{- if $ctrlConfig.pullRequest }}
                   pullRequest:
                     {{- if $ctrlConfig.pullRequest.workQueue }}
+                    {{- $wq := $ctrlConfig.pullRequest.workQueue }}
                     workQueue:
-                      maxConcurrentReconciles: {{ $ctrlConfig.pullRequest.workQueue.maxConcurrentReconciles }}
-                      requeueDuration: {{ $ctrlConfig.pullRequest.workQueue.requeueDuration | quote }}
+                      maxConcurrentReconciles: {{ $wq.maxConcurrentReconciles }}
+                      requeueDuration: {{ $wq.requeueDuration | quote }}
+                      {{- if $wq.rateLimiter }}
+                      rateLimiter:
+                        {{- if $wq.rateLimiter.maxOf }}
+                        maxOf:
+                          {{- range $rl := $wq.rateLimiter.maxOf }}
+                          {{- if $rl.bucket }}
+                          - bucket:
+                              bucket: {{ $rl.bucket.bucket }}
+                              qps: {{ $rl.bucket.qps }}
+                          {{- end }}
+                          {{- if $rl.fastSlow }}
+                          - fastSlow:
+                              fastDelay: {{ $rl.fastSlow.fastDelay | quote }}
+                              maxFastAttempts: {{ $rl.fastSlow.maxFastAttempts }}
+                              slowDelay: {{ $rl.fastSlow.slowDelay | quote }}
+                          {{- end }}
+                          {{- end }}
+                        {{- end }}
+                      {{- end }}
                     {{- end }}
                     {{- if $ctrlConfig.pullRequest.template }}
                     template:
@@ -3687,9 +3830,30 @@ spec:
                   secret:
                     name: "gitops-promoter-github-token"
                     tokenKey: "token"
+                  {{- if $tools.gitopsPromoter.gitFetchDaemon }}
+                  {{- $gfd := $tools.gitopsPromoter.gitFetchDaemon }}
+                  {{- if $gfd.fetchIntervalSeconds }}
+                  fetchIntervalSeconds: {{ $gfd.fetchIntervalSeconds }}
+                  {{- end }}
+                  {{- if $gfd.resources }}
+                  resources:
+                    {{- if $gfd.resources.requests }}
+                    requests:
+                      {{- range $key, $value := $gfd.resources.requests }}
+                      {{ $key }}: "{{ $value }}"
+                      {{- end }}
+                    {{- end }}
+                    {{- if $gfd.resources.limits }}
+                    limits:
+                      {{- range $key, $value := $gfd.resources.limits }}
+                      {{ $key }}: "{{ $value }}"
+                      {{- end }}
+                    {{- end }}
+                  {{- end }}
+                  {{- end }}
                   image:
                     repository: alpine/git
-                    tag: "v2.49.1" 
+                    tag: "v2.49.1"
                     pullPolicy: IfNotPresent
 
                 crds:

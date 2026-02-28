@@ -67,7 +67,7 @@ spec:
                   {{- $errors = append $errors (printf "spec.structure.components[%d].type is required" $i) -}}
                 {{- end -}}
                 {{/* Validate component type */}}
-                {{- $validTypes := list "deployment" "service" "ingress" "configmap" "secret" "pvc" -}}
+                {{- $validTypes := list "deployment" "service" "ingress" "configmap" "secret" "pvc" "rollout" -}}
                 {{- if $component.type -}}
                   {{- if not (has $component.type $validTypes) -}}
                     {{- $errors = append $errors (printf "spec.structure.components[%d].type must be one of: %s" $i (join ", " $validTypes)) -}}

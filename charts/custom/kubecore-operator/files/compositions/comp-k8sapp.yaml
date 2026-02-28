@@ -163,6 +163,12 @@ spec:
             {{- end -}}
           {{- end -}}
 
+          {{/* Rollout enablement detection */}}
+          {{- $rolloutEnabled := false -}}
+          {{- if and $k8sapp.rollout $k8sapp.rollout.enabled -}}
+            {{- $rolloutEnabled = true -}}
+          {{- end -}}
+
           {{- if $baseResourcesEnabled }}
           ---
           # Base Kubernetes Resources
@@ -319,6 +325,34 @@ spec:
                     app.kubernetes.io/part-of: {{ $projectName }}
                     app.kubernetes.io/managed-by: kubecore
                 spec: {}
+                {{ end }}
+
+                {{ if $rolloutEnabled }}
+                ---
+                apiVersion: argoproj.io/v1alpha1
+                kind: Rollout
+                metadata:
+                  name: {{ $resourceName }}
+                  annotations:
+                    argocd.argoproj.io/sync-wave: "1"
+                  labels:
+                    kubeapp: {{ $resourceName }}
+                    kubenv: base
+                spec:
+                  replicas: 0
+                  selector:
+                    matchLabels:
+                      app: {{ $resourceName }}
+                  workloadRef:
+                    apiVersion: apps/v1
+                    kind: Deployment
+                    name: {{ $resourceName }}
+                  strategy:
+                    canary:
+                      steps:
+                      - setWeight: 20
+                      - pause:
+                          duration: 2m
                 {{ end }}
               file: {{ $basePath }}/{{ $resourceName }}/base/resources.yaml
               overwriteOnCreate: true
@@ -492,6 +526,12 @@ spec:
             {{- $environmentOverlaysEnabled = $spec.features.environmentOverlays.enabled | default true -}}
           {{- end -}}
 
+          {{/* Rollout enablement detection */}}
+          {{- $rolloutEnabled := false -}}
+          {{- if and $k8sapp.rollout $k8sapp.rollout.enabled -}}
+            {{- $rolloutEnabled = true -}}
+          {{- end -}}
+
           {{/* GitOps configuration */}}
           {{- $gitops := $k8sapp.gitops | default (dict) -}}
           {{- $commitAuthor := $gitops.commitAuthor | default "kubecore-k8sapp[bot]" -}}
@@ -644,6 +684,19 @@ spec:
                             name: {{ $resourceName }}-svc
                             port:
                               number: {{ $k8sapp.service.port | default 80 }}
+                {{ end }}
+
+                {{ if $rolloutEnabled }}
+                ---
+                # Rollout patch for {{ $envName }}
+                apiVersion: argoproj.io/v1alpha1
+                kind: Rollout
+                metadata:
+                  name: {{ $resourceName }}
+                  labels:
+                    kubenv: {{ $envName }}
+                spec:
+                  replicas: {{ $env.replicas | default 1 }}
                 {{ end }}
               file: {{ $basePath }}/{{ $resourceName }}/overlays/{{ $overlayName }}/deployment-patch.yaml
               overwriteOnCreate: true
