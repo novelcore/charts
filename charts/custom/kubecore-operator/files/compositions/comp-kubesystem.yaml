@@ -90,12 +90,13 @@ spec:
           {{- $argoWorkflowsEnabled := $features.argoWorkflows | default false -}}
           {{- $traefikEnabled := $features.traefik | default false -}}
           {{- $externalSecretsEnabled := $features.externalSecrets | default true -}}
-          {{- $gitopsPromoterEnabled := $features.gitopsPromoter | default false -}}
+          {{- $gitopsPromoterEnabled := $features.gitopsPromoter | default true -}}
+          {{- $argoMetricsEnabled := $features.argoMetrics | default true -}}
           {{- $observabilityEnabled := $features.observability | default true -}}
 
           {{/* VictoriaMetrics configuration from EnvironmentConfig (with safe defaults) */}}
           {{- $vmConfig := $tools.victoriametrics | default dict -}}
-          {{- $vmEnabled := $vmConfig.enabled | default false -}}
+          {{- $vmEnabled := $vmConfig.enabled | default true -}}
           {{- $vmMode := $vmConfig.mode | default "single" -}}
           {{- $vmChartVersion := $vmConfig.chartVersion | default "0.29.5" -}}
           {{- $vmOperatorChartVersion := $vmConfig.operatorChartVersion | default "0.57.1" -}}
@@ -1481,8 +1482,12 @@ spec:
                     hydrator.enabled: true
                     # Preserve pre-9.0.0 ApplicationSet sync behavior (chart 9.0.0 changed default from 'sync' to '')
                     applicationsetcontroller.policy: 'sync'
-                  {{- if $hasArgocdOIDC }}
+                    {{- if $argoMetricsEnabled }}
+                    server.enable.proxy.extension: "true"
+                    {{- end }}
+                  {{- if or $hasArgocdOIDC (and $argoMetricsEnabled $shouldDeployVM) }}
                   cm:
+                    {{- if $hasArgocdOIDC }}
                     url: https://argocd.system.{{ $dns.clusterDomain }}
                     oidc.config: |
                       name: {{ $tools.argocd.oidc.name }}
@@ -1495,12 +1500,28 @@ spec:
                         - email
                         - groups
                       logoutURL: {{ $tools.argocd.oidc.logoutURL }}
+                    {{- end }}
+                    {{- if and $argoMetricsEnabled $shouldDeployVM }}
+                    extension.config: |
+                      extensions:
+                        - name: metrics
+                          backend:
+                            services:
+                              - url: http://argocd-metrics-server.{{ $tools.argocd.namespace }}.svc.cluster.local:9003
+                    {{- end }}
                   rbac:
+                    {{- if $hasArgocdOIDC }}
                     scopes: '[groups]'
                     policy.default: 'role:readonly'
-                    {{- if $tools.argocd.oidc.rbacPolicyCSV }}
+                    {{- end }}
+                    {{- if or $argoMetricsEnabled (and $hasArgocdOIDC $tools.argocd.oidc.rbacPolicyCSV) }}
                     policy.csv: |
+                      {{- if $argoMetricsEnabled }}
+                      p, role:readonly, extensions, invoke, metrics, allow
+                      {{- end }}
+                      {{- if and $hasArgocdOIDC $tools.argocd.oidc.rbacPolicyCSV }}
                       {{ $tools.argocd.oidc.rbacPolicyCSV }}
+                      {{- end }}
                     {{- end }}
                   {{- end }}
                 server:
@@ -1601,18 +1622,148 @@ spec:
                       effect: "{{ $toleration.effect }}"
                     {{- end }}
                   {{- end }}
-                {{- if $gitopsPromoterEnabled }}
+                {{- if or $argoRolloutsEnabled $gitopsPromoterEnabled $argoMetricsEnabled }}
                 extensions:
                   enabled: true
                   image:
                     repository: "quay.io/argoprojlabs/argocd-extension-installer"
                     tag: "v0.0.8"
                   extensionList:
+                  {{- if $argoRolloutsEnabled }}
+                  - name: rollout-extension
+                    env:
+                    - name: EXTENSION_URL
+                      value: "https://github.com/argoproj-labs/rollout-extension/releases/download/v0.3.7/extension.tar"
+                  {{- end }}
+                  {{- if $gitopsPromoterEnabled }}
                   - name: gitops-promoter
                     env:
                     - name: EXTENSION_URL
                       value: "https://github.com/argoproj-labs/gitops-promoter/releases/latest/download/gitops-promoter-argocd-extension.tar.gz"
+                  {{- end }}
+                  {{- if $argoMetricsEnabled }}
+                  - name: extension-metrics
+                    env:
+                    - name: EXTENSION_URL
+                      value: "https://github.com/argoproj-labs/argocd-extension-metrics/releases/download/v1.0.0/extension.tar.gz"
+                  {{- end }}
                 {{- end }}
+          {{- end }}
+
+          {{/* =================================================================== */}}
+          {{/* ARGOCD METRICS SERVER (backend for extension-metrics UI extension) */}}
+          {{/* =================================================================== */}}
+
+          {{- if and $argoMetricsEnabled $argoCdEnabled $shouldDeployVM }}
+          ---
+          apiVersion: kubernetes.crossplane.io/v1alpha2
+          kind: Object
+          metadata:
+            name: {{ $name }}-argocd-metrics-server-configmap
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: argocd-metrics-server-configmap
+            labels:
+              {{- range $key, $value := $commonLabels }}
+              {{ $key }}: "{{ $value }}"
+              {{- end }}
+              platform.kubecore.io/component: "argocd"
+          spec:
+            deletionPolicy: Delete
+            managementPolicies: ["*"]
+            providerConfigRef:
+              name: {{ $kubernetesProvider }}
+            forProvider:
+              manifest:
+                apiVersion: v1
+                kind: ConfigMap
+                metadata:
+                  name: argocd-metrics-server-configmap
+                  namespace: {{ $tools.argocd.namespace }}
+                data:
+                  config.yaml: |
+                    providers:
+                    - name: prometheus
+                      address: http://vmselect-{{ $clusterName }}-vm.{{ $vmNamespace }}.svc.cluster.local:8481/select/0/prometheus
+          ---
+          apiVersion: kubernetes.crossplane.io/v1alpha2
+          kind: Object
+          metadata:
+            name: {{ $name }}-argocd-metrics-server-deployment
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: argocd-metrics-server-deployment
+            labels:
+              {{- range $key, $value := $commonLabels }}
+              {{ $key }}: "{{ $value }}"
+              {{- end }}
+              platform.kubecore.io/component: "argocd"
+          spec:
+            deletionPolicy: Delete
+            managementPolicies: ["*"]
+            providerConfigRef:
+              name: {{ $kubernetesProvider }}
+            forProvider:
+              manifest:
+                apiVersion: apps/v1
+                kind: Deployment
+                metadata:
+                  name: argocd-metrics-server
+                  namespace: {{ $tools.argocd.namespace }}
+                  labels:
+                    app: argocd-metrics-server
+                spec:
+                  replicas: 1
+                  selector:
+                    matchLabels:
+                      app: argocd-metrics-server
+                  template:
+                    metadata:
+                      labels:
+                        app: argocd-metrics-server
+                    spec:
+                      serviceAccountName: argocd-server
+                      containers:
+                      - name: argocd-metrics-server
+                        image: ghcr.io/argoproj-labs/argocd-extension-metrics:v1.0.3
+                        imagePullPolicy: IfNotPresent
+                        ports:
+                        - containerPort: 9003
+                        volumeMounts:
+                        - name: config
+                          mountPath: /app/config
+                      volumes:
+                      - name: config
+                        configMap:
+                          name: argocd-metrics-server-configmap
+          ---
+          apiVersion: kubernetes.crossplane.io/v1alpha2
+          kind: Object
+          metadata:
+            name: {{ $name }}-argocd-metrics-server-service
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: argocd-metrics-server-service
+            labels:
+              {{- range $key, $value := $commonLabels }}
+              {{ $key }}: "{{ $value }}"
+              {{- end }}
+              platform.kubecore.io/component: "argocd"
+          spec:
+            deletionPolicy: Delete
+            managementPolicies: ["*"]
+            providerConfigRef:
+              name: {{ $kubernetesProvider }}
+            forProvider:
+              manifest:
+                apiVersion: v1
+                kind: Service
+                metadata:
+                  name: argocd-metrics-server
+                  namespace: {{ $tools.argocd.namespace }}
+                spec:
+                  selector:
+                    app: argocd-metrics-server
+                  ports:
+                  - port: 9003
+                    targetPort: 9003
           {{- end }}
 
           {{/* =================================================================== */}}
