@@ -1648,6 +1648,18 @@ spec:
                       effect: "{{ $toleration.effect }}"
                     {{- end }}
                   {{- end }}
+                {{- if $gitopsPromoterEnabled }}
+                extensions:
+                  enabled: true
+                  image:
+                    repository: "quay.io/argoprojlabs/argocd-extension-installer"
+                    tag: "v0.0.8"
+                  extensionList:
+                  - name: gitops-promoter
+                    env:
+                    - name: EXTENSION_URL
+                      value: "https://github.com/argoproj-labs/gitops-promoter/releases/latest/download/gitops-promoter-argocd-extension.tar.gz"
+                {{- end }}
           {{- end }}
 
           {{/* =================================================================== */}}
