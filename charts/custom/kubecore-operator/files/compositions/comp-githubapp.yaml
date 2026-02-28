@@ -328,8 +328,8 @@ spec:
                 matchLabels:
                   testing.upbound.io/example-name: {{ $baseName }}
 
-              # Enforce protection rules for administrators
-              enforceAdmins: true
+              # Allow administrators to bypass protection rules
+              enforceAdmins: false
 
               # Prevent force pushes and deletions
               allowsForcePushes: false
@@ -356,6 +356,58 @@ spec:
                 # TODO: add quality gate
                 # - "deploy-preview"
                 # - "preview-deployment-validation"
+
+          ---
+          # GitFlow Main Branch Protection Rules
+          # Only merges from rc/* and hotfix/* branches are allowed (enforced via validate-source-branch CI check)
+          apiVersion: repo.github.upbound.io/v1alpha1
+          kind: BranchProtection
+          metadata:
+            name: {{ $baseName }}-branch-protection-main
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: branch-protection-main
+            labels:
+              kubecore.eu/kubeapp: {{ $repositoryName }}
+              kubecore.eu/kubeproject: {{ $project.name }}
+              kubecore.eu/part-of: "schema"
+              kubecore.eu/branch-strategy: "gitFlow"
+              kubecore.eu/deletion-order: "5"
+          spec:
+            providerConfigRef:
+              name: {{ $githubProviderConfigName }}
+            deletionPolicy: Delete
+            forProvider:
+              # Protect the main branch
+              pattern: main
+              repositoryIdSelector:
+                matchLabels:
+                  testing.upbound.io/example-name: {{ $baseName }}
+
+              # Allow administrators to bypass protection rules
+              enforceAdmins: false
+
+              # Prevent force pushes and deletions
+              allowsForcePushes: false
+              allowsDeletions: false
+
+              # Require pull request reviews
+              requiredPullRequestReviews:
+              - dismissStaleReviews: true
+                requireCodeOwnerReviews: false
+                requiredApprovingReviewCount: 1
+                restrictDismissals: false
+
+              # Require all conversations to be resolved before merging
+              requireConversationResolution: true
+
+              # Required status checks - validate-source-branch enforces that only rc/* and hotfix/* can merge
+              requiredStatusChecks:
+              - strict: true # Require branches to be up to date before merging
+                contexts:
+                - "gate-check"
+                - "validate-pr"
+                - "build-scan-push"
+                - "validate-source-branch" # Enforces rc/* and hotfix/* source branch pattern
           {{ end }}
           {{ end }}
 
