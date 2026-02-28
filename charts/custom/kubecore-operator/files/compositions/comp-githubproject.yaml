@@ -1491,12 +1491,12 @@ spec:
           # ArgoCD repo push secrets delete before repository (created in child clusters, one per KubePool)
           - resource: "argocd-push-secret-*"
             waitFor: []
-          # ArgoCD AppProjects delete before repository (created in child clusters, one per KubePool)
-          - resource: "argocd-project-*"
-            waitFor: []
           # ArgoCD ApplicationSets delete before AppProjects (created in child clusters, one per KubePool)
           - resource: "app-of-apps-*"
             waitFor: []
+          # ArgoCD AppProjects delete after ApplicationSets to allow Application finalizers to complete
+          - resource: "argocd-project-*"
+            waitFor: ["app-of-apps-*"]
           # GitOps Promoter GitRepository resources delete before repository (created in child clusters, one per KubePool)
           - resource: "gitrepository-*"
             waitFor: []
