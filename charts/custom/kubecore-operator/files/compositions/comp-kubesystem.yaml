@@ -1680,10 +1680,111 @@ spec:
                   name: argocd-metrics-server-configmap
                   namespace: {{ $tools.argocd.namespace }}
                 data:
-                  config.yaml: |
-                    providers:
-                    - name: prometheus
-                      address: http://vmselect-{{ $clusterName }}-vm.{{ $vmNamespace }}.svc.cluster.local:8481/select/0/prometheus
+                  config.json: |
+                    {
+                    "prometheus": {
+                      "applications": [
+                        {
+                          "name": "default",
+                          "default": true,
+                          "dashboards": [
+                            {
+                              "groupKind": "pod",
+                              "tabs": ["Golden Signal"],
+                              "rows": [
+                                {
+                                  "name": "pod",
+                                  "title": "Pods",
+                                  "tab": "Golden Signal",
+                                  "graphs": [
+                                    {
+                                      "name": "pod_cpu_line",
+                                      "title": "CPU",
+                                      "description": "",
+                                      "graphType": "line",
+                                      "metricName": "pod",
+                                      "queryExpression": "sum(rate(container_cpu_usage_seconds_total{pod=~\"{{.name}}\", image!=\"\", container!=\"POD\", container!=\"\", container_name!=\"POD\"}[5m])) by (pod)"
+                                    },
+                                    {
+                                      "name": "pod_memory_line",
+                                      "title": "Memory",
+                                      "description": "",
+                                      "graphType": "line",
+                                      "metricName": "pod",
+                                      "queryExpression": "sum(rate(container_memory_usage_bytes{pod=~\"{{.name}}\", container!=\"POD\", image!=\"\", container!=\"\", container_name!=\"POD\"}[5m])) by (pod)"
+                                    }
+                                  ]
+                                }
+                              ]
+                            },
+                            {
+                              "groupKind": "deployment",
+                              "tabs": ["Golden Signal"],
+                              "rows": [
+                                {
+                                  "name": "pod",
+                                  "title": "Pods",
+                                  "tab": "Golden Signal",
+                                  "graphs": [
+                                    {
+                                      "name": "pod_cpu_line",
+                                      "title": "CPU",
+                                      "description": "",
+                                      "graphType": "line",
+                                      "metricName": "pod",
+                                      "queryExpression": "sum(rate(container_cpu_usage_seconds_total{pod=~\"{{.name}}\", image!=\"\", container!=\"POD\", container!=\"\", container_name!=\"POD\"}[5m])) by (pod)"
+                                    },
+                                    {
+                                      "name": "pod_memory_line",
+                                      "title": "Memory",
+                                      "description": "",
+                                      "graphType": "line",
+                                      "metricName": "pod",
+                                      "queryExpression": "sum(rate(container_memory_usage_bytes{pod=~\"{{.name}}\", container!=\"POD\", image!=\"\", container!=\"\", container_name!=\"POD\"}[5m])) by (pod)"
+                                    }
+                                  ]
+                                }
+                              ]
+                            },
+                            {
+                              "groupKind": "rollout",
+                              "tabs": ["Golden Signal"],
+                              "rows": [
+                                {
+                                  "name": "pod",
+                                  "title": "Pods",
+                                  "tab": "Golden Signal",
+                                  "graphs": [
+                                    {
+                                      "name": "pod_cpu_line",
+                                      "title": "CPU",
+                                      "description": "",
+                                      "graphType": "line",
+                                      "metricName": "pod",
+                                      "queryExpression": "sum(rate(container_cpu_usage_seconds_total{pod=~\"{{.name}}\", image!=\"\", container!=\"POD\", container!=\"\", container_name!=\"POD\"}[5m])) by (pod)"
+                                    },
+                                    {
+                                      "name": "pod_memory_line",
+                                      "title": "Memory",
+                                      "description": "",
+                                      "graphType": "line",
+                                      "metricName": "pod",
+                                      "queryExpression": "sum(rate(container_memory_usage_bytes{pod=~\"{{.name}}\", container!=\"POD\", image!=\"\", container!=\"\", container_name!=\"POD\"}[5m])) by (pod)"
+                                    }
+                                  ]
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      ],
+                      "provider": {
+                        "Name": "default",
+                        "default": true,
+                        "address": "http://vmselect-{{ $clusterName }}-vm.{{ $vmNamespace }}.svc.cluster.local:8481/select/0/prometheus"
+                      }
+                    }
+                    }
           ---
           apiVersion: kubernetes.crossplane.io/v1alpha2
           kind: Object
@@ -1730,13 +1831,22 @@ spec:
                       - name: argocd-metrics-server
                         image: quay.io/argoprojlabs/argocd-extension-metrics:latest
                         imagePullPolicy: IfNotPresent
+                        args:
+                        - '-enableTLS=false'
                         ports:
                         - containerPort: 9003
+                          name: metrics
+                          protocol: TCP
+                        resources:
+                          requests:
+                            cpu: 100m
+                            memory: 100Mi
                         volumeMounts:
-                        - name: config
-                          mountPath: /app/config
+                        - name: config-volume
+                          mountPath: /app/config.json
+                          subPath: config.json
                       volumes:
-                      - name: config
+                      - name: config-volume
                         configMap:
                           name: argocd-metrics-server-configmap
           ---
