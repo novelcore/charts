@@ -1721,6 +1721,11 @@ spec:
                         app: argocd-metrics-server
                     spec:
                       serviceAccountName: argocd-server
+                      tolerations:
+                      - key: "kubecore.eu/computation-type"
+                        operator: "Equal"
+                        value: "kubecore-system"
+                        effect: "NoSchedule"
                       containers:
                       - name: argocd-metrics-server
                         image: ghcr.io/argoproj-labs/argocd-extension-metrics:v1.0.3
