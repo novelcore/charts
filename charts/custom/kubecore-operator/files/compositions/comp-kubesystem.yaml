@@ -1565,6 +1565,32 @@ spec:
                       {{- end }}
                     {{- end }}
                   {{- end }}
+                  {{- if or $argoRolloutsEnabled $gitopsPromoterEnabled $argoMetricsEnabled }}
+                  extensions:
+                    enabled: true
+                    image:
+                      repository: "quay.io/argoprojlabs/argocd-extension-installer"
+                      tag: "v0.0.8"
+                    extensionList:
+                    {{- if $argoRolloutsEnabled }}
+                    - name: rollout-extension
+                      env:
+                      - name: EXTENSION_URL
+                        value: "https://github.com/argoproj-labs/rollout-extension/releases/download/v0.3.7/extension.tar"
+                    {{- end }}
+                    {{- if $gitopsPromoterEnabled }}
+                    - name: gitops-promoter
+                      env:
+                      - name: EXTENSION_URL
+                        value: "https://github.com/argoproj-labs/gitops-promoter/releases/latest/download/gitops-promoter-argocd-extension.tar.gz"
+                    {{- end }}
+                    {{- if $argoMetricsEnabled }}
+                    - name: extension-metrics
+                      env:
+                      - name: EXTENSION_URL
+                        value: "https://github.com/argoproj-labs/argocd-extension-metrics/releases/download/v1.0.0/extension.tar.gz"
+                    {{- end }}
+                  {{- end }}
                 repoServer:
                   {{- if $tools.argocd.repoServer.replicas }}
                   replicas: {{ $tools.argocd.repoServer.replicas }}
@@ -1622,32 +1648,6 @@ spec:
                       effect: "{{ $toleration.effect }}"
                     {{- end }}
                   {{- end }}
-                {{- if or $argoRolloutsEnabled $gitopsPromoterEnabled $argoMetricsEnabled }}
-                extensions:
-                  enabled: true
-                  image:
-                    repository: "quay.io/argoprojlabs/argocd-extension-installer"
-                    tag: "v0.0.8"
-                  extensionList:
-                  {{- if $argoRolloutsEnabled }}
-                  - name: rollout-extension
-                    env:
-                    - name: EXTENSION_URL
-                      value: "https://github.com/argoproj-labs/rollout-extension/releases/download/v0.3.7/extension.tar"
-                  {{- end }}
-                  {{- if $gitopsPromoterEnabled }}
-                  - name: gitops-promoter
-                    env:
-                    - name: EXTENSION_URL
-                      value: "https://github.com/argoproj-labs/gitops-promoter/releases/latest/download/gitops-promoter-argocd-extension.tar.gz"
-                  {{- end }}
-                  {{- if $argoMetricsEnabled }}
-                  - name: extension-metrics
-                    env:
-                    - name: EXTENSION_URL
-                      value: "https://github.com/argoproj-labs/argocd-extension-metrics/releases/download/v1.0.0/extension.tar.gz"
-                  {{- end }}
-                {{- end }}
           {{- end }}
 
           {{/* =================================================================== */}}
