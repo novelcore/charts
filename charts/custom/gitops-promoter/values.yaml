@@ -73,10 +73,14 @@ controllerManager:
     runAsNonRoot: true
     runAsUser: 65532
   # Environment variables
-  env: []
-  # Example:
-  # - name: LOG_LEVEL
-  #   value: "info"
+  env:
+    # Kill stalled git HTTPS connections: abort if transfer rate drops below
+    # 1000 bytes/sec for 30 seconds. Prevents git-remote-https helpers from
+    # hanging indefinitely and leaking as orphaned processes under PID 1.
+    - name: GIT_HTTP_LOW_SPEED_LIMIT
+      value: "1000"
+    - name: GIT_HTTP_LOW_SPEED_TIME
+      value: "30"
 
   # Volume mounts
   # Default includes /tmp mount for git operations (required due to readOnlyRootFilesystem)
@@ -229,7 +233,7 @@ controllerConfiguration:
     # Work queue configuration for the ArgoCD commit status controller
     workQueue:
       # Maximum number of concurrent reconciles
-      maxConcurrentReconciles: 10
+      maxConcurrentReconciles: 3
       # Rate limiter configuration
       rateLimiter:
         # Use the maximum of these rate limiters
@@ -251,7 +255,7 @@ controllerConfiguration:
   # ChangeTransferPolicy controller configuration
   changeTransferPolicy:
     workQueue:
-      maxConcurrentReconciles: 10
+      maxConcurrentReconciles: 3
       rateLimiter:
         maxOf:
           - bucket:
@@ -265,7 +269,7 @@ controllerConfiguration:
   # CommitStatus controller configuration
   commitStatus:
     workQueue:
-      maxConcurrentReconciles: 10
+      maxConcurrentReconciles: 3
       rateLimiter:
         maxOf:
           - bucket:
@@ -279,7 +283,7 @@ controllerConfiguration:
   # PromotionStrategy controller configuration
   promotionStrategy:
     workQueue:
-      maxConcurrentReconciles: 10
+      maxConcurrentReconciles: 3
       rateLimiter:
         maxOf:
           - bucket:
@@ -298,7 +302,7 @@ controllerConfiguration:
       description: "## \U0001F680 Promotion Summary\nThis PR promotes changes from **{{ .ChangeTransferPolicy.Spec.ProposedBranch }}** to **{{ .ChangeTransferPolicy.Spec.ActiveBranch }}**.\n\n## \U0001F4CA Branch Details\n| | Active | Proposed |\n|---|---|---|\n| **Branch** | `{{ .ChangeTransferPolicy.Spec.ActiveBranch }}` | `{{ .ChangeTransferPolicy.Spec.ProposedBranch }}` |\n| **Dry SHA** | `{{ trunc 7 .ChangeTransferPolicy.Status.Active.Dry.Sha }}` | `{{ trunc 7 .ChangeTransferPolicy.Status.Proposed.Dry.Sha }}` |\n| **Hydrated SHA** | `{{ trunc 7 .ChangeTransferPolicy.Status.Active.Hydrated.Sha }}` | `{{ trunc 7 .ChangeTransferPolicy.Status.Proposed.Hydrated.Sha }}` |\n| **Commit Time** | {{ .ChangeTransferPolicy.Status.Active.Dry.CommitTime }} | {{ .ChangeTransferPolicy.Status.Proposed.Dry.CommitTime }} |\n\n## \U0001F4A1 Change Links\n* [View Active Branch](https://github.com/[[OWNER]]/[[REPO]]/tree/{{ .ChangeTransferPolicy.Spec.ActiveBranch }})\n* [View Proposed Branch](https://github.com/[[OWNER]]/[[REPO]]/tree/{{ .ChangeTransferPolicy.Spec.ProposedBranch }})\n* [View Active Commit](https://github.com/[[OWNER]]/[[REPO]]/commit/{{ .ChangeTransferPolicy.Status.Active.Dry.Sha }})\n* [View Proposed Commit](https://github.com/[[OWNER]]/[[REPO]]/commit/{{ .ChangeTransferPolicy.Status.Proposed.Dry.Sha }})\n* [Compare Changes](https://github.com/[[OWNER]]/[[REPO]]/compare/{{ .ChangeTransferPolicy.Status.Active.Dry.Sha }}...{{ .ChangeTransferPolicy.Status.Proposed.Dry.Sha }})\n\n## \U0001F50D Current Status Checks\n\n### ❗Active commit statuses\n{{ range .ChangeTransferPolicy.Status.Active.CommitStatuses }}\n* {{ .Key }}: **{{ .Phase }}**\n{{- end }}\n\n### \U0001F440 Proposed commit statuses\n{{ range .ChangeTransferPolicy.Status.Proposed.CommitStatuses }}\n* {{ .Key }}: **{{ .Phase }}**\n{{- end }}\n\n## ✅ Acceptance Criteria\nThis promotion can be merged when all of the following checks pass:\n{{ range .ChangeTransferPolicy.Spec.ActiveCommitStatuses }}\n- [ ] {{ .Key }} status is successful on active branch\n{{- end }}\n{{ range .ChangeTransferPolicy.Spec.ProposedCommitStatuses }}\n- [ ] {{ .Key }} status is successful on proposed branch\n{{- end }}\n- [ ] Code review approval from at least one team member\n\n## \U0001F465 Reviewers\n@[[OWNER]]/[[REPO]]-ops\n\n## Additional Information\n* **Auto-Merge**: {{ .ChangeTransferPolicy.Spec.AutoMerge }}\n* **Full Active Dry SHA**: `{{ .ChangeTransferPolicy.Status.Active.Dry.Sha }}`\n* **Full Proposed Dry SHA**: `{{ .ChangeTransferPolicy.Status.Proposed.Dry.Sha }}`\n"
     # Work queue configuration for the PullRequest controller
     workQueue:
-      maxConcurrentReconciles: 10
+      maxConcurrentReconciles: 3
       rateLimiter:
         maxOf:
           - bucket:
@@ -312,7 +316,7 @@ controllerConfiguration:
   # GitCommitStatus controller configuration (v0.19.0+)
   gitCommitStatus:
     workQueue:
-      maxConcurrentReconciles: 10
+      maxConcurrentReconciles: 3
       rateLimiter:
         maxOf:
           - bucket:
@@ -327,7 +331,7 @@ controllerConfiguration:
   # TimedCommitStatus controller configuration (v0.17.0+)
   timedCommitStatus:
     workQueue:
-      maxConcurrentReconciles: 10
+      maxConcurrentReconciles: 3
       rateLimiter:
         maxOf:
           - bucket:

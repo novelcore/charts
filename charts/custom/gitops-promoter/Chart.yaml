@@ -3,7 +3,7 @@ name: gitops-promoter
 description: A Helm chart for GitOps Promoter - A tool for promoting changes between environments in GitOps workflows
 type: application
 # Chart version - follows semantic versioning
-version: 0.8.2
+version: 0.8.3
 # Application version - matches the GitOps Promoter version
 appVersion: "0.22.6"
 # Maintainers
@@ -34,8 +34,14 @@ annotations:
       url: https://github.com/argoproj-labs/gitops-promoter/releases/tag/v0.22.6
   # Changes for this chart version
   artifacthub.io/changes: |
+    - kind: fixed
+      description: "Restore tini as PID 1 to eliminate zombie git-remote-https process accumulation"
+    - kind: fixed
+      description: "Add shareProcessNamespace to ensure pause container reaps orphaned processes"
     - kind: changed
-      description: "Updated GitOps Promoter to v0.20.3"
+      description: "Reduce maxConcurrentReconciles from 10 to 3 to lower git subprocess burst rate"
+    - kind: added
+      description: "Add GIT_HTTP_LOW_SPEED_LIMIT/TIME env vars to kill stalled git HTTPS connections"
   # - kind: changed
   #   description: CRDs now installed from crds/ directory for proper Helm lifecycle management
   # - kind: removed
