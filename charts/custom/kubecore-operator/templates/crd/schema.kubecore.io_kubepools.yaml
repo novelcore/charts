@@ -68,6 +68,7 @@ spec:
                 description: Cluster defines the EKS cluster configuration
                 properties:
                   kubernetesVersion:
+                    default: "1.35"
                     description: KubernetesVersion specifies the Kubernetes version
                       for the cluster
                     pattern: ^[0-9]+\.[0-9]+$
