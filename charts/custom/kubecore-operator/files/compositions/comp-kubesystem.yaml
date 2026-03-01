@@ -3832,7 +3832,7 @@ spec:
                   {{- if kindIs "bool" $gfdEnabledVal }}
                   enabled: {{ $gfdEnabledVal }}
                   {{- else }}
-                  enabled: true
+                  enabled: false
                   {{- end }}
                   {{- if $gfd.fetchIntervalSeconds }}
                   fetchIntervalSeconds: {{ $gfd.fetchIntervalSeconds }}
@@ -3853,7 +3853,7 @@ spec:
                     {{- end }}
                   {{- end }}
                   {{- else }}
-                  enabled: true
+                  enabled: false
                   {{- end }}
                   secret:
                     name: "gitops-promoter-github-token"
