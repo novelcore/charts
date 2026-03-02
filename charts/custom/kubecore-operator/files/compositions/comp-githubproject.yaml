@@ -1219,10 +1219,10 @@ spec:
 
           ---
           # Delete-only Object: tracks {project}-ops Application for sequenced deletion before AppProject.
-          # managementPolicies: ["Delete"] means Crossplane never creates/updates/observes this object
-          # during normal lifecycle — it only sends a DELETE when the composition is being deleted.
-          # This avoids ArgoCD cascade (which requires the AppProject to exist) and directly removes
-          # the Application object before argocd-project-* is deleted. 404 = treated as success.
+          # managementPolicies: ["Observe", "Delete"] means Crossplane observes (but never creates/updates)
+          # this object during normal lifecycle — it only sends a DELETE when the composition is being
+          # deleted. This avoids ArgoCD cascade (which requires the AppProject to exist) and directly
+          # removes the Application object before argocd-project-* is deleted. 404 = treated as success.
           apiVersion: kubernetes.crossplane.io/v1alpha2
           kind: Object
           metadata:
@@ -1236,8 +1236,7 @@ spec:
               project.kubecore.io/part-of: "argocd-integration"
               project.kubecore.io/deletion-order: "68"
           spec:
-            deletionPolicy: Delete
-            managementPolicies: ["Delete"]
+            managementPolicies: ["Observe", "Delete"]
             providerConfigRef:
               name: {{ $kubePool.kubernetesProviderConfig }}
             forProvider:
@@ -1264,8 +1263,7 @@ spec:
               project.kubecore.io/part-of: "argocd-integration"
               project.kubecore.io/deletion-order: "68"
           spec:
-            deletionPolicy: Delete
-            managementPolicies: ["Delete"]
+            managementPolicies: ["Observe", "Delete"]
             providerConfigRef:
               name: {{ $kubePool.kubernetesProviderConfig }}
             forProvider:
@@ -1292,8 +1290,7 @@ spec:
               project.kubecore.io/part-of: "argocd-integration"
               project.kubecore.io/deletion-order: "68"
           spec:
-            deletionPolicy: Delete
-            managementPolicies: ["Delete"]
+            managementPolicies: ["Observe", "Delete"]
             providerConfigRef:
               name: {{ $kubePool.kubernetesProviderConfig }}
             forProvider:
@@ -1579,7 +1576,7 @@ spec:
           - resource: "argocd-push-secret-*"
             waitFor: []
           # ArgoCD ApplicationSet, Application, and sub-ApplicationSets are all deleted simultaneously
-          # (no cascade — managementPolicies: ["Delete"] objects bypass ArgoCD cascade entirely).
+          # (no cascade — managementPolicies: ["Observe", "Delete"] objects bypass ArgoCD cascade entirely).
           # The AppProject is deleted ONLY after all four are gone, ensuring no Application
           # referencing the project exists when ArgoCD processes the AppProject deletion.
           - resource: "app-of-apps-*"
