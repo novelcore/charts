@@ -1186,8 +1186,6 @@ spec:
                     kubecore.eu/kubeproject: {{ $name }}
                     kubecore.eu/kubepool: {{ $kubePool.name }}
                     kubecore.eu/part-of: system
-                  finalizers:
-                    - resources-finalizer.argocd.argoproj.io
                 spec:
                   generators:
                   - list:
@@ -1218,6 +1216,93 @@ spec:
                           selfHeal: true
                         syncOptions:
                         - RespectIgnoreDifferences=true
+
+          ---
+          # Delete-only Object: tracks {project}-ops Application for sequenced deletion before AppProject.
+          # managementPolicies: ["Delete"] means Crossplane never creates/updates/observes this object
+          # during normal lifecycle — it only sends a DELETE when the composition is being deleted.
+          # This avoids ArgoCD cascade (which requires the AppProject to exist) and directly removes
+          # the Application object before argocd-project-* is deleted. 404 = treated as success.
+          apiVersion: kubernetes.crossplane.io/v1alpha2
+          kind: Object
+          metadata:
+            name: {{ $name }}-project-ops-app-{{ $kubePool.name }}
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: project-ops-app-{{ $kubePool.name }}
+              crossplane.io/external-name: {{ $name }}-ops
+            labels:
+              project.kubecore.io/kubeproject: {{ $name }}
+              project.kubecore.io/kubepool: {{ $kubePool.name }}
+              project.kubecore.io/part-of: "argocd-integration"
+              project.kubecore.io/deletion-order: "68"
+          spec:
+            deletionPolicy: Delete
+            managementPolicies: ["Delete"]
+            providerConfigRef:
+              name: {{ $kubePool.kubernetesProviderConfig }}
+            forProvider:
+              manifest:
+                apiVersion: argoproj.io/v1alpha1
+                kind: Application
+                metadata:
+                  name: {{ $name }}-ops
+                  namespace: argocd
+
+          ---
+          # Delete-only Object: tracks {project}-kubeapps-auto-discovery ApplicationSet.
+          # Created by karma-ops syncing root/autov2/resource.yaml. Deleted before AppProject.
+          apiVersion: kubernetes.crossplane.io/v1alpha2
+          kind: Object
+          metadata:
+            name: {{ $name }}-kubeapps-auto-discovery-appset-{{ $kubePool.name }}
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: kubeapps-auto-discovery-appset-{{ $kubePool.name }}
+              crossplane.io/external-name: {{ $name }}-kubeapps-auto-discovery
+            labels:
+              project.kubecore.io/kubeproject: {{ $name }}
+              project.kubecore.io/kubepool: {{ $kubePool.name }}
+              project.kubecore.io/part-of: "argocd-integration"
+              project.kubecore.io/deletion-order: "68"
+          spec:
+            deletionPolicy: Delete
+            managementPolicies: ["Delete"]
+            providerConfigRef:
+              name: {{ $kubePool.kubernetesProviderConfig }}
+            forProvider:
+              manifest:
+                apiVersion: argoproj.io/v1alpha1
+                kind: ApplicationSet
+                metadata:
+                  name: {{ $name }}-kubeapps-auto-discovery
+                  namespace: argocd
+
+          ---
+          # Delete-only Object: tracks {project}-kubeapps-spec-auto-discovery ApplicationSet.
+          # Created by karma-ops syncing root/autov2/resource.yaml. Deleted before AppProject.
+          apiVersion: kubernetes.crossplane.io/v1alpha2
+          kind: Object
+          metadata:
+            name: {{ $name }}-kubeapps-spec-auto-discovery-appset-{{ $kubePool.name }}
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: kubeapps-spec-auto-discovery-appset-{{ $kubePool.name }}
+              crossplane.io/external-name: {{ $name }}-kubeapps-spec-auto-discovery
+            labels:
+              project.kubecore.io/kubeproject: {{ $name }}
+              project.kubecore.io/kubepool: {{ $kubePool.name }}
+              project.kubecore.io/part-of: "argocd-integration"
+              project.kubecore.io/deletion-order: "68"
+          spec:
+            deletionPolicy: Delete
+            managementPolicies: ["Delete"]
+            providerConfigRef:
+              name: {{ $kubePool.kubernetesProviderConfig }}
+            forProvider:
+              manifest:
+                apiVersion: argoproj.io/v1alpha1
+                kind: ApplicationSet
+                metadata:
+                  name: {{ $name }}-kubeapps-spec-auto-discovery
+                  namespace: argocd
           {{- end }}
           {{- end }}
 
@@ -1493,12 +1578,21 @@ spec:
           # ArgoCD repo push secrets delete before repository (created in child clusters, one per KubePool)
           - resource: "argocd-push-secret-*"
             waitFor: []
-          # ArgoCD ApplicationSets delete before AppProjects (created in child clusters, one per KubePool)
+          # ArgoCD ApplicationSet, Application, and sub-ApplicationSets are all deleted simultaneously
+          # (no cascade — managementPolicies: ["Delete"] objects bypass ArgoCD cascade entirely).
+          # The AppProject is deleted ONLY after all four are gone, ensuring no Application
+          # referencing the project exists when ArgoCD processes the AppProject deletion.
           - resource: "app-of-apps-*"
             waitFor: []
-          # ArgoCD AppProjects delete after ApplicationSets to allow Application finalizers to complete
+          - resource: "project-ops-app-*"
+            waitFor: []
+          - resource: "kubeapps-auto-discovery-appset-*"
+            waitFor: []
+          - resource: "kubeapps-spec-auto-discovery-appset-*"
+            waitFor: []
+          # AppProject deleted only after ALL ArgoCD objects that reference it are gone
           - resource: "argocd-project-*"
-            waitFor: ["app-of-apps-*"]
+            waitFor: ["app-of-apps-*", "project-ops-app-*", "kubeapps-auto-discovery-appset-*", "kubeapps-spec-auto-discovery-appset-*"]
           # GitOps Promoter GitRepository resources delete before repository (created in child clusters, one per KubePool)
           - resource: "gitrepository-*"
             waitFor: []
