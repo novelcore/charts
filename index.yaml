@@ -10,7 +10,7 @@ entries:
         url: https://argoproj.github.io/argo-helm/pgp_keys.asc
     apiVersion: v2
     appVersion: v3.0.12
-    created: "2026-03-02T13:24:35.065798249Z"
+    created: "2026-03-02T13:50:17.605150844Z"
     dependencies:
     - condition: redis-ha.enabled
       name: redis-ha
@@ -46,7 +46,7 @@ entries:
         url: https://argoproj.github.io/argo-helm/pgp_keys.asc
     apiVersion: v2
     appVersion: v3.0.12
-    created: "2026-03-02T13:24:35.077075989Z"
+    created: "2026-03-02T13:50:17.615586088Z"
     dependencies:
     - condition: redis-ha.enabled
       name: redis-ha
@@ -58,7 +58,7 @@ entries:
       version: 2.40.3
     description: A Helm chart for Argo CD with Argo Rollouts included, a declarative,
       GitOps continuous delivery tool for Kubernetes.
-    digest: 2836040f4a6d54ec329ab2818535349967e47917f5f55bb6d37b3152e354b761
+    digest: 22bf0befe0c852f695fbbf47e2bbbf98bd5fe794063f85e33fd03b2f9f3648ef
     home: https://github.com/argoproj/argo-helm
     icon: https://argo-cd.readthedocs.io/en/stable/assets/logo.png
     keywords:
@@ -86,10 +86,10 @@ entries:
         url: https://argoproj.github.io/argo-helm/pgp_keys.asc
     apiVersion: v2
     appVersion: v1.9.6
-    created: "2026-03-02T13:24:35.078232998Z"
+    created: "2026-03-02T13:50:17.616705695Z"
     description: A Helm chart for Argo Events, the event-driven workflow automation
       framework
-    digest: 0143ad76c10249a179fffdbe16c9863ef6a0f97df408571ad4d987c0d8ec9640
+    digest: 80b5a173c6fc369903fe93d6be6eb832d145efccf52370629fdd7afa24f72a68
     home: https://github.com/argoproj/argo-helm
     icon: https://avatars.githubusercontent.com/u/30269780?s=200&v=4
     keywords:
@@ -114,9 +114,9 @@ entries:
         url: https://argoproj.github.io/argo-helm/pgp_keys.asc
     apiVersion: v2
     appVersion: v1.8.3
-    created: "2026-03-02T13:24:35.081227731Z"
+    created: "2026-03-02T13:50:17.620022997Z"
     description: A Helm chart for Argo Rollouts
-    digest: 4d0bc2c580d2d69c6ab24bba3070772e9c3b063f074cfdd5ea38f409f79832c7
+    digest: c9c85698086e0bc029cc5dcaf1a457a31df5805b668ca393eca6e9bcae955fdc
     home: https://github.com/argoproj/argo-helm
     icon: https://argoproj.github.io/argo-rollouts/assets/logo.png
     keywords:
@@ -141,9 +141,9 @@ entries:
         url: https://argoproj.github.io/argo-helm/pgp_keys.asc
     apiVersion: v2
     appVersion: v3.6.5
-    created: "2026-03-02T13:24:35.083471467Z"
+    created: "2026-03-02T13:50:17.62214067Z"
     description: A Helm chart for Argo Workflows
-    digest: 3223dc6ff33d004e59260bf79f104d7567d8e7710c292c2ff69a7163801849c6
+    digest: 77985f6758e3c5e5932a340608d302f4f01fa731a38c3598ceed554f3664658c
     home: https://github.com/argoproj/argo-helm
     icon: https://argo-workflows.readthedocs.io/en/stable/assets/logo.png
     maintainers:
@@ -159,9 +159,9 @@ entries:
   atlas-operator:
   - apiVersion: v2
     appVersion: 0.7.7
-    created: "2026-03-02T13:24:35.083863191Z"
+    created: "2026-03-02T13:50:17.62251977Z"
     description: The Atlas Kubernetes Operator
-    digest: 77734d57ee8fa10f528f8781c61ec86e21faa0e2d034f614d757d95aec06704b
+    digest: 902db7e9737543b9853142a3012e891da28dc4f94dc8211c393bab8779dc2c72
     name: atlas-operator
     type: application
     urls:
@@ -177,9 +177,9 @@ entries:
         url: https://cert-manager.io/public-keys/cert-manager-keyring-2021-09-20-1020CF3C033D4F35BAE1C19E1226061C665DF13E.gpg
     apiVersion: v2
     appVersion: v1.17.1
-    created: "2026-03-02T13:24:35.08992748Z"
+    created: "2026-03-02T13:50:17.628302035Z"
     description: A Helm chart for cert-manager
-    digest: aba337ec7647df444597471be2369832e5f30c87ce64c9acc700ffd1936c3cde
+    digest: 3586dc93cb542a586e6eb3fefdade2d7f6116122d59ec164b190740a9d612974
     home: https://cert-manager.io
     icon: https://raw.githubusercontent.com/cert-manager/community/4d35a69437d21b76322157e6284be4cd64e6d2b7/logo/logo-small.png
     keywords:
@@ -201,11 +201,11 @@ entries:
   crossplane:
   - apiVersion: v1
     appVersion: 1.20.0
-    created: "2026-03-02T13:24:35.090828733Z"
+    created: "2026-03-02T13:50:17.629130769Z"
     description: Crossplane is an open source Kubernetes add-on that enables platform
       teams to assemble infrastructure from multiple vendors, and expose higher level
       self-service APIs for application teams to consume.
-    digest: 87193fec002c6c1d410f5149ba2b340cec306c3da4ff259ace5fc0d7dd480375
+    digest: ec21e43456691cb167c5cddf4bc39b39baa783b5cc5df014c2581cc73989d9ea
     home: https://crossplane.io
     icon: https://docs.crossplane.io/android-chrome-192x192.png
     keywords:
@@ -241,14 +241,14 @@ entries:
   eck-operator:
   - apiVersion: v2
     appVersion: 3.0.0
-    created: "2026-03-02T13:24:35.09504608Z"
+    created: "2026-03-02T13:50:17.63345875Z"
     dependencies:
     - condition: installCRDs
       name: eck-operator-crds
       repository: ""
       version: 3.0.0
     description: Elastic Cloud on Kubernetes (ECK) operator
-    digest: 1293bbdcb06dfa87a6159183226b424e29e55700d1da695fae9caca4ee572762
+    digest: 99f427024c66aabb3855d566998a7be38368272f5b5f8edae649a71992acbcfd
     home: https://github.com/elastic/cloud-on-k8s
     icon: https://helm.elastic.co/icons/eck.png
     keywords:
@@ -272,7 +272,7 @@ entries:
   everest:
   - apiVersion: v2
     appVersion: 1.6.0
-    created: "2026-03-02T13:24:35.132663042Z"
+    created: "2026-03-02T13:50:17.669110889Z"
     dependencies:
     - name: common
       repository: file://charts/common
@@ -296,7 +296,7 @@ entries:
       repository: https://percona.github.io/percona-helm-charts
       version: 1.3.*
     description: A cloud-native database platform
-    digest: 5fecd5a65d5464886b6d0136f2b23be1c5fcd3fee284b0a858375b910065a969
+    digest: 613e1dab8616922f0e038c7322003084fe4c005becdcf8f63b5716380ce621f4
     kubeVersion: '>= 1.27.0-0'
     maintainers:
     - email: mayank.shah@percona.com
@@ -335,10 +335,10 @@ entries:
           url: https://github.com/argoproj-labs/gitops-promoter/releases/tag/v0.22.6
     apiVersion: v2
     appVersion: 0.22.6
-    created: "2026-03-02T13:24:35.170601385Z"
+    created: "2026-03-02T13:50:17.706706759Z"
     description: A Helm chart for GitOps Promoter - A tool for promoting changes between
       environments in GitOps workflows
-    digest: f54c103d896c86c3a6bc9c886d7f23ca1905c28ee1464a3c33340cfd80b64c97
+    digest: d97195d080b233a572cca97208340825d21aedc943a07e17f55123d41e9dbeda
     home: https://github.com/argoproj-labs/gitops-promoter
     keywords:
     - gitops
@@ -375,7 +375,7 @@ entries:
           url: https://github.com/argoproj-labs/gitops-promoter/releases/tag/v0.22.6
     apiVersion: v2
     appVersion: 0.22.6
-    created: "2026-03-02T13:24:35.167149001Z"
+    created: "2026-03-02T13:50:17.703383085Z"
     description: A Helm chart for GitOps Promoter - A tool for promoting changes between
       environments in GitOps workflows
     digest: 48533cd08f8b341f71b00ffee4b7db4fc483aa6062a5779316640981733ce162
@@ -415,7 +415,7 @@ entries:
           url: https://github.com/argoproj-labs/gitops-promoter/releases/tag/v0.22.6
     apiVersion: v2
     appVersion: 0.22.6
-    created: "2026-03-02T13:24:35.164167533Z"
+    created: "2026-03-02T13:50:17.700079038Z"
     description: A Helm chart for GitOps Promoter - A tool for promoting changes between
       environments in GitOps workflows
     digest: 5c078a753b69368feb01d4f3d805380d2e7333232225a698d7acd8a1ebbb86be
@@ -457,7 +457,7 @@ entries:
           url: https://github.com/argoproj-labs/gitops-promoter/releases/tag/v0.20.3
     apiVersion: v2
     appVersion: 0.20.3
-    created: "2026-03-02T13:24:35.161467962Z"
+    created: "2026-03-02T13:50:17.697383949Z"
     description: A Helm chart for GitOps Promoter - A tool for promoting changes between
       environments in GitOps workflows
     digest: 643fae5a94850b873d5938b15a244489c322ddd74295730d90dab76c3f48ba2a
@@ -503,7 +503,7 @@ entries:
           url: https://github.com/argoproj-labs/gitops-promoter/releases/tag/v0.17.0
     apiVersion: v2
     appVersion: 0.17.0
-    created: "2026-03-02T13:24:35.157765242Z"
+    created: "2026-03-02T13:50:17.694416081Z"
     description: A Helm chart for GitOps Promoter - A tool for promoting changes between
       environments in GitOps workflows
     digest: 890d9627171bf017c0a2c4cf18902970847dee9eba7179ff37ea3fe98f751b86
@@ -551,7 +551,7 @@ entries:
           url: https://github.com/argoproj-labs/gitops-promoter/releases/tag/v0.14.0
     apiVersion: v2
     appVersion: 0.14.0
-    created: "2026-03-02T13:24:35.155310797Z"
+    created: "2026-03-02T13:50:17.692283188Z"
     description: A Helm chart for GitOps Promoter - A tool for promoting changes between
       environments in GitOps workflows
     digest: df783d0be0ab25ff23795b3ebb4f90ae06ae9c65719b39538b71a74a34babb9b
@@ -595,7 +595,7 @@ entries:
           url: https://github.com/argoproj-labs/gitops-promoter/releases/tag/v0.14.0
     apiVersion: v2
     appVersion: 0.14.0
-    created: "2026-03-02T13:24:35.153122847Z"
+    created: "2026-03-02T13:50:17.689435409Z"
     description: A Helm chart for GitOps Promoter - A tool for promoting changes between
       environments in GitOps workflows
     digest: 6da630d75b7d855fe2b3e3511046654441c686763dc1f5f9e3eb4fbaf945f888
@@ -645,7 +645,7 @@ entries:
           url: https://github.com/argoproj-labs/gitops-promoter/releases/tag/v0.14.0
     apiVersion: v2
     appVersion: 0.14.0
-    created: "2026-03-02T13:24:35.150287808Z"
+    created: "2026-03-02T13:50:17.68734095Z"
     description: A Helm chart for GitOps Promoter - A tool for promoting changes between
       environments in GitOps workflows
     digest: b084173aca6f143e093a7efec0c00c80dfdcc9b1298a1797b55531bc812914e5
@@ -689,7 +689,7 @@ entries:
           url: https://github.com/argoproj-labs/gitops-promoter/releases/tag/v0.14.0
     apiVersion: v2
     appVersion: 0.14.0
-    created: "2026-03-02T13:24:35.148260643Z"
+    created: "2026-03-02T13:50:17.684911405Z"
     description: A Helm chart for GitOps Promoter - A tool for promoting changes between
       environments in GitOps workflows
     digest: fd1f83a1dd60c93c51ffbdb3db01f5a837b560a423a61132cde53751094165b3
@@ -737,7 +737,7 @@ entries:
           url: https://github.com/argoproj-labs/gitops-promoter/releases/tag/v0.14.0
     apiVersion: v2
     appVersion: 0.14.0
-    created: "2026-03-02T13:24:35.14689629Z"
+    created: "2026-03-02T13:50:17.68332465Z"
     description: A Helm chart for GitOps Promoter - A tool for promoting changes between
       environments in GitOps workflows
     digest: bb3db3fa2ee4892008ba8a91d65bebaf8f2b806683395fc5e63c256bf6ddd8dd
@@ -791,7 +791,7 @@ entries:
           url: https://github.com/argoproj-labs/gitops-promoter/releases/tag/v0.10.2
     apiVersion: v2
     appVersion: 0.10.2
-    created: "2026-03-02T13:24:35.145400496Z"
+    created: "2026-03-02T13:50:17.681347014Z"
     description: A Helm chart for GitOps Promoter - A tool for promoting changes between
       environments in GitOps workflows
     digest: 8f718592cee70c19a99ced964ba3e34d6281b15e1454c5a2116e8a15596c344c
@@ -845,7 +845,7 @@ entries:
           url: https://github.com/argoproj-labs/gitops-promoter/releases/tag/v0.10.2
     apiVersion: v2
     appVersion: 0.10.2
-    created: "2026-03-02T13:24:35.14328748Z"
+    created: "2026-03-02T13:50:17.679886559Z"
     description: A Helm chart for GitOps Promoter - A tool for promoting changes between
       environments in GitOps workflows
     digest: 85ff354e021406706ab74f8009547a97d387a29f1acfceeecacf4c9d96a7239b
@@ -899,7 +899,7 @@ entries:
           url: https://github.com/argoproj-labs/gitops-promoter/releases/tag/v0.10.2
     apiVersion: v2
     appVersion: 0.10.2
-    created: "2026-03-02T13:24:35.141838065Z"
+    created: "2026-03-02T13:50:17.678399554Z"
     description: A Helm chart for GitOps Promoter - A tool for promoting changes between
       environments in GitOps workflows
     digest: 00971acf297b6b35776c53d2a8e34e34b605603fa7183b348598e9a8b5f0de52
@@ -953,7 +953,7 @@ entries:
           url: https://github.com/argoproj-labs/gitops-promoter/releases/tag/v0.10.2
     apiVersion: v2
     appVersion: 0.10.2
-    created: "2026-03-02T13:24:35.140364943Z"
+    created: "2026-03-02T13:50:17.676930313Z"
     description: A Helm chart for GitOps Promoter - A tool for promoting changes between
       environments in GitOps workflows
     digest: cf60f9422a3aac115492ede04e21526dccee0cb26fab8630ad519da2e786460a
@@ -1007,7 +1007,7 @@ entries:
           url: https://github.com/argoproj-labs/gitops-promoter/releases/tag/v0.10.2
     apiVersion: v2
     appVersion: 0.10.2
-    created: "2026-03-02T13:24:35.138915759Z"
+    created: "2026-03-02T13:50:17.675520094Z"
     description: A Helm chart for GitOps Promoter - A tool for promoting changes between
       environments in GitOps workflows
     digest: 6277e42fa91020500439437550b12c56ffc6d87608fc07e5622b5e578b4a1a76
@@ -1061,7 +1061,7 @@ entries:
           url: https://github.com/argoproj-labs/gitops-promoter/releases/tag/v0.10.2
     apiVersion: v2
     appVersion: 0.10.2
-    created: "2026-03-02T13:24:35.13757526Z"
+    created: "2026-03-02T13:50:17.674107681Z"
     description: A Helm chart for GitOps Promoter - A tool for promoting changes between
       environments in GitOps workflows
     digest: 7c6449efd739bf17fa0e4912207482cf2246cab2e240941d0ccccda728df042c
@@ -1115,7 +1115,7 @@ entries:
           url: https://github.com/argoproj-labs/gitops-promoter/releases/tag/v0.10.2
     apiVersion: v2
     appVersion: 0.10.2
-    created: "2026-03-02T13:24:35.136261302Z"
+    created: "2026-03-02T13:50:17.672618041Z"
     description: A Helm chart for GitOps Promoter - A tool for promoting changes between
       environments in GitOps workflows
     digest: ec14be04c19e41ba9232a5043e6ee976a835bd349e2627a41f2d7c69f314a8d1
@@ -1161,7 +1161,7 @@ entries:
           url: https://github.com/argoproj-labs/gitops-promoter/releases/tag/v0.10.2
     apiVersion: v2
     appVersion: 0.10.2
-    created: "2026-03-02T13:24:35.134843177Z"
+    created: "2026-03-02T13:50:17.671153419Z"
     description: A Helm chart for GitOps Promoter - A tool for promoting changes between
       environments in GitOps workflows
     digest: 2de6b82a5eda5ae9c4359b63505f00d41c22c1352847572ea57229b0efac9651
@@ -1207,7 +1207,7 @@ entries:
           url: https://github.com/argoproj-labs/gitops-promoter/releases/tag/v0.10.2
     apiVersion: v2
     appVersion: 0.10.2
-    created: "2026-03-02T13:24:35.133732184Z"
+    created: "2026-03-02T13:50:17.670084869Z"
     description: A Helm chart for GitOps Promoter - A tool for promoting changes between
       environments in GitOps workflows
     digest: ce25747621432432c87cf6b212b13facb34f4c8a32ba57cfedb88c6d0fb2107d
@@ -1232,9 +1232,9 @@ entries:
   grafana-operator:
   - apiVersion: v2
     appVersion: v5.17.1
-    created: "2026-03-02T13:24:35.17472885Z"
+    created: "2026-03-02T13:50:17.709901128Z"
     description: Helm chart for the Grafana Operator
-    digest: 1164481446e3de21a3e84201af0c3d7be22c9046708ca87daafa1a5b896cceb5
+    digest: bc9a8a772e706ac19979cad0f39256dbf7bfcbc13d949282e4e13fae61753beb
     name: grafana-operator
     type: application
     urls:
@@ -1243,9 +1243,9 @@ entries:
   keda:
   - apiVersion: v2
     appVersion: 2.17.0
-    created: "2026-03-02T13:24:35.179296133Z"
+    created: "2026-03-02T13:50:17.714891948Z"
     description: Event-based autoscaler for workloads on Kubernetes
-    digest: 58d4bef23944a7d44e21af0d54e6574407d338981ccece6b63fcf8b079b1daa1
+    digest: 7737498fd35bd635825a18a3065abfee42809efba6a0593f3bacd9e20d5dedae
     home: https://github.com/kedacore/keda
     icon: https://raw.githubusercontent.com/kedacore/keda/main/images/keda-logo-500x500-white.png
     kubeVersion: '>=v1.23.0-0'
@@ -1265,9 +1265,9 @@ entries:
   kubecore-observability-rules:
   - apiVersion: v2
     appVersion: 1.0.0
-    created: "2026-03-02T13:24:35.18549137Z"
+    created: "2026-03-02T13:50:17.720598169Z"
     description: KubeCore observability rules and dashboards from external sources
-    digest: 81d552eca78b5c9cd44ee6c0da07525a1667281028820a5eb957de2449fb8226
+    digest: 6277078d2c677cdf2f4ccd6befced487ac662ad6e04de02f64cb8e315e8d8e3a
     home: https://github.com/novelcore/kubecore-operator
     keywords:
     - kubecore
@@ -1302,8 +1302,62 @@ entries:
         - name: Release Notes
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
+    appVersion: 0.1.192
+    created: "2026-03-02T13:50:18.547942027Z"
+    dependencies:
+    - condition: crossplane.enabled
+      name: crossplane
+      repository: https://charts.crossplane.io/stable
+      version: 2.1.0
+    - condition: externalSecrets.enabled
+      name: external-secrets
+      repository: https://charts.external-secrets.io
+      version: 1.0.0
+    description: A sophisticated Kubernetes operator that implements a four-layer
+      framework architecture for provisioning and managing cloud infrastructure through
+      Crossplane compositions.
+    digest: 5a663918ed5882b26958802cac13bfcaea063e73cf5a566f7272d30a1f9f7801
+    home: https://github.com/novelcore/kubecore-operator
+    icon: https://github.com/novelcore/kubecore-operator/raw/main/docs/icon.png
+    keywords:
+    - kubernetes
+    - kubecore
+    - operator
+    - crossplane
+    - infrastructure
+    - gitops
+    - platform
+    - kubecore
+    - infrastructure-as-code
+    kubeVersion: '>=1.20.0-0'
+    maintainers:
+    - email: platform@novelcore.io
+      name: Novelcore Platform Team
+    name: kubecore-operator
+    sources:
+    - https://github.com/novelcore/kubecore-operator
+    type: application
+    urls:
+    - https://novelcore.github.io/charts/kubecore-operator-0.1.192.tgz
+    version: 0.1.192
+  - annotations:
+      artifacthub.io/category: automation
+      artifacthub.io/changes: |
+        - kind: changed
+          description: "Changed XEKS Cluster, ClusterAuth, and NodeGroup deletionPolicy from Orphan to Delete for proper AWS resource cleanup"
+        - kind: fixed
+          description: "Fixed XEKS deletion blocking issue caused by orphaned AWS resources preventing subnet deletion"
+      artifacthub.io/license: Apache-2.0
+      artifacthub.io/links: |
+        - name: GitHub Repository
+          url: https://github.com/novelcore/kubecore-operator
+        - name: Documentation
+          url: https://github.com/novelcore/kubecore-operator/blob/main/README.md
+        - name: Release Notes
+          url: https://github.com/novelcore/kubecore-operator/releases
+    apiVersion: v2
     appVersion: 0.1.191
-    created: "2026-03-02T13:24:36.017348818Z"
+    created: "2026-03-02T13:50:18.535547481Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -1357,7 +1411,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.190
-    created: "2026-03-02T13:24:36.000362397Z"
+    created: "2026-03-02T13:50:18.522250421Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -1411,7 +1465,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.189
-    created: "2026-03-02T13:24:35.984454475Z"
+    created: "2026-03-02T13:50:18.5086847Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -1465,7 +1519,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.188
-    created: "2026-03-02T13:24:35.969499955Z"
+    created: "2026-03-02T13:50:18.494896567Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -1519,7 +1573,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.187
-    created: "2026-03-02T13:24:35.954114366Z"
+    created: "2026-03-02T13:50:18.481877965Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -1573,7 +1627,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.186
-    created: "2026-03-02T13:24:35.941658478Z"
+    created: "2026-03-02T13:50:18.468947743Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -1627,7 +1681,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.185
-    created: "2026-03-02T13:24:35.928600984Z"
+    created: "2026-03-02T13:50:18.455566993Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -1681,7 +1735,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.184
-    created: "2026-03-02T13:24:35.914197072Z"
+    created: "2026-03-02T13:50:18.441675353Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -1735,7 +1789,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.183
-    created: "2026-03-02T13:24:35.900728849Z"
+    created: "2026-03-02T13:50:18.427095696Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -1789,7 +1843,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.182
-    created: "2026-03-02T13:24:35.887040606Z"
+    created: "2026-03-02T13:50:18.41454839Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -1843,7 +1897,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.181
-    created: "2026-03-02T13:24:35.874548418Z"
+    created: "2026-03-02T13:50:18.401871137Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -1897,7 +1951,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.180
-    created: "2026-03-02T13:24:35.861862922Z"
+    created: "2026-03-02T13:50:18.388652977Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -1951,7 +2005,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.179
-    created: "2026-03-02T13:24:35.848361416Z"
+    created: "2026-03-02T13:50:18.374212875Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -2005,7 +2059,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.178
-    created: "2026-03-02T13:24:35.832374795Z"
+    created: "2026-03-02T13:50:18.358564938Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -2059,7 +2113,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.177
-    created: "2026-03-02T13:24:35.81747023Z"
+    created: "2026-03-02T13:50:18.346127672Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -2113,7 +2167,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.176
-    created: "2026-03-02T13:24:35.804799012Z"
+    created: "2026-03-02T13:50:18.333436573Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -2167,7 +2221,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.175
-    created: "2026-03-02T13:24:35.792051868Z"
+    created: "2026-03-02T13:50:18.320178848Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -2221,7 +2275,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.174
-    created: "2026-03-02T13:24:35.778999135Z"
+    created: "2026-03-02T13:50:18.307041019Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -2275,7 +2329,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.173
-    created: "2026-03-02T13:24:35.764095733Z"
+    created: "2026-03-02T13:50:18.293263646Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -2329,7 +2383,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.172
-    created: "2026-03-02T13:24:35.750283265Z"
+    created: "2026-03-02T13:50:18.28020515Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -2383,7 +2437,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.171
-    created: "2026-03-02T13:24:35.737599332Z"
+    created: "2026-03-02T13:50:18.26566115Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -2437,7 +2491,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.170
-    created: "2026-03-02T13:24:35.723532451Z"
+    created: "2026-03-02T13:50:18.253768888Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -2491,7 +2545,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.169
-    created: "2026-03-02T13:24:35.708997649Z"
+    created: "2026-03-02T13:50:18.241238374Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -2545,7 +2599,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.168
-    created: "2026-03-02T13:24:35.695385331Z"
+    created: "2026-03-02T13:50:18.227961643Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -2599,7 +2653,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.167
-    created: "2026-03-02T13:24:35.682124412Z"
+    created: "2026-03-02T13:50:18.214148322Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -2653,7 +2707,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.166
-    created: "2026-03-02T13:24:35.669003518Z"
+    created: "2026-03-02T13:50:18.201266199Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -2707,7 +2761,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.165
-    created: "2026-03-02T13:24:35.655719655Z"
+    created: "2026-03-02T13:50:18.189178286Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -2761,7 +2815,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.164
-    created: "2026-03-02T13:24:35.641698681Z"
+    created: "2026-03-02T13:50:18.17463571Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -2815,7 +2869,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.163
-    created: "2026-03-02T13:24:35.627005268Z"
+    created: "2026-03-02T13:50:18.161004926Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -2869,7 +2923,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.162
-    created: "2026-03-02T13:24:35.613469475Z"
+    created: "2026-03-02T13:50:18.14846806Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -2923,7 +2977,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.161
-    created: "2026-03-02T13:24:35.600929286Z"
+    created: "2026-03-02T13:50:18.135465078Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -2977,7 +3031,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.160
-    created: "2026-03-02T13:24:35.586840342Z"
+    created: "2026-03-02T13:50:18.122849322Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -3031,7 +3085,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.159
-    created: "2026-03-02T13:24:35.573363723Z"
+    created: "2026-03-02T13:50:18.110676988Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -3085,7 +3139,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.158
-    created: "2026-03-02T13:24:35.560793126Z"
+    created: "2026-03-02T13:50:18.097468186Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -3139,7 +3193,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.157
-    created: "2026-03-02T13:24:35.545746732Z"
+    created: "2026-03-02T13:50:18.083712534Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -3193,7 +3247,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.156
-    created: "2026-03-02T13:24:35.530835074Z"
+    created: "2026-03-02T13:50:18.070781629Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -3247,7 +3301,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.155
-    created: "2026-03-02T13:24:35.517507218Z"
+    created: "2026-03-02T13:50:18.056978908Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -3301,7 +3355,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.154
-    created: "2026-03-02T13:24:35.503747019Z"
+    created: "2026-03-02T13:50:18.040752002Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -3355,7 +3409,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.153
-    created: "2026-03-02T13:24:35.489119762Z"
+    created: "2026-03-02T13:50:18.027529564Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -3409,7 +3463,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.152
-    created: "2026-03-02T13:24:35.475837993Z"
+    created: "2026-03-02T13:50:18.014950698Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -3463,7 +3517,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.151
-    created: "2026-03-02T13:24:35.463834373Z"
+    created: "2026-03-02T13:50:18.0029973Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -3517,7 +3571,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.150
-    created: "2026-03-02T13:24:35.451490626Z"
+    created: "2026-03-02T13:50:17.989728413Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -3571,7 +3625,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.149
-    created: "2026-03-02T13:24:35.439141321Z"
+    created: "2026-03-02T13:50:17.976708669Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -3625,7 +3679,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.148
-    created: "2026-03-02T13:24:35.42626406Z"
+    created: "2026-03-02T13:50:17.961905939Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -3679,7 +3733,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.147
-    created: "2026-03-02T13:24:35.414103412Z"
+    created: "2026-03-02T13:50:17.948933836Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -3733,7 +3787,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.146
-    created: "2026-03-02T13:24:35.401210492Z"
+    created: "2026-03-02T13:50:17.936946744Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -3787,7 +3841,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.145
-    created: "2026-03-02T13:24:35.388507704Z"
+    created: "2026-03-02T13:50:17.923867899Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -3841,7 +3895,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.144
-    created: "2026-03-02T13:24:35.376660272Z"
+    created: "2026-03-02T13:50:17.911239027Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -3895,7 +3949,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.143
-    created: "2026-03-02T13:24:35.364121545Z"
+    created: "2026-03-02T13:50:17.899277414Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -3949,7 +4003,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.142
-    created: "2026-03-02T13:24:35.350782486Z"
+    created: "2026-03-02T13:50:17.886840658Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -4003,7 +4057,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.141
-    created: "2026-03-02T13:24:35.339162547Z"
+    created: "2026-03-02T13:50:17.873851823Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -4057,7 +4111,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.140
-    created: "2026-03-02T13:24:35.327245091Z"
+    created: "2026-03-02T13:50:17.859516521Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -4111,7 +4165,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.139
-    created: "2026-03-02T13:24:35.314536381Z"
+    created: "2026-03-02T13:50:17.847715082Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -4165,7 +4219,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.138
-    created: "2026-03-02T13:24:35.300789137Z"
+    created: "2026-03-02T13:50:17.836010526Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -4219,7 +4273,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.137
-    created: "2026-03-02T13:24:35.288652515Z"
+    created: "2026-03-02T13:50:17.823074452Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -4273,7 +4327,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.136
-    created: "2026-03-02T13:24:35.276612566Z"
+    created: "2026-03-02T13:50:17.809838027Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -4327,7 +4381,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.135
-    created: "2026-03-02T13:24:35.263825558Z"
+    created: "2026-03-02T13:50:17.795260654Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -4381,7 +4435,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.134
-    created: "2026-03-02T13:24:35.251472845Z"
+    created: "2026-03-02T13:50:17.783152312Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -4435,7 +4489,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.133
-    created: "2026-03-02T13:24:35.239342484Z"
+    created: "2026-03-02T13:50:17.770254731Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -4489,7 +4543,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.132
-    created: "2026-03-02T13:24:35.227024988Z"
+    created: "2026-03-02T13:50:17.758003798Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -4543,7 +4597,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.131
-    created: "2026-03-02T13:24:35.213917089Z"
+    created: "2026-03-02T13:50:17.745594003Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -4597,7 +4651,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.130
-    created: "2026-03-02T13:24:35.200128978Z"
+    created: "2026-03-02T13:50:17.733600529Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -4637,7 +4691,7 @@ entries:
   milvus-operator:
   - apiVersion: v2
     appVersion: 1.2.5
-    created: "2026-03-02T13:24:36.031866748Z"
+    created: "2026-03-02T13:50:18.560757903Z"
     dependencies:
     - condition: cert-manager.enabled
       name: cert-manager
@@ -4646,7 +4700,7 @@ entries:
       - cert-manager
       version: 1.5.3
     description: A Helm chart for deploying Milvus Operator
-    digest: 010b7cc6cd4731bbfc1bcf67e3f44ee88b9c9da05e9e65b2fde03ffe2d8ceb71
+    digest: d0ddef2b39fdd02c7ffb787ea07eab97a5b29f993ade214e887084cf416155bf
     home: https://github.com/zilliztech/milvus-operator
     kubeVersion: '>= 1.16.0-0'
     maintainers:
@@ -4674,7 +4728,7 @@ entries:
       tanzuCategory: service
     apiVersion: v2
     appVersion: 7.0.1
-    created: "2026-03-02T13:24:36.035384665Z"
+    created: "2026-03-02T13:50:18.56399886Z"
     dependencies:
     - name: common
       repository: oci://registry-1.docker.io/bitnamicharts
@@ -4756,7 +4810,7 @@ entries:
         url: https://keybase.io/communitycharts/pgp_keys.asc
     apiVersion: v2
     appVersion: 3.1.0
-    created: "2026-03-02T13:24:36.057551255Z"
+    created: "2026-03-02T13:50:18.584306027Z"
     dependencies:
     - condition: postgresql.enabled
       name: postgresql
@@ -4799,9 +4853,9 @@ entries:
   pg-operator:
   - apiVersion: v2
     appVersion: 2.6.0
-    created: "2026-03-02T13:24:36.06982079Z"
+    created: "2026-03-02T13:50:18.594636802Z"
     description: A Helm chart to deploy the Percona Operator for PostgreSQL
-    digest: 971f47821d633f5c6d3fd05697bd9c9e29c7c7e31bd0f9bb06404a1f1a216035
+    digest: 933500a141d81264ff363a4ce8ad1f83e1e1169328e022ccd060c8da117fb40d
     home: https://docs.percona.com/percona-operator-for-postgresql/2.0/
     keywords:
     - PostgreSQL
@@ -4830,9 +4884,9 @@ entries:
           url: https://github.com/prometheus-community/helm-charts
     apiVersion: v2
     appVersion: 1.9.1
-    created: "2026-03-02T13:24:36.071546049Z"
+    created: "2026-03-02T13:50:18.59593054Z"
     description: A Helm chart for prometheus node-exporter
-    digest: 57ae215c7ee381c9f785c5ab9ae59ec49de35166ee66a47458563280833d085b
+    digest: 6e65b2868f60bc3104e9491adffa7dbaa593b6597e41509df51b2cd0231e9614
     home: https://github.com/prometheus/node_exporter/
     keywords:
     - node-exporter
@@ -4858,9 +4912,9 @@ entries:
   strimzi-kafka-operator:
   - apiVersion: v2
     appVersion: 0.46.0
-    created: "2026-03-02T13:24:36.076456144Z"
+    created: "2026-03-02T13:50:18.601267289Z"
     description: 'Strimzi: Apache Kafka running on Kubernetes'
-    digest: ebb7199c0be6aaef594555032e34e80c184c4e949e4cae3a43dadd5e759355e0
+    digest: b8052f5fccdb003be4db30085a82d3bdc349776ba80d49163a85a98d5fc3a954
     home: https://strimzi.io/
     icon: https://raw.githubusercontent.com/strimzi/strimzi-kafka-operator/main/documentation/logo/strimzi_logo.png
     keywords:
@@ -4890,14 +4944,14 @@ entries:
   teleport-cluster:
   - apiVersion: v2
     appVersion: 17.5.2
-    created: "2026-03-02T13:24:36.081283441Z"
+    created: "2026-03-02T13:50:18.606282667Z"
     dependencies:
     - alias: operator
       name: teleport-operator
       repository: ""
       version: 17.5.2
     description: Teleport is an access platform for your infrastructure
-    digest: 36730265e4ef4e5ace75bab16d996543f52b7284f4882ad3db3305cf0ba9d4c6
+    digest: 638ac8af00e37d73e6d3f85f2107154cfb8d6519e7d2032229d0c50739480024
     icon: https://goteleport.com/static/teleport-symbol-bimi.svg
     keywords:
     - Teleport
@@ -4908,10 +4962,10 @@ entries:
   teleport-kube-agent:
   - apiVersion: v2
     appVersion: 17.5.2
-    created: "2026-03-02T13:24:36.084031004Z"
+    created: "2026-03-02T13:50:18.609652247Z"
     description: Teleport provides a secure SSH, Kubernetes, database and application
       remote access solution that doesn't get in the way.
-    digest: 792105f0ede91cbc7cc71089c3dd96199e542002ebd1c8b2f96e1e3353eb814f
+    digest: 6e691c94f49571d40425995b70dd7df1ac887b21615021bb41c5816353c659b3
     icon: https://goteleport.com/static/teleport-symbol-bimi.svg
     keywords:
     - Teleport
@@ -4929,9 +4983,9 @@ entries:
         corresponding versions\"\n- \"chore(ci): :bug: should fail on test error\"\n"
     apiVersion: v2
     appVersion: v3.3.5
-    created: "2026-03-02T13:24:36.093517388Z"
+    created: "2026-03-02T13:50:18.61900801Z"
     description: A Traefik based Kubernetes ingress controller
-    digest: 4ebc7cf22bcc63c46f5a12bf79358b9a14930ccbdf85c1a51862f75a9535aa10
+    digest: c2cefed69a0ff01e9cd29f16eb7ffde69a646444a0974d5abe57b0257a32750a
     home: https://traefik.io/
     icon: https://raw.githubusercontent.com/traefik/traefik/v2.3/docs/content/assets/img/traefik.logo.png
     keywords:
@@ -4972,14 +5026,14 @@ entries:
           url: https://docs.victoriametrics.com/changelog
     apiVersion: v2
     appVersion: v1.115.0
-    created: "2026-03-02T13:24:36.095815267Z"
+    created: "2026-03-02T13:50:18.621327857Z"
     dependencies:
     - name: victoria-metrics-common
       repository: https://victoriametrics.github.io/helm-charts
       version: 0.0.*
     description: Victoria Metrics Agent - collects metrics from various sources and
       stores them to VictoriaMetrics
-    digest: 0b1cdd76dd7ad7234d6a2ee01cf4c7735221b01062a4fa2fd6245bfb545533d9
+    digest: 55be5360c84f74e25176ac7117e01fe93bdabe83790d5a5b188d236d64cd2b98
     home: https://github.com/VictoriaMetrics/helm-charts
     icon: https://avatars.githubusercontent.com/u/43720803?s=200&v=4
     keywords:
@@ -5018,14 +5072,14 @@ entries:
           url: https://docs.victoriametrics.com/changelog
     apiVersion: v2
     appVersion: v1.115.0
-    created: "2026-03-02T13:24:36.098414809Z"
+    created: "2026-03-02T13:50:18.624017938Z"
     dependencies:
     - name: victoria-metrics-common
       repository: https://victoriametrics.github.io/helm-charts
       version: 0.0.*
     description: Victoria Metrics Cluster version - high-performance, cost-effective
       and scalable TSDB, long-term remote storage for Prometheus
-    digest: 117d288f902574c5e78c9e72bb93f4651a6af6dcc6b99118a5f4dc3f49010b47
+    digest: a22ae4fac4d0248213b7e6d00db66f7883261168fa6cd2563f670cc44dd3e2b1
     home: https://github.com/VictoriaMetrics/helm-charts
     icon: https://avatars.githubusercontent.com/u/43720803?s=200&v=4
     keywords:
@@ -5049,4 +5103,4 @@ entries:
     urls:
     - https://novelcore.github.io/charts/victoria-metrics-cluster-0.20.1.tgz
     version: 0.20.1
-generated: "2026-03-02T13:24:35.050197671Z"
+generated: "2026-03-02T13:50:17.59060945Z"
