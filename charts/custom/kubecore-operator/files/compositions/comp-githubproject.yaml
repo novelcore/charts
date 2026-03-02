@@ -1186,6 +1186,8 @@ spec:
                     kubecore.eu/kubeproject: {{ $name }}
                     kubecore.eu/kubepool: {{ $kubePool.name }}
                     kubecore.eu/part-of: system
+                  finalizers:
+                    - resources-finalizer.argocd.argoproj.io
                 spec:
                   generators:
                   - list:
