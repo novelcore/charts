@@ -1246,40 +1246,23 @@ spec:
             {{- end -}}
           {{- end -}}
 
-          {{/* Extract Template Information from Environment Config */}}
-          {{- $templateName := "" -}}
-          {{- $templateType := "rest" -}}
-          {{- $templateLanguage := "python" -}}
-          {{- $templateProfile := "small" -}}
+          {{/* Extract Template Information - read directly from EnvironmentConfig (authoritative) */}}
+          {{- $templateMeta := dict -}}
+          {{- if and $envConfig.kubeAppTemplate (kindIs "map" $envConfig.kubeAppTemplate) -}}
+            {{- $templateMeta = $envConfig.kubeAppTemplate -}}
+          {{- end -}}
+          {{- $templateName := get $templateMeta "name" | default "" -}}
+          {{- $templateLanguage := get $templateMeta "language" | default "python" -}}
+          {{- $templateType := get $templateMeta "type" | default "rest" -}}
+          {{- $templateProfile := get $templateMeta "profile" | default "small" -}}
           {{- $sourceOwner := "" -}}
           {{- $sourceRepository := "" -}}
           {{- $branchStrategyType := $branchStrategy.type | default "gitFlow" -}}
 
+          {{/* Extract source repository info (used for status.source fields only) */}}
           {{- if and $repositorySource $repositorySource.template -}}
             {{- $sourceOwner = $repositorySource.template.owner | default "" -}}
             {{- $sourceRepository = $repositorySource.template.repository | default "" -}}
-            {{/* Infer template information from source repository name */}}
-            {{- if contains "python" $sourceRepository -}}
-              {{- $templateLanguage = "python" -}}
-            {{- else if contains "nodejs" $sourceRepository -}}
-              {{- $templateLanguage = "nodejs" -}}
-            {{- else if contains "java" $sourceRepository -}}
-              {{- $templateLanguage = "java" -}}
-            {{- end -}}
-            {{- if contains "rest" $sourceRepository -}}
-              {{- $templateType = "rest" -}}
-              {{- $templateName = printf "%s-rest-api" $templateLanguage -}}
-            {{- else if contains "web" $sourceRepository -}}
-              {{- $templateType = "web" -}}
-              {{- $templateName = printf "%s-web-app" $templateLanguage -}}
-            {{- end -}}
-            {{- if contains "small" $sourceRepository -}}
-              {{- $templateProfile = "small" -}}
-            {{- else if contains "medium" $sourceRepository -}}
-              {{- $templateProfile = "medium" -}}
-            {{- else if contains "large" $sourceRepository -}}
-              {{- $templateProfile = "large" -}}
-            {{- end -}}
           {{- end -}}
 
           apiVersion: github.platform.kubecore.io/v1alpha1
