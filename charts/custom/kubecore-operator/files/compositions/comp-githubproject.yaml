@@ -1548,18 +1548,18 @@ spec:
     functionRef:
       name: function-auto-ready
 
-  # Step 6: Sequencer function to ensure proper resource creation ordering
+  # Step 6: Sequencer function to ensure proper resource creation AND DELETION ordering
   - step: sequence-resources
     functionRef:
       name: function-sequencer
     input:
       apiVersion: sequencer.fn.crossplane.io/v1beta1
       kind: Input
-      config:
-        respectDeletionOrder: true
-        finalizerStrategy:
-          mode: Strict
-          cleanupRules:
+      enableDeletionSequencing: true
+      replayDeletion: true
+      finalizerStrategy:
+        mode: Strict
+        cleanupRules:
           # INVERTED DEPENDENCY: Team repository permissions delete first
           - resource: "team-repository-main"
             waitFor: []

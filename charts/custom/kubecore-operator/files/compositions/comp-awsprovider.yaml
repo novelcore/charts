@@ -427,6 +427,8 @@ spec:
     input:
       apiVersion: sequencer.fn.crossplane.io/v1beta1
       kind: Input
+      enableDeletionSequencing: true
+      replayDeletion: true
       config:
         respectDeletionOrder: true
         finalizerStrategy:
