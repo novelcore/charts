@@ -258,7 +258,7 @@ spec:
               {{- end }}
               labels:
                 platform.kubecore.io/kubenv: {{ $envName }}
-                platform.kubecore.io/environment-type: development
+                platform.kubecore.io/environment-type: {{ $xr.spec.envType }}
                 platform.kubecore.io/eks-cluster: {{ $xr.spec.eksClusterName }}
               tags:
                 Name: {{ $ngName }}
