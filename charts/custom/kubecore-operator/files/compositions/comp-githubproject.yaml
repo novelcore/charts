@@ -1222,15 +1222,34 @@ spec:
           ---
           # Delete-only Object: tracks {project}-ops Application for sequenced deletion before AppProject.
           # managementPolicies: ["Observe", "Delete"] means Crossplane observes (but never creates/updates)
-          # Plain Application manifest (not tracked by Crossplane Object)
-          # Allows direct deletion without sequencer interference
-          apiVersion: argoproj.io/v1alpha1
-          kind: Application
+          # this object during normal lifecycle — it only sends a DELETE when the composition is being
+          # deleted. This avoids ArgoCD cascade (which requires the AppProject to exist) and directly
+          # removes the Application object before argocd-project-* is deleted. 404 = treated as success.
+          apiVersion: kubernetes.crossplane.io/v1alpha2
+          kind: Object
           metadata:
-            name: {{ $name }}-ops
-            namespace: argocd
+            name: {{ $name }}-project-ops-app-{{ $kubePool.name }}
             annotations:
-              argocd.argoproj.io/sync-wave: "-1"
+              gotemplating.fn.crossplane.io/composition-resource-name: project-ops-app-{{ $kubePool.name }}
+              crossplane.io/external-name: {{ $name }}-ops
+            labels:
+              project.kubecore.io/kubeproject: {{ $name }}
+              project.kubecore.io/kubepool: {{ $kubePool.name }}
+              project.kubecore.io/part-of: "argocd-integration"
+              project.kubecore.io/deletion-order: "68"
+          spec:
+            managementPolicies: ["Observe", "Delete"]
+            providerConfigRef:
+              name: {{ $kubePool.kubernetesProviderConfig }}
+            forProvider:
+              manifest:
+                apiVersion: argoproj.io/v1alpha1
+                kind: Application
+                metadata:
+                  name: {{ $name }}-ops
+                  namespace: argocd
+                  annotations:
+                    argocd.argoproj.io/sync-wave: "-1"
 
           ---
           # Delete-only Object: tracks {project}-kubeapps-auto-discovery ApplicationSet.
