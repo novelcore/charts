@@ -5479,8 +5479,12 @@ spec:
         # ArgoCD builds its secretValues map once at startup; AddFunc does NOT call invalidateCache(), so a
         # secret created after ArgoCD starts is never picked up. Ensuring the secret exists before argocd-release
         # deploys guarantees the server's initial LIST includes the populated secret.
+        # NOTE: cluster-secret-store is intentionally NOT included as a predecessor here. Including it creates
+        # a circular dependency (argocd-release → cluster-secret-store exists in another rule), which causes
+        # the sequencer to break the cycle and ignore all constraints. ESO handles the ClusterSecretStore
+        # dependency natively: if the store isn't ready, ExternalSecret.Ready stays False and argocd-release
+        # remains blocked via this rule.
         - sequence:
-          - cluster-secret-store
           - argocd-oidc-external-secret
           - argocd-release
         # ArgoCD GitHub ExternalSecret after ArgoCD release and ClusterSecretStore
