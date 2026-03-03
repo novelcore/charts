@@ -252,6 +252,16 @@ rules:
   - kubernetes.crossplane.io
   resources:
   - objects
+  verbs:
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - kubernetes.crossplane.io
+  resources:
   - providerconfigs
   verbs:
   - get
