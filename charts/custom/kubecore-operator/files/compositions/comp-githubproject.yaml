@@ -1218,38 +1218,6 @@ spec:
                         - RespectIgnoreDifferences=true
 
           ---
-          # Delete-only Object: tracks {project}-ops Application for sequenced deletion before AppProject.
-          # managementPolicies: ["Observe", "Delete"] means Crossplane observes (but never creates/updates)
-          # this object during normal lifecycle — it only sends a DELETE when the composition is being
-          # deleted. This avoids ArgoCD cascade (which requires the AppProject to exist) and directly
-          # removes the Application object before argocd-project-* is deleted. 404 = treated as success.
-          apiVersion: kubernetes.crossplane.io/v1alpha2
-          kind: Object
-          metadata:
-            name: {{ $name }}-project-ops-app-{{ $kubePool.name }}
-            annotations:
-              gotemplating.fn.crossplane.io/composition-resource-name: project-ops-app-{{ $kubePool.name }}
-              crossplane.io/external-name: {{ $name }}-ops
-            labels:
-              project.kubecore.io/kubeproject: {{ $name }}
-              project.kubecore.io/kubepool: {{ $kubePool.name }}
-              project.kubecore.io/part-of: "argocd-integration"
-              project.kubecore.io/deletion-order: "68"
-          spec:
-            managementPolicies: ["Observe", "Delete"]
-            providerConfigRef:
-              name: {{ $kubePool.kubernetesProviderConfig }}
-            forProvider:
-              manifest:
-                apiVersion: argoproj.io/v1alpha1
-                kind: Application
-                metadata:
-                  name: {{ $name }}-ops
-                  namespace: argocd
-                  annotations:
-                    argocd.argoproj.io/sync-wave: "-1"
-
-          ---
           # Delete-only Object: tracks {project}-kubeapps-auto-discovery ApplicationSet.
           # Created by karma-ops syncing root/autov2/resource.yaml. Deleted before AppProject.
           apiVersion: kubernetes.crossplane.io/v1alpha2
@@ -1577,21 +1545,21 @@ spec:
           # ArgoCD repo push secrets delete before repository (created in child clusters, one per KubePool)
           - resource: "argocd-push-secret-*"
             waitFor: []
-          # ArgoCD ApplicationSet, Application, and sub-ApplicationSets are all deleted simultaneously
-          # (no cascade — managementPolicies: ["Observe", "Delete"] objects bypass ArgoCD cascade entirely).
-          # The AppProject is deleted ONLY after all four are gone, ensuring no Application
+          # ArgoCD ApplicationSet and sub-ApplicationSets are deleted simultaneously.
+          # The AppProject is deleted ONLY after all three are gone, ensuring no ArgoCD resource
           # referencing the project exists when ArgoCD processes the AppProject deletion.
+          # Note: {project}-ops Application is NOT tracked here — its lifecycle is managed by
+          # ArgoCD/karma-ops independently. Removing it from composition management avoids the
+          # resources-finalizer deadlock (Application stuck waiting for AppProject that is already deleted).
           - resource: "app-of-apps-*"
-            waitFor: []
-          - resource: "project-ops-app-*"
             waitFor: []
           - resource: "kubeapps-auto-discovery-appset-*"
             waitFor: []
           - resource: "kubeapps-spec-auto-discovery-appset-*"
             waitFor: []
-          # AppProject deleted only after ALL ArgoCD objects that reference it are gone
+          # AppProject deleted only after all ArgoCD objects that reference it are gone
           - resource: "argocd-project-*"
-            waitFor: ["app-of-apps-*", "project-ops-app-*", "kubeapps-auto-discovery-appset-*", "kubeapps-spec-auto-discovery-appset-*"]
+            waitFor: ["app-of-apps-*", "kubeapps-auto-discovery-appset-*", "kubeapps-spec-auto-discovery-appset-*"]
           # GitOps Promoter GitRepository resources delete before repository (created in child clusters, one per KubePool)
           - resource: "gitrepository-*"
             waitFor: []
