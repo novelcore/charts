@@ -1053,8 +1053,6 @@ spec:
           kind: Object
           metadata:
             name: {{ $name }}-argocd-project-{{ $kubePool.name }}
-            finalizers:
-            - kubecore.io/await-argocd-app-cleanup
             annotations:
               gotemplating.fn.crossplane.io/composition-resource-name: argocd-project-{{ $kubePool.name }}
               crossplane.io/external-name: {{ $name }}
@@ -1585,13 +1583,15 @@ spec:
           # referencing the project exists when ArgoCD processes the AppProject deletion.
           - resource: "app-of-apps-*"
             waitFor: []
+          - resource: "project-ops-app-*"
+            waitFor: []
           - resource: "kubeapps-auto-discovery-appset-*"
             waitFor: []
           - resource: "kubeapps-spec-auto-discovery-appset-*"
             waitFor: []
           # AppProject deleted only after ALL ArgoCD objects that reference it are gone
           - resource: "argocd-project-*"
-            waitFor: ["app-of-apps-*", "kubeapps-auto-discovery-appset-*", "kubeapps-spec-auto-discovery-appset-*"]
+            waitFor: ["app-of-apps-*", "project-ops-app-*", "kubeapps-auto-discovery-appset-*", "kubeapps-spec-auto-discovery-appset-*"]
           # GitOps Promoter GitRepository resources delete before repository (created in child clusters, one per KubePool)
           - resource: "gitrepository-*"
             waitFor: []
