@@ -1053,6 +1053,8 @@ spec:
           kind: Object
           metadata:
             name: {{ $name }}-argocd-project-{{ $kubePool.name }}
+            finalizers:
+            - kubecore.io/await-argocd-app-cleanup
             annotations:
               gotemplating.fn.crossplane.io/composition-resource-name: argocd-project-{{ $kubePool.name }}
               crossplane.io/external-name: {{ $name }}
