@@ -1591,6 +1591,30 @@ spec:
                         value: "https://github.com/argoproj-labs/argocd-extension-metrics/releases/download/v1.0.0/extension.tar.gz"
                     {{- end }}
                   {{- end }}
+                  {{- if $hasArgocdOIDC }}
+                  # Init container ensures argocd-server does not start until the OIDC secret exists.
+                  # The sequencer cannot guarantee this because on first reconcile (observed.resources empty)
+                  # it uses permissive behavior and allows all resources to be created simultaneously.
+                  # This init container is the only reliable gate: argocd-server cannot start until the
+                  # argocd-zitadel-oidc secret is present, guaranteeing ArgoCD's secretValues cache is
+                  # populated at startup and OIDC authentication works on first boot.
+                  initContainers:
+                  - name: wait-oidc-secret
+                    image: bitnami/kubectl:1.32
+                    command: ["/bin/sh", "-c"]
+                    args:
+                    - |
+                      echo "Waiting for argocd-zitadel-oidc OIDC secret..."
+                      until kubectl get secret argocd-zitadel-oidc -n argocd 2>/dev/null; do
+                        echo "Secret not found, retrying in 10s..."
+                        sleep 10
+                      done
+                      echo "argocd-zitadel-oidc secret found, starting ArgoCD server."
+                    securityContext:
+                      readOnlyRootFilesystem: false
+                      runAsNonRoot: true
+                      allowPrivilegeEscalation: false
+                  {{- end }}
                 repoServer:
                   {{- if $tools.argocd.repoServer.replicas }}
                   replicas: {{ $tools.argocd.repoServer.replicas }}
