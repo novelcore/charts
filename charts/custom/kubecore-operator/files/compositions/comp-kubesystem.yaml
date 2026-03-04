@@ -1600,7 +1600,7 @@ spec:
                   # populated at startup and OIDC authentication works on first boot.
                   initContainers:
                   - name: wait-oidc-secret
-                    image: alpine:3.20
+                    image: curlimages/curl:8.11.1
                     command: ["/bin/sh", "-c"]
                     args:
                     - |
@@ -1608,7 +1608,7 @@ spec:
                       CA=/var/run/secrets/kubernetes.io/serviceaccount/ca.crt
                       URL="https://kubernetes.default.svc/api/v1/namespaces/argocd/secrets/argocd-zitadel-oidc"
                       echo "Waiting for argocd-zitadel-oidc OIDC secret..."
-                      until wget -qO- --ca-certificate="$CA" --header="Authorization: Bearer $TOKEN" "$URL" 2>/dev/null | grep -q "argocd-zitadel-oidc"; do
+                      until curl -sf --cacert "$CA" -H "Authorization: Bearer $TOKEN" "$URL" 2>/dev/null | grep -q "argocd-zitadel-oidc"; do
                         echo "Secret not found, retrying in 10s..."
                         sleep 10
                       done
