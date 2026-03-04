@@ -1492,8 +1492,8 @@ spec:
                     oidc.config: |
                       name: {{ $tools.argocd.oidc.name }}
                       issuer: {{ $tools.argocd.oidc.issuer }}
-                      clientID: $argocd-zitadel-oidc:zitadel_client_id
-                      clientSecret: $argocd-zitadel-oidc:zitadel_client_secret
+                      clientID: "$argocd-zitadel-oidc:zitadel_client_id"
+                      clientSecret: "$argocd-zitadel-oidc:zitadel_client_secret"
                       requestedScopes:
                         - openid
                         - profile
