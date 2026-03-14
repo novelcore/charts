@@ -94,6 +94,18 @@ rules:
 - apiGroups:
   - ec2.aws.upbound.io
   resources:
+  - eips
+  - internetgateways
+  - routes
+  - routetableassociations
+  - routetables
+  verbs:
+  - delete
+  - get
+  - list
+- apiGroups:
+  - ec2.aws.upbound.io
+  resources:
   - natgateways
   - subnets
   - vpcs
