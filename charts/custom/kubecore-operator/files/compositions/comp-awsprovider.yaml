@@ -405,8 +405,9 @@ spec:
                           serviceAccountRef:
                             name: {{ $org }}-eso-sa
                             namespace: external-secrets
-                      # Use EKS region so STS AssumeRoleWithWebIdentity succeeds (OIDC lookup); Secrets Manager calls still work cross-region via SDK
-                      region: {{ $eksRegion }}
+                      # Use org primaryRegion so secrets land in the same SM region that child-cluster ExternalSecrets read from.
+                      # STS AssumeRoleWithWebIdentity still works: OIDC providers are global IAM resources, any regional STS endpoint can validate tokens.
+                      region: {{ $primaryRegion }}
                       service: SecretsManager
 
   # Step 3: Enable automatic readiness detection
