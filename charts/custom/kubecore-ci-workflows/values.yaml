@@ -1,0 +1,54 @@
+## KubeCore CI Workflows configuration
+
+# Registry configuration
+registry:
+  # In-cluster Zot registry URL (for build push)
+  internalUrl: "zot-registry.zot-registry.svc.cluster.local:5000"
+
+# GitHub configuration
+github:
+  # GitHub organization
+  org: ""
+  # Name of the K8s secret containing the GitHub installation token
+  # This secret is provisioned by ESO GithubAccessToken generator
+  tokenSecretName: ""
+
+# GitOps configuration
+gitops:
+  # Suffix for the project ops repository (e.g., "my-project" + "-ops" = "my-project-ops")
+  projectRepoSuffix: "-ops"
+
+# BuildKit configuration
+buildkit:
+  image: "moby/buildkit:rootless"
+  # Default Dockerfile path relative to repo root
+  dockerfilePath: "./Dockerfile"
+  # Default build context relative to repo root
+  buildContext: "."
+
+# Workflow configuration
+workflow:
+  # Namespace where WorkflowTemplate is created
+  namespace: "argo-workflows"
+
+  # TTL for completed workflows
+  ttlStrategy:
+    secondsAfterCompletion: 3600
+
+  # Pod garbage collection
+  podGC:
+    strategy: OnWorkflowSuccess
+
+# Service account for workflow execution
+serviceAccount:
+  create: true
+  name: "ci-build-sa"
+  annotations: {}
+
+# RBAC for workflow pods
+rbac:
+  create: true
+
+# Scheduling (typically set by composition from workflowDefaults, but can override per-template)
+nodeSelector: {}
+tolerations: []
