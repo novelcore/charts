@@ -6,15 +6,15 @@ kind: CompositeResourceDefinition
 metadata:
   labels:
     {{- include "chart.labels" . | nindent 4 }}
-  name: xprojectenvmlstacks.platform.kubecore.io
+  name: xprojectmlstacks.platform.kubecore.io
 spec:
   group: platform.kubecore.io
   names:
-    kind: XProjectEnvMLStack
-    plural: xprojectenvmlstacks
+    kind: XProjectMLStack
+    plural: xprojectmlstacks
   scope: Cluster
   defaultCompositionRef:
-    name: projectenvmlstack
+    name: projectmlstack
   versions:
   - name: v1alpha1
     served: true
@@ -29,12 +29,9 @@ spec:
               projectName:
                 type: string
                 description: "KubeProject name"
-              environmentName:
-                type: string
-                description: "Environment name within the project"
               clusterRef:
                 type: object
-                description: "Reference to the KubePool (cluster) where this ML stack is provisioned"
+                description: "Reference to the KubePool (cluster) whose system nodes host this ML stack"
                 properties:
                   name:
                     type: string
@@ -46,7 +43,7 @@ spec:
                 description: "KubeOrg name for provider configs"
               region:
                 type: string
-                description: "AWS region for S3 and resources (inherited from environment's KubePool)"
+                description: "AWS region for S3 and resources (inherited from KubePool EnvironmentConfig)"
               features:
                 type: object
                 description: "ML stack feature toggles"
@@ -65,7 +62,7 @@ spec:
                     default: false
               postgresResources:
                 type: object
-                description: "Optional Postgres resource sizing overrides (applied per environment when postgres is enabled)"
+                description: "Optional Postgres resource sizing overrides for the per-project CloudNativePG cluster"
                 properties:
                   cpu:
                     type: string
@@ -78,7 +75,7 @@ spec:
                     description: "Storage size for the primary Postgres PVC (e.g., 20Gi)"
               environmentConfigRef:
                 type: object
-                description: "Reference to the EnvironmentConfig for this ML stack"
+                description: "Reference to the system EnvironmentConfig for this ML stack (e.g., {pool}-system-config)"
                 properties:
                   name:
                     type: string
@@ -86,7 +83,6 @@ spec:
                 - name
             required:
             - projectName
-            - environmentName
             - clusterRef
             - environmentConfigRef
           status:
@@ -94,6 +90,32 @@ spec:
             properties:
               ready:
                 type: boolean
+              namespace:
+                type: string
+                description: "Kubernetes namespace hosting the ML stack"
+              mlflowEndpoint:
+                type: string
+                description: "In-cluster MLflow service URL"
+              lakeFSEndpoint:
+                type: string
+                description: "In-cluster lakeFS service URL"
+              s3Bucket:
+                type: string
+                description: "S3 bucket name for ML artifacts"
+              postgresHost:
+                type: string
+                description: "In-cluster Postgres host (CNPG cluster -rw service)"
+              features:
+                type: object
+                properties:
+                  mlflow:
+                    type: boolean
+                  lakefs:
+                    type: boolean
+                  s3:
+                    type: boolean
+                  postgres:
+                    type: boolean
               conditions:
                 type: array
                 items:
@@ -103,4 +125,5 @@ spec:
                     status: { type: string }
                     reason: { type: string }
                     message: { type: string }
+
 {{- end }}

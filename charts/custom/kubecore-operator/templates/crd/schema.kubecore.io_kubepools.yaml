@@ -174,28 +174,6 @@ spec:
                           default: true
                           description: Logging enables logging stack for the environment
                           type: boolean
-                        mlStack:
-                          description: |-
-                            MLStack defines ML stack toggles for environments using this template.
-                            Only applied when the KubePool has features.ml and operators.postgres (cluster is ML capable).
-                            Provisions one Postgres + MLflow + optional S3 per project environment when enabled.
-                          properties:
-                            mlflow:
-                              default: false
-                              description: MLflow enables MLflow for this environment
-                                (requires Postgres as backend)
-                              type: boolean
-                            postgres:
-                              default: false
-                              description: Postgres enables a Postgres instance for
-                                this environment's ML stack (MLflow backend)
-                              type: boolean
-                            s3:
-                              default: false
-                              description: S3 enables S3 bucket and IRSA for MLflow
-                                artifact storage (only used when MLflow is enabled)
-                              type: boolean
-                          type: object
                         monitoring:
                           default: true
                           description: Monitoring enables monitoring stack for the
@@ -478,26 +456,6 @@ spec:
                 description: Features defines which platform features are enabled
                   for this cluster
                 properties:
-                  ml:
-                    description: |-
-                      ML enables the ML platform tools (MLflow, lakeFS, pricing cache).
-                      When true, creates an XMLSystem claim; requires Operators.Postgres when using shared Postgres.
-                    type: boolean
-                  mlConfig:
-                    description: |-
-                      MLConfig fine-tunes which ML components are provisioned when ML is true.
-                      When nil, all default to true (backward compatible). Set to false to skip provisioning a component.
-                    properties:
-                      mlflow:
-                        description: Mlflow deploys MLflow (Postgres backend, optional
-                          S3 artifacts). Default true.
-                        type: boolean
-                      s3:
-                        description: |-
-                          S3 creates an S3 bucket and configures MLflow to use it for artifacts. Default true.
-                          When false, MLflow uses the default artifact store (no S3 bucket or IRSA).
-                        type: boolean
-                    type: object
                   observability:
                     description: Observability enables VictoriaMetrics observability
                       stack
@@ -549,6 +507,36 @@ spec:
                   Postgres cluster) so XMLSystem and other workloads can use it. Operators run before
                   XMLSystem; observability stays in XKubeSystem.
                 properties:
+                  karpenter:
+                    description: |-
+                      Karpenter configures the Karpenter node autoscaler.
+                      When present and enabled, XClusterOperators installs the Karpenter Helm chart.
+                      App-level ML NodePools are configured via KubeApp.spec.mlPipeline and provisioned
+                      by the XK8sMLApp composition for per-app workload isolation and cost attribution.
+                    properties:
+                      controllerRoleArn:
+                        description: ControllerRoleArn is the IRSA ARN for the Karpenter
+                          controller ServiceAccount.
+                        type: string
+                      enabled:
+                        default: true
+                        description: Enabled toggles Karpenter. Defaults to true when
+                          the karpenter block is present.
+                        type: boolean
+                      nodeRoleName:
+                        description: |-
+                          NodeRoleName overrides the IAM role for Karpenter-provisioned nodes.
+                          Defaults to "{clusterName}-eks-karpenter-node".
+                        type: string
+                    required:
+                    - enabled
+                    type: object
+                  nvidiaGpu:
+                    description: |-
+                      NvidiaGpu enables the NVIDIA GPU Operator (device plugin, container toolkit, DCGM exporter).
+                      Required when the cluster uses XGPUNodeGroup so pods requesting nvidia.com/gpu resources
+                      are scheduled. Configured with driver.enabled=false (AL2_x86_64_GPU has pre-installed drivers).
+                    type: boolean
                   postgres:
                     description: |-
                       Postgres enables the CloudNativePG operator and a shared Postgres cluster (30Gi, 1 instance).

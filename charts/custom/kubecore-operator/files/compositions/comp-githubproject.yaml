@@ -644,6 +644,48 @@ spec:
                             duration: 5s
                             factor: 2
                             maxDuration: 3m0s
+                ---
+                apiVersion: argoproj.io/v1alpha1
+                kind: ApplicationSet
+                metadata:
+                  name: {{ $name }}-workflows-auto-discovery
+                  namespace: argocd
+                  labels:
+                    project.kubecore.io/kubeproject: {{ $name }}
+                    project.kubecore.io/part-of: workflows
+                  annotations:
+                    argocd.argoproj.io/sync-wave: "-1"
+                spec:
+                  goTemplate: true
+                  goTemplateOptions: [ "missingkey=error" ]
+                  generators:
+                  - git:
+                      repoURL: {{ $repoURL }}
+                      revision: main
+                      directories:
+                      - path: workflows/*/*
+                  template:
+                    metadata:
+                      name: '{{"{{index .path.segments 1}}-wft-{{.path.basename}}"}}'
+                      labels:
+                        project.kubecore.io/kubeapp: '{{"{{index .path.segments 1}}"}}'
+                        project.kubecore.io/part-of: workflows
+                    spec:
+                      project: {{ $name }}
+                      destination:
+                        server: https://kubernetes.default.svc
+                        namespace: ml-{{ $name }}
+                      source:
+                        repoURL: {{ $repoURL }}
+                        targetRevision: main
+                        path: '{{"{{.path.path}}"}}'
+                      syncPolicy:
+                        syncOptions:
+                        - CreateNamespace=false
+                        - ApplyOutOfSyncOnly=true
+                        automated:
+                          prune: true
+                          selfHeal: true
               branch: main
               commitMessage: "feat: Add ArgoCD ApplicationSets for {{ $name }}"
               commitAuthor: "Kubecore Platform"
@@ -762,7 +804,7 @@ spec:
             secret: {{ randAlphaNum 32 | quote }}
           {{- end }}
 
-  # Step 3.4: Generate ArgoCD repository secrets - create plain Secret per unique KubePool for repository registration
+  # Step 3.4: Generate ArgoCD repository secrets (read) - ExternalSecret with GitHub App credentials per KubePool
   - step: generate-argocd-repo-secrets
     functionRef:
       name: function-go-templating
@@ -787,6 +829,11 @@ spec:
           {{- if not $githubOrg -}}
             {{- fail "github.organization is required in EnvironmentConfig" -}}
           {{- end -}}
+
+          {{/* Extract GitHub configuration for ExternalSecret (read credentials) */}}
+          {{- $githubSecretName := $envConfig.github.secretManager.secretName -}}
+          {{- $keyMappings := $envConfig.github.secretManager.keyMappings -}}
+          {{- $clusterSecretStore := $envConfig.clusterSecretStore.name -}}
 
           {{/* Extract KubePool configurations list from EnvironmentConfig */}}
           {{- $kubePools := list -}}
@@ -822,10 +869,10 @@ spec:
           {{/* Repository URL always uses target organization */}}
           {{- $repoURL := printf "https://github.com/%s/%s.git" $githubOrg $repoName -}}
 
-          {{/* Create one ArgoCD repo secret per unique KubePool */}}
+          {{/* Create one ArgoCD repo secret (read/clone) per unique KubePool - ExternalSecret with GitHub App credentials */}}
           {{- range $kubePool := $kubePools }}
           ---
-          # ArgoCD Repository Secret for KubePool: {{ $kubePool.name }}
+          # ArgoCD Repository Secret (read) - ExternalSecret for KubePool: {{ $kubePool.name }}
           apiVersion: kubernetes.crossplane.io/v1alpha2
           kind: Object
           metadata:
@@ -845,8 +892,8 @@ spec:
               name: {{ $kubePool.kubernetesProviderConfig }}
             forProvider:
               manifest:
-                apiVersion: v1
-                kind: Secret
+                apiVersion: external-secrets.io/v1
+                kind: ExternalSecret
                 metadata:
                   name: {{ $name }}-repo-creds
                   namespace: argocd
@@ -857,10 +904,40 @@ spec:
                     argocd.argoproj.io/secret-type: repository
                     project.kubecore.io/kubeproject: {{ $name }}
                     project.kubecore.io/managed-by: crossplane
-                type: Opaque
-                stringData:
-                  url: {{ $repoURL }}
-                  type: git
+                spec:
+                  refreshInterval: 1h
+                  secretStoreRef:
+                    kind: ClusterSecretStore
+                    name: {{ $clusterSecretStore }}
+                  target:
+                    name: {{ $name }}-repo-creds
+                    creationPolicy: Owner
+                    deletionPolicy: Retain
+                    template:
+                      type: Opaque
+                      engineVersion: v2
+                      metadata:
+                        labels:
+                          argocd.argoproj.io/secret-type: repository
+                      data:
+                        url: "{{ $repoURL }}"
+                        type: "git"
+                        githubAppID: "{{ `{{ .appId }}` }}"
+                        githubAppInstallationID: "{{ `{{ .installationId }}` }}"
+                        githubAppPrivateKey: "{{ `{{ .privateKey }}` }}"
+                  data:
+                  - secretKey: appId
+                    remoteRef:
+                      key: {{ $githubSecretName }}
+                      property: {{ $keyMappings.appId }}
+                  - secretKey: installationId
+                    remoteRef:
+                      key: {{ $githubSecretName }}
+                      property: {{ $keyMappings.installationId }}
+                  - secretKey: privateKey
+                    remoteRef:
+                      key: {{ $githubSecretName }}
+                      property: {{ $keyMappings.privateKey }}
           {{- end }}
           {{- end }}
 
@@ -1216,6 +1293,8 @@ spec:
                           selfHeal: true
                         syncOptions:
                         - RespectIgnoreDifferences=true
+                  syncPolicy:
+                    preserveResourcesOnDeletion: false
 
           ---
           # Delete-only Object: tracks {project}-kubeapps-auto-discovery ApplicationSet.
@@ -1269,6 +1348,32 @@ spec:
                 kind: ApplicationSet
                 metadata:
                   name: {{ $name }}-kubeapps-spec-auto-discovery
+                  namespace: argocd
+          ---
+          # Delete-only Object: tracks {project}-workflows-auto-discovery ApplicationSet.
+          # Created by karma-ops syncing root/autov2/resource.yaml. Deleted before AppProject.
+          apiVersion: kubernetes.crossplane.io/v1alpha2
+          kind: Object
+          metadata:
+            name: {{ $name }}-workflows-auto-discovery-appset-{{ $kubePool.name }}
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: workflows-auto-discovery-appset-{{ $kubePool.name }}
+              crossplane.io/external-name: {{ $name }}-workflows-auto-discovery
+            labels:
+              project.kubecore.io/kubeproject: {{ $name }}
+              project.kubecore.io/kubepool: {{ $kubePool.name }}
+              project.kubecore.io/part-of: "argocd-integration"
+              project.kubecore.io/deletion-order: "68"
+          spec:
+            managementPolicies: ["Observe", "Delete"]
+            providerConfigRef:
+              name: {{ $kubePool.kubernetesProviderConfig }}
+            forProvider:
+              manifest:
+                apiVersion: argoproj.io/v1alpha1
+                kind: ApplicationSet
+                metadata:
+                  name: {{ $name }}-workflows-auto-discovery
                   namespace: argocd
           {{- end }}
           {{- end }}
@@ -1546,7 +1651,10 @@ spec:
           - resource: "argocd-push-secret-*"
             waitFor: []
           # ArgoCD ApplicationSet and sub-ApplicationSets are deleted simultaneously.
-          # The AppProject is deleted ONLY after all three are gone, ensuring no ArgoCD resource
+          # The ApplicationSet has preserveResourcesOnDeletion: false so its Applications
+          # are cascade-deleted automatically — no separate project-ops-app tracker needed.
+          # The AppProject is deleted only after all tracked ArgoCD resources are gone,
+          # ensuring no Application/Resource still references the project at delete time.
           # referencing the project exists when ArgoCD processes the AppProject deletion.
           # Note: {project}-ops Application is NOT tracked here — its lifecycle is managed by
           # ArgoCD/karma-ops independently. Removing it from composition management avoids the
@@ -1557,9 +1665,11 @@ spec:
             waitFor: []
           - resource: "kubeapps-spec-auto-discovery-appset-*"
             waitFor: []
+          - resource: "workflows-auto-discovery-appset-*"
+            waitFor: []
           # AppProject deleted only after all ArgoCD objects that reference it are gone
           - resource: "argocd-project-*"
-            waitFor: ["app-of-apps-*", "kubeapps-auto-discovery-appset-*", "kubeapps-spec-auto-discovery-appset-*"]
+            waitFor: ["app-of-apps-*", "kubeapps-auto-discovery-appset-*", "kubeapps-spec-auto-discovery-appset-*", "workflows-auto-discovery-appset-*"]
           # GitOps Promoter GitRepository resources delete before repository (created in child clusters, one per KubePool)
           - resource: "gitrepository-*"
             waitFor: []

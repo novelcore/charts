@@ -60,7 +60,7 @@ spec:
           {{- $refreshInterval := $envConfig.refreshInterval -}}
           {{- $kubernetesProviderConfigRef := $envConfig.kubernetesProviderConfig -}}
           {{- $github := $envConfig.github -}}
-          
+
           {{/* Default values */}}
           {{- $baseURL := "https://api.github.com" -}}
           {{- $isEnterprise := false -}}
@@ -268,6 +268,7 @@ spec:
 
           {{/* Extract GitHub configuration values */}}
           {{- $github := $envConfig.github -}}
+
           {{- $baseURL := "https://api.github.com" -}}
           {{- $isEnterprise := false -}}
           {{- if $github -}}

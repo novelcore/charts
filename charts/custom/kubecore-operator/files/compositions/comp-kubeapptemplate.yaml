@@ -56,58 +56,64 @@ spec:
             {{- end -}}
           {{- end -}}
 
-          {{- if not $spec.structure -}}
-            {{- $errors = append $errors "spec.structure is required" -}}
-          {{- else -}}
-            {{- if not $spec.structure.components -}}
-              {{- $errors = append $errors "spec.structure.components is required" -}}
+          {{/* Type-specific validation: ml-pipeline vs standard app templates */}}
+          {{- $isMLPipeline := eq ($spec.type | default "") "ml-pipeline" -}}
+
+          {{- if not $isMLPipeline -}}
+            {{/* Standard app template validation */}}
+            {{- if not $spec.structure -}}
+              {{- $errors = append $errors "spec.structure is required" -}}
             {{- else -}}
-              {{- range $i, $component := $spec.structure.components -}}
-                {{- if not $component.type -}}
-                  {{- $errors = append $errors (printf "spec.structure.components[%d].type is required" $i) -}}
-                {{- end -}}
-                {{/* Validate component type */}}
-                {{- $validTypes := list "deployment" "service" "ingress" "configmap" "secret" "pvc" "rollout" -}}
-                {{- if $component.type -}}
-                  {{- if not (has $component.type $validTypes) -}}
-                    {{- $errors = append $errors (printf "spec.structure.components[%d].type must be one of: %s" $i (join ", " $validTypes)) -}}
+              {{- if not $spec.structure.components -}}
+                {{- $errors = append $errors "spec.structure.components is required" -}}
+              {{- else -}}
+                {{- range $i, $component := $spec.structure.components -}}
+                  {{- if not $component.type -}}
+                    {{- $errors = append $errors (printf "spec.structure.components[%d].type is required" $i) -}}
                   {{- end -}}
-                {{- end -}}
-                {{/* Validate ports are integers */}}
-                {{- if $component.ports -}}
-                  {{- range $j, $port := $component.ports -}}
-                    {{- if or (lt $port 1) (gt $port 65535) -}}
-                      {{- $errors = append $errors (printf "spec.structure.components[%d].ports[%d] must be between 1 and 65535" $i $j) -}}
+                  {{/* Validate component type */}}
+                  {{- $validTypes := list "deployment" "service" "ingress" "configmap" "secret" "pvc" "rollout" -}}
+                  {{- if $component.type -}}
+                    {{- if not (has $component.type $validTypes) -}}
+                      {{- $errors = append $errors (printf "spec.structure.components[%d].type must be one of: %s" $i (join ", " $validTypes)) -}}
                     {{- end -}}
                   {{- end -}}
-                {{- end -}}
-                {{/* Validate expose ports are subset of ports */}}
-                {{- if and $component.expose $component.ports -}}
-                  {{- range $expose := $component.expose -}}
-                    {{- if not (has $expose $component.ports) -}}
-                      {{- $errors = append $errors (printf "spec.structure.components[%d].expose contains port %d which is not in ports array" $i $expose) -}}
+                  {{/* Validate ports are integers */}}
+                  {{- if $component.ports -}}
+                    {{- range $j, $port := $component.ports -}}
+                      {{- if or (lt $port 1) (gt $port 65535) -}}
+                        {{- $errors = append $errors (printf "spec.structure.components[%d].ports[%d] must be between 1 and 65535" $i $j) -}}
+                      {{- end -}}
+                    {{- end -}}
+                  {{- end -}}
+                  {{/* Validate expose ports are subset of ports */}}
+                  {{- if and $component.expose $component.ports -}}
+                    {{- range $expose := $component.expose -}}
+                      {{- if not (has $expose $component.ports) -}}
+                        {{- $errors = append $errors (printf "spec.structure.components[%d].expose contains port %d which is not in ports array" $i $expose) -}}
+                      {{- end -}}
                     {{- end -}}
                   {{- end -}}
                 {{- end -}}
               {{- end -}}
             {{- end -}}
-          {{- end -}}
 
-          {{- if not $spec.profiles -}}
-            {{- $errors = append $errors "spec.profiles is required" -}}
-          {{- else -}}
-            {{/* Validate at least one profile exists */}}
-            {{- $profileCount := 0 -}}
-            {{- if $spec.profiles.small -}}{{- $profileCount = add $profileCount 1 -}}{{- end -}}
-            {{- if $spec.profiles.medium -}}{{- $profileCount = add $profileCount 1 -}}{{- end -}}
-            {{- if $spec.profiles.large -}}{{- $profileCount = add $profileCount 1 -}}{{- end -}}
-            {{- if eq $profileCount 0 -}}
-              {{- $errors = append $errors "At least one profile (small, medium, large) must be defined" -}}
+            {{- if not $spec.profiles -}}
+              {{- $errors = append $errors "spec.profiles is required" -}}
+            {{- else -}}
+              {{/* Validate at least one profile exists */}}
+              {{- $profileCount := 0 -}}
+              {{- if $spec.profiles.small -}}{{- $profileCount = add $profileCount 1 -}}{{- end -}}
+              {{- if $spec.profiles.medium -}}{{- $profileCount = add $profileCount 1 -}}{{- end -}}
+              {{- if $spec.profiles.large -}}{{- $profileCount = add $profileCount 1 -}}{{- end -}}
+              {{- if eq $profileCount 0 -}}
+                {{- $errors = append $errors "At least one profile (small, medium, large) must be defined" -}}
+              {{- end -}}
             {{- end -}}
-          {{- end -}}
 
-          {{- if not $spec.environmentSchema -}}
-            {{- $errors = append $errors "spec.environmentSchema is required" -}}
+            {{- if not $spec.environmentSchema -}}
+              {{- $errors = append $errors "spec.environmentSchema is required" -}}
+            {{- end -}}
           {{- end -}}
 
           {{/* Calculate metrics */}}
@@ -180,16 +186,18 @@ spec:
             lastValidated: {{ now | date "2006-01-02T15:04:05Z" }}
             resourceProfiles:
               profileCount: {{ $profileCount }}
-              availableProfiles:
+              availableProfiles: {{ if $availableProfiles }}
               {{- range $profile := $availableProfiles }}
               - {{ $profile }}
               {{- end }}
+              {{- else }}[]{{- end }}
             components:
               componentCount: {{ $componentCount }}
-              componentTypes:
+              componentTypes: {{ if $componentTypes }}
               {{- range $type := $componentTypes }}
               - {{ $type }}
               {{- end }}
+              {{- else }}[]{{- end }}
               totalPorts: {{ $totalPorts }}
               exposedPorts: {{ $exposedPorts }}
 

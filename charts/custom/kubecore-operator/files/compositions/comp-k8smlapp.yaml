@@ -1,0 +1,3217 @@
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: k8smlapp
+  labels:
+    platform.kubecore.io/type: k8smlapp
+    provider: kubernetes
+    service: ml-pipeline
+    layer: application
+spec:
+  writeConnectionSecretsToNamespace: crossplane-system
+  compositeTypeRef:
+    apiVersion: platform.kubecore.io/v1alpha1
+    kind: XK8sMLApp
+  mode: Pipeline
+  pipeline:
+
+  # ── Step 1: Load EnvironmentConfig ──────────────────────────────────────
+  - step: load-environment-configs
+    functionRef:
+      name: function-environment-configs
+    input:
+      apiVersion: environmentconfigs.fn.crossplane.io/v1beta1
+      kind: Input
+      spec:
+        environmentConfigs:
+        - type: Selector
+          selector:
+            matchLabels:
+            - key: platform.kubecore.io/type
+              type: Value
+              value: k8smlapp-config
+            - key: k8s.platform.kubecore.io/app-name
+              type: FromCompositeFieldPath
+              valueFromFieldPath: spec.appName
+
+  # ── Step 2: Generate ML app resources (lakeFS init job) ─────────────────
+  - step: generate-ml-app-resources
+    functionRef:
+      name: function-go-templating
+    input:
+      apiVersion: gotemplating.fn.crossplane.io/v1beta1
+      kind: GoTemplate
+      source: Inline
+      inline:
+        template: |
+          {{- $name := .observed.composite.resource.metadata.name -}}
+          {{- $spec := .observed.composite.resource.spec -}}
+          {{- $envConfig := index .context "apiextensions.crossplane.io/environment" -}}
+
+          {{- $appName := $spec.appName -}}
+          {{- $projectName := $spec.projectName -}}
+          {{- $clusterName := $spec.clusterName -}}
+          {{- $pipelineLabel := printf "%s-%s" $projectName $appName -}}
+
+          {{- $k8sProvider := $envConfig.kubernetesProviderConfig | default "" -}}
+
+          {{/* Extract lakeFS config from EnvironmentConfig */}}
+          {{- $lakefs := $envConfig.lakefs | default dict -}}
+          {{- $lakeFSEndpoint := $lakefs.endpoint | default "" -}}
+
+          {{/* Common labels for all resources */}}
+          {{- $commonLabels := dict
+            "platform.kubecore.io/project" $projectName
+            "platform.kubecore.io/pipeline" $pipelineLabel
+            "platform.kubecore.io/managed-by" "k8smlapp-composition"
+          -}}
+
+          {{/* ── lakeFS Repository Creation Job ──────────────────────────── */}}
+          {{- if $lakeFSEndpoint }}
+          {{- $lakeFSAccessKeyId := $lakefs.accessKeyId | default "" -}}
+          {{- $lakeFSSecretAccessKey := $lakefs.secretAccessKey | default "" -}}
+          {{- $lakeFSS3Bucket := $lakefs.s3Bucket | default "" -}}
+          {{- $lakeFSRegion := $lakefs.region | default "us-east-1" -}}
+          {{- $repoName := $appName -}}
+          {{- $storageNamespace := printf "s3://%s/%s" $lakeFSS3Bucket $repoName -}}
+          {{- $mlNs := printf "ml-%s" $projectName -}}
+          ---
+          apiVersion: kubernetes.crossplane.io/v1alpha2
+          kind: Object
+          metadata:
+            name: {{ $name }}-lakefs-repo
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: lakefs-repo
+              gotemplating.fn.crossplane.io/ready: "True"
+            labels:
+              {{- range $key, $value := $commonLabels }}
+              {{ $key }}: "{{ $value }}"
+              {{- end }}
+          spec:
+            deletionPolicy: Delete
+            managementPolicies: ["*"]
+            providerConfigRef:
+              name: {{ $k8sProvider }}
+            forProvider:
+              manifest:
+                apiVersion: batch/v1
+                kind: Job
+                metadata:
+                  name: {{ $appName }}-lakefs-repo-init
+                  namespace: {{ $mlNs }}
+                  labels:
+                    platform.kubecore.io/pipeline: {{ $pipelineLabel }}
+                    platform.kubecore.io/type: lakefs-repo-init
+                spec:
+                  ttlSecondsAfterFinished: 600
+                  backoffLimit: 5
+                  template:
+                    spec:
+                      restartPolicy: OnFailure
+                      nodeSelector:
+                        platform.kubecore.io/system: "true"
+                      tolerations:
+                      - key: kubecore.eu/computation-type
+                        operator: Equal
+                        value: kubecore-system
+                        effect: NoSchedule
+                      - key: CriticalAddonsOnly
+                        operator: Exists
+                      - operator: Exists
+                        effect: NoExecute
+                      containers:
+                      - name: create-repo
+                        image: curlimages/curl:latest
+                        command: ["/bin/sh", "-c"]
+                        args:
+                        - |
+                          LAKEFS="{{ $lakeFSEndpoint }}/api/v1"
+                          AUTH="${LAKEFS_ACCESS_KEY}:${LAKEFS_SECRET_KEY}"
+                          REPO="{{ $repoName }}"
+
+                          # Wait for lakeFS to be reachable before attempting repo creation
+                          echo "Waiting for lakeFS to be ready..."
+                          MAX_WAIT=300
+                          WAITED=0
+                          while [ $WAITED -lt $MAX_WAIT ]; do
+                            if curl -sf -o /dev/null -u "${AUTH}" "${LAKEFS}/healthcheck"; then
+                              echo "lakeFS is ready (took ${WAITED}s)"
+                              break
+                            fi
+                            echo "lakeFS not ready, retrying in 5s... (${WAITED}/${MAX_WAIT}s)"
+                            sleep 5
+                            WAITED=$((WAITED + 5))
+                          done
+                          if [ $WAITED -ge $MAX_WAIT ]; then
+                            echo "lakeFS not reachable after ${MAX_WAIT}s, giving up"
+                            exit 1
+                          fi
+
+                          echo "Creating lakeFS repository: ${REPO}"
+                          HTTP_CODE=$(curl -s -o /tmp/response.txt -w "%{http_code}" \
+                            -X POST "${LAKEFS}/repositories" \
+                            -H "Content-Type: application/json" \
+                            -u "${AUTH}" \
+                            -d "{\"name\":\"${REPO}\",\"storage_namespace\":\"{{ $storageNamespace }}\",\"default_branch\":\"main\"}")
+                          if [ "$HTTP_CODE" = "201" ]; then
+                            echo "Repository created successfully"
+                          elif [ "$HTTP_CODE" = "409" ]; then
+                            echo "Repository already exists (409) - OK"
+                          elif [ "$HTTP_CODE" = "400" ] && grep -q "storage namespace already in use" /tmp/response.txt; then
+                            echo "Storage namespace has stale lakeFS metadata — cleaning up and recreating"
+                            # Create a bare repo to claim the namespace, then delete it to clear _lakefs metadata
+                            BARE_CODE=$(curl -s -o /tmp/response.txt -w "%{http_code}" \
+                              -X POST "${LAKEFS}/repositories?bare=true" \
+                              -H "Content-Type: application/json" \
+                              -u "${AUTH}" \
+                              -d "{\"name\":\"${REPO}\",\"storage_namespace\":\"{{ $storageNamespace }}\",\"default_branch\":\"main\"}")
+                            if [ "$BARE_CODE" = "201" ] || [ "$BARE_CODE" = "409" ]; then
+                              echo "Bare repo created/exists — deleting to clear stale metadata"
+                              curl -s -o /dev/null -w "%{http_code}" \
+                                -X DELETE "${LAKEFS}/repositories/${REPO}" \
+                                -u "${AUTH}"
+                              sleep 2
+                              # Now create a normal repo
+                              HTTP_CODE=$(curl -s -o /tmp/response.txt -w "%{http_code}" \
+                                -X POST "${LAKEFS}/repositories" \
+                                -H "Content-Type: application/json" \
+                                -u "${AUTH}" \
+                                -d "{\"name\":\"${REPO}\",\"storage_namespace\":\"{{ $storageNamespace }}\",\"default_branch\":\"main\"}")
+                              if [ "$HTTP_CODE" = "201" ]; then
+                                echo "Repository created successfully after cleanup"
+                              elif [ "$HTTP_CODE" = "409" ]; then
+                                echo "Repository already exists (409) - OK"
+                              else
+                                echo "Failed to create repository after cleanup. HTTP code: $HTTP_CODE"
+                                cat /tmp/response.txt
+                                exit 1
+                              fi
+                            else
+                              echo "Failed to create bare repository for cleanup. HTTP code: $BARE_CODE"
+                              cat /tmp/response.txt
+                              exit 1
+                            fi
+                          else
+                            echo "Failed to create repository. HTTP code: $HTTP_CODE"
+                            cat /tmp/response.txt
+                            exit 1
+                          fi
+
+                          echo "Verifying main branch exists..."
+                          BR_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+                            -u "${AUTH}" "${LAKEFS}/repositories/${REPO}/branches/main")
+                          if [ "$BR_CODE" = "200" ]; then
+                            echo "Branch 'main' exists"
+                          else
+                            echo "Branch 'main' missing — creating with empty commit..."
+                            curl -s -o /dev/null -w "%{http_code}" \
+                              -X POST "${LAKEFS}/repositories/${REPO}/branches" \
+                              -H "Content-Type: application/json" \
+                              -u "${AUTH}" \
+                              -d '{"name":"main","source":"main"}' || true
+                            echo "Branch 'main' created"
+                          fi
+                        env:
+                        - name: LAKEFS_ACCESS_KEY
+                          valueFrom:
+                            secretKeyRef:
+                              name: {{ $projectName }}-lakefs-admin
+                              key: accessKeyId
+                        - name: LAKEFS_SECRET_KEY
+                          valueFrom:
+                            secretKeyRef:
+                              name: {{ $projectName }}-lakefs-admin
+                              key: secretAccessKey
+                        resources:
+                          requests:
+                            cpu: "50m"
+                            memory: "32Mi"
+                          limits:
+                            cpu: "100m"
+                            memory: "64Mi"
+          {{- end }}
+
+  # ── Step 2.1: Create Karpenter NodePools for ML pipeline compute ──────
+  - step: create-karpenter-nodepools
+    functionRef:
+      name: function-go-templating
+    input:
+      apiVersion: gotemplating.fn.crossplane.io/v1beta1
+      kind: GoTemplate
+      source: Inline
+      inline:
+        template: |
+          {{- $name := .observed.composite.resource.metadata.name -}}
+          {{- $spec := .observed.composite.resource.spec -}}
+          {{- $envConfig := index .context "apiextensions.crossplane.io/environment" -}}
+
+          {{- $appName := $spec.appName -}}
+          {{- $projectName := $spec.projectName -}}
+          {{- $clusterName := $spec.clusterName | default "" -}}
+          {{- $region := $spec.region | default "us-east-1" -}}
+          {{- $mlNs := printf "ml-%s" $projectName -}}
+          {{- $pipelineLabel := printf "%s-%s" $projectName $appName -}}
+          {{- $k8sProvider := $envConfig.kubernetesProviderConfig | default "" -}}
+
+          {{/* Karpenter config from EnvironmentConfig */}}
+          {{- $karpenter := $envConfig.karpenter | default dict -}}
+          {{- $nodeRoleName := $karpenter.nodeRoleName | default (printf "%s-karpenter-node" $clusterName) -}}
+
+          {{- $awsConfig := $envConfig.aws | default dict -}}
+          {{- $accountId := $awsConfig.accountId | default "" -}}
+          {{- $primaryRegion := $awsConfig.primaryRegion | default $region -}}
+
+          {{/* GPU NodePool configuration from spec */}}
+          {{- $gpuConfig := $spec.gpu | default dict -}}
+          {{- $gpuConsolidate := $gpuConfig.consolidateAfter | default "60s" -}}
+          {{- $gpuDiskSize := $gpuConfig.diskSizeGi | default 50 -}}
+          {{- $gpuMaxResources := $gpuConfig.maxResources | default "2" -}}
+
+          {{/* CPU NodePool configuration from spec */}}
+          {{- $cpuConfig := $spec.cpu | default dict -}}
+          {{- $cpuConsolidate := $cpuConfig.consolidateAfter | default "30s" -}}
+          {{- $cpuDiskSize := $cpuConfig.diskSizeGi | default 30 -}}
+          {{- $cpuMaxResources := $cpuConfig.maxResources | default "8" -}}
+
+          {{/* Instance families/sizes from spec with fallback defaults */}}
+          {{/* Families can be "g5" (full) or "g" (category only). Extract category letters and generations. */}}
+          {{- $gpuInstanceFamiliesRaw := $gpuConfig.instanceFamilies | default (list "g" "p") -}}
+          {{- $gpuInstanceSizes := $gpuConfig.instanceSizes | default (list "xlarge" "2xlarge" "4xlarge") -}}
+          {{- $cpuInstanceFamiliesRaw := $cpuConfig.instanceFamilies | default (list "m" "c" "r") -}}
+          {{- $cpuInstanceSizes := $cpuConfig.instanceSizes | default (list "large" "xlarge" "2xlarge") -}}
+          {{/* Extract unique category letters (e.g., "g5" -> "g", "p" -> "p"). "*" means allow all. */}}
+          {{- $gpuInstanceFamilies := list -}}
+          {{- range $f := $gpuInstanceFamiliesRaw -}}
+            {{- $cat := regexReplaceAll "[0-9]+" $f "" -}}
+            {{- if not (has $cat $gpuInstanceFamilies) -}}
+              {{- $gpuInstanceFamilies = append $gpuInstanceFamilies $cat -}}
+            {{- end -}}
+          {{- end -}}
+          {{- $cpuInstanceFamilies := list -}}
+          {{- range $f := $cpuInstanceFamiliesRaw -}}
+            {{- $cat := regexReplaceAll "[0-9]+" $f "" -}}
+            {{- if not (has $cat $cpuInstanceFamilies) -}}
+              {{- $cpuInstanceFamilies = append $cpuInstanceFamilies $cat -}}
+            {{- end -}}
+          {{- end -}}
+          {{- $gpuAllowAllFamilies := and (eq (len $gpuInstanceFamilies) 1) (eq (index $gpuInstanceFamilies 0) "*") -}}
+          {{- $gpuAllowAllSizes := and (eq (len $gpuInstanceSizes) 1) (eq (index $gpuInstanceSizes 0) "*") -}}
+          {{- $cpuAllowAllFamilies := and (eq (len $cpuInstanceFamilies) 1) (eq (index $cpuInstanceFamilies 0) "*") -}}
+          {{- $cpuAllowAllSizes := and (eq (len $cpuInstanceSizes) 1) (eq (index $cpuInstanceSizes 0) "*") -}}
+
+          {{- if and $k8sProvider $clusterName }}
+          ---
+          # EC2NodeClass for GPU nodes
+          apiVersion: kubernetes.crossplane.io/v1alpha2
+          kind: Object
+          metadata:
+            name: {{ $name }}-gpu-nodeclass
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: gpu-nodeclass
+            labels:
+              platform.kubecore.io/project: {{ $projectName }}
+              platform.kubecore.io/pipeline: {{ $pipelineLabel }}
+              platform.kubecore.io/resource-type: karpenter-nodeclass
+          spec:
+            deletionPolicy: Delete
+            providerConfigRef:
+              name: {{ $k8sProvider }}
+            forProvider:
+              manifest:
+                apiVersion: karpenter.k8s.aws/v1
+                kind: EC2NodeClass
+                metadata:
+                  name: {{ $pipelineLabel }}-gpu
+                  labels:
+                    platform.kubecore.io/pipeline: {{ $pipelineLabel }}
+                    platform.kubecore.io/compute-type: gpu
+                spec:
+                  role: {{ $nodeRoleName }}
+                  amiSelectorTerms:
+                  - alias: al2023@latest
+                  subnetSelectorTerms:
+                  - tags:
+                      kubernetes.io/cluster/{{ $clusterName }}: owned
+                      platform.kubecore.io/subnet-type: private
+                  securityGroupSelectorTerms:
+                  - tags:
+                      kubernetes.io/cluster/{{ $clusterName }}: owned
+                  blockDeviceMappings:
+                  - deviceName: /dev/xvda
+                    ebs:
+                      volumeSize: {{ $gpuDiskSize }}Gi
+                      volumeType: gp3
+                      deleteOnTermination: true
+                  tags:
+                    platform.kubecore.io/pipeline: {{ $pipelineLabel }}
+                    platform.kubecore.io/compute-type: gpu
+          ---
+          # Karpenter NodePool for GPU workloads
+          apiVersion: kubernetes.crossplane.io/v1alpha2
+          kind: Object
+          metadata:
+            name: {{ $name }}-gpu-nodepool
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: gpu-nodepool
+            labels:
+              platform.kubecore.io/project: {{ $projectName }}
+              platform.kubecore.io/pipeline: {{ $pipelineLabel }}
+              platform.kubecore.io/resource-type: karpenter-nodepool
+          spec:
+            deletionPolicy: Delete
+            providerConfigRef:
+              name: {{ $k8sProvider }}
+            forProvider:
+              manifest:
+                apiVersion: karpenter.sh/v1
+                kind: NodePool
+                metadata:
+                  name: {{ $pipelineLabel }}-gpu
+                  labels:
+                    platform.kubecore.io/pipeline: {{ $pipelineLabel }}
+                    platform.kubecore.io/compute-type: gpu
+                spec:
+                  template:
+                    metadata:
+                      labels:
+                        platform.kubecore.io/pipeline: {{ $pipelineLabel }}
+                        platform.kubecore.io/compute-type: gpu
+                    spec:
+                      nodeClassRef:
+                        group: karpenter.k8s.aws
+                        kind: EC2NodeClass
+                        name: {{ $pipelineLabel }}-gpu
+                      taints:
+                      - key: nvidia.com/gpu
+                        effect: NoSchedule
+                      requirements:
+                      - key: karpenter.sh/capacity-type
+                        operator: In
+                        values: ["on-demand"]
+                      {{- if not $gpuAllowAllFamilies }}
+                      - key: karpenter.k8s.aws/instance-category
+                        operator: In
+                        values: {{ $gpuInstanceFamilies | toJson }}
+                      {{- end }}
+                      - key: karpenter.k8s.aws/instance-generation
+                        operator: In
+                        values: ["5", "6", "7", "8"]
+                      {{- if not $gpuAllowAllSizes }}
+                      - key: karpenter.k8s.aws/instance-size
+                        operator: In
+                        values: {{ $gpuInstanceSizes | toJson }}
+                      {{- end }}
+                      - key: kubernetes.io/arch
+                        operator: In
+                        values: ["amd64"]
+                  limits:
+                    nvidia.com/gpu: {{ $gpuMaxResources | quote }}
+                  disruption:
+                    consolidationPolicy: WhenEmpty
+                    consolidateAfter: {{ $gpuConsolidate }}
+          ---
+          # EC2NodeClass for CPU burst nodes
+          apiVersion: kubernetes.crossplane.io/v1alpha2
+          kind: Object
+          metadata:
+            name: {{ $name }}-cpu-nodeclass
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: cpu-nodeclass
+            labels:
+              platform.kubecore.io/project: {{ $projectName }}
+              platform.kubecore.io/pipeline: {{ $pipelineLabel }}
+              platform.kubecore.io/resource-type: karpenter-nodeclass
+          spec:
+            deletionPolicy: Delete
+            providerConfigRef:
+              name: {{ $k8sProvider }}
+            forProvider:
+              manifest:
+                apiVersion: karpenter.k8s.aws/v1
+                kind: EC2NodeClass
+                metadata:
+                  name: {{ $pipelineLabel }}-cpu
+                  labels:
+                    platform.kubecore.io/pipeline: {{ $pipelineLabel }}
+                    platform.kubecore.io/compute-type: cpu-burst
+                spec:
+                  role: {{ $nodeRoleName }}
+                  amiSelectorTerms:
+                  - alias: al2023@latest
+                  subnetSelectorTerms:
+                  - tags:
+                      kubernetes.io/cluster/{{ $clusterName }}: owned
+                      platform.kubecore.io/subnet-type: private
+                  securityGroupSelectorTerms:
+                  - tags:
+                      kubernetes.io/cluster/{{ $clusterName }}: owned
+                  blockDeviceMappings:
+                  - deviceName: /dev/xvda
+                    ebs:
+                      volumeSize: {{ $cpuDiskSize }}Gi
+                      volumeType: gp3
+                      deleteOnTermination: true
+                  tags:
+                    platform.kubecore.io/pipeline: {{ $pipelineLabel }}
+                    platform.kubecore.io/compute-type: cpu-burst
+          ---
+          # Karpenter NodePool for CPU burst workloads
+          apiVersion: kubernetes.crossplane.io/v1alpha2
+          kind: Object
+          metadata:
+            name: {{ $name }}-cpu-nodepool
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: cpu-nodepool
+            labels:
+              platform.kubecore.io/project: {{ $projectName }}
+              platform.kubecore.io/pipeline: {{ $pipelineLabel }}
+              platform.kubecore.io/resource-type: karpenter-nodepool
+          spec:
+            deletionPolicy: Delete
+            providerConfigRef:
+              name: {{ $k8sProvider }}
+            forProvider:
+              manifest:
+                apiVersion: karpenter.sh/v1
+                kind: NodePool
+                metadata:
+                  name: {{ $pipelineLabel }}-cpu
+                  labels:
+                    platform.kubecore.io/pipeline: {{ $pipelineLabel }}
+                    platform.kubecore.io/compute-type: cpu-burst
+                spec:
+                  template:
+                    metadata:
+                      labels:
+                        platform.kubecore.io/pipeline: {{ $pipelineLabel }}
+                        platform.kubecore.io/compute-type: cpu-burst
+                    spec:
+                      nodeClassRef:
+                        group: karpenter.k8s.aws
+                        kind: EC2NodeClass
+                        name: {{ $pipelineLabel }}-cpu
+                      taints:
+                      - key: platform.kubecore.io/burst
+                        value: "true"
+                        effect: NoSchedule
+                      requirements:
+                      - key: karpenter.sh/capacity-type
+                        operator: In
+                        values: ["on-demand"]
+                      {{- if not $cpuAllowAllFamilies }}
+                      - key: karpenter.k8s.aws/instance-category
+                        operator: In
+                        values: {{ $cpuInstanceFamilies | toJson }}
+                      {{- end }}
+                      - key: karpenter.k8s.aws/instance-generation
+                        operator: In
+                        values: ["5", "6", "7", "8"]
+                      {{- if not $cpuAllowAllSizes }}
+                      - key: karpenter.k8s.aws/instance-size
+                        operator: In
+                        values: {{ $cpuInstanceSizes | toJson }}
+                      {{- end }}
+                      - key: kubernetes.io/arch
+                        operator: In
+                        values: ["amd64"]
+                  limits:
+                    cpu: {{ $cpuMaxResources | quote }}
+                  disruption:
+                    consolidationPolicy: WhenEmpty
+                    consolidateAfter: {{ $cpuConsolidate }}
+          {{- end }}
+
+  # ── Step 2.2: ML pipeline cost recording rules (VMRule) ────────────────
+  - step: create-ml-cost-vmrule
+    functionRef:
+      name: function-go-templating
+    input:
+      apiVersion: gotemplating.fn.crossplane.io/v1beta1
+      kind: GoTemplate
+      source: Inline
+      inline:
+        template: |
+          {{- $name := .observed.composite.resource.metadata.name -}}
+          {{- $spec := .observed.composite.resource.spec -}}
+          {{- $envConfig := index .context "apiextensions.crossplane.io/environment" -}}
+
+          {{- $projectName := $spec.projectName -}}
+          {{- $appName := $spec.appName -}}
+          {{- $pipelineLabel := printf "%s-%s" $projectName $appName -}}
+          {{- $mlNs := printf "ml-%s" $projectName -}}
+          {{- $k8sProvider := $envConfig.kubernetesProviderConfig | default "" -}}
+
+          {{- $features := $envConfig.features | default dict -}}
+          {{- $observabilityEnabled := true -}}
+          {{- if hasKey $features "observability" -}}
+            {{- $observabilityEnabled = $features.observability -}}
+          {{- end -}}
+
+          {{- $vm := $envConfig.tools.victoriametrics | default dict -}}
+          {{- $vmNamespace := $vm.namespace | default "observability" -}}
+
+          {{- if and $k8sProvider $vm.enabled $observabilityEnabled }}
+          ---
+          apiVersion: kubernetes.crossplane.io/v1alpha2
+          kind: Object
+          metadata:
+            name: {{ $name }}-ml-cost-vmrule
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: ml-cost-vmrule
+            labels:
+              platform.kubecore.io/project: {{ $projectName }}
+              platform.kubecore.io/pipeline: {{ $pipelineLabel }}
+              platform.kubecore.io/resource-type: vmrule
+          spec:
+            deletionPolicy: Orphan
+            managementPolicies: ["*"]
+            providerConfigRef:
+              name: {{ $k8sProvider }}
+            forProvider:
+              manifest:
+                apiVersion: operator.victoriametrics.com/v1beta1
+                kind: VMRule
+                metadata:
+                  name: kubecore-ml-pipeline-cost
+                  namespace: {{ $vmNamespace }}
+                  labels:
+                    platform.kubecore.io/component: "observability"
+                spec:
+                  groups:
+                  - name: kubecore-ml-pipeline-cost
+                    rules:
+                    # ── Pipeline cost: hourly burn rate per compute type ──
+                    - record: kubecore:ml:pipeline_cost_per_hour
+                      expr: |
+                        label_replace(
+                          label_replace(
+                            sum by (nodepool) (
+                              count by (instance_type, capacity_type, nodepool) (
+                                max by (instance_type, capacity_type, nodepool, node_name) (karpenter_nodes_allocatable{nodepool=~"{{ $pipelineLabel }}-(gpu|cpu)",resource_type="cpu"})
+                              )
+                              * on(instance_type, capacity_type) group_left()
+                              max by (instance_type, capacity_type) (
+                                karpenter_cloudprovider_instance_type_offering_price_estimate{capacity_type="on-demand"}
+                              )
+                            ),
+                            "compute_type", "$1", "nodepool", ".*-(gpu|cpu)"
+                          ),
+                          "pipeline", "$1", "nodepool", "(.*)-(?:gpu|cpu)"
+                        )
+                    - record: kubecore:ml:pipeline_gpu_cost_per_hour
+                      expr: |
+                        kubecore:ml:pipeline_cost_per_hour{compute_type="gpu"}
+                    - record: kubecore:ml:pipeline_cpu_cost_per_hour
+                      expr: |
+                        kubecore:ml:pipeline_cost_per_hour{compute_type!="gpu"}
+                    # ── Active node counts ──
+                    - record: kubecore:ml:pipeline_active_nodes
+                      expr: |
+                        label_replace(
+                          label_replace(
+                            count by (nodepool) (
+                              karpenter_nodes_allocatable{nodepool=~"{{ $pipelineLabel }}-(gpu|cpu)",resource_type="cpu"}
+                            ),
+                            "compute_type", "$1", "nodepool", ".*-(gpu|cpu)"
+                          ),
+                          "pipeline", "$1", "nodepool", "(.*)-(?:gpu|cpu)"
+                        )
+                    # ── Cost estimates (derived from base rule) ──
+                    - record: kubecore:ml:pipeline_cost_daily_estimate
+                      expr: |
+                        sum_over_time(kubecore:ml:pipeline_cost_per_hour[24h]) / 24
+                    - record: kubecore:ml:pipeline_cost_monthly_estimate
+                      expr: |
+                        sum_over_time(kubecore:ml:pipeline_cost_per_hour[30d]) / 30
+                    # ── Resource tracking ──
+                    - record: kubecore:ml:pipeline_gpu_hours
+                      expr: |
+                        label_replace(
+                          sum by (nodepool) (
+                            karpenter_nodes_allocatable{nodepool="{{ $pipelineLabel }}-gpu",resource_type="nvidia.com/gpu"}
+                          ),
+                          "pipeline", "$1", "nodepool", "(.*)-gpu"
+                        )
+                    - record: kubecore:ml:pipeline_cpu_hours
+                      expr: |
+                        label_replace(
+                          sum by (nodepool) (
+                            karpenter_nodes_allocatable{nodepool="{{ $pipelineLabel }}-cpu",resource_type="cpu"}
+                          ),
+                          "pipeline", "$1", "nodepool", "(.*)-cpu"
+                        )
+                    - record: kubecore:ml:pipeline_gpu_memory_gb_hours
+                      expr: |
+                        label_replace(
+                          sum by (nodepool) (
+                            karpenter_nodes_allocatable{nodepool="{{ $pipelineLabel }}-gpu",resource_type="memory"}
+                          ) / 1073741824,
+                          "pipeline", "$1", "nodepool", "(.*)-gpu"
+                        )
+                    # ── Utilization ──
+                    - record: kubecore:ml:pipeline_gpu_utilization
+                      expr: |
+                        label_replace(
+                          sum by (nodepool) (
+                            karpenter_nodes_total_pod_requests{nodepool="{{ $pipelineLabel }}-gpu",resource_type="nvidia.com/gpu"}
+                          )
+                          /
+                          clamp_min(
+                            max by (nodepool) (
+                              karpenter_nodepools_limit{nodepool="{{ $pipelineLabel }}-gpu",resource_type="nvidia.com/gpu"}
+                            ),
+                            1
+                          ),
+                          "pipeline", "$1", "nodepool", "(.*)-gpu"
+                        )
+                    - record: kubecore:ml:pipeline_cpu_utilization
+                      expr: |
+                        label_replace(
+                          sum by (nodepool) (
+                            karpenter_nodes_total_pod_requests{nodepool="{{ $pipelineLabel }}-cpu",resource_type="cpu"}
+                          )
+                          /
+                          clamp_min(
+                            max by (nodepool) (
+                              karpenter_nodepools_limit{nodepool="{{ $pipelineLabel }}-cpu",resource_type="cpu"}
+                            ),
+                            1
+                          ),
+                          "pipeline", "$1", "nodepool", "(.*)-cpu"
+                        )
+                    # ── Total cost: per-nodepool 30d spend (price/hr × lifetime_hours) ──
+                    - record: kubecore:ml:workflow_cost_total
+                      expr: |
+                        label_replace(
+                          label_replace(
+                            sum by (nodepool) (
+                              last_over_time(karpenter_nodes_allocatable{nodepool=~"{{ $pipelineLabel }}-(gpu|cpu)",resource_type="cpu"}[30d])
+                              * on(instance_type, capacity_type) group_left()
+                              max by (instance_type, capacity_type) (
+                                karpenter_cloudprovider_instance_type_offering_price_estimate{capacity_type="on-demand"}
+                              )
+                              * on(node_name) group_left()
+                              max by (node_name) (
+                                last_over_time(karpenter_nodes_current_lifetime_seconds{nodepool=~"{{ $pipelineLabel }}-(gpu|cpu)"}[30d]) / 3600
+                              )
+                            ),
+                            "compute_type", "$1", "nodepool", ".*-(gpu|cpu)"
+                          ),
+                          "pipeline", "$1", "nodepool", "(.*)-(?:gpu|cpu)"
+                        )
+                    # ── Per-node cost breakdown with 30d persistence ──
+                    - record: kubecore:ml:pipeline_node_cost
+                      expr: |
+                        label_replace(
+                          label_replace(
+                            last_over_time(karpenter_nodes_allocatable{nodepool=~"{{ $pipelineLabel }}-(gpu|cpu)",resource_type="cpu"}[30d])
+                            * on(instance_type, capacity_type) group_left()
+                            max by (instance_type, capacity_type) (
+                              karpenter_cloudprovider_instance_type_offering_price_estimate{capacity_type="on-demand"}
+                            )
+                            * on(node_name) group_left()
+                            max by (node_name) (
+                              last_over_time(karpenter_nodes_current_lifetime_seconds{nodepool=~"{{ $pipelineLabel }}-(gpu|cpu)"}[30d]) / 3600
+                            ),
+                            "compute_type", "$1", "nodepool", ".*-(gpu|cpu)"
+                          ),
+                          "pipeline", "$1", "nodepool", "(.*)-(?:gpu|cpu)"
+                        )
+                    # ── Per-step resource tracking rules ──
+                    # CPU cores requested per pipeline step (for cost attribution)
+                    - record: kubecore:ml:step_cpu_requests
+                      expr: |
+                        label_replace(
+                          label_replace(
+                            label_replace(
+                              sum by (label_platform_kubecore_io_step, label_platform_kubecore_io_compute_type, label_platform_kubecore_io_pipeline) (
+                                kube_pod_container_resource_requests{resource="cpu", container="main"}
+                                * on(pod, namespace) group_left(label_platform_kubecore_io_pipeline, label_platform_kubecore_io_step, label_platform_kubecore_io_compute_type)
+                                kube_pod_labels{label_platform_kubecore_io_step!=""}
+                              ),
+                              "step", "$1", "label_platform_kubecore_io_step", "(.*)"
+                            ),
+                            "pipeline", "$1", "label_platform_kubecore_io_pipeline", "(.*)"
+                          ),
+                          "compute_type", "$1", "label_platform_kubecore_io_compute_type", "(.*)"
+                        )
+                    # CPU cores per step per workflow run (for per-run cost)
+                    - record: kubecore:ml:workflow_run_cpu_requests
+                      expr: |
+                        label_replace(
+                          label_replace(
+                            label_replace(
+                              label_replace(
+                                sum by (label_platform_kubecore_io_pipeline, label_workflows_argoproj_io_workflow, label_platform_kubecore_io_step, label_platform_kubecore_io_compute_type) (
+                                  kube_pod_container_resource_requests{resource="cpu", container="main"}
+                                  * on(pod, namespace) group_left(label_platform_kubecore_io_pipeline, label_platform_kubecore_io_step, label_platform_kubecore_io_compute_type, label_workflows_argoproj_io_workflow)
+                                  kube_pod_labels{label_platform_kubecore_io_step!=""}
+                                ),
+                                "step", "$1", "label_platform_kubecore_io_step", "(.*)"
+                              ),
+                              "pipeline", "$1", "label_platform_kubecore_io_pipeline", "(.*)"
+                            ),
+                            "workflow", "$1", "label_workflows_argoproj_io_workflow", "(.*)"
+                          ),
+                          "compute_type", "$1", "label_platform_kubecore_io_compute_type", "(.*)"
+                        )
+          {{- end }}
+
+
+  # ── Step 2.3: Per-pipeline ML cost Grafana dashboard ─────────────────────
+  - step: create-ml-pipeline-dashboard
+    functionRef:
+      name: function-go-templating
+    input:
+      apiVersion: gotemplating.fn.crossplane.io/v1beta1
+      kind: GoTemplate
+      source: Inline
+      inline:
+        template: |
+          {{- $name := .observed.composite.resource.metadata.name -}}
+          {{- $spec := .observed.composite.resource.spec -}}
+          {{- $envConfig := index .context "apiextensions.crossplane.io/environment" -}}
+
+          {{- $projectName := $spec.projectName -}}
+          {{- $appName := $spec.appName -}}
+          {{- $clusterName := $spec.clusterName -}}
+          {{- $pipelineLabel := printf "%s-%s" $projectName $appName -}}
+          {{- $mlNs := printf "ml-%s" $projectName -}}
+          {{- $k8sProvider := $envConfig.kubernetesProviderConfig | default "" -}}
+
+          {{- $features := $envConfig.features | default dict -}}
+          {{- $observabilityEnabled := true -}}
+          {{- if hasKey $features "observability" -}}
+            {{- $observabilityEnabled = $features.observability -}}
+          {{- end -}}
+
+          {{- $vm := $envConfig.tools.victoriametrics | default dict -}}
+          {{- $vmNamespace := $vm.namespace | default "observability" -}}
+          {{- $grafana := $vm.grafana | default dict -}}
+          {{- $grafanaUrl := $grafana.url | default "" -}}
+
+          {{- $gpuConfig := $spec.gpu | default dict -}}
+          {{- $cpuConfig := $spec.cpu | default dict -}}
+          {{- $gpuFamilies := join ", " ($gpuConfig.instanceFamilies | default (list "g" "p")) -}}
+          {{- $gpuSizes := join ", " ($gpuConfig.instanceSizes | default (list "xlarge" "2xlarge" "4xlarge")) -}}
+          {{- $cpuFamilies := join ", " ($cpuConfig.instanceFamilies | default (list "m" "c" "r")) -}}
+          {{- $cpuSizes := join ", " ($cpuConfig.instanceSizes | default (list "large" "xlarge" "2xlarge")) -}}
+
+          {{- if and $k8sProvider $vm.enabled $observabilityEnabled }}
+          ---
+          apiVersion: kubernetes.crossplane.io/v1alpha2
+          kind: Object
+          metadata:
+            name: {{ $name }}-ml-pipeline-dashboard
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: ml-pipeline-dashboard
+            labels:
+              platform.kubecore.io/project: {{ $projectName }}
+              platform.kubecore.io/pipeline: {{ $pipelineLabel }}
+              platform.kubecore.io/resource-type: grafana-dashboard
+          spec:
+            deletionPolicy: Orphan
+            managementPolicies: ["*"]
+            providerConfigRef:
+              name: {{ $k8sProvider }}
+            forProvider:
+              manifest:
+                apiVersion: grafana.integreatly.org/v1beta1
+                kind: GrafanaDashboard
+                metadata:
+                  name: {{ $pipelineLabel }}-ml-cost
+                  namespace: {{ $vmNamespace }}
+                  labels:
+                    platform.kubecore.io/component: "observability"
+                spec:
+                  folderRef: {{ $clusterName }}-ml-pipelines
+                  instanceSelector:
+                    matchLabels:
+                      dashboards: "kubecore-grafana"
+                  json: |
+                    {
+                      "uid": "ml-{{ $appName }}",
+                      "title": "{{ $pipelineLabel }} - ML Pipeline Cost",
+                      "tags": ["kubecore", "ml", "karpenter", "{{ $projectName }}", "{{ $appName }}"],
+                      "time": { "from": "now-6h", "to": "now" },
+                      "timezone": "browser",
+                      "schemaVersion": 39,
+                      "version": 1,
+                      "refresh": "30s",
+                      "templating": { "list": [] },
+                      "panels": [
+                        {"id":1,"type":"row","title":"Dedicated Infrastructure (MLflow, LakeFS, PostgreSQL)","collapsed":false,"gridPos":{"h":1,"w":24,"x":0,"y":0}},
+                        {
+                          "id": 2,
+                          "type": "stat",
+                          "title": "Infra $/hr",
+                          "description": "Current hourly burn rate for always-on infra nodes.",
+                          "gridPos": { "h": 4, "w": 4, "x": 0, "y": 1 },
+                          "datasource": null,
+                          "targets": [
+                            {
+                              "datasource": null,
+                              "expr": "sum(count by (instance_type, capacity_type) (max by (instance_type, capacity_type, node_name) (karpenter_nodes_allocatable{nodepool=~\u0022.*ml-infra\u0022,resource_type=\u0022cpu\u0022})) * on(instance_type, capacity_type) group_left() max by (instance_type, capacity_type) (karpenter_cloudprovider_instance_type_offering_price_estimate))"
+                            }
+                          ],
+                          "fieldConfig": {
+                            "defaults": {
+                              "unit": "currencyUSD",
+                              "decimals": 4,
+                              "noValue": "$0.00",
+                              "color": { "fixedColor": "blue", "mode": "fixed" }
+                            },
+                            "overrides": []
+                          },
+                          "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } }
+                        },
+                        {
+                          "id": 3,
+                          "type": "stat",
+                          "title": "Infra Total Spent",
+                          "description": "Total $ spent on infra since node creation. Formula: hourly_price \u00d7 node_uptime_hours.",
+                          "gridPos": { "h": 4, "w": 5, "x": 4, "y": 1 },
+                          "datasource": null,
+                          "targets": [
+                            {
+                              "datasource": null,
+                              "expr": "sum(count by (instance_type, capacity_type, node_name) (max by (instance_type, capacity_type, node_name) (karpenter_nodes_allocatable{nodepool=~\u0022.*ml-infra\u0022,resource_type=\u0022cpu\u0022})) * on(instance_type, capacity_type) group_left() max by (instance_type, capacity_type) (karpenter_cloudprovider_instance_type_offering_price_estimate) * on(node_name) group_left() (karpenter_nodes_current_lifetime_seconds{nodepool=~\u0022.*ml-infra\u0022} / 3600))"
+                            }
+                          ],
+                          "fieldConfig": {
+                            "defaults": {
+                              "unit": "currencyUSD",
+                              "decimals": 2,
+                              "noValue": "$0.00",
+                              "color": { "mode": "thresholds" },
+                              "thresholds": {
+                                "mode": "absolute",
+                                "steps": [
+                                  { "color": "green", "value": null },
+                                  { "color": "yellow", "value": 50 },
+                                  { "color": "red", "value": 200 }
+                                ]
+                              }
+                            },
+                            "overrides": []
+                          },
+                          "options": { "colorMode": "background", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } }
+                        },
+                        {
+                          "id": 4,
+                          "type": "stat",
+                          "title": "Uptime",
+                          "gridPos": { "h": 4, "w": 3, "x": 9, "y": 1 },
+                          "datasource": null,
+                          "targets": [
+                            {
+                              "datasource": null,
+                              "expr": "max(karpenter_nodes_current_lifetime_seconds{nodepool=~\u0022.*ml-infra\u0022})"
+                            }
+                          ],
+                          "fieldConfig": {
+                            "defaults": {
+                              "unit": "s",
+                              "noValue": "0"
+                            },
+                            "overrides": []
+                          },
+                          "options": { "colorMode": "value", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"] } }
+                        },
+                        {
+                          "id": 5,
+                          "type": "stat",
+                          "title": "Nodes",
+                          "gridPos": { "h": 4, "w": 2, "x": 12, "y": 1 },
+                          "datasource": null,
+                          "targets": [
+                            {
+                              "datasource": null,
+                              "expr": "sum(karpenter_nodepools_usage{nodepool=~\u0022.*ml-infra\u0022,resource_type=\u0022nodes\u0022})"
+                            }
+                          ],
+                          "fieldConfig": {
+                            "defaults": {
+                              "noValue": "0"
+                            },
+                            "overrides": []
+                          },
+                          "options": { "colorMode": "value", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"] } }
+                        },
+                        {
+                          "id": 6,
+                          "type": "stat",
+                          "title": "Pods",
+                          "gridPos": { "h": 4, "w": 2, "x": 14, "y": 1 },
+                          "datasource": null,
+                          "targets": [
+                            {
+                              "datasource": null,
+                              "expr": "sum(karpenter_nodepools_usage{nodepool=~\u0022.*ml-infra\u0022,resource_type=\u0022pods\u0022})"
+                            }
+                          ],
+                          "fieldConfig": {
+                            "defaults": {
+                              "noValue": "0"
+                            },
+                            "overrides": []
+                          },
+                          "options": { "colorMode": "value", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"] } }
+                        },
+                        {
+                          "id": 7,
+                          "type": "gauge",
+                          "title": "CPU %",
+                          "gridPos": { "h": 4, "w": 4, "x": 16, "y": 1 },
+                          "datasource": null,
+                          "targets": [
+                            {
+                              "datasource": null,
+                              "expr": "sum(karpenter_nodes_total_pod_requests{nodepool=~\u0022.*ml-infra\u0022,resource_type=\u0022cpu\u0022}) / sum(karpenter_nodes_allocatable{nodepool=~\u0022.*ml-infra\u0022,resource_type=\u0022cpu\u0022}) * 100"
+                            }
+                          ],
+                          "fieldConfig": {
+                            "defaults": {
+                              "unit": "percent",
+                              "min": 0,
+                              "max": 100,
+                              "thresholds": {
+                                "mode": "absolute",
+                                "steps": [
+                                  { "color": "green", "value": null },
+                                  { "color": "yellow", "value": 70 },
+                                  { "color": "red", "value": 90 }
+                                ]
+                              }
+                            },
+                            "overrides": []
+                          },
+                          "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "showThresholdMarkers": true }
+                        },
+                        {
+                          "id": 8,
+                          "type": "gauge",
+                          "title": "Memory %",
+                          "gridPos": { "h": 4, "w": 4, "x": 20, "y": 1 },
+                          "datasource": null,
+                          "targets": [
+                            {
+                              "datasource": null,
+                              "expr": "sum(karpenter_nodes_total_pod_requests{nodepool=~\u0022.*ml-infra\u0022,resource_type=\u0022memory\u0022}) / sum(karpenter_nodes_allocatable{nodepool=~\u0022.*ml-infra\u0022,resource_type=\u0022memory\u0022}) * 100"
+                            }
+                          ],
+                          "fieldConfig": {
+                            "defaults": {
+                              "unit": "percent",
+                              "min": 0,
+                              "max": 100,
+                              "thresholds": {
+                                "mode": "absolute",
+                                "steps": [
+                                  { "color": "green", "value": null },
+                                  { "color": "yellow", "value": 70 },
+                                  { "color": "red", "value": 90 }
+                                ]
+                              }
+                            },
+                            "overrides": []
+                          },
+                          "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "showThresholdMarkers": true }
+                        },
+                        {"id":9,"type":"row","title":"Pipeline Runs ({{ $appName }}, on-demand)","collapsed":false,"gridPos":{"h":1,"w":24,"x":0,"y":5}},
+                        {
+                          "id": 10,
+                          "type": "stat",
+                          "title": "Pipeline $/hr",
+                          "description": "Current pipeline burn rate. $0 when idle (scale-to-zero).",
+                          "gridPos": { "h": 4, "w": 4, "x": 0, "y": 6 },
+                          "datasource": null,
+                          "targets": [
+                            {
+                              "datasource": null,
+                              "expr": "sum(count by (instance_type, capacity_type) (max by (instance_type, capacity_type, node_name) (karpenter_nodes_allocatable{nodepool=~\u0022{{ $pipelineLabel }}.*\u0022,resource_type=\u0022cpu\u0022})) * on(instance_type, capacity_type) group_left() max by (instance_type, capacity_type) (karpenter_cloudprovider_instance_type_offering_price_estimate)) or vector(0)"
+                            }
+                          ],
+                          "fieldConfig": {
+                            "defaults": {
+                              "unit": "currencyUSD",
+                              "decimals": 2,
+                              "noValue": "$0.00",
+                              "color": { "fixedColor": "purple", "mode": "fixed" }
+                            },
+                            "overrides": []
+                          },
+                          "options": { "colorMode": "value", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"] } }
+                        },
+                        {
+                          "id": 11,
+                          "type": "stat",
+                          "title": "Pipeline Total Spent",
+                          "description": "Total $ spent on pipeline nodes. Persists after scale-to-zero via last_over_time. Formula: price/hr \u00d7 node_uptime_hours.",
+                          "gridPos": { "h": 4, "w": 5, "x": 4, "y": 6 },
+                          "datasource": null,
+                          "targets": [
+                            {
+                              "datasource": null,
+                              "expr": "sum(count by (instance_type, capacity_type, node_name) (max by (instance_type, capacity_type, node_name) (last_over_time(karpenter_nodes_allocatable{nodepool=~\u0022{{ $pipelineLabel }}.*\u0022,resource_type=\u0022cpu\u0022}[30d]))) * on(instance_type, capacity_type) group_left() max by (instance_type, capacity_type) (karpenter_cloudprovider_instance_type_offering_price_estimate) * on(node_name) group_left() max by (node_name) (last_over_time(karpenter_nodes_current_lifetime_seconds{nodepool=~\u0022{{ $pipelineLabel }}.*\u0022}[30d]) / 3600))"
+                            }
+                          ],
+                          "fieldConfig": {
+                            "defaults": {
+                              "unit": "currencyUSD",
+                              "decimals": 2,
+                              "noValue": "$0.00",
+                              "color": { "mode": "thresholds" },
+                              "thresholds": {
+                                "mode": "absolute",
+                                "steps": [
+                                  { "color": "green", "value": null },
+                                  { "color": "yellow", "value": 50 },
+                                  { "color": "red", "value": 200 }
+                                ]
+                              }
+                            },
+                            "overrides": []
+                          },
+                          "options": { "colorMode": "background", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } }
+                        },
+                        {
+                          "id": 12,
+                          "type": "stat",
+                          "title": "GPU Nodes",
+                          "gridPos": { "h": 4, "w": 2, "x": 9, "y": 6 },
+                          "datasource": null,
+                          "targets": [
+                            {
+                              "datasource": null,
+                              "expr": "max(karpenter_nodepools_usage{nodepool=\u0022{{ $pipelineLabel }}-gpu\u0022,resource_type=\u0022nodes\u0022})"
+                            }
+                          ],
+                          "fieldConfig": { "defaults": { "noValue": "0" }, "overrides": [] },
+                          "options": { "colorMode": "value", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"] } }
+                        },
+                        {
+                          "id": 13,
+                          "type": "stat",
+                          "title": "CPU Nodes",
+                          "gridPos": { "h": 4, "w": 2, "x": 11, "y": 6 },
+                          "datasource": null,
+                          "targets": [
+                            {
+                              "datasource": null,
+                              "expr": "max(karpenter_nodepools_usage{nodepool=\u0022{{ $pipelineLabel }}-cpu\u0022,resource_type=\u0022nodes\u0022})"
+                            }
+                          ],
+                          "fieldConfig": { "defaults": { "noValue": "0" }, "overrides": [] },
+                          "options": { "colorMode": "value", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"] } }
+                        },
+                        {
+                          "id": 14,
+                          "type": "stat",
+                          "title": "GPU Limit",
+                          "gridPos": { "h": 4, "w": 3, "x": 13, "y": 6 },
+                          "datasource": null,
+                          "targets": [
+                            {
+                              "datasource": null,
+                              "expr": "max(karpenter_nodepools_limit{nodepool=\u0022{{ $pipelineLabel }}-gpu\u0022,resource_type=\u0022nvidia.com/gpu\u0022})"
+                            }
+                          ],
+                          "fieldConfig": { "defaults": { "noValue": "0" }, "overrides": [] },
+                          "options": { "colorMode": "value", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"] } }
+                        },
+                        {
+                          "id": 15,
+                          "type": "stat",
+                          "title": "CPU Limit (vCPU)",
+                          "gridPos": { "h": 4, "w": 3, "x": 16, "y": 6 },
+                          "datasource": null,
+                          "targets": [
+                            {
+                              "datasource": null,
+                              "expr": "max(karpenter_nodepools_limit{nodepool=\u0022{{ $pipelineLabel }}-cpu\u0022,resource_type=\u0022cpu\u0022})"
+                            }
+                          ],
+                          "fieldConfig": { "defaults": { "noValue": "0" }, "overrides": [] },
+                          "options": { "colorMode": "value", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"] } }
+                        },
+                        {
+                          "id": 26,
+                          "type": "stat",
+                          "title": "GPU Cost (30d)",
+                          "description": "Total $ spent on GPU nodes in the last 30 days.",
+                          "gridPos": { "h": 4, "w": 3, "x": 19, "y": 6 },
+                          "datasource": null,
+                          "targets": [
+                            {
+                              "datasource": null,
+                              "expr": "sum(last_over_time(karpenter_nodes_allocatable{nodepool=\u0022{{ $pipelineLabel }}-gpu\u0022,resource_type=\u0022cpu\u0022}[30d]) * on(instance_type, capacity_type) group_left() max by (instance_type, capacity_type) (karpenter_cloudprovider_instance_type_offering_price_estimate{capacity_type=\u0022on-demand\u0022}) * on(node_name) group_left() max by (node_name) (last_over_time(karpenter_nodes_current_lifetime_seconds{nodepool=\u0022{{ $pipelineLabel }}-gpu\u0022}[30d]) / 3600))"
+                            }
+                          ],
+                          "fieldConfig": {
+                            "defaults": {
+                              "unit": "currencyUSD",
+                              "decimals": 2,
+                              "noValue": "$0.00",
+                              "color": { "fixedColor": "purple", "mode": "fixed" }
+                            },
+                            "overrides": []
+                          },
+                          "options": { "colorMode": "value", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"] } }
+                        },
+                        {
+                          "id": 27,
+                          "type": "stat",
+                          "title": "CPU Cost (30d)",
+                          "description": "Total $ spent on CPU nodes in the last 30 days.",
+                          "gridPos": { "h": 4, "w": 2, "x": 22, "y": 6 },
+                          "datasource": null,
+                          "targets": [
+                            {
+                              "datasource": null,
+                              "expr": "sum(last_over_time(karpenter_nodes_allocatable{nodepool=\u0022{{ $pipelineLabel }}-cpu\u0022,resource_type=\u0022cpu\u0022}[30d]) * on(instance_type, capacity_type) group_left() max by (instance_type, capacity_type) (karpenter_cloudprovider_instance_type_offering_price_estimate{capacity_type=\u0022on-demand\u0022}) * on(node_name) group_left() max by (node_name) (last_over_time(karpenter_nodes_current_lifetime_seconds{nodepool=\u0022{{ $pipelineLabel }}-cpu\u0022}[30d]) / 3600))"
+                            }
+                          ],
+                          "fieldConfig": {
+                            "defaults": {
+                              "unit": "currencyUSD",
+                              "decimals": 2,
+                              "noValue": "$0.00",
+                              "color": { "fixedColor": "orange", "mode": "fixed" }
+                            },
+                            "overrides": []
+                          },
+                          "options": { "colorMode": "value", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"] } }
+                        },
+                        {
+                          "id": 16,
+                          "type": "timeseries",
+                          "title": "Pipeline Cost Over Time",
+                          "gridPos": { "h": 7, "w": 12, "x": 0, "y": 10 },
+                          "datasource": null,
+                          "targets": [
+                            {
+                              "datasource": null,
+                              "expr": "sum(count by (instance_type, capacity_type) (max by (instance_type, capacity_type, node_name) (karpenter_nodes_allocatable{nodepool=\u0022{{ $pipelineLabel }}-gpu\u0022,resource_type=\u0022cpu\u0022})) * on(instance_type, capacity_type) group_left() max by (instance_type, capacity_type) (karpenter_cloudprovider_instance_type_offering_price_estimate))",
+                              "legendFormat": "GPU $/hr"
+                            },
+                            {
+                              "datasource": null,
+                              "expr": "sum(count by (instance_type, capacity_type) (max by (instance_type, capacity_type, node_name) (karpenter_nodes_allocatable{nodepool=\u0022{{ $pipelineLabel }}-cpu\u0022,resource_type=\u0022cpu\u0022})) * on(instance_type, capacity_type) group_left() max by (instance_type, capacity_type) (karpenter_cloudprovider_instance_type_offering_price_estimate))",
+                              "legendFormat": "CPU $/hr"
+                            }
+                          ],
+                          "fieldConfig": {
+                            "defaults": {
+                              "unit": "currencyUSD",
+                              "custom": { "stacking": { "mode": "normal" }, "fillOpacity": 30 }
+                            },
+                            "overrides": [
+                              { "matcher": { "id": "byName", "options": "GPU $/hr" }, "properties": [{ "id": "color", "value": { "fixedColor": "purple", "mode": "fixed" } }] },
+                              { "matcher": { "id": "byName", "options": "CPU $/hr" }, "properties": [{ "id": "color", "value": { "fixedColor": "orange", "mode": "fixed" } }] }
+                            ]
+                          },
+                          "options": { "legend": { "displayMode": "table", "placement": "right", "calcs": ["lastNotNull", "mean"] }, "tooltip": { "mode": "multi", "sort": "desc" } }
+                        },
+                        {
+                          "id": 17,
+                          "type": "table",
+                          "title": "Active Pipeline Nodes",
+                          "description": "Nodes currently provisioned for this pipeline. Shows instance type, capacity type, allocatable CPU, and hourly cost.",
+                          "gridPos": { "h": 6, "w": 24, "x": 0, "y": 17 },
+                          "datasource": null,
+                          "targets": [
+                            {
+                              "datasource": null,
+                              "expr": "karpenter_nodes_allocatable{nodepool=~\u0022{{ $pipelineLabel }}.*\u0022,resource_type=\u0022cpu\u0022}",
+                              "instant": true,
+                              "format": "table",
+                              "refId": "A"
+                            }
+                          ],
+                          "transformations": [
+                            {
+                              "id": "filterFieldsByName",
+                              "options": {
+                                "include": { "names": ["nodepool", "instance_type", "capacity_type", "node_name", "Value"] }
+                              }
+                            },
+                            {
+                              "id": "organize",
+                              "options": {
+                                "renameByName": {
+                                  "nodepool": "NodePool",
+                                  "instance_type": "Instance Type",
+                                  "capacity_type": "Capacity",
+                                  "node_name": "Node",
+                                  "Value": "Allocatable CPU"
+                                }
+                              }
+                            }
+                          ],
+                          "fieldConfig": {
+                            "defaults": { "noValue": "No active nodes" },
+                            "overrides": [
+                              { "matcher": { "id": "byName", "options": "NodePool" }, "properties": [{ "id": "custom.width", "value": 220 }] },
+                              { "matcher": { "id": "byName", "options": "Instance Type" }, "properties": [{ "id": "custom.width", "value": 120 }] },
+                              { "matcher": { "id": "byName", "options": "Capacity" }, "properties": [{ "id": "custom.width", "value": 100 }] },
+                              { "matcher": { "id": "byName", "options": "Allocatable CPU" }, "properties": [{ "id": "decimals", "value": 1 }] }
+                            ]
+                          },
+                          "options": { "showHeader": true }
+                        },
+                        {
+                          "id": 25,
+                          "type": "table",
+                          "title": "Workflow Run Cost History (30d)",
+                          "description": "Cost per workflow = (workflow_pod_runtime / total_pod_runtime) \u00d7 Pipeline_Total_Spent. Sum of all rows equals Pipeline Total Spent.",
+                          "gridPos": { "h": 8, "w": 24, "x": 0, "y": 23 },
+                          "datasource": null,
+                          "targets": [
+                            {
+                              "datasource": null,
+                              "expr": "sum by (workflow) (label_replace((last_over_time(max by (pod, namespace) (kube_pod_completion_time{namespace=\u0022{{ $mlNs }}\u0022, pod=~\u0022{{ $appName }}-pipeline.*\u0022})[30d]) - last_over_time(max by (pod, namespace) (kube_pod_created{namespace=\u0022{{ $mlNs }}\u0022, pod=~\u0022{{ $appName }}-pipeline.*\u0022})[30d])) * on(pod, namespace) group_left(label_workflows_argoproj_io_workflow) last_over_time(max by (pod, namespace, label_workflows_argoproj_io_workflow) (kube_pod_labels{label_platform_kubecore_io_step!=\u0022\u0022, label_platform_kubecore_io_pipeline=\u0022{{ $pipelineLabel }}\u0022})[30d]), \u0022workflow\u0022, \u0022$1\u0022, \u0022label_workflows_argoproj_io_workflow\u0022, \u0022(.*)\u0022)) / scalar(sum((last_over_time(max by (pod, namespace) (kube_pod_completion_time{namespace=\u0022{{ $mlNs }}\u0022, pod=~\u0022{{ $appName }}-pipeline.*\u0022})[30d]) - last_over_time(max by (pod, namespace) (kube_pod_created{namespace=\u0022{{ $mlNs }}\u0022, pod=~\u0022{{ $appName }}-pipeline.*\u0022})[30d])) * on(pod, namespace) group_left(label_workflows_argoproj_io_workflow) last_over_time(max by (pod, namespace, label_workflows_argoproj_io_workflow) (kube_pod_labels{label_platform_kubecore_io_step!=\u0022\u0022, label_platform_kubecore_io_pipeline=\u0022{{ $pipelineLabel }}\u0022})[30d]))) * scalar(sum(count by (instance_type, capacity_type, node_name) (last_over_time(karpenter_nodes_allocatable{nodepool=~\u0022{{ $pipelineLabel }}.*\u0022, resource_type=\u0022cpu\u0022}[30d])) * on(instance_type, capacity_type) group_left() max by (instance_type, capacity_type) (karpenter_cloudprovider_instance_type_offering_price_estimate) * on(node_name) group_left() max by (node_name) (last_over_time(karpenter_nodes_current_lifetime_seconds{nodepool=~\u0022{{ $pipelineLabel }}.*\u0022}[30d]) / 3600)))",
+                              "instant": true,
+                              "format": "table",
+                              "refId": "A"
+                            },
+                            {
+                              "datasource": null,
+                              "expr": "count by (workflow) (label_replace(last_over_time(max by (pod, namespace, label_workflows_argoproj_io_workflow) (kube_pod_labels{label_platform_kubecore_io_step!=\u0022\u0022, label_platform_kubecore_io_pipeline=\u0022{{ $pipelineLabel }}\u0022})[30d]), \u0022workflow\u0022, \u0022$1\u0022, \u0022label_workflows_argoproj_io_workflow\u0022, \u0022(.*)\u0022))",
+                              "instant": true,
+                              "format": "table",
+                              "refId": "B"
+                            }
+                          ],
+                          "transformations": [
+                            {
+                              "id": "merge",
+                              "options": {}
+                            },
+                            {
+                              "id": "filterFieldsByName",
+                              "options": {
+                                "include": { "names": ["workflow", "Value #A", "Value #B"] }
+                              }
+                            },
+                            {
+                              "id": "organize",
+                              "options": {
+                                "renameByName": {
+                                  "workflow": "Workflow Run",
+                                  "Value #A": "Total Cost ($)",
+                                  "Value #B": "Steps"
+                                },
+                                "indexByName": {
+                                  "Workflow Run": 0,
+                                  "Steps": 1,
+                                  "Total Cost ($)": 2
+                                }
+                              }
+                            }
+                          ],
+                          "fieldConfig": {
+                            "defaults": { "noValue": "No workflow runs in last 30 days" },
+                            "overrides": [
+                              { "matcher": { "id": "byName", "options": "Workflow Run" }, "properties": [{ "id": "custom.width", "value": 350 }] },
+                              { "matcher": { "id": "byName", "options": "Steps" }, "properties": [{ "id": "decimals", "value": 0 }] },
+                              { "matcher": { "id": "byName", "options": "Total Cost ($)" }, "properties": [{ "id": "unit", "value": "currencyUSD" }, { "id": "decimals", "value": 4 }] }
+                            ]
+                          },
+                          "options": { "showHeader": true, "footer": { "show": true, "reducer": ["sum"], "fields": ["Total Cost ($)"] }, "sortBy": [{ "displayName": "Total Cost ($)", "desc": true }] }
+                        },
+                        {"id":18,"type":"row","title":"Total","collapsed":false,"gridPos":{"h":1,"w":24,"x":0,"y":31}},
+                        {
+                          "id": 19,
+                          "type": "stat",
+                          "title": "Total $/hr",
+                          "description": "Combined current burn rate: pipeline + infra.",
+                          "gridPos": { "h": 4, "w": 4, "x": 0, "y": 32 },
+                          "datasource": null,
+                          "targets": [
+                            {
+                              "datasource": null,
+                              "expr": "(sum(count by (instance_type, capacity_type) (max by (instance_type, capacity_type, node_name) (karpenter_nodes_allocatable{nodepool=~\u0022{{ $pipelineLabel }}.*\u0022,resource_type=\u0022cpu\u0022})) * on(instance_type, capacity_type) group_left() max by (instance_type, capacity_type) (karpenter_cloudprovider_instance_type_offering_price_estimate)) or vector(0)) + sum(count by (instance_type, capacity_type) (max by (instance_type, capacity_type, node_name) (karpenter_nodes_allocatable{nodepool=~\u0022.*ml-infra\u0022,resource_type=\u0022cpu\u0022})) * on(instance_type, capacity_type) group_left() max by (instance_type, capacity_type) (karpenter_cloudprovider_instance_type_offering_price_estimate))"
+                            }
+                          ],
+                          "fieldConfig": {
+                            "defaults": {
+                              "unit": "currencyUSD",
+                              "decimals": 2,
+                              "noValue": "$0.00"
+                            },
+                            "overrides": []
+                          },
+                          "options": { "colorMode": "value", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"] } }
+                        },
+                        {
+                          "id": 20,
+                          "type": "stat",
+                          "title": "Total Spent",
+                          "description": "Infra (live) + Pipeline (persisted). Formula: price/hr \u00d7 uptime_hours per node.",
+                          "gridPos": { "h": 4, "w": 5, "x": 4, "y": 32 },
+                          "datasource": null,
+                          "targets": [
+                            {
+                              "datasource": null,
+                              "expr": "(sum(count by (instance_type, capacity_type, node_name) (max by (instance_type, capacity_type, node_name) (karpenter_nodes_allocatable{nodepool=~\u0022.*ml-infra\u0022,resource_type=\u0022cpu\u0022})) * on(instance_type, capacity_type) group_left() max by (instance_type, capacity_type) (karpenter_cloudprovider_instance_type_offering_price_estimate) * on(node_name) group_left() (karpenter_nodes_current_lifetime_seconds{nodepool=~\u0022.*ml-infra\u0022} / 3600)) or vector(0)) + (sum(count by (instance_type, capacity_type, node_name) (max by (instance_type, capacity_type, node_name) (last_over_time(karpenter_nodes_allocatable{nodepool=~\u0022{{ $pipelineLabel }}.*\u0022,resource_type=\u0022cpu\u0022}[30d]))) * on(instance_type, capacity_type) group_left() max by (instance_type, capacity_type) (karpenter_cloudprovider_instance_type_offering_price_estimate) * on(node_name) group_left() max by (node_name) (last_over_time(karpenter_nodes_current_lifetime_seconds{nodepool=~\u0022{{ $pipelineLabel }}.*\u0022}[30d]) / 3600)) or vector(0))"
+                            }
+                          ],
+                          "fieldConfig": {
+                            "defaults": {
+                              "unit": "currencyUSD",
+                              "decimals": 2,
+                              "noValue": "$0.00",
+                              "color": { "mode": "thresholds" },
+                              "thresholds": {
+                                "mode": "absolute",
+                                "steps": [
+                                  { "color": "green", "value": null },
+                                  { "color": "yellow", "value": 100 },
+                                  { "color": "red", "value": 500 }
+                                ]
+                              }
+                            },
+                            "overrides": []
+                          },
+                          "options": { "colorMode": "background", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"] } }
+                        },
+                        {
+                          "id": 21,
+                          "type": "stat",
+                          "title": "Est. 24h",
+                          "description": "Cost if current compute runs for 24 hours at current rate. Formula: total_$/hr \u00d7 24.",
+                          "gridPos": { "h": 4, "w": 5, "x": 9, "y": 32 },
+                          "datasource": null,
+                          "targets": [
+                            {
+                              "datasource": null,
+                              "expr": "((sum(count by (instance_type, capacity_type) (max by (instance_type, capacity_type, node_name) (karpenter_nodes_allocatable{nodepool=~\u0022{{ $pipelineLabel }}.*\u0022,resource_type=\u0022cpu\u0022})) * on(instance_type, capacity_type) group_left() max by (instance_type, capacity_type) (karpenter_cloudprovider_instance_type_offering_price_estimate)) or vector(0)) + sum(count by (instance_type, capacity_type) (max by (instance_type, capacity_type, node_name) (karpenter_nodes_allocatable{nodepool=~\u0022.*ml-infra\u0022,resource_type=\u0022cpu\u0022})) * on(instance_type, capacity_type) group_left() max by (instance_type, capacity_type) (karpenter_cloudprovider_instance_type_offering_price_estimate))) * 24"
+                            }
+                          ],
+                          "fieldConfig": {
+                            "defaults": {
+                              "unit": "currencyUSD",
+                              "decimals": 2,
+                              "noValue": "$0.00"
+                            },
+                            "overrides": []
+                          },
+                          "options": { "colorMode": "value", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"] } }
+                        },
+                        {
+                          "id": 22,
+                          "type": "stat",
+                          "title": "Est. 7d",
+                          "description": "Cost if current compute runs for 7 days at current rate. Formula: total_$/hr \u00d7 168.",
+                          "gridPos": { "h": 4, "w": 5, "x": 14, "y": 32 },
+                          "datasource": null,
+                          "targets": [
+                            {
+                              "datasource": null,
+                              "expr": "((sum(count by (instance_type, capacity_type) (max by (instance_type, capacity_type, node_name) (karpenter_nodes_allocatable{nodepool=~\u0022{{ $pipelineLabel }}.*\u0022,resource_type=\u0022cpu\u0022})) * on(instance_type, capacity_type) group_left() max by (instance_type, capacity_type) (karpenter_cloudprovider_instance_type_offering_price_estimate)) or vector(0)) + sum(count by (instance_type, capacity_type) (max by (instance_type, capacity_type, node_name) (karpenter_nodes_allocatable{nodepool=~\u0022.*ml-infra\u0022,resource_type=\u0022cpu\u0022})) * on(instance_type, capacity_type) group_left() max by (instance_type, capacity_type) (karpenter_cloudprovider_instance_type_offering_price_estimate))) * 168"
+                            }
+                          ],
+                          "fieldConfig": {
+                            "defaults": {
+                              "unit": "currencyUSD",
+                              "decimals": 2,
+                              "noValue": "$0.00"
+                            },
+                            "overrides": []
+                          },
+                          "options": { "colorMode": "value", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"] } }
+                        },
+                        {
+                          "id": 23,
+                          "type": "stat",
+                          "title": "Est. 30d",
+                          "description": "Cost if current compute runs for 30 days at current rate. Formula: total_$/hr \u00d7 720.",
+                          "gridPos": { "h": 4, "w": 5, "x": 19, "y": 32 },
+                          "datasource": null,
+                          "targets": [
+                            {
+                              "datasource": null,
+                              "expr": "((sum(count by (instance_type, capacity_type) (max by (instance_type, capacity_type, node_name) (karpenter_nodes_allocatable{nodepool=~\u0022{{ $pipelineLabel }}.*\u0022,resource_type=\u0022cpu\u0022})) * on(instance_type, capacity_type) group_left() max by (instance_type, capacity_type) (karpenter_cloudprovider_instance_type_offering_price_estimate)) or vector(0)) + sum(count by (instance_type, capacity_type) (max by (instance_type, capacity_type, node_name) (karpenter_nodes_allocatable{nodepool=~\u0022.*ml-infra\u0022,resource_type=\u0022cpu\u0022})) * on(instance_type, capacity_type) group_left() max by (instance_type, capacity_type) (karpenter_cloudprovider_instance_type_offering_price_estimate))) * 720"
+                            }
+                          ],
+                          "fieldConfig": {
+                            "defaults": {
+                              "unit": "currencyUSD",
+                              "decimals": 2,
+                              "noValue": "$0.00"
+                            },
+                            "overrides": []
+                          },
+                          "options": { "colorMode": "value", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"] } }
+                        },
+                        {
+                          "id": 24,
+                          "type": "timeseries",
+                          "title": "All Costs Over Time",
+                          "gridPos": { "h": 7, "w": 24, "x": 0, "y": 36 },
+                          "datasource": null,
+                          "targets": [
+                            {
+                              "datasource": null,
+                              "expr": "sum(count by (instance_type, capacity_type) (max by (instance_type, capacity_type, node_name) (karpenter_nodes_allocatable{nodepool=\u0022{{ $pipelineLabel }}-gpu\u0022,resource_type=\u0022cpu\u0022})) * on(instance_type, capacity_type) group_left() max by (instance_type, capacity_type) (karpenter_cloudprovider_instance_type_offering_price_estimate))",
+                              "legendFormat": "GPU Pipeline"
+                            },
+                            {
+                              "datasource": null,
+                              "expr": "sum(count by (instance_type, capacity_type) (max by (instance_type, capacity_type, node_name) (karpenter_nodes_allocatable{nodepool=\u0022{{ $pipelineLabel }}-cpu\u0022,resource_type=\u0022cpu\u0022})) * on(instance_type, capacity_type) group_left() max by (instance_type, capacity_type) (karpenter_cloudprovider_instance_type_offering_price_estimate))",
+                              "legendFormat": "CPU Pipeline"
+                            },
+                            {
+                              "datasource": null,
+                              "expr": "sum(count by (instance_type, capacity_type) (max by (instance_type, capacity_type, node_name) (karpenter_nodes_allocatable{nodepool=~\u0022.*ml-infra\u0022,resource_type=\u0022cpu\u0022})) * on(instance_type, capacity_type) group_left() max by (instance_type, capacity_type) (karpenter_cloudprovider_instance_type_offering_price_estimate))",
+                              "legendFormat": "Infra"
+                            }
+                          ],
+                          "fieldConfig": {
+                            "defaults": {
+                              "unit": "currencyUSD",
+                              "custom": { "stacking": { "mode": "normal" }, "fillOpacity": 30 }
+                            },
+                            "overrides": [
+                              { "matcher": { "id": "byName", "options": "GPU Pipeline" }, "properties": [{ "id": "color", "value": { "fixedColor": "purple", "mode": "fixed" } }] },
+                              { "matcher": { "id": "byName", "options": "CPU Pipeline" }, "properties": [{ "id": "color", "value": { "fixedColor": "orange", "mode": "fixed" } }] },
+                              { "matcher": { "id": "byName", "options": "Infra" }, "properties": [{ "id": "color", "value": { "fixedColor": "blue", "mode": "fixed" } }] }
+                            ]
+                          },
+                          "options": { "legend": { "displayMode": "table", "placement": "right", "calcs": ["lastNotNull", "mean"] }, "tooltip": { "mode": "multi", "sort": "desc" } }
+                        }
+                      ]
+                    }
+          {{- end }}
+
+  # ── Step 3: Create single ECR repository for the app ──────────────────
+  - step: create-ecr-repository
+    functionRef:
+      name: function-go-templating
+    input:
+      apiVersion: gotemplating.fn.crossplane.io/v1beta1
+      kind: GoTemplate
+      source: Inline
+      inline:
+        template: |
+          {{- $name := .observed.composite.resource.metadata.name -}}
+          {{- $spec := .observed.composite.resource.spec -}}
+          {{- $envConfig := index .context "apiextensions.crossplane.io/environment" -}}
+
+          {{- $appName := $spec.appName -}}
+          {{- $projectName := $spec.projectName -}}
+          {{- $region := $spec.region | default "us-east-1" -}}
+
+          {{/* Extract config from EnvironmentConfig */}}
+          {{- $org := "" -}}
+          {{- if $envConfig.organization -}}
+            {{- $org = $envConfig.organization.name | default "" -}}
+          {{- end -}}
+          {{- $awsConfig := $envConfig.aws | default dict -}}
+          {{- $providerConfig := $awsConfig.providerConfig | default "aws-default" -}}
+          {{- $accountId := $awsConfig.accountId | default "" -}}
+          {{- $primaryRegion := $awsConfig.primaryRegion | default $region -}}
+
+          {{/* Single ECR repo per app */}}
+          {{- if $org }}
+          {{- $ecrRepoName := printf "%s-%s-%s" $org $projectName $appName -}}
+          ---
+          # ECR Repository for ML app
+          apiVersion: ecr.aws.upbound.io/v1beta2
+          kind: Repository
+          metadata:
+            name: {{ $name }}-ecr-app
+            annotations:
+              crossplane.io/external-name: {{ $ecrRepoName }}
+              gotemplating.fn.crossplane.io/composition-resource-name: ecr-app
+            labels:
+              platform.kubecore.io/organization: {{ $org }}
+              platform.kubecore.io/project: {{ $projectName }}
+              platform.kubecore.io/app: {{ $appName }}
+              platform.kubecore.io/resource-type: ecr-repository
+          spec:
+            deletionPolicy: Delete
+            providerConfigRef:
+              name: {{ $providerConfig }}
+            forProvider:
+              region: {{ $primaryRegion }}
+              forceDelete: true
+              imageScanningConfiguration:
+                scanOnPush: true
+              imageTagMutability: MUTABLE
+              encryptionConfiguration:
+              - encryptionType: AES256
+              tags:
+                Organization: {{ $org }}
+                Project: {{ $projectName }}
+                Application: {{ $appName }}
+                ManagedBy: crossplane
+          ---
+          # ECR Lifecycle Policy
+          apiVersion: ecr.aws.upbound.io/v1beta1
+          kind: LifecyclePolicy
+          metadata:
+            name: {{ $name }}-ecr-lifecycle-app
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: ecr-lifecycle-app
+          spec:
+            deletionPolicy: Delete
+            providerConfigRef:
+              name: {{ $providerConfig }}
+            forProvider:
+              region: {{ $primaryRegion }}
+              repositorySelector:
+                matchLabels:
+                  crossplane.io/composite: {{ $name }}
+                  platform.kubecore.io/app: {{ $appName }}
+              policy: |
+                {
+                  "rules": [
+                    {
+                      "rulePriority": 1,
+                      "description": "Expire untagged images after 30 days",
+                      "selection": {
+                        "tagStatus": "untagged",
+                        "countType": "sinceImagePushed",
+                        "countUnit": "days",
+                        "countNumber": 30
+                      },
+                      "action": { "type": "expire" }
+                    },
+                    {
+                      "rulePriority": 2,
+                      "description": "Keep last 50 tagged images",
+                      "selection": {
+                        "tagStatus": "tagged",
+                        "tagPrefixList": ["v"],
+                        "countType": "imageCountMoreThan",
+                        "countNumber": 50
+                      },
+                      "action": { "type": "expire" }
+                    }
+                  ]
+                }
+          {{- end }}
+
+  # ── Step 4: Create ECR credentials (SA + generators + ExternalSecrets) ──
+  - step: create-ecr-credentials
+    functionRef:
+      name: function-go-templating
+    input:
+      apiVersion: gotemplating.fn.crossplane.io/v1beta1
+      kind: GoTemplate
+      source: Inline
+      inline:
+        template: |
+          {{- $name := .observed.composite.resource.metadata.name -}}
+          {{- $spec := .observed.composite.resource.spec -}}
+          {{- $envConfig := index .context "apiextensions.crossplane.io/environment" -}}
+
+          {{- $appName := $spec.appName -}}
+          {{- $projectName := $spec.projectName -}}
+          {{- $clusterName := $spec.clusterName | default "" -}}
+          {{- $region := $spec.region | default "us-east-1" -}}
+          {{- $mlNs := printf "ml-%s" $projectName -}}
+          {{- $k8sProvider := $envConfig.kubernetesProviderConfig | default "" -}}
+
+          {{- $org := "" -}}
+          {{- if $envConfig.organization -}}
+            {{- $org = $envConfig.organization.name | default "" -}}
+          {{- end -}}
+          {{- $awsConfig := $envConfig.aws | default dict -}}
+          {{- $accountId := $awsConfig.accountId | default "" -}}
+          {{- $primaryRegion := $awsConfig.primaryRegion | default $region -}}
+
+          {{- if and $org $clusterName }}
+          ---
+          # ServiceAccount for ECR Access in ML namespace
+          apiVersion: kubernetes.crossplane.io/v1alpha2
+          kind: Object
+          metadata:
+            name: {{ $name }}-ml-ecr-sa
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: ml-ecr-sa
+          spec:
+            deletionPolicy: Delete
+            providerConfigRef:
+              name: {{ $k8sProvider }}
+            forProvider:
+              manifest:
+                apiVersion: v1
+                kind: ServiceAccount
+                metadata:
+                  name: {{ $org }}-eso-sa
+                  namespace: {{ $mlNs }}
+                  annotations:
+                    eks.amazonaws.com/role-arn: {{ printf "arn:aws:iam::%s:role/%s-ecr-credentials-role" $accountId $clusterName }}
+                  labels:
+                    platform.kubecore.io/organization: {{ $org }}
+                    platform.kubecore.io/project: {{ $projectName }}
+          ---
+          # ECRAuthorizationToken Generator in ML namespace
+          apiVersion: kubernetes.crossplane.io/v1alpha2
+          kind: Object
+          metadata:
+            name: {{ $name }}-ml-ecr-gen
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: ml-ecr-gen
+          spec:
+            deletionPolicy: Delete
+            providerConfigRef:
+              name: {{ $k8sProvider }}
+            forProvider:
+              manifest:
+                apiVersion: generators.external-secrets.io/v1alpha1
+                kind: ECRAuthorizationToken
+                metadata:
+                  name: {{ $org }}-ecr-gen-{{ $primaryRegion }}
+                  namespace: {{ $mlNs }}
+                  labels:
+                    platform.kubecore.io/organization: {{ $org }}
+                    platform.kubecore.io/project: {{ $projectName }}
+                spec:
+                  region: {{ $primaryRegion }}
+                  auth:
+                    jwt:
+                      serviceAccountRef:
+                        name: {{ $org }}-eso-sa
+          ---
+          # ExternalSecret for ECR credentials in ML namespace
+          apiVersion: kubernetes.crossplane.io/v1alpha2
+          kind: Object
+          metadata:
+            name: {{ $name }}-ml-ecr-secret
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: ml-ecr-secret
+          spec:
+            deletionPolicy: Delete
+            providerConfigRef:
+              name: {{ $k8sProvider }}
+            forProvider:
+              manifest:
+                apiVersion: external-secrets.io/v1
+                kind: ExternalSecret
+                metadata:
+                  name: {{ $projectName }}-{{ $appName }}-ecr-dockerconfig
+                  namespace: {{ $mlNs }}
+                  labels:
+                    platform.kubecore.io/organization: {{ $org }}
+                    platform.kubecore.io/project: {{ $projectName }}
+                spec:
+                  refreshInterval: "11h"
+                  secretStoreRef:
+                    name: {{ $org }}-infrastructure-secrets
+                    kind: ClusterSecretStore
+                  target:
+                    name: {{ $projectName }}-{{ $appName }}-ecr-dockerconfig
+                    creationPolicy: Owner
+                    deletionPolicy: Delete
+                    template:
+                      type: Opaque
+                      engineVersion: v2
+                      data:
+                        username: '{{ printf "{{ .username_%s }}" ($primaryRegion | replace "-" "_") }}'
+                        password: '{{ printf "{{ .password_%s }}" ($primaryRegion | replace "-" "_") }}'
+                        registry_url: '{{ printf "{{ .proxy_endpoint_%s | replace \"https://\" \"\" }}" ($primaryRegion | replace "-" "_") }}'
+                  dataFrom:
+                  - sourceRef:
+                      generatorRef:
+                        apiVersion: generators.external-secrets.io/v1alpha1
+                        kind: ECRAuthorizationToken
+                        name: {{ $org }}-ecr-gen-{{ $primaryRegion }}
+                    rewrite:
+                    - regexp:
+                        source: "(.*)"
+                        target: "${1}_{{ $primaryRegion | replace "-" "_" }}"
+          {{- end }}
+
+  # ── Step 5: Render scaffold WorkflowTemplates (CI overwrites with real DAG) ─
+  - step: render-scaffold-workflow-templates
+    functionRef:
+      name: function-go-templating
+    input:
+      apiVersion: gotemplating.fn.crossplane.io/v1beta1
+      kind: GoTemplate
+      source: Inline
+      inline:
+        template: |
+          {{- $name := .observed.composite.resource.metadata.name -}}
+          {{- $spec := .observed.composite.resource.spec -}}
+          {{- $envConfig := index .context "apiextensions.crossplane.io/environment" -}}
+
+          {{- $appName := $spec.appName -}}
+          {{- $projectName := $spec.projectName -}}
+          {{- $mlNs := printf "ml-%s" $projectName -}}
+          {{- $pipelineLabel := printf "%s-%s" $projectName $appName -}}
+
+          {{/* Extract config */}}
+          {{- $github := $envConfig.github | default dict -}}
+          {{- $githubProviderConfig := $github.providerConfigName | default "" -}}
+          {{- $gitopsRepoName := $github.repositoryName | default $projectName -}}
+
+          {{- $lakefs := $envConfig.lakefs | default dict -}}
+          {{- $lakeFSEndpoint := $lakefs.endpoint | default "" -}}
+          {{- $mlflow := $envConfig.mlflow | default dict -}}
+          {{- $mlflowEndpoint := $mlflow.endpoint | default "" -}}
+
+          {{- $region := $spec.region | default "us-east-1" -}}
+          {{- $org := "" -}}
+          {{- if $envConfig.organization -}}
+            {{- $org = $envConfig.organization.name | default "" -}}
+          {{- end -}}
+          {{- $awsConfig := $envConfig.aws | default dict -}}
+          {{- $accountId := $awsConfig.accountId | default "" -}}
+          {{- $primaryRegion := $awsConfig.primaryRegion | default $region -}}
+          {{- $ecrRegistry := printf "%s.dkr.ecr.%s.amazonaws.com" $accountId $primaryRegion -}}
+          {{- $ecrRepo := printf "%s-%s-%s" $org $projectName $appName -}}
+          {{- $grafana := $envConfig.tools.victoriametrics.grafana | default dict -}}
+          {{- $grafanaUrl := $grafana.url | default "" -}}
+
+          {{/* NodePool disk sizes for PVC sizing */}}
+          {{- $gpuConfig := $spec.gpu | default dict -}}
+          {{- $gpuDiskSize := $gpuConfig.diskSizeGi | default 50 -}}
+          {{- $cpuConfig := $spec.cpu | default dict -}}
+          {{- $cpuDiskSize := $cpuConfig.diskSizeGi | default 30 -}}
+
+          {{/* Auto-calculate step resource limits from smallest allowed instance size.
+               Memory = node_memory - 4Gi headroom (for NVIDIA daemonsets, kubelet, kube-proxy, etc).
+               CPU = node_vCPU - 1 (for system pods).
+               Values are conservative minimums across all instance families (g/p/m/c/r). */}}
+          {{- $gpuMemMap := dict "large" "12Gi" "xlarge" "12Gi" "2xlarge" "28Gi" "4xlarge" "60Gi" "8xlarge" "124Gi" "12xlarge" "188Gi" "16xlarge" "252Gi" "24xlarge" "380Gi" "48xlarge" "764Gi" -}}
+          {{- $gpuCpuMap := dict "large" "2" "xlarge" "3" "2xlarge" "7" "4xlarge" "15" "8xlarge" "31" "12xlarge" "47" "16xlarge" "63" "24xlarge" "95" "48xlarge" "191" -}}
+          {{- $cpuMemMap := dict "medium" "2Gi" "large" "4Gi" "xlarge" "4Gi" "2xlarge" "12Gi" "4xlarge" "28Gi" "8xlarge" "60Gi" -}}
+          {{- $cpuCpuMap := dict "medium" "1" "large" "1" "xlarge" "3" "2xlarge" "7" "4xlarge" "15" "8xlarge" "31" -}}
+          {{- $gpuInstanceSizesWFT := $gpuConfig.instanceSizes | default (list "xlarge" "2xlarge" "4xlarge") -}}
+          {{- $cpuInstanceSizesWFT := $cpuConfig.instanceSizes | default (list "large" "xlarge" "2xlarge") -}}
+          {{- $smallestGpuSize := index $gpuInstanceSizesWFT 0 -}}
+          {{- $smallestCpuSize := index $cpuInstanceSizesWFT 0 -}}
+          {{- $gpuStepMem := index $gpuMemMap $smallestGpuSize | default "28Gi" -}}
+          {{- $gpuStepCpu := index $gpuCpuMap $smallestGpuSize | default "4" -}}
+          {{- $cpuStepMem := index $cpuMemMap $smallestCpuSize | default "4Gi" -}}
+          {{- $cpuStepCpu := index $cpuCpuMap $smallestCpuSize | default "2" -}}
+
+          {{/* Only render scaffold WFT if github provider is configured */}}
+          {{- if $githubProviderConfig }}
+
+          {{/* Render for main branch — ArgoCD auto-discovers and syncs the WFT */}}
+          {{- range $branch := list "main" }}
+          ---
+          # Scaffold WorkflowTemplate for {{ $branch }} branch (CI overwrites with real DAG)
+          apiVersion: repo.github.upbound.io/v1alpha1
+          kind: RepositoryFile
+          metadata:
+            name: {{ $name }}-wft-{{ $branch }}
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: wft-{{ $branch }}
+            labels:
+              platform.kubecore.io/project: {{ $projectName }}
+              platform.kubecore.io/pipeline: {{ $appName }}
+              platform.kubecore.io/resource-type: workflow-template
+          spec:
+            managementPolicies: ["Create", "Delete"]
+            providerConfigRef:
+              name: {{ $githubProviderConfig }}
+            deletionPolicy: Delete
+            forProvider:
+              repositoryRef:
+                name: {{ $gitopsRepoName }}-repository
+              overwriteOnCreate: true
+              file: workflows/{{ $appName }}/{{ $branch }}/workflow-template.yaml
+              content: |
+                apiVersion: argoproj.io/v1alpha1
+                kind: WorkflowTemplate
+                metadata:
+                  name: {{ $appName }}-pipeline
+                  namespace: {{ $mlNs }}
+                  annotations:
+                    platform.kubecore.io/cost-tracking: "enabled"
+                    platform.kubecore.io/pipeline: "{{ $pipelineLabel }}"
+                    platform.kubecore.io/gpu-nodepool: "{{ $pipelineLabel }}-gpu"
+                    platform.kubecore.io/cpu-nodepool: "{{ $pipelineLabel }}-cpu"
+                  labels:
+                    platform.kubecore.io/project: {{ $projectName }}
+                    platform.kubecore.io/app: {{ $appName }}
+                    platform.kubecore.io/managed-by: kubecore-platform
+                    platform.kubecore.io/scaffold: "true"
+                spec:
+                  imagePullSecrets:
+                  - name: {{ $projectName }}-{{ $appName }}-ecr-dockerconfig
+                  serviceAccountName: argo-workflow
+                  entrypoint: {{ $appName }}-pipeline
+                  volumeClaimGC:
+                    strategy: OnWorkflowCompletion
+                  volumeClaimTemplates:
+                  - metadata:
+                      name: workspace
+                    spec:
+                      accessModes: ["ReadWriteOnce"]
+                      storageClassName: gp3
+                      resources:
+                        requests:
+                          storage: {{ add $gpuDiskSize $cpuDiskSize }}Gi
+                  volumes:
+                  - name: shm
+                    emptyDir:
+                      medium: Memory
+                      sizeLimit: "8Gi"
+                  arguments:
+                    parameters:
+                    # Developer-controlled: experiment
+                    - name: project-name
+                      value: "{{ $projectName }}"
+                    - name: environment-name
+                      value: "{{ $branch }}"
+                    - name: experiment-description
+                      value: ""
+
+                    # Developer-controlled: dataset
+                    - name: dataset-version
+                      value: upload-initial
+                    - name: dataset-source
+                      value: lakefs
+                    - name: dataset-path-override
+                      value: ""
+                    - name: dataset-sample-size
+                      value: ""
+                    - name: dataset-seed
+                      value: "42"
+                    - name: dataset-labels-only
+                      value: "false"
+                    - name: dataset-manifest-only
+                      value: "false"
+
+                    # Developer-controlled: model
+                    - name: model-config
+                      value: yolov8n-pose.pt
+                    - name: pretrained-weights
+                      value: ""
+
+                    # Developer-controlled: training hyperparameters
+                    - name: epochs
+                      value: "100"
+                    - name: batch-size
+                      value: "16"
+                    - name: image-size
+                      value: "640"
+                    - name: learning-rate
+                      value: "0.01"
+                    - name: optimizer
+                      value: SGD
+                    - name: cos-lr
+                      value: "true"
+                    - name: lrf
+                      value: "0.01"
+                    - name: momentum
+                      value: "0.937"
+                    - name: weight-decay
+                      value: "0.0005"
+                    - name: warmup-epochs
+                      value: "3.0"
+                    - name: warmup-momentum
+                      value: "0.8"
+                    - name: dropout
+                      value: "0.0"
+                    - name: label-smoothing
+                      value: "0.0"
+                    - name: nbs
+                      value: "64"
+                    - name: freeze
+                      value: ""
+                    - name: amp
+                      value: "true"
+                    - name: close-mosaic
+                      value: "10"
+                    - name: training-seed
+                      value: "0"
+                    - name: deterministic
+                      value: "true"
+
+                    # Developer-controlled: loss gains (YOLO-Pose specific)
+                    - name: pose
+                      value: "12.0"
+                    - name: kobj
+                      value: "2.0"
+                    - name: box
+                      value: "7.5"
+                    - name: cls
+                      value: "0.5"
+                    - name: dfl
+                      value: "1.5"
+
+                    # Developer-controlled: early stopping & checkpointing
+                    - name: early-stopping-patience
+                      value: "50"
+                    - name: checkpointing-interval-epochs
+                      value: "10"
+                    - name: checkpoint-resume-from
+                      value: ""
+
+                    # Developer-controlled: augmentation
+                    - name: aug-hsv-h
+                      value: "0.015"
+                    - name: aug-hsv-s
+                      value: "0.7"
+                    - name: aug-hsv-v
+                      value: "0.4"
+                    - name: aug-degrees
+                      value: "0.0"
+                    - name: aug-translate
+                      value: "0.1"
+                    - name: aug-scale
+                      value: "0.5"
+                    - name: aug-shear
+                      value: "0.0"
+                    - name: aug-perspective
+                      value: "0.0"
+                    - name: aug-flipud
+                      value: "0.0"
+                    - name: aug-fliplr
+                      value: "0.0"
+                    - name: aug-mosaic
+                      value: "1.0"
+                    - name: aug-mixup
+                      value: "0.0"
+                    - name: aug-copy-paste
+                      value: "0.0"
+                    - name: aug-erasing
+                      value: "0.4"
+                    - name: aug-bgr
+                      value: "0.0"
+
+                    # Developer-controlled: model registry
+                    - name: registered-model-name
+                      value: "{{ $appName }}-yolo"
+                    - name: promote-to
+                      value: ""
+
+                    # Platform-injected
+                    - name: kubepool-name
+                      value: "{{ $projectName }}"
+                    - name: mlflow-endpoint
+                      value: "{{ $mlflowEndpoint }}"
+                    - name: lakefs-endpoint
+                      value: "{{ $lakeFSEndpoint }}"
+                    - name: lakefs-repo
+                      value: "{{ $appName }}"
+                    - name: lakefs-branch
+                      value: "{{ $branch }}"
+                    - name: s3-artifacts-bucket
+                      value: "{{ $projectName }}-ml-artifacts-{{ $primaryRegion }}"
+                    - name: checkpoint-bucket
+                      value: "{{ $projectName }}-ml-artifacts-{{ $primaryRegion }}"
+                    - name: checkpoint-prefix
+                      value: checkpoints
+                    - name: aws-region
+                      value: "{{ $primaryRegion }}"
+
+                    # Resource limits (auto-calculated from instance sizes with 4Gi headroom)
+                    - name: cpu-step-cpu-limit
+                      value: "{{ $cpuStepCpu }}"
+                    - name: cpu-step-mem-limit
+                      value: "{{ $cpuStepMem }}"
+                    - name: gpu-step-cpu-limit
+                      value: "{{ $gpuStepCpu }}"
+                    - name: gpu-step-mem-limit
+                      value: "{{ $gpuStepMem }}"
+                    - name: gpu-step-gpu-limit
+                      value: "1"
+
+                  templates:
+                  # ── Main DAG ──
+                  - name: {{ $appName }}-pipeline
+                    dag:
+                      tasks:
+                      # ── CPU steps (Karpenter auto-provisions cpu-burst nodes) ──
+                      - name: config-validation
+                        template: config-validation
+
+                      - name: dataset-loading
+                        dependencies: [config-validation]
+                        template: dataset-loading
+
+                      # ── GPU step (Karpenter auto-provisions gpu nodes when pod is pending) ──
+                      - name: model-training
+                        dependencies: [dataset-loading]
+                        template: model-training
+                        arguments:
+                          parameters:
+                          - name: lakefs-commit-id
+                            value: "{{ "{{" }}tasks.dataset-loading.outputs.parameters.lakefs-commit-id{{ "}}" }}"
+
+                      # ── Post-training CPU steps ──
+                      - name: model-registration
+                        dependencies: [model-training]
+                        template: model-registration
+                        arguments:
+                          parameters:
+                          - name: mlflow-run-id
+                            value: "{{ "{{" }}tasks.model-training.outputs.parameters.mlflow-run-id{{ "}}" }}"
+                          - name: best-checkpoint-path
+                            value: "{{ "{{" }}tasks.model-training.outputs.parameters.best-checkpoint-path{{ "}}" }}"
+
+                  # ── Step 1: config-validation ──
+                  # Runs: config-validation [all flags]
+                  # NOTE: Typer single-command app — NO subcommand, just flags directly.
+                  # Boolean flags use --flag / --no-flag pattern (Typer default).
+                  - name: config-validation
+                    metadata:
+                      labels:
+                        platform.kubecore.io/pipeline: "{{ $pipelineLabel }}"
+                        platform.kubecore.io/step: "config-validation"
+                        platform.kubecore.io/compute-type: "cpu"
+                    nodeSelector:
+                      karpenter.sh/nodepool: {{ $pipelineLabel }}-cpu
+                    tolerations:
+                    - key: platform.kubecore.io/burst
+                      operator: Equal
+                      value: "true"
+                      effect: NoSchedule
+                    podSpecPatch: '{"containers":[{"name":"main","resources":{"limits":{"cpu":"{{ "{{" }}workflow.parameters.cpu-step-cpu-limit{{ "}}" }}","memory":"{{ "{{" }}workflow.parameters.cpu-step-mem-limit{{ "}}" }}"}}}]}'
+                    container:
+                      image: {{ $ecrRegistry }}/{{ $ecrRepo }}:config_validation-latest
+                      imagePullPolicy: Always
+                      command: [sh, -c]
+                      args:
+                      - |
+                        set -eu
+
+                        # Boolean flag helper: Typer uses --flag / --no-flag (not --flag true)
+                        bool_flag() {
+                          if [ "$2" = "true" ]; then echo "--$1"; else echo "--no-$1"; fi
+                        }
+
+                        ARGS=""
+                        ARGS="$ARGS --experiment-name {{ "{{" }}workflow.parameters.project-name{{ "}}" }}"
+                        ARGS="$ARGS --dataset-version {{ "{{" }}workflow.parameters.dataset-version{{ "}}" }}"
+                        ARGS="$ARGS --dataset-source {{ "{{" }}workflow.parameters.dataset-source{{ "}}" }}"
+                        ARGS="$ARGS --model-variant {{ "{{" }}workflow.parameters.model-config{{ "}}" }}"
+                        ARGS="$ARGS --training-epochs {{ "{{" }}workflow.parameters.epochs{{ "}}" }}"
+                        ARGS="$ARGS --training-batch-size {{ "{{" }}workflow.parameters.batch-size{{ "}}" }}"
+                        ARGS="$ARGS --training-image-size {{ "{{" }}workflow.parameters.image-size{{ "}}" }}"
+                        ARGS="$ARGS --training-learning-rate {{ "{{" }}workflow.parameters.learning-rate{{ "}}" }}"
+                        ARGS="$ARGS --training-optimizer {{ "{{" }}workflow.parameters.optimizer{{ "}}" }}"
+                        ARGS="$ARGS $(bool_flag training-cos-lr {{ "{{" }}workflow.parameters.cos-lr{{ "}}" }})"
+                        ARGS="$ARGS --training-lrf {{ "{{" }}workflow.parameters.lrf{{ "}}" }}"
+                        ARGS="$ARGS --training-momentum {{ "{{" }}workflow.parameters.momentum{{ "}}" }}"
+                        ARGS="$ARGS --training-weight-decay {{ "{{" }}workflow.parameters.weight-decay{{ "}}" }}"
+                        ARGS="$ARGS --training-warmup-epochs {{ "{{" }}workflow.parameters.warmup-epochs{{ "}}" }}"
+                        ARGS="$ARGS --training-warmup-momentum {{ "{{" }}workflow.parameters.warmup-momentum{{ "}}" }}"
+                        ARGS="$ARGS --training-dropout {{ "{{" }}workflow.parameters.dropout{{ "}}" }}"
+                        ARGS="$ARGS --training-label-smoothing {{ "{{" }}workflow.parameters.label-smoothing{{ "}}" }}"
+                        ARGS="$ARGS --training-nbs {{ "{{" }}workflow.parameters.nbs{{ "}}" }}"
+                        ARGS="$ARGS $(bool_flag training-amp {{ "{{" }}workflow.parameters.amp{{ "}}" }})"
+                        ARGS="$ARGS --training-close-mosaic {{ "{{" }}workflow.parameters.close-mosaic{{ "}}" }}"
+                        ARGS="$ARGS --training-seed {{ "{{" }}workflow.parameters.training-seed{{ "}}" }}"
+                        ARGS="$ARGS $(bool_flag training-deterministic {{ "{{" }}workflow.parameters.deterministic{{ "}}" }})"
+                        ARGS="$ARGS --training-pose {{ "{{" }}workflow.parameters.pose{{ "}}" }}"
+                        ARGS="$ARGS --training-kobj {{ "{{" }}workflow.parameters.kobj{{ "}}" }}"
+                        ARGS="$ARGS --training-box {{ "{{" }}workflow.parameters.box{{ "}}" }}"
+                        ARGS="$ARGS --training-cls {{ "{{" }}workflow.parameters.cls{{ "}}" }}"
+                        ARGS="$ARGS --training-dfl {{ "{{" }}workflow.parameters.dfl{{ "}}" }}"
+                        ARGS="$ARGS --checkpointing-interval-epochs {{ "{{" }}workflow.parameters.checkpointing-interval-epochs{{ "}}" }}"
+                        ARGS="$ARGS --checkpointing-storage-path s3://{{ "{{" }}workflow.parameters.checkpoint-bucket{{ "}}" }}/{{ "{{" }}workflow.parameters.checkpoint-prefix{{ "}}" }}"
+                        ARGS="$ARGS --early-stopping-patience {{ "{{" }}workflow.parameters.early-stopping-patience{{ "}}" }}"
+
+                        # Augmentation flags
+                        ARGS="$ARGS --aug-hsv-h {{ "{{" }}workflow.parameters.aug-hsv-h{{ "}}" }}"
+                        ARGS="$ARGS --aug-hsv-s {{ "{{" }}workflow.parameters.aug-hsv-s{{ "}}" }}"
+                        ARGS="$ARGS --aug-hsv-v {{ "{{" }}workflow.parameters.aug-hsv-v{{ "}}" }}"
+                        ARGS="$ARGS --aug-degrees {{ "{{" }}workflow.parameters.aug-degrees{{ "}}" }}"
+                        ARGS="$ARGS --aug-translate {{ "{{" }}workflow.parameters.aug-translate{{ "}}" }}"
+                        ARGS="$ARGS --aug-scale {{ "{{" }}workflow.parameters.aug-scale{{ "}}" }}"
+                        ARGS="$ARGS --aug-shear {{ "{{" }}workflow.parameters.aug-shear{{ "}}" }}"
+                        ARGS="$ARGS --aug-perspective {{ "{{" }}workflow.parameters.aug-perspective{{ "}}" }}"
+                        ARGS="$ARGS --aug-flipud {{ "{{" }}workflow.parameters.aug-flipud{{ "}}" }}"
+                        ARGS="$ARGS --aug-fliplr {{ "{{" }}workflow.parameters.aug-fliplr{{ "}}" }}"
+                        ARGS="$ARGS --aug-mosaic {{ "{{" }}workflow.parameters.aug-mosaic{{ "}}" }}"
+                        ARGS="$ARGS --aug-mixup {{ "{{" }}workflow.parameters.aug-mixup{{ "}}" }}"
+                        ARGS="$ARGS --aug-copy-paste {{ "{{" }}workflow.parameters.aug-copy-paste{{ "}}" }}"
+                        ARGS="$ARGS --aug-erasing {{ "{{" }}workflow.parameters.aug-erasing{{ "}}" }}"
+                        ARGS="$ARGS --aug-bgr {{ "{{" }}workflow.parameters.aug-bgr{{ "}}" }}"
+
+                        # Optional flags (only if non-empty)
+                        DESC="{{ "{{" }}workflow.parameters.experiment-description{{ "}}" }}"
+                        [ -n "$DESC" ] && ARGS="$ARGS --experiment-description \"$DESC\""
+
+                        LAKEFS_REPO="{{ "{{" }}workflow.parameters.lakefs-repo{{ "}}" }}"
+                        [ -n "$LAKEFS_REPO" ] && ARGS="$ARGS --dataset-lakefs-repo $LAKEFS_REPO"
+
+                        LAKEFS_BRANCH="{{ "{{" }}workflow.parameters.lakefs-branch{{ "}}" }}"
+                        [ -n "$LAKEFS_BRANCH" ] && ARGS="$ARGS --dataset-lakefs-branch $LAKEFS_BRANCH"
+
+                        OVERRIDE="{{ "{{" }}workflow.parameters.dataset-path-override{{ "}}" }}"
+                        [ -n "$OVERRIDE" ] && ARGS="$ARGS --dataset-path-override $OVERRIDE"
+
+                        SAMPLE="{{ "{{" }}workflow.parameters.dataset-sample-size{{ "}}" }}"
+                        [ -n "$SAMPLE" ] && ARGS="$ARGS --dataset-sample-size $SAMPLE"
+
+                        SEED="{{ "{{" }}workflow.parameters.dataset-seed{{ "}}" }}"
+                        [ -n "$SEED" ] && ARGS="$ARGS --dataset-seed $SEED"
+
+                        WEIGHTS="{{ "{{" }}workflow.parameters.pretrained-weights{{ "}}" }}"
+                        [ -n "$WEIGHTS" ] && ARGS="$ARGS --model-pretrained-weights $WEIGHTS"
+
+                        FREEZE="{{ "{{" }}workflow.parameters.freeze{{ "}}" }}"
+                        [ -n "$FREEZE" ] && ARGS="$ARGS --training-freeze $FREEZE"
+
+                        RESUME="{{ "{{" }}workflow.parameters.checkpoint-resume-from{{ "}}" }}"
+                        [ -n "$RESUME" ] && ARGS="$ARGS --checkpointing-resume-from $RESUME"
+
+                        ARGS="$ARGS --output-path /workspace/validated-config.json"
+
+                        echo "[config-validation] Running: config-validation $ARGS"
+                        eval config-validation $ARGS
+                      env:
+                      - name: APP_NAME
+                        value: "{{ $appName }}-config-validation"
+                      - name: LOG_LEVEL
+                        value: "INFO"
+                      - name: MAX_RETRIES
+                        value: "3"
+                      - name: TIMEOUT
+                        value: "30"
+                      - name: STRICT_MODE
+                        value: "true"
+                      - name: SKIP_LIVENESS_CHECKS
+                        value: "true"
+                      - name: MLFLOW_TRACKING_URI
+                        value: "{{ "{{" }}workflow.parameters.mlflow-endpoint{{ "}}" }}"
+                      resources:
+                        requests:
+                          memory: "256Mi"
+                          cpu: "250m"
+                        limits:
+                          memory: "512Mi"
+                          cpu: "500m"
+                      volumeMounts:
+                      - name: workspace
+                        mountPath: /workspace
+
+                  # ── Step 2: dataset-loading ──
+                  # Runs: dataset-loading --version V --source S --output-dir DIR
+                  # NOTE: Typer single-command app — NO subcommand.
+                  # lakeFS S3 gateway: repo name = bucket, branch/path = key prefix.
+                  - name: dataset-loading
+                    metadata:
+                      labels:
+                        platform.kubecore.io/pipeline: "{{ $pipelineLabel }}"
+                        platform.kubecore.io/step: "dataset-loading"
+                        platform.kubecore.io/compute-type: "cpu"
+                    affinity:
+                      podAffinity:
+                        requiredDuringSchedulingIgnoredDuringExecution:
+                        - labelSelector:
+                            matchExpressions:
+                            - key: workflows.argoproj.io/workflow
+                              operator: In
+                              values:
+                              - "{{ "{{" }}workflow.name{{ "}}" }}"
+                          topologyKey: topology.kubernetes.io/zone
+                    nodeSelector:
+                      karpenter.sh/nodepool: {{ $pipelineLabel }}-cpu
+                    tolerations:
+                    - key: platform.kubecore.io/burst
+                      operator: Equal
+                      value: "true"
+                      effect: NoSchedule
+                    podSpecPatch: '{"containers":[{"name":"main","resources":{"limits":{"cpu":"{{ "{{" }}workflow.parameters.cpu-step-cpu-limit{{ "}}" }}","memory":"{{ "{{" }}workflow.parameters.cpu-step-mem-limit{{ "}}" }}"}}}]}'
+                    outputs:
+                      parameters:
+                      - name: lakefs-commit-id
+                        valueFrom:
+                          path: /tmp/lakefs-commit-id
+                    container:
+                      image: {{ $ecrRegistry }}/{{ $ecrRepo }}:dataset_loading-latest
+                      imagePullPolicy: Always
+                      command: [sh, -c]
+                      args:
+                      - |
+                        set -eu
+
+                        # Ensure the shared dataset directory always exists
+                        mkdir -p /workspace/dataset
+
+                        ARGS=""
+                        ARGS="$ARGS --version {{ "{{" }}workflow.parameters.dataset-version{{ "}}" }}"
+                        ARGS="$ARGS --source {{ "{{" }}workflow.parameters.dataset-source{{ "}}" }}"
+                        ARGS="$ARGS --output-dir /workspace/dataset"
+
+                        # For lakeFS source: override path to lakeFS S3 gateway
+                        # Convention: s3://<lakefs-repo>/<lakefs-branch>/dataset/
+                        OVERRIDE="{{ "{{" }}workflow.parameters.dataset-path-override{{ "}}" }}"
+                        if [ -n "$OVERRIDE" ]; then
+                          ARGS="$ARGS --path-override $OVERRIDE"
+                        elif [ "{{ "{{" }}workflow.parameters.dataset-source{{ "}}" }}" = "lakefs" ]; then
+                          ARGS="$ARGS --path-override s3://{{ "{{" }}workflow.parameters.lakefs-repo{{ "}}" }}/{{ "{{" }}workflow.parameters.lakefs-branch{{ "}}" }}/dataset/"
+                        fi
+
+                        SAMPLE="{{ "{{" }}workflow.parameters.dataset-sample-size{{ "}}" }}"
+                        [ -n "$SAMPLE" ] && ARGS="$ARGS --sample-size $SAMPLE --seed {{ "{{" }}workflow.parameters.dataset-seed{{ "}}" }}"
+
+                        LABELS_ONLY="{{ "{{" }}workflow.parameters.dataset-labels-only{{ "}}" }}"
+                        [ "$LABELS_ONLY" = "true" ] && ARGS="$ARGS --labels-only"
+                        MANIFEST_ONLY="{{ "{{" }}workflow.parameters.dataset-manifest-only{{ "}}" }}"
+                        [ "$MANIFEST_ONLY" = "true" ] && ARGS="$ARGS --manifest-only"
+
+                        echo "[dataset-loading] Running: dataset-loading $ARGS"
+                        eval dataset-loading $ARGS
+
+                        # Resolve lakeFS ref → commit ID
+                        LAKEFS_REF="{{ "{{" }}workflow.parameters.lakefs-branch{{ "}}" }}"
+
+                        LAKEFS_AUTH="${LAKEFS_ACCESS_KEY}:${LAKEFS_SECRET_KEY}"
+                        COMMIT_RESP=$(curl -sf -u "$LAKEFS_AUTH" \
+                          "${LAKEFS_ENDPOINT}/api/v1/repositories/{{ "{{" }}workflow.parameters.lakefs-repo{{ "}}" }}/refs/${LAKEFS_REF}" 2>&1) || {
+                          echo "[dataset-loading] WARN: could not resolve lakeFS ref '${LAKEFS_REF}'"
+                          COMMIT_RESP=""
+                        }
+
+                        LAKEFS_COMMIT_ID=""
+                        if [ -n "$COMMIT_RESP" ]; then
+                          LAKEFS_COMMIT_ID=$(echo "$COMMIT_RESP" | jq -r '.id // empty')
+                        fi
+                        echo "[dataset-loading] lakeFS ref=${LAKEFS_REF} -> commit=${LAKEFS_COMMIT_ID:-unknown}"
+                        echo -n "${LAKEFS_COMMIT_ID:-unknown}" > /tmp/lakefs-commit-id
+                      env:
+                      - name: APP_NAME
+                        value: "{{ $appName }}-dataset-loading"
+                      - name: LOG_LEVEL
+                        value: "INFO"
+                      - name: MAX_RETRIES
+                        value: "3"
+                      - name: TIMEOUT
+                        value: "120"
+                      - name: AWS_DEFAULT_REGION
+                        value: "{{ "{{" }}workflow.parameters.aws-region{{ "}}" }}"
+                      - name: LAKEFS_ENDPOINT
+                        value: "{{ "{{" }}workflow.parameters.lakefs-endpoint{{ "}}" }}"
+                      - name: LAKEFS_ACCESS_KEY
+                        valueFrom:
+                          secretKeyRef:
+                            name: {{ $projectName }}-lakefs-admin
+                            key: accessKeyId
+                      - name: LAKEFS_SECRET_KEY
+                        valueFrom:
+                          secretKeyRef:
+                            name: {{ $projectName }}-lakefs-admin
+                            key: secretAccessKey
+                      resources:
+                        requests:
+                          memory: "1Gi"
+                          cpu: "500m"
+                        limits:
+                          memory: "2Gi"
+                          cpu: "1"
+                      volumeMounts:
+                      - name: workspace
+                        mountPath: /workspace
+
+                  # ── Step 3: model-training ──
+                  # Runs: model-training --model-variant M --experiment-name E [all hyperparams]
+                  # NOTE: Typer single-command app — NO subcommand.
+                  # Boolean flags use --flag / --no-flag pattern.
+                  # Writes training_result.json with TrainingResult Pydantic model.
+                  - name: model-training
+                    metadata:
+                      labels:
+                        platform.kubecore.io/pipeline: "{{ $pipelineLabel }}"
+                        platform.kubecore.io/step: "model-training"
+                        platform.kubecore.io/compute-type: "gpu"
+                    affinity:
+                      podAffinity:
+                        requiredDuringSchedulingIgnoredDuringExecution:
+                        - labelSelector:
+                            matchExpressions:
+                            - key: workflows.argoproj.io/workflow
+                              operator: In
+                              values:
+                              - "{{ "{{" }}workflow.name{{ "}}" }}"
+                          topologyKey: topology.kubernetes.io/zone
+                    nodeSelector:
+                      karpenter.sh/nodepool: {{ $pipelineLabel }}-gpu
+                    tolerations:
+                    - key: nvidia.com/gpu
+                      operator: Exists
+                      effect: NoSchedule
+                    podSpecPatch: '{"containers":[{"name":"main","resources":{"requests":{"cpu":"{{ "{{" }}workflow.parameters.gpu-step-cpu-limit{{ "}}" }}","memory":"{{ "{{" }}workflow.parameters.gpu-step-mem-limit{{ "}}" }}","nvidia.com/gpu":"{{ "{{" }}workflow.parameters.gpu-step-gpu-limit{{ "}}" }}"},"limits":{"cpu":"{{ "{{" }}workflow.parameters.gpu-step-cpu-limit{{ "}}" }}","memory":"{{ "{{" }}workflow.parameters.gpu-step-mem-limit{{ "}}" }}","nvidia.com/gpu":"{{ "{{" }}workflow.parameters.gpu-step-gpu-limit{{ "}}" }}"}}}]}'
+                    inputs:
+                      parameters:
+                      - name: lakefs-commit-id
+                    outputs:
+                      parameters:
+                      - name: mlflow-run-id
+                        valueFrom:
+                          path: /tmp/mlflow-run-id
+                      - name: best-checkpoint-path
+                        valueFrom:
+                          path: /tmp/best-checkpoint-path
+                    container:
+                      image: {{ $ecrRegistry }}/{{ $ecrRepo }}:model_training-latest
+                      imagePullPolicy: Always
+                      command: [sh, -c]
+                      args:
+                      - |
+                        set -u
+
+                        bool_flag() {
+                          if [ "$2" = "true" ]; then echo "--$1"; else echo "--no-$1"; fi
+                        }
+
+                        # MLflow API helper (python3, no curl needed)
+                        python3 -c "
+                        import base64; s='aW1wb3J0IHVybGxpYi5yZXF1ZXN0LGpzb24sc3lzLGJhc2U2NCxvcwptLGU9c3lzLmFyZ3ZbMV0sc3lzLmFyZ3ZbMl0KZD1zeXMuYXJndlszXSBpZiBsZW4oc3lzLmFyZ3YpPjMgZWxzZSBOb25lCnU9b3MuZW52aXJvblsnTUxGTE9XX1RSQUNLSU5HX1VSSSddK2UKcj11cmxsaWIucmVxdWVzdC5SZXF1ZXN0KHUsbWV0aG9kPW0pCnIuYWRkX2hlYWRlcignQ29udGVudC1UeXBlJywnYXBwbGljYXRpb24vanNvbicpCnUscD1vcy5lbnZpcm9uLmdldCgnTUxGTE9XX1RSQUNLSU5HX1VTRVJOQU1FJywnJyksb3MuZW52aXJvbi5nZXQoJ01MRkxPV19UUkFDS0lOR19QQVNTV09SRCcsJycpCmlmIHUgYW5kIHA6ci5hZGRfaGVhZGVyKCdBdXRob3JpemF0aW9uJywnQmFzaWMgJytiYXNlNjQuYjY0ZW5jb2RlKCh1Kyc6JytwKS5lbmNvZGUoKSkuZGVjb2RlKCkpCnRyeToKIHJlc3A9dXJsbGliLnJlcXVlc3QudXJsb3BlbihyLGQuZW5jb2RlKCkgaWYgZCBlbHNlIE5vbmUsdGltZW91dD0xMCk7cHJpbnQocmVzcC5yZWFkKCkuZGVjb2RlKCkpCmV4Y2VwdCBFeGNlcHRpb24gYXMgZXg6CiBwcmludChqc29uLmR1bXBzKHsnZXJyb3InOnN0cihleCl9KSxmaWxlPXN5cy5zdGRlcnIpO3N5cy5leGl0KDEpCg=='
+                        open('/tmp/mlflow_req.py','w').write(base64.b64decode(s).decode())
+                        "
+                        mlflow_req() { python3 /tmp/mlflow_req.py "$@"; }
+
+                        # Create experiment if not exists (idempotent)
+                        mlflow_req POST "/api/2.0/mlflow/experiments/create-if-not-exists" \
+                          "{\"name\":\"{{ "{{" }}workflow.parameters.project-name{{ "}}" }}\"}" > /dev/null 2>&1 || true
+
+                        # Get experiment ID
+                        EXPERIMENT_ID=$(mlflow_req GET "/api/2.0/mlflow/experiments/get-by-name?experiment_name={{ "{{" }}workflow.parameters.project-name{{ "}}" }}" \
+                          | python3 -c "import sys,json; print(json.load(sys.stdin)['experiment']['experiment_id'])" 2>/dev/null || echo "0")
+                        echo "[model-training] Experiment ID: ${EXPERIMENT_ID}"
+
+                        # Pre-create the run with metadata tags and proper start_time
+                        START_TIME_MS=$(python3 -c "import time; print(int(time.time()*1000))")
+                        CREATE_RUN_RESP=$(mlflow_req POST "/api/2.0/mlflow/runs/create" \
+                          "{\"experiment_id\":\"${EXPERIMENT_ID}\",\"start_time\":${START_TIME_MS},\"run_name\":\"{{ "{{" }}workflow.name{{ "}}" }}\",\"tags\":[{\"key\":\"mlflow.runName\",\"value\":\"{{ "{{" }}workflow.name{{ "}}" }}\"},{\"key\":\"mlflow.source.name\",\"value\":\"kubecore-pipeline\"},{\"key\":\"mlflow.source.type\",\"value\":\"JOB\"},{\"key\":\"kubecore.pipeline\",\"value\":\"{{ $pipelineLabel }}\"},{\"key\":\"kubecore.project\",\"value\":\"{{ $projectName }}\"},{\"key\":\"kubecore.app\",\"value\":\"{{ $appName }}\"},{\"key\":\"kubecore.workflow_id\",\"value\":\"{{ "{{" }}workflow.uid{{ "}}" }}\"},{\"key\":\"kubecore.dataset_version\",\"value\":\"{{ "{{" }}workflow.parameters.dataset-version{{ "}}" }}\"},{\"key\":\"kubecore.model_config\",\"value\":\"{{ "{{" }}workflow.parameters.model-config{{ "}}" }}\"},{\"key\":\"kubecore.gpu_nodepool\",\"value\":\"{{ $pipelineLabel }}-gpu\"},{\"key\":\"kubecore.cpu_nodepool\",\"value\":\"{{ $pipelineLabel }}-cpu\"}]}" 2>/dev/null || echo "")
+
+                        MLFLOW_RUN_ID_PRE=$(echo "$CREATE_RUN_RESP" | python3 -c "import sys,json; print(json.load(sys.stdin)['run']['info']['run_id'])" 2>/dev/null || echo "")
+
+                        if [ -n "$MLFLOW_RUN_ID_PRE" ]; then
+                          echo "[model-training] Pre-created MLflow run: ${MLFLOW_RUN_ID_PRE}"
+                          export MLFLOW_RUN_ID="${MLFLOW_RUN_ID_PRE}"
+                        else
+                          echo "[model-training] WARN: Failed to pre-create MLflow run. Response: ${CREATE_RUN_RESP}"
+                          echo "[model-training] WARN: YOLO will create its own run named ${MLFLOW_RUN_NAME}"
+                        fi
+
+                        ARGS=""
+                        ARGS="$ARGS --model-variant {{ "{{" }}workflow.parameters.model-config{{ "}}" }}"
+                        ARGS="$ARGS --experiment-name {{ "{{" }}workflow.parameters.project-name{{ "}}" }}"
+                        ARGS="$ARGS --dataset-dir /workspace/dataset"
+                        ARGS="$ARGS --output-dir /workspace/output"
+                        ARGS="$ARGS --source local"
+                        ARGS="$ARGS --epochs {{ "{{" }}workflow.parameters.epochs{{ "}}" }}"
+                        ARGS="$ARGS --batch-size {{ "{{" }}workflow.parameters.batch-size{{ "}}" }}"
+                        ARGS="$ARGS --image-size {{ "{{" }}workflow.parameters.image-size{{ "}}" }}"
+                        ARGS="$ARGS --learning-rate {{ "{{" }}workflow.parameters.learning-rate{{ "}}" }}"
+                        ARGS="$ARGS --optimizer {{ "{{" }}workflow.parameters.optimizer{{ "}}" }}"
+                        ARGS="$ARGS $(bool_flag cos-lr {{ "{{" }}workflow.parameters.cos-lr{{ "}}" }})"
+                        ARGS="$ARGS --lrf {{ "{{" }}workflow.parameters.lrf{{ "}}" }}"
+                        ARGS="$ARGS --momentum {{ "{{" }}workflow.parameters.momentum{{ "}}" }}"
+                        ARGS="$ARGS --weight-decay {{ "{{" }}workflow.parameters.weight-decay{{ "}}" }}"
+                        ARGS="$ARGS --warmup-epochs {{ "{{" }}workflow.parameters.warmup-epochs{{ "}}" }}"
+                        ARGS="$ARGS --warmup-momentum {{ "{{" }}workflow.parameters.warmup-momentum{{ "}}" }}"
+                        ARGS="$ARGS --dropout {{ "{{" }}workflow.parameters.dropout{{ "}}" }}"
+                        ARGS="$ARGS --label-smoothing {{ "{{" }}workflow.parameters.label-smoothing{{ "}}" }}"
+                        ARGS="$ARGS --nbs {{ "{{" }}workflow.parameters.nbs{{ "}}" }}"
+                        ARGS="$ARGS $(bool_flag amp {{ "{{" }}workflow.parameters.amp{{ "}}" }})"
+                        ARGS="$ARGS --close-mosaic {{ "{{" }}workflow.parameters.close-mosaic{{ "}}" }}"
+                        ARGS="$ARGS --seed {{ "{{" }}workflow.parameters.training-seed{{ "}}" }}"
+                        ARGS="$ARGS $(bool_flag deterministic {{ "{{" }}workflow.parameters.deterministic{{ "}}" }})"
+                        ARGS="$ARGS --pose {{ "{{" }}workflow.parameters.pose{{ "}}" }}"
+                        ARGS="$ARGS --kobj {{ "{{" }}workflow.parameters.kobj{{ "}}" }}"
+                        ARGS="$ARGS --box {{ "{{" }}workflow.parameters.box{{ "}}" }}"
+                        ARGS="$ARGS --cls {{ "{{" }}workflow.parameters.cls{{ "}}" }}"
+                        ARGS="$ARGS --dfl {{ "{{" }}workflow.parameters.dfl{{ "}}" }}"
+                        ARGS="$ARGS --patience {{ "{{" }}workflow.parameters.early-stopping-patience{{ "}}" }}"
+                        ARGS="$ARGS --checkpoint-interval {{ "{{" }}workflow.parameters.checkpointing-interval-epochs{{ "}}" }}"
+                        ARGS="$ARGS --checkpoint-bucket {{ "{{" }}workflow.parameters.checkpoint-bucket{{ "}}" }}"
+                        ARGS="$ARGS --checkpoint-prefix {{ "{{" }}workflow.parameters.checkpoint-prefix{{ "}}" }}"
+                        ARGS="$ARGS --hsv-h {{ "{{" }}workflow.parameters.aug-hsv-h{{ "}}" }}"
+                        ARGS="$ARGS --hsv-s {{ "{{" }}workflow.parameters.aug-hsv-s{{ "}}" }}"
+                        ARGS="$ARGS --hsv-v {{ "{{" }}workflow.parameters.aug-hsv-v{{ "}}" }}"
+                        ARGS="$ARGS --degrees {{ "{{" }}workflow.parameters.aug-degrees{{ "}}" }}"
+                        ARGS="$ARGS --translate {{ "{{" }}workflow.parameters.aug-translate{{ "}}" }}"
+                        ARGS="$ARGS --scale {{ "{{" }}workflow.parameters.aug-scale{{ "}}" }}"
+                        ARGS="$ARGS --shear {{ "{{" }}workflow.parameters.aug-shear{{ "}}" }}"
+                        ARGS="$ARGS --perspective {{ "{{" }}workflow.parameters.aug-perspective{{ "}}" }}"
+                        ARGS="$ARGS --flipud {{ "{{" }}workflow.parameters.aug-flipud{{ "}}" }}"
+                        ARGS="$ARGS --fliplr {{ "{{" }}workflow.parameters.aug-fliplr{{ "}}" }}"
+                        ARGS="$ARGS --mosaic {{ "{{" }}workflow.parameters.aug-mosaic{{ "}}" }}"
+                        ARGS="$ARGS --mixup {{ "{{" }}workflow.parameters.aug-mixup{{ "}}" }}"
+                        ARGS="$ARGS --copy-paste {{ "{{" }}workflow.parameters.aug-copy-paste{{ "}}" }}"
+                        ARGS="$ARGS --erasing {{ "{{" }}workflow.parameters.aug-erasing{{ "}}" }}"
+                        ARGS="$ARGS --bgr {{ "{{" }}workflow.parameters.aug-bgr{{ "}}" }}"
+
+                        WEIGHTS="{{ "{{" }}workflow.parameters.pretrained-weights{{ "}}" }}"
+                        [ -n "$WEIGHTS" ] && ARGS="$ARGS --pretrained-weights $WEIGHTS"
+                        FREEZE="{{ "{{" }}workflow.parameters.freeze{{ "}}" }}"
+                        [ -n "$FREEZE" ] && ARGS="$ARGS --freeze $FREEZE"
+                        RESUME="{{ "{{" }}workflow.parameters.checkpoint-resume-from{{ "}}" }}"
+                        [ -n "$RESUME" ] && ARGS="$ARGS --resume-from $RESUME"
+
+                        # MLFLOW_RUN_ID is already exported as env var — YOLO picks it up automatically
+
+                        echo "[model-training] Running: model-training $ARGS"
+
+                        # Run training — capture exit code, don't exit on failure
+                        TRAIN_EXIT=0
+                        eval model-training $ARGS 2>&1 | tee /tmp/training-output.log || TRAIN_EXIT=$?
+                        echo "[model-training] Training exited with code: ${TRAIN_EXIT}"
+
+                        # Extract MLflow run ID (best effort — works even if training failed)
+                        if [ -f /workspace/output/training_result.json ]; then
+                          MLFLOW_RUN_ID=$(python3 -c "import json; d=json.load(open('/workspace/output/training_result.json')); print(d.get('mlflow_run_id',''))" 2>/dev/null || true)
+                          BEST_CHECKPOINT=$(python3 -c "import json; d=json.load(open('/workspace/output/training_result.json')); print(d.get('best_checkpoint_s3',''))" 2>/dev/null || true)
+                        else
+                          MLFLOW_RUN_ID=$(grep -oP '"mlflow_run_id"\s*:\s*"\K[^"]+' /tmp/training-output.log | tail -1 || true)
+                          BEST_CHECKPOINT=$(grep -oP '"best_checkpoint_s3"\s*:\s*"\K[^"]+' /tmp/training-output.log | tail -1 || true)
+                        fi
+
+                        # Fallback: use pre-created run ID if extraction failed
+                        if [ -z "${MLFLOW_RUN_ID:-}" ] && [ -n "${MLFLOW_RUN_ID_PRE:-}" ]; then
+                          MLFLOW_RUN_ID="${MLFLOW_RUN_ID_PRE}"
+                          echo "[model-training] Using pre-created run ID: ${MLFLOW_RUN_ID}"
+                        fi
+
+                        echo "[model-training] MLflow run: ${MLFLOW_RUN_ID:-unknown}"
+                        echo -n "${MLFLOW_RUN_ID:-unknown}" > /tmp/mlflow-run-id
+                        echo -n "${BEST_CHECKPOINT:-}" > /tmp/best-checkpoint-path
+
+                        # ALWAYS tag the run with kubecore metadata (even if training failed)
+                        # The developer's code can also tag via KUBECORE_* env vars
+                        LAKEFS_COMMIT_ID="{{ "{{" }}inputs.parameters.lakefs-commit-id{{ "}}" }}"
+
+                        if [ -n "${MLFLOW_RUN_ID:-}" ] && [ "${MLFLOW_RUN_ID}" != "unknown" ]; then
+                          set_tag() {
+                            mlflow_req POST "/api/2.0/mlflow/runs/set-tag" \
+                              "{\"run_id\":\"${MLFLOW_RUN_ID}\",\"key\":\"$1\",\"value\":\"$2\"}" > /dev/null 2>&1 \
+                              && echo "[model-training] Tagged $1=$2" || true
+                          }
+
+                          # Run name + status
+                          set_tag "mlflow.runName"            "{{ "{{" }}workflow.name{{ "}}" }}"
+                          TRAIN_STATUS=$( [ $TRAIN_EXIT -eq 0 ] && echo "succeeded" || echo "failed" )
+                          set_tag "kubecore.status"            "${TRAIN_STATUS}"
+
+                          # Kubecore metadata
+                          set_tag "kubecore.pipeline"          "{{ $pipelineLabel }}"
+                          set_tag "kubecore.project"           "{{ $projectName }}"
+                          set_tag "kubecore.app"               "{{ $appName }}"
+                          set_tag "kubecore.workflow_id"        "{{ "{{" }}workflow.uid{{ "}}" }}"
+                          set_tag "kubecore.workflow_name"      "{{ "{{" }}workflow.name{{ "}}" }}"
+                          set_tag "kubecore.dataset_version"    "{{ "{{" }}workflow.parameters.dataset-version{{ "}}" }}"
+                          set_tag "kubecore.model_config"       "{{ "{{" }}workflow.parameters.model-config{{ "}}" }}"
+                          set_tag "kubecore.gpu_nodepool"       "{{ $pipelineLabel }}-gpu"
+                          set_tag "kubecore.cpu_nodepool"       "{{ $pipelineLabel }}-cpu"
+                          set_tag "kubecore.description"        "{{ "{{" }}workflow.parameters.experiment-description{{ "}}" }}"
+                          set_tag "kubecore.epochs"             "{{ "{{" }}workflow.parameters.epochs{{ "}}" }}"
+                          set_tag "kubecore.batch_size"         "{{ "{{" }}workflow.parameters.batch-size{{ "}}" }}"
+                          set_tag "kubecore.image_size"         "{{ "{{" }}workflow.parameters.image-size{{ "}}" }}"
+                          set_tag "kubecore.optimizer"           "{{ "{{" }}workflow.parameters.optimizer{{ "}}" }}"
+                          set_tag "kubecore.learning_rate"      "{{ "{{" }}workflow.parameters.learning-rate{{ "}}" }}"
+
+                          # lakeFS lineage
+                          set_tag "lakefs.repo"                 "{{ "{{" }}workflow.parameters.lakefs-repo{{ "}}" }}"
+                          set_tag "lakefs.branch"               "{{ "{{" }}workflow.parameters.lakefs-branch{{ "}}" }}"
+                          set_tag "lakefs.commit_id"            "${LAKEFS_COMMIT_ID}"
+                          set_tag "lakefs.endpoint"             "{{ "{{" }}workflow.parameters.lakefs-endpoint{{ "}}" }}"
+
+                          # Close orphaned pre-created run if YOLO used a different one
+                          if [ -n "${MLFLOW_RUN_ID_PRE:-}" ] && [ "${MLFLOW_RUN_ID_PRE}" != "${MLFLOW_RUN_ID}" ]; then
+                            echo "[model-training] Closing orphaned pre-created run ${MLFLOW_RUN_ID_PRE}"
+                            mlflow_req POST "/api/2.0/mlflow/runs/update" \
+                              "{\"run_id\":\"${MLFLOW_RUN_ID_PRE}\",\"status\":\"KILLED\"}" > /dev/null 2>&1 || true
+                          fi
+                        fi
+
+                        # Exit with training's original exit code
+                        exit ${TRAIN_EXIT}
+                      env:
+                      - name: APP_NAME
+                        value: "{{ $appName }}-model-training"
+                      - name: LOG_LEVEL
+                        value: "INFO"
+                      # MLflow connection
+                      - name: MLFLOW_TRACKING_URI
+                        value: "{{ "{{" }}workflow.parameters.mlflow-endpoint{{ "}}" }}"
+                      - name: MLFLOW_EXPERIMENT_NAME
+                        value: "{{ "{{" }}workflow.parameters.project-name{{ "}}" }}"
+                      - name: MLFLOW_RUN_NAME
+                        value: "{{ "{{" }}workflow.name{{ "}}" }}"
+                      - name: MLFLOW_TRACKING_USERNAME
+                        valueFrom:
+                          secretKeyRef:
+                            name: {{ $projectName }}-mlflow-admin
+                            key: username
+                      - name: MLFLOW_TRACKING_PASSWORD
+                        valueFrom:
+                          secretKeyRef:
+                            name: {{ $projectName }}-mlflow-admin
+                            key: password
+                      # AWS
+                      - name: AWS_DEFAULT_REGION
+                        value: "{{ "{{" }}workflow.parameters.aws-region{{ "}}" }}"
+                      - name: AWS_REGION
+                        value: "{{ "{{" }}workflow.parameters.aws-region{{ "}}" }}"
+                      # Kubecore metadata — available to developer's code via KUBECORE_* env vars
+                      - name: KUBECORE_PIPELINE
+                        value: "{{ $pipelineLabel }}"
+                      - name: KUBECORE_PROJECT
+                        value: "{{ $projectName }}"
+                      - name: KUBECORE_APP
+                        value: "{{ $appName }}"
+                      - name: KUBECORE_WORKFLOW_NAME
+                        value: "{{ "{{" }}workflow.name{{ "}}" }}"
+                      - name: KUBECORE_WORKFLOW_UID
+                        value: "{{ "{{" }}workflow.uid{{ "}}" }}"
+                      - name: KUBECORE_DATASET_VERSION
+                        value: "{{ "{{" }}workflow.parameters.dataset-version{{ "}}" }}"
+                      - name: KUBECORE_MODEL_CONFIG
+                        value: "{{ "{{" }}workflow.parameters.model-config{{ "}}" }}"
+                      - name: KUBECORE_GPU_NODEPOOL
+                        value: "{{ $pipelineLabel }}-gpu"
+                      - name: KUBECORE_CPU_NODEPOOL
+                        value: "{{ $pipelineLabel }}-cpu"
+                      - name: KUBECORE_DESCRIPTION
+                        value: "{{ "{{" }}workflow.parameters.experiment-description{{ "}}" }}"
+                      - name: KUBECORE_EPOCHS
+                        value: "{{ "{{" }}workflow.parameters.epochs{{ "}}" }}"
+                      - name: KUBECORE_BATCH_SIZE
+                        value: "{{ "{{" }}workflow.parameters.batch-size{{ "}}" }}"
+                      - name: KUBECORE_IMAGE_SIZE
+                        value: "{{ "{{" }}workflow.parameters.image-size{{ "}}" }}"
+                      - name: KUBECORE_OPTIMIZER
+                        value: "{{ "{{" }}workflow.parameters.optimizer{{ "}}" }}"
+                      - name: KUBECORE_LEARNING_RATE
+                        value: "{{ "{{" }}workflow.parameters.learning-rate{{ "}}" }}"
+                      - name: LAKEFS_ENDPOINT
+                        value: "{{ "{{" }}workflow.parameters.lakefs-endpoint{{ "}}" }}"
+                      - name: LAKEFS_ACCESS_KEY
+                        valueFrom:
+                          secretKeyRef:
+                            name: {{ $projectName }}-lakefs-admin
+                            key: accessKeyId
+                      - name: LAKEFS_SECRET_KEY
+                        valueFrom:
+                          secretKeyRef:
+                            name: {{ $projectName }}-lakefs-admin
+                            key: secretAccessKey
+                      resources:
+                        requests:
+                          memory: "128Mi"
+                          cpu: "100m"
+                          nvidia.com/gpu: "1"
+                        limits:
+                          memory: "256Mi"
+                          cpu: "200m"
+                          nvidia.com/gpu: "1"
+                      volumeMounts:
+                      - name: workspace
+                        mountPath: /workspace
+                      - name: shm
+                        mountPath: /dev/shm
+
+                  # ── Step 4: model-registration ──
+                  # Runs: model-registration --mlflow-run-id R --best-checkpoint-path P [lineage tags]
+                  # NOTE: Typer single-command app — NO subcommand.
+                  - name: model-registration
+                    metadata:
+                      labels:
+                        platform.kubecore.io/pipeline: "{{ $pipelineLabel }}"
+                        platform.kubecore.io/step: "model-registration"
+                        platform.kubecore.io/compute-type: "cpu"
+                    affinity:
+                      podAffinity:
+                        requiredDuringSchedulingIgnoredDuringExecution:
+                        - labelSelector:
+                            matchExpressions:
+                            - key: workflows.argoproj.io/workflow
+                              operator: In
+                              values:
+                              - "{{ "{{" }}workflow.name{{ "}}" }}"
+                          topologyKey: topology.kubernetes.io/zone
+                    nodeSelector:
+                      karpenter.sh/nodepool: {{ $pipelineLabel }}-cpu
+                    tolerations:
+                    - key: platform.kubecore.io/burst
+                      operator: Equal
+                      value: "true"
+                      effect: NoSchedule
+                    podSpecPatch: '{"containers":[{"name":"main","resources":{"limits":{"cpu":"{{ "{{" }}workflow.parameters.cpu-step-cpu-limit{{ "}}" }}","memory":"{{ "{{" }}workflow.parameters.cpu-step-mem-limit{{ "}}" }}"}}}]}'
+                    inputs:
+                      parameters:
+                      - name: mlflow-run-id
+                      - name: best-checkpoint-path
+                    container:
+                      image: {{ $ecrRegistry }}/{{ $ecrRepo }}:model_registration-latest
+                      imagePullPolicy: Always
+                      command: [sh, -c]
+                      args:
+                      - |
+                        set -eu
+
+                        ARGS=""
+                        ARGS="$ARGS --mlflow-run-id {{ "{{" }}inputs.parameters.mlflow-run-id{{ "}}" }}"
+                        ARGS="$ARGS --best-checkpoint-path {{ "{{" }}inputs.parameters.best-checkpoint-path{{ "}}" }}"
+                        ARGS="$ARGS --dataset-version {{ "{{" }}workflow.parameters.dataset-version{{ "}}" }}"
+                        ARGS="$ARGS --model-variant {{ "{{" }}workflow.parameters.model-config{{ "}}" }}"
+
+                        SAMPLE="{{ "{{" }}workflow.parameters.dataset-sample-size{{ "}}" }}"
+                        [ -n "$SAMPLE" ] && ARGS="$ARGS --dataset-sample-size $SAMPLE"
+                        PROMOTE="{{ "{{" }}workflow.parameters.promote-to{{ "}}" }}"
+                        [ -n "$PROMOTE" ] && ARGS="$ARGS --promote-to $PROMOTE"
+
+                        echo "[model-registration] Running: model-registration $ARGS"
+                        eval model-registration $ARGS
+                      env:
+                      - name: APP_NAME
+                        value: "{{ $appName }}-model-registration"
+                      - name: LOG_LEVEL
+                        value: "INFO"
+                      - name: MAX_RETRIES
+                        value: "3"
+                      - name: TIMEOUT
+                        value: "60"
+                      - name: MLFLOW_TRACKING_URI
+                        value: "{{ "{{" }}workflow.parameters.mlflow-endpoint{{ "}}" }}"
+                      - name: MLFLOW_TRACKING_USERNAME
+                        valueFrom:
+                          secretKeyRef:
+                            name: {{ $projectName }}-mlflow-admin
+                            key: username
+                      - name: MLFLOW_TRACKING_PASSWORD
+                        valueFrom:
+                          secretKeyRef:
+                            name: {{ $projectName }}-mlflow-admin
+                            key: password
+                      - name: REGISTERED_MODEL_NAME
+                        value: "{{ "{{" }}workflow.parameters.registered-model-name{{ "}}" }}"
+                      - name: MLFLOW_EXPERIMENT_NAME
+                        value: "{{ "{{" }}workflow.parameters.project-name{{ "}}" }}"
+                      - name: AWS_DEFAULT_REGION
+                        value: "{{ "{{" }}workflow.parameters.aws-region{{ "}}" }}"
+                      resources:
+                        requests:
+                          cpu: "250m"
+                          memory: "256Mi"
+                        limits:
+                          cpu: "500m"
+                          memory: "512Mi"
+
+              branch: main
+              commitMessage: "feat: Scaffold WorkflowTemplate for {{ $appName }} ({{ $branch }})"
+              commitAuthor: "Kubecore Platform"
+              commitEmail: "platform@kubecore.eu"
+          {{- end }}
+          {{- end }}
+
+  # ── Step 5.1: Create ML dispatch handler workflows in GitOps repo ──────
+  - step: create-ml-dispatch-handlers
+    functionRef:
+      name: function-go-templating
+    input:
+      apiVersion: gotemplating.fn.crossplane.io/v1beta1
+      kind: GoTemplate
+      source: Inline
+      inline:
+        template: |
+          {{- $name := .observed.composite.resource.metadata.name -}}
+          {{- $spec := .observed.composite.resource.spec -}}
+          {{- $envConfig := index .context "apiextensions.crossplane.io/environment" -}}
+
+          {{- $appName := $spec.appName -}}
+          {{- $projectName := $spec.projectName -}}
+          {{- $mlNs := printf "ml-%s" $projectName -}}
+
+          {{- $github := $envConfig.github | default dict -}}
+          {{- $githubProviderConfig := $github.providerConfigName | default "" -}}
+          {{- $gitopsRepoName := $github.repositoryName | default $projectName -}}
+
+          {{- if $githubProviderConfig }}
+          ---
+          # ml-image-update.yml — handles ml-dev-environment-update and ml-main-environment-update dispatches
+          apiVersion: repo.github.upbound.io/v1alpha1
+          kind: RepositoryFile
+          metadata:
+            name: {{ $name }}-ml-image-update-wf
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: ml-image-update-wf
+            labels:
+              platform.kubecore.io/project: {{ $projectName }}
+              platform.kubecore.io/pipeline: {{ $appName }}
+              platform.kubecore.io/resource-type: gitops-workflow
+          spec:
+            providerConfigRef:
+              name: {{ $githubProviderConfig }}
+            deletionPolicy: Delete
+            forProvider:
+              repositoryRef:
+                name: {{ $gitopsRepoName }}-repository
+              file: .github/workflows/ml-image-update.yml
+              content: |
+                name: ML Image Update
+
+                on:
+                  repository_dispatch:
+                    types:
+                      - ml-dev-environment-update
+                      - ml-main-environment-update
+
+                permissions:
+                  contents: write
+
+                jobs:
+                  update-image:
+                    runs-on: ubuntu-latest
+                    steps:
+                      - uses: actions/checkout@v4
+
+                      - name: Install yq
+                        uses: mikefarah/yq@master
+
+                      - name: Update image tag in WorkflowTemplate
+                        run: |
+                          APP_NAME="${{ "{{" }} github.event.client_payload.app_name {{ "}}" }}"
+                          BRANCH="${{ "{{" }} github.event.client_payload.branch {{ "}}" }}"
+                          STEP_NAME="${{ "{{" }} github.event.client_payload.step_name {{ "}}" }}"
+                          IMAGE="${{ "{{" }} github.event.client_payload.image {{ "}}" }}"
+                          VERSION="${{ "{{" }} github.event.client_payload.version {{ "}}" }}"
+
+                          WFT_FILE="workflows/${APP_NAME}/${BRANCH}/workflow-template.yaml"
+
+                          if [ ! -f "$WFT_FILE" ]; then
+                            echo "WorkflowTemplate file not found: $WFT_FILE"
+                            exit 1
+                          fi
+
+                          echo "Updating image for step '$STEP_NAME' in $WFT_FILE"
+                          echo "  Image: ${IMAGE}:${VERSION}"
+
+                          # Find the template by name and update its container image
+                          yq e -i "(.spec.templates[] | select(.name == \"${STEP_NAME}\") | .container.image) = \"${IMAGE}:${VERSION}\"" "$WFT_FILE"
+
+                          echo "Updated WorkflowTemplate:"
+                          cat "$WFT_FILE"
+
+                      - name: Commit and push
+                        run: |
+                          APP_NAME="${{ "{{" }} github.event.client_payload.app_name {{ "}}" }}"
+                          BRANCH="${{ "{{" }} github.event.client_payload.branch {{ "}}" }}"
+                          STEP_NAME="${{ "{{" }} github.event.client_payload.step_name {{ "}}" }}"
+                          VERSION="${{ "{{" }} github.event.client_payload.version {{ "}}" }}"
+
+                          git config user.name "Kubecore Platform"
+                          git config user.email "platform@kubecore.eu"
+                          git add -A
+                          git diff --cached --quiet && echo "No changes to commit" && exit 0
+                          git commit -m "chore(${APP_NAME}): update ${STEP_NAME} image to ${VERSION} [${BRANCH}]"
+                          git push
+              branch: main
+              commitMessage: "feat: Add ml-image-update dispatch handler workflow"
+              commitAuthor: "Kubecore Platform"
+              commitEmail: "platform@kubecore.eu"
+
+          {{- end }}
+
+  # ── Step 6.0: Parse GitHub credentials in control cluster ──────────────
+  - step: parse-github-credentials-control
+    functionRef:
+      name: function-go-templating
+    input:
+      apiVersion: gotemplating.fn.crossplane.io/v1beta1
+      kind: GoTemplate
+      source: Inline
+      inline:
+        template: |
+          {{- $name := .observed.composite.resource.metadata.name -}}
+          {{- $spec := .observed.composite.resource.spec -}}
+          {{- $envConfig := index .context "apiextensions.crossplane.io/environment" -}}
+          {{- $appName := $spec.appName -}}
+
+          {{- $org := "" -}}
+          {{- if $envConfig.organization -}}
+            {{- $org = $envConfig.organization.name | default "" -}}
+          {{- end -}}
+
+          {{- if $org }}
+          ---
+          # ClusterSecretStore for control cluster's own Kubernetes API
+          apiVersion: kubernetes.crossplane.io/v1alpha2
+          kind: Object
+          metadata:
+            name: {{ $name }}-control-k8s-store
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: control-k8s-store
+          spec:
+            deletionPolicy: Delete
+            providerConfigRef:
+              name: kubesys-enhanced
+            forProvider:
+              manifest:
+                apiVersion: external-secrets.io/v1
+                kind: ClusterSecretStore
+                metadata:
+                  name: control-cluster-kubernetes
+                spec:
+                  provider:
+                    kubernetes:
+                      remoteNamespace: crossplane-system
+                      server:
+                        url: https://kubernetes.default.svc
+                        caProvider:
+                          type: ConfigMap
+                          name: kube-root-ca.crt
+                          namespace: external-secrets
+                          key: ca.crt
+                      auth:
+                        serviceAccount:
+                          name: external-secrets
+                          namespace: external-secrets
+          ---
+          # ExternalSecret to parse JSON GitHub provider secret in control cluster
+          apiVersion: kubernetes.crossplane.io/v1alpha2
+          kind: Object
+          metadata:
+            name: {{ $name }}-github-parser
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: github-parser
+          spec:
+            deletionPolicy: Delete
+            providerConfigRef:
+              name: kubesys-enhanced
+            forProvider:
+              manifest:
+                apiVersion: external-secrets.io/v1
+                kind: ExternalSecret
+                metadata:
+                  name: {{ $name }}-github-app-clean
+                  namespace: crossplane-system
+                  labels:
+                    platform.kubecore.io/organization: {{ $org }}
+                    platform.kubecore.io/managed-by: k8smlapp-composition
+                spec:
+                  refreshInterval: 24h
+                  secretStoreRef:
+                    name: control-cluster-kubernetes
+                    kind: ClusterSecretStore
+                  target:
+                    name: {{ $appName }}-github-app-credentials-clean
+                    creationPolicy: Owner
+                    deletionPolicy: Delete
+                    template:
+                      engineVersion: v2
+                      data:
+                        appID: "{{ "{{" }} (index (.credentials | fromJson).app_auth 0).id {{ "}}" }}"
+                        installationID: "{{ "{{" }} (index (.credentials | fromJson).app_auth 0).installation_id {{ "}}" }}"
+                        privateKey: "{{ "{{" }} (index (.credentials | fromJson).app_auth 0).pem_file {{ "}}" }}"
+                  data:
+                  - secretKey: credentials
+                    remoteRef:
+                      key: github-provider-{{ $org }}-github-provider
+                      property: credentials
+          {{- end }}
+
+  # ── Step 6.1: Copy GitHub credentials to ML namespace on child cluster ──
+  - step: copy-github-credentials-to-child
+    functionRef:
+      name: function-go-templating
+    input:
+      apiVersion: gotemplating.fn.crossplane.io/v1beta1
+      kind: GoTemplate
+      source: Inline
+      inline:
+        template: |
+          {{- $name := .observed.composite.resource.metadata.name -}}
+          {{- $spec := .observed.composite.resource.spec -}}
+          {{- $envConfig := index .context "apiextensions.crossplane.io/environment" -}}
+
+          {{- $appName := $spec.appName -}}
+          {{- $projectName := $spec.projectName -}}
+          {{- $mlNs := printf "ml-%s" $projectName -}}
+          {{- $k8sProvider := $envConfig.kubernetesProviderConfig | default "" -}}
+
+          {{- $org := "" -}}
+          {{- if $envConfig.organization -}}
+            {{- $org = $envConfig.organization.name | default "" -}}
+          {{- end -}}
+          {{- $resourceName := printf "%s-%s" $projectName $appName -}}
+
+          {{- if and $org $k8sProvider }}
+          ---
+          # Copy GitHub App credentials from control cluster to child cluster ML namespace
+          apiVersion: kubernetes.crossplane.io/v1alpha2
+          kind: Object
+          metadata:
+            name: {{ $name }}-ml-github-creds
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: ml-github-creds-copy
+          spec:
+            deletionPolicy: Delete
+            providerConfigRef:
+              name: {{ $k8sProvider }}
+            references:
+            - patchesFrom:
+                apiVersion: v1
+                kind: Secret
+                name: {{ $appName }}-github-app-credentials-clean
+                namespace: crossplane-system
+                fieldPath: data.appID
+              toFieldPath: data.appID
+            - patchesFrom:
+                apiVersion: v1
+                kind: Secret
+                name: {{ $appName }}-github-app-credentials-clean
+                namespace: crossplane-system
+                fieldPath: data.installationID
+              toFieldPath: data.installationID
+            - patchesFrom:
+                apiVersion: v1
+                kind: Secret
+                name: {{ $appName }}-github-app-credentials-clean
+                namespace: crossplane-system
+                fieldPath: data.privateKey
+              toFieldPath: data.privateKey
+            forProvider:
+              manifest:
+                apiVersion: v1
+                kind: Secret
+                metadata:
+                  name: github-app-credentials
+                  namespace: {{ $mlNs }}
+                  labels:
+                    platform.kubecore.io/organization: {{ $org }}
+                    platform.kubecore.io/project: {{ $projectName }}
+                    platform.kubecore.io/resource-type: secret
+                    platform.kubecore.io/secret-type: github-credentials
+                type: Opaque
+                data:
+                  appID: ""
+                  installationID: ""
+                  privateKey: ""
+          {{- end }}
+
+  # ── Step 6.2: GitHub SecretStore + PushSecret for ECR → GitHub Actions ──
+  - step: create-github-push-secrets
+    functionRef:
+      name: function-go-templating
+    input:
+      apiVersion: gotemplating.fn.crossplane.io/v1beta1
+      kind: GoTemplate
+      source: Inline
+      inline:
+        template: |
+          {{- $name := .observed.composite.resource.metadata.name -}}
+          {{- $spec := .observed.composite.resource.spec -}}
+          {{- $envConfig := index .context "apiextensions.crossplane.io/environment" -}}
+
+          {{- $appName := $spec.appName -}}
+          {{- $projectName := $spec.projectName -}}
+          {{- $mlNs := printf "ml-%s" $projectName -}}
+          {{- $k8sProvider := $envConfig.kubernetesProviderConfig | default "" -}}
+
+          {{- $org := "" -}}
+          {{- if $envConfig.organization -}}
+            {{- $org = $envConfig.organization.name | default "" -}}
+          {{- end -}}
+
+          {{- $github := $envConfig.github | default dict -}}
+          {{- $resourceName := printf "%s-%s" $projectName $appName -}}
+
+          {{- if and $org $k8sProvider }}
+          ---
+          # GitHub SecretStore for ECR→GitHub Actions sync
+          apiVersion: kubernetes.crossplane.io/v1alpha2
+          kind: Object
+          metadata:
+            name: {{ $name }}-github-secretstore
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: github-secretstore
+          spec:
+            deletionPolicy: Delete
+            providerConfigRef:
+              name: {{ $k8sProvider }}
+            forProvider:
+              manifest:
+                apiVersion: external-secrets.io/v1
+                kind: SecretStore
+                metadata:
+                  name: {{ $resourceName }}-github-actions
+                  namespace: {{ $mlNs }}
+                  labels:
+                    platform.kubecore.io/organization: {{ $org }}
+                    platform.kubecore.io/project: {{ $projectName }}
+                spec:
+                  provider:
+                    github:
+                      appID: {{ $github.appID | default 0 }}
+                      installationID: {{ $github.installationID | default 0 }}
+                      organization: {{ $org | quote }}
+                      repository: {{ printf "%s-%s" $projectName $appName | quote }}
+                      auth:
+                        privateKey:
+                          name: github-app-credentials
+                          namespace: {{ $mlNs }}
+                          key: privateKey
+          ---
+          # PushSecret for ECR credentials to GitHub Actions
+          apiVersion: kubernetes.crossplane.io/v1alpha2
+          kind: Object
+          metadata:
+            name: {{ $name }}-ecr-push-github
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: ecr-push-github
+          spec:
+            deletionPolicy: Delete
+            managementPolicies:
+            - '*'
+            providerConfigRef:
+              name: {{ $k8sProvider }}
+            watch: true
+            readiness:
+              policy: SuccessfulCreate
+            forProvider:
+              manifest:
+                apiVersion: external-secrets.io/v1alpha1
+                kind: PushSecret
+                metadata:
+                  name: {{ $resourceName }}-ecr-to-github
+                  namespace: {{ $mlNs }}
+                spec:
+                  refreshInterval: "11h"
+                  deletionPolicy: None
+                  secretStoreRefs:
+                  - name: {{ $resourceName }}-github-actions
+                    kind: SecretStore
+                  selector:
+                    secret:
+                      name: {{ $resourceName }}-ecr-dockerconfig
+                  data:
+                  - match:
+                      secretKey: username
+                      remoteRef:
+                        remoteKey: KUBECORE_REGISTRY_UNAME
+                    conversionStrategy: None
+                  - match:
+                      secretKey: password
+                      remoteRef:
+                        remoteKey: KUBECORE_REGISTRY_PWD
+                    conversionStrategy: None
+          {{- end }}
+
+  # ── Step 7: Status patching ─────────────────────────────────────────────
+  - step: patch-status
+    functionRef:
+      name: function-go-templating
+    input:
+      apiVersion: gotemplating.fn.crossplane.io/v1beta1
+      kind: GoTemplate
+      source: Inline
+      inline:
+        template: |
+          {{- $name := .observed.composite.resource.metadata.name -}}
+          {{- $spec := .observed.composite.resource.spec -}}
+          {{- $envConfig := index .context "apiextensions.crossplane.io/environment" -}}
+
+          {{- $appName := $spec.appName -}}
+          {{- $projectName := $spec.projectName -}}
+          {{- $region := $spec.region | default "us-east-1" -}}
+          {{- $pipelineLabel := printf "%s-%s" $projectName $appName -}}
+
+          {{- $lakefs := $envConfig.lakefs | default dict -}}
+          {{- $lakeFSEndpoint := $lakefs.endpoint | default "" -}}
+
+          {{- $org := "" -}}
+          {{- if $envConfig.organization -}}
+            {{- $org = $envConfig.organization.name | default "" -}}
+          {{- end -}}
+          {{- $awsConfig := $envConfig.aws | default dict -}}
+          {{- $accountId := $awsConfig.accountId | default "" -}}
+          {{- $primaryRegion := $awsConfig.primaryRegion | default $region -}}
+          {{- $grafana := $envConfig.tools.victoriametrics.grafana | default dict -}}
+          {{- $grafanaUrl := $grafana.url | default "" -}}
+
+          {{- $gpuConfig := $spec.gpu | default dict -}}
+          {{- $gpuInstanceFamilies := $gpuConfig.instanceFamilies | default (list "g" "p") -}}
+          {{- $cpuConfig := $spec.cpu | default dict -}}
+          {{- $cpuInstanceFamilies := $cpuConfig.instanceFamilies | default (list "m" "c" "r") -}}
+
+          ---
+          apiVersion: platform.kubecore.io/v1alpha1
+          kind: XK8sMLApp
+          metadata:
+            name: {{ $name }}
+          status:
+            {{- if $lakeFSEndpoint }}
+            lakeFSRepository: {{ $appName }}
+            {{- end }}
+            {{- if $accountId }}
+            ecrRegistryHost: {{ printf "%s.dkr.ecr.%s.amazonaws.com" $accountId $primaryRegion }}
+            {{- end }}
+            costTracking:
+              enabled: {{ ternary "true" "false" (ne $grafanaUrl "") }}
+              dashboardUrl: "{{ $grafanaUrl }}/d/ml-{{ $appName }}"
+              estimatedGpuHourlyCost: ""
+              estimatedCpuHourlyCost: ""
+              gpuInstanceCategories: "{{ join "," $gpuInstanceFamilies }}"
+              cpuInstanceCategories: "{{ join "," $cpuInstanceFamilies }}"
+            workflowTemplateRendered: true
+            workflowTemplateLink: "workflows/{{ $appName }}/main/workflow-template.yaml"
+            gpuNodePool: {{ $pipelineLabel }}-gpu
+            cpuNodePool: {{ $pipelineLabel }}-cpu
+            ready: true
+
+  # ── Step 8: Auto-ready ──────────────────────────────────────────────────
+  - step: auto-ready
+    functionRef:
+      name: function-auto-ready
+
+  # ── Step 9: Resource sequencing ─────────────────────────────────────────
+  - step: sequence-resources
+    functionRef:
+      name: function-sequencer
+    input:
+      apiVersion: sequencer.fn.crossplane.io/v1beta1
+      kind: Input
+      config:
+        respectDeletionOrder: true
+        finalizerStrategy:
+          mode: Strict
+      rules:
+      # Karpenter NodeClasses before NodePools
+      - sequence:
+        - gpu-nodeclass
+        - gpu-nodepool
+      - sequence:
+        - cpu-nodeclass
+        - cpu-nodepool
+      # ML VMRule depends on NodePools; dashboard depends on VMRule
+      - sequence:
+        - gpu-nodepool
+        - ml-cost-vmrule
+      - sequence:
+        - cpu-nodepool
+        - ml-cost-vmrule
+      - sequence:
+        - ml-cost-vmrule
+        - ml-pipeline-dashboard
+      - sequence:
+        - ecr-app
+        - ml-ecr-sa
+      - sequence:
+        - lakefs-repo
+        - ml-ecr-sa
+      - sequence:
+        - ml-ecr-sa
+        - ml-ecr-gen
+      - sequence:
+        - ml-ecr-gen
+        - ml-ecr-secret
+      - sequence:
+        - ml-ecr-secret
+        - github-secretstore
+      - sequence:
+        - github-secretstore
+        - ecr-push-github
+      # ML dispatch handler workflows depend on scaffold WFTs being created first
+      - sequence:
+        - wft-dev
+        - ml-image-update-wf
+      - sequence:
+        - wft-dev
+        - ml-dag-update-wf

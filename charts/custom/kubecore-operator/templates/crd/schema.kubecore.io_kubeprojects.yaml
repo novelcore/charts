@@ -135,23 +135,6 @@ spec:
                           description: Labels to add to the environment (merged with
                             template labels)
                           type: object
-                        mlStack:
-                          description: MLStack overrides for ML stack toggles (within
-                            template limits; only applied when pool is ML capable)
-                          properties:
-                            mlflow:
-                              description: MLflow overrides MLflow enablement for
-                                this environment
-                              type: boolean
-                            postgres:
-                              description: Postgres overrides Postgres instance enablement
-                                for this environment
-                              type: boolean
-                            s3:
-                              description: S3 overrides S3 artifact store enablement
-                                for this environment
-                              type: boolean
-                          type: object
                         scaling:
                           description: Scaling overrides for node group scaling configuration
                           properties:
@@ -295,6 +278,148 @@ spec:
               kubeOrgRef:
                 description: KubeOrgRef references the KubeOrg that owns this project
                 type: string
+              ml:
+                description: |-
+                  ML defines project-wide ML platform configuration (MLflow, LakeFS, S3, Postgres).
+                  When enabled, the KubeProject operator provisions a single per-project ML stack
+                  using XProjectMLStack composition, scheduled on system nodes of the specified KubePool.
+                properties:
+                  components:
+                    description: Components controls which ML components are deployed.
+                    properties:
+                      lakefs:
+                        description: Lakefs enables LakeFS for this project (per environment).
+                        type: boolean
+                      mlflow:
+                        description: Mlflow enables MLflow for this project (per environment).
+                        type: boolean
+                    type: object
+                  enabled:
+                    description: |-
+                      Enabled turns the ML platform on for this project. When true, the operator
+                      provisions a single per-project ML stack (Postgres, S3, MLflow, optionally LakeFS)
+                      scheduled on system nodes of the specified KubePool.
+                    type: boolean
+                  kubePool:
+                    description: |-
+                      KubePool specifies which KubePool's system nodes host the ML stack for this project.
+                      This is required when ML is enabled so that ML components can inherit the correct
+                      scheduling configuration from the selected pool's system EnvironmentConfig.
+                    type: string
+                  pipelines:
+                    description: |-
+                      Pipelines declares per-project pipeline templates. Each pipeline gets its own
+                      Karpenter NodePool + EC2NodeClass (GPU and/or CPU), labeled with project and
+                      pipeline name for per-project cost attribution via Karpenter metrics.
+                    items:
+                      description: MLPipeline defines a pipeline template with its
+                        node resource configuration.
+                      properties:
+                        cpu:
+                          description: CPU configures the CPU NodePool for pipeline
+                            steps (validate, prepare, register).
+                          properties:
+                            consolidateAfter:
+                              description: ConsolidateAfter is how long before removing
+                                empty nodes (e.g. "60s","5m").
+                              type: string
+                            diskSizeGi:
+                              description: DiskSizeGi is the root EBS volume size
+                                in GiB.
+                              minimum: 20
+                              type: integer
+                            instanceFamilies:
+                              description: |-
+                                InstanceFamilies are allowed EC2 instance families (e.g. ["g5","g6"] for GPU).
+                                Use ["*"] to allow all instance families (no instance-category requirement on NodePool).
+                              items:
+                                type: string
+                              minItems: 1
+                              type: array
+                            instanceSizes:
+                              description: |-
+                                InstanceSizes are allowed EC2 instance sizes (e.g. ["xlarge","2xlarge"]).
+                                Use ["*"] to allow all instance sizes (no instance-size requirement on NodePool).
+                              items:
+                                type: string
+                              minItems: 1
+                              type: array
+                            maxResources:
+                              description: 'MaxResources is the NodePool limit: "nvidia.com/gpu"
+                                count for GPU, or vCPU count for CPU.'
+                              type: string
+                          type: object
+                        gpu:
+                          description: GPU configures the GPU NodePool for training
+                            workloads in this pipeline.
+                          properties:
+                            consolidateAfter:
+                              description: ConsolidateAfter is how long before removing
+                                empty nodes (e.g. "60s","5m").
+                              type: string
+                            diskSizeGi:
+                              description: DiskSizeGi is the root EBS volume size
+                                in GiB.
+                              minimum: 20
+                              type: integer
+                            instanceFamilies:
+                              description: |-
+                                InstanceFamilies are allowed EC2 instance families (e.g. ["g5","g6"] for GPU).
+                                Use ["*"] to allow all instance families (no instance-category requirement on NodePool).
+                              items:
+                                type: string
+                              minItems: 1
+                              type: array
+                            instanceSizes:
+                              description: |-
+                                InstanceSizes are allowed EC2 instance sizes (e.g. ["xlarge","2xlarge"]).
+                                Use ["*"] to allow all instance sizes (no instance-size requirement on NodePool).
+                              items:
+                                type: string
+                              minItems: 1
+                              type: array
+                            maxResources:
+                              description: 'MaxResources is the NodePool limit: "nvidia.com/gpu"
+                                count for GPU, or vCPU count for CPU.'
+                              type: string
+                          type: object
+                        name:
+                          description: |-
+                            Name identifies the pipeline (e.g. "yolo-v1"). Used in NodePool names:
+                            {project}-{name}-gpu and {project}-{name}-cpu.
+                          minLength: 1
+                          pattern: ^[a-z0-9][a-z0-9-]*[a-z0-9]$
+                          type: string
+                      required:
+                      - name
+                      type: object
+                    type: array
+                  postgres:
+                    description: Postgres controls resource sizing for the per-environment
+                      CloudNativePG cluster.
+                    properties:
+                      cpu:
+                        description: CPU is the requested CPU for the primary Postgres
+                          instance (e.g., "500m").
+                        type: string
+                      memory:
+                        description: Memory is the requested memory for the primary
+                          Postgres instance (e.g., "1Gi").
+                        type: string
+                      storageSize:
+                        description: StorageSize is the PVC size for the primary Postgres
+                          instance (e.g., "20Gi").
+                        type: string
+                    type: object
+                  s3:
+                    description: S3 controls S3 artifact store provisioning.
+                    properties:
+                      enabled:
+                        description: Enabled controls whether per-environment S3 buckets
+                          are created for ML artifacts.
+                        type: boolean
+                    type: object
+                type: object
               owner:
                 description: Owner specifies the owner or team responsible for this
                   project
@@ -722,6 +847,95 @@ spec:
                 description: LastTransitionTime records when the status was last updated
                 format: date-time
                 type: string
+              mlStack:
+                description: MLStack tracks the per-project ML platform stack (XProjectMLStack)
+                properties:
+                  environmentConfigRef:
+                    description: EnvironmentConfigRef is a reference to the ML stack
+                      EnvironmentConfig
+                    properties:
+                      apiVersion:
+                        description: API version of the resource
+                        type: string
+                      kind:
+                        description: Kind of the resource
+                        type: string
+                      name:
+                        description: Name of the resource
+                        type: string
+                      namespace:
+                        description: Namespace of the resource (if namespaced)
+                        type: string
+                      uid:
+                        description: UID of the resource
+                        type: string
+                    type: object
+                  features:
+                    description: Features records which ML components are enabled
+                    properties:
+                      lakefs:
+                        type: boolean
+                      mlflow:
+                        type: boolean
+                      postgres:
+                        type: boolean
+                      s3:
+                        type: boolean
+                    type: object
+                  lakeFSEndpoint:
+                    description: LakeFSEndpoint is the in-cluster service URL for
+                      lakeFS
+                    type: string
+                  lakeFSRepository:
+                    description: LakeFSRepository is the lakeFS repository name
+                    type: string
+                  lastReconciled:
+                    description: LastReconciled is when the ML stack was last reconciled
+                    format: date-time
+                    type: string
+                  message:
+                    description: Message contains details about the current state
+                    type: string
+                  mlflowEndpoint:
+                    description: MLflowEndpoint is the in-cluster service URL for
+                      MLflow
+                    type: string
+                  namespace:
+                    description: Namespace is the Kubernetes namespace hosting the
+                      ML stack (e.g., ml-{project})
+                    type: string
+                  postgresHost:
+                    description: PostgresHost is the in-cluster Postgres connection
+                      host (e.g., {project}-pg-rw.ml-{project}.svc)
+                    type: string
+                  s3Bucket:
+                    description: S3Bucket is the name of the S3 bucket for ML artifacts
+                    type: string
+                  state:
+                    description: 'State of the ML stack: "Pending", "Creating", "Ready",
+                      "Failed"'
+                    type: string
+                  xProjectMLStackRef:
+                    description: XProjectMLStackRef is a reference to the created
+                      XProjectMLStack claim
+                    properties:
+                      apiVersion:
+                        description: API version of the resource
+                        type: string
+                      kind:
+                        description: Kind of the resource
+                        type: string
+                      name:
+                        description: Name of the resource
+                        type: string
+                      namespace:
+                        description: Namespace of the resource (if namespaced)
+                        type: string
+                      uid:
+                        description: UID of the resource
+                        type: string
+                    type: object
+                type: object
               observedGeneration:
                 description: ObservedGeneration is the most recent generation observed
                   by the controller

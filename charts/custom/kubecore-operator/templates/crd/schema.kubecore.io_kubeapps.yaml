@@ -290,6 +290,78 @@ spec:
                   application
                 minLength: 1
                 type: string
+              mlPipeline:
+                description: |-
+                  MLPipeline defines ML pipeline-specific configuration.
+                  Only used when the referenced KubeAppTemplate has type "ml-pipeline".
+                properties:
+                  cpu:
+                    description: CPU configures the CPU Karpenter NodePool for non-GPU
+                      pipeline steps.
+                    properties:
+                      consolidateAfter:
+                        description: ConsolidateAfter is how long before removing
+                          empty nodes (e.g. "60s","5m").
+                        type: string
+                      diskSizeGi:
+                        description: DiskSizeGi is the root EBS volume size in GiB.
+                        minimum: 20
+                        type: integer
+                      instanceFamilies:
+                        description: |-
+                          InstanceFamilies are allowed EC2 instance families (e.g. ["g5","g6"] for GPU).
+                          Use ["*"] to allow all instance families (no instance-category requirement on NodePool).
+                        items:
+                          type: string
+                        minItems: 1
+                        type: array
+                      instanceSizes:
+                        description: |-
+                          InstanceSizes are allowed EC2 instance sizes (e.g. ["xlarge","2xlarge"]).
+                          Use ["*"] to allow all instance sizes (no instance-size requirement on NodePool).
+                        items:
+                          type: string
+                        minItems: 1
+                        type: array
+                      maxResources:
+                        description: 'MaxResources is the NodePool limit: "nvidia.com/gpu"
+                          count for GPU, or vCPU count for CPU.'
+                        type: string
+                    type: object
+                  gpu:
+                    description: GPU configures the GPU Karpenter NodePool for training
+                      workloads.
+                    properties:
+                      consolidateAfter:
+                        description: ConsolidateAfter is how long before removing
+                          empty nodes (e.g. "60s","5m").
+                        type: string
+                      diskSizeGi:
+                        description: DiskSizeGi is the root EBS volume size in GiB.
+                        minimum: 20
+                        type: integer
+                      instanceFamilies:
+                        description: |-
+                          InstanceFamilies are allowed EC2 instance families (e.g. ["g5","g6"] for GPU).
+                          Use ["*"] to allow all instance families (no instance-category requirement on NodePool).
+                        items:
+                          type: string
+                        minItems: 1
+                        type: array
+                      instanceSizes:
+                        description: |-
+                          InstanceSizes are allowed EC2 instance sizes (e.g. ["xlarge","2xlarge"]).
+                          Use ["*"] to allow all instance sizes (no instance-size requirement on NodePool).
+                        items:
+                          type: string
+                        minItems: 1
+                        type: array
+                      maxResources:
+                        description: 'MaxResources is the NodePool limit: "nvidia.com/gpu"
+                          count for GPU, or vCPU count for CPU.'
+                        type: string
+                    type: object
+                type: object
               profile:
                 default: small
                 description: Profile specifies the resource profile size for the application
@@ -603,6 +675,25 @@ spec:
                 description: LastTransitionTime records when the status was last updated
                 format: date-time
                 type: string
+              mlPipelineStatus:
+                description: MLPipelineStatus contains ML pipeline-specific status
+                  information
+                properties:
+                  cpuNodePool:
+                    description: CPUNodePool is the name of the CPU Karpenter NodePool
+                    type: string
+                  gpuNodePool:
+                    description: GPUNodePool is the name of the GPU Karpenter NodePool
+                    type: string
+                  lakeFSRepository:
+                    description: LakeFSRepository is the lakeFS repository for this
+                      pipeline
+                    type: string
+                  ready:
+                    description: Ready indicates whether all ML pipeline resources
+                      are ready
+                    type: boolean
+                type: object
               observedGeneration:
                 description: ObservedGeneration is the most recent generation observed
                   by the controller
@@ -774,6 +865,26 @@ spec:
                 type: object
               xK8sAppRef:
                 description: XK8sAppRef contains a reference to the created XK8sApp
+                  resource
+                properties:
+                  apiVersion:
+                    description: API version of the resource
+                    type: string
+                  kind:
+                    description: Kind of the resource
+                    type: string
+                  name:
+                    description: Name of the resource
+                    type: string
+                  namespace:
+                    description: Namespace of the resource (if namespaced)
+                    type: string
+                  uid:
+                    description: UID of the resource
+                    type: string
+                type: object
+              xK8sMLAppRef:
+                description: XK8sMLAppRef contains a reference to the created XK8sMLApp
                   resource
                 properties:
                   apiVersion:

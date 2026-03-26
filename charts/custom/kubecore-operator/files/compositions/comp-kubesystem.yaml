@@ -92,7 +92,10 @@ spec:
           {{- $externalSecretsEnabled := $features.externalSecrets | default true -}}
           {{- $gitopsPromoterEnabled := $features.gitopsPromoter | default true -}}
           {{- $argoMetricsEnabled := $features.argoMetrics | default true -}}
-          {{- $observabilityEnabled := $features.observability | default true -}}
+          {{- $observabilityEnabled := true -}}
+          {{- if hasKey $features "observability" -}}
+            {{- $observabilityEnabled = $features.observability -}}
+          {{- end -}}
 
           {{/* VictoriaMetrics configuration from EnvironmentConfig (with safe defaults) */}}
           {{- $vmConfig := $tools.victoriametrics | default dict -}}
@@ -1039,6 +1042,43 @@ spec:
                     {{- end }}
                 spec:
                   title: "Kubernetes"
+                  instanceSelector:
+                    matchLabels:
+                      dashboards: "kubecore-grafana"
+          {{- end }}
+
+          {{/* ML Pipelines folder (for ML pipeline cost dashboards) */}}
+          {{- if and $shouldDeployVM $grafanaEnabled }}
+          ---
+          apiVersion: kubernetes.crossplane.io/v1alpha2
+          kind: Object
+          metadata:
+            name: {{ $name }}-grafana-folder-ml-pipelines
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: grafana-folder-ml-pipelines
+            labels:
+              {{- range $key, $value := $commonLabels }}
+              {{ $key }}: "{{ $value }}"
+              {{- end }}
+              platform.kubecore.io/component: "observability"
+          spec:
+            deletionPolicy: Orphan
+            managementPolicies: ["*"]
+            providerConfigRef:
+              name: {{ $kubernetesProvider }}
+            forProvider:
+              manifest:
+                apiVersion: grafana.integreatly.org/v1beta1
+                kind: GrafanaFolder
+                metadata:
+                  name: {{ $clusterName }}-ml-pipelines
+                  namespace: {{ $vmNamespace }}
+                  labels:
+                    {{- range $key, $value := $commonLabels }}
+                    {{ $key }}: "{{ $value }}"
+                    {{- end }}
+                spec:
+                  title: "ML Pipelines"
                   instanceSelector:
                     matchLabels:
                       dashboards: "kubecore-grafana"
@@ -2528,6 +2568,54 @@ spec:
                       scheme: http
           {{- end }}
 
+          {{/* =================================================================== */}}
+          {{/* KARPENTER METRICS SCRAPING (VMServiceScrape) */}}
+          {{/* =================================================================== */}}
+
+          {{- if $shouldDeployVM }}
+          ---
+          apiVersion: kubernetes.crossplane.io/v1alpha2
+          kind: Object
+          metadata:
+            name: {{ $name }}-karpenter-vmservicescrape
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: karpenter-vmservicescrape
+            labels:
+              {{- range $key, $value := $commonLabels }}
+              {{ $key }}: "{{ $value }}"
+              {{- end }}
+              platform.kubecore.io/component: "observability"
+          spec:
+            deletionPolicy: Orphan
+            managementPolicies: ["*"]
+            providerConfigRef:
+              name: {{ $kubernetesProvider }}
+            forProvider:
+              manifest:
+                apiVersion: operator.victoriametrics.com/v1beta1
+                kind: VMServiceScrape
+                metadata:
+                  name: {{ $clusterName }}-karpenter
+                  namespace: {{ $vmNamespace }}
+                  labels:
+                    platform.kubecore.io/component: "karpenter"
+                    {{- range $key, $value := $commonLabels }}
+                    {{ $key }}: "{{ $value }}"
+                    {{- end }}
+                spec:
+                  namespaceSelector:
+                    matchNames:
+                      - kube-system
+                  selector:
+                    matchLabels:
+                      app.kubernetes.io/name: karpenter
+                  endpoints:
+                    - port: http-metrics
+                      path: /metrics
+                      interval: 30s
+                      scheme: http
+          {{- end }}
+
           {{/* ArgoCD GitHub Integration ExternalSecret */}}
           {{/* Safely check for ArgoCD and GitHub configuration */}}
           {{- $hasArgoCd := false -}}
@@ -3060,6 +3148,7 @@ spec:
                   {{- if $hasArgoWfOIDC }}
                   authModes:
                     - sso
+                    - client
                   sso:
                     enabled: true
                     issuer: {{ $tools.argoWorkflows.oidc.issuer }}
@@ -3077,6 +3166,9 @@ spec:
                       - groups
                     rbac:
                       enabled: true
+                  {{- else }}
+                  authModes:
+                    - server
                   {{- end }}
                   {{- if $nodeSelector }}
                   nodeSelector:
@@ -3316,7 +3408,102 @@ spec:
                     name: argo-workflows-sso-readonly
                     namespace: {{ $tools.argoWorkflows.namespace }}
           {{- end }}
-          
+
+          {{/* Argo Workflows Client Auth — admin SA + token (always created when Argo Workflows is enabled) */}}
+          {{- if and $argoWorkflowsEnabled $tools.argoWorkflows.server.enabled }}
+          ---
+          apiVersion: kubernetes.crossplane.io/v1alpha2
+          kind: Object
+          metadata:
+            name: {{ $name }}-argo-workflows-admin-sa
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: argo-workflows-admin-sa
+            labels:
+              {{- range $key, $value := $commonLabels }}
+              {{ $key }}: "{{ $value }}"
+              {{- end }}
+              platform.kubecore.io/component: "argo-workflows"
+          spec:
+            deletionPolicy: Delete
+            managementPolicies: ["*"]
+            providerConfigRef:
+              name: {{ $kubernetesProvider }}
+            forProvider:
+              manifest:
+                apiVersion: v1
+                kind: ServiceAccount
+                metadata:
+                  name: argo-workflows-admin
+                  namespace: {{ $tools.argoWorkflows.namespace }}
+                  labels:
+                    platform.kubecore.io/kubesystem: {{ $name }}
+                    platform.kubecore.io/part-of: "system"
+          ---
+          apiVersion: kubernetes.crossplane.io/v1alpha2
+          kind: Object
+          metadata:
+            name: {{ $name }}-argo-workflows-admin-token
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: argo-workflows-admin-token
+            labels:
+              {{- range $key, $value := $commonLabels }}
+              {{ $key }}: "{{ $value }}"
+              {{- end }}
+              platform.kubecore.io/component: "argo-workflows"
+          spec:
+            deletionPolicy: Delete
+            managementPolicies: ["*"]
+            providerConfigRef:
+              name: {{ $kubernetesProvider }}
+            forProvider:
+              manifest:
+                apiVersion: v1
+                kind: Secret
+                metadata:
+                  name: argo-workflows-admin-token
+                  namespace: {{ $tools.argoWorkflows.namespace }}
+                  annotations:
+                    kubernetes.io/service-account.name: argo-workflows-admin
+                  labels:
+                    platform.kubecore.io/kubesystem: {{ $name }}
+                    platform.kubecore.io/part-of: "system"
+                type: kubernetes.io/service-account-token
+          ---
+          apiVersion: kubernetes.crossplane.io/v1alpha2
+          kind: Object
+          metadata:
+            name: {{ $name }}-argo-workflows-admin-binding
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: argo-workflows-admin-binding
+            labels:
+              {{- range $key, $value := $commonLabels }}
+              {{ $key }}: "{{ $value }}"
+              {{- end }}
+              platform.kubecore.io/component: "argo-workflows"
+          spec:
+            deletionPolicy: Delete
+            managementPolicies: ["*"]
+            providerConfigRef:
+              name: {{ $kubernetesProvider }}
+            forProvider:
+              manifest:
+                apiVersion: rbac.authorization.k8s.io/v1
+                kind: ClusterRoleBinding
+                metadata:
+                  name: argo-workflows-admin-binding
+                  labels:
+                    platform.kubecore.io/kubesystem: {{ $name }}
+                    platform.kubecore.io/part-of: "system"
+                roleRef:
+                  apiGroup: rbac.authorization.k8s.io
+                  kind: ClusterRole
+                  name: {{ $name }}-argo-workflows-admin
+                subjects:
+                  - kind: ServiceAccount
+                    name: argo-workflows-admin
+                    namespace: {{ $tools.argoWorkflows.namespace }}
+          {{- end }}
+
           {{/* Traefik Installation */}}
           {{- if and $traefikEnabled $tools.traefik $tools.traefik.enabled }}
           ---
@@ -4463,23 +4650,21 @@ spec:
           {{- $vmInsertCPU := "200m" -}}
           {{- $vmInsertMemory := "256Mi" -}}
           {{- $vmStorageCPU := "500m" -}}
-          {{- $vmStorageMemory := "512Mi" -}}
+          {{- $vmStorageMemory := "1536Mi" -}}
           {{- if eq $resourceProfile "small" }}
             {{- $vmSelectCPU = "100m" -}}
-            {{- $vmSelectMemory = "128Mi" -}}
+            {{- $vmSelectMemory = "256Mi" -}}
             {{- $vmInsertCPU = "100m" -}}
             {{- $vmInsertMemory = "256Mi" -}}
-            {{- $vmStorageCPU = "200m" -}}
-            {{- $vmStorageMemory = "512Mi" -}}
-            {{/* Small profile: vmstorage memory increased to 512Mi to prevent OOM (was 256Mi) */}}
-            {{/* Small profile: vminsert memory increased to 256Mi to prevent OOM (was 128Mi) */}}
+            {{- $vmStorageCPU = "300m" -}}
+            {{- $vmStorageMemory = "1536Mi" -}}
           {{- else if eq $resourceProfile "large" }}
             {{- $vmSelectCPU = "500m" -}}
             {{- $vmSelectMemory = "512Mi" -}}
             {{- $vmInsertCPU = "500m" -}}
             {{- $vmInsertMemory = "512Mi" -}}
             {{- $vmStorageCPU = "1000m" -}}
-            {{- $vmStorageMemory = "1Gi" -}}
+            {{- $vmStorageMemory = "2Gi" -}}
           {{- end }}
 
           {{/* Grafana Zitadel OIDC ExternalSecret */}}
@@ -4965,6 +5150,8 @@ spec:
                 # Enable kube-state-metrics
                 kube-state-metrics:
                   enabled: true
+                  extraArgs:
+                    - --metric-labels-allowlist=nodes=[*],pods=[platform.kubecore.io/pipeline,platform.kubecore.io/step,platform.kubecore.io/compute-type,workflows.argoproj.io/workflow]
                   {{- if $nodeSelector }}
                   nodeSelector:
                     {{- range $key, $value := $nodeSelector }}

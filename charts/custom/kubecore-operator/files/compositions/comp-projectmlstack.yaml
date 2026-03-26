@@ -1,17 +1,17 @@
 apiVersion: apiextensions.crossplane.io/v1
 kind: Composition
 metadata:
-  name: projectenvmlstack
+  name: projectmlstack
   labels:
-    platform.kubecore.io/type: projectenvmlstack
+    platform.kubecore.io/type: projectmlstack
     provider: kubernetes
-    service: project-env-ml
+    service: project-ml
     layer: platform
 spec:
   writeConnectionSecretsToNamespace: crossplane-system
   compositeTypeRef:
     apiVersion: platform.kubecore.io/v1alpha1
-    kind: XProjectEnvMLStack
+    kind: XProjectMLStack
   mode: Pipeline
   pipeline:
 
@@ -28,7 +28,7 @@ spec:
             matchLabels:
             - key: platform.kubecore.io/type
               type: Value
-              value: projectenv-ml-config
+              value: project-ml-config
             - key: platform.kubecore.io/mlstack-claim-name
               type: FromCompositeFieldPath
               valueFromFieldPath: metadata.name
@@ -46,10 +46,9 @@ spec:
           {{- $spec := .observed.composite.resource.spec -}}
           {{- $envConfig := index .context "apiextensions.crossplane.io/environment" -}}
           {{- if not $envConfig -}}
-            {{- fail "Environment configuration not found for project-env ML stack" -}}
+            {{- fail "Environment configuration not found for project ML stack" -}}
           {{- end -}}
           {{- $projectName := $spec.projectName -}}
-          {{- $environmentName := $spec.environmentName -}}
           {{- $clusterName := $spec.clusterRef.name -}}
           {{- $region := $spec.region | default $envConfig.region | default "us-east-1" -}}
           {{- $mlflowEnabled := index $spec.features "mlflow" | default false -}}
@@ -60,16 +59,18 @@ spec:
           {{- $k8sProvider := $providerConfigs.kubernetes | default (printf "%s-eks-kubernetes" $clusterName) -}}
           {{- $helmProvider := $providerConfigs.helm | default (printf "%s-eks-helm" $clusterName) -}}
           {{- $awsProvider := $providerConfigs.aws | default "aws-default" -}}
-          {{- $nsName := printf "ml-%s-%s" $projectName $environmentName -}}
-          {{- $pgClusterName := printf "%s-%s-pg" $projectName $environmentName -}}
-          {{- $pgSecretName := printf "%s-%s-pg-mlflow" $projectName $environmentName -}}
-          {{- $bucketName := printf "%s-%s-ml-artifacts-%s" $projectName $environmentName $region -}}
+          {{- $nsName := printf "ml-%s" $projectName -}}
+          {{- $pgClusterName := printf "%s-pg" $projectName -}}
+          {{- $pgSecretName := printf "%s-pg-mlflow" $projectName -}}
+          {{- $bucketName := printf "%s-ml-artifacts-%s" $projectName $region -}}
           {{- $pgBackupPath := printf "s3://%s/cnpg-backups" $bucketName -}}
-          {{- $pgSAName := printf "%s-%s-pg" $projectName $environmentName -}}
-          {{- $pgBackupRoleName := printf "ml-%s-%s-cnpg-backup-role" $projectName $environmentName -}}
+          {{- $pgSAName := printf "%s-pg" $projectName -}}
+          {{- $pgBackupRoleName := printf "ml-%s-cnpg-backup-role" $projectName -}}
           {{- $mlflowPassword := $envConfig.mlflowPassword | default "mlflow-change-me" -}}
           {{- $lakeFSPassword := $envConfig.lakeFSPassword | default "lakefs-change-me" -}}
           {{- $lakeFSAuthSecretKey := $envConfig.lakeFSAuthSecretKey | default "lakefs-auth-key-change-me" -}}
+          {{/* Derive a deterministic lakeFS admin access key ID from the project name (20 alphanumeric chars) */}}
+          {{- $lakeFSAccessKeyId := printf "AKIAML%s" ($projectName | upper | replace "-" "" | replace "_" "") | trunc 20 -}}
           {{- $accountId := "" -}}{{- if $envConfig.aws }}{{ $accountId = $envConfig.aws.accountId | default "" }}{{ end -}}
           {{- $oidcId := "" -}}{{- if $envConfig.eks }}{{ $oidcId = $envConfig.eks.clusterId | default "" }}{{ end -}}
           {{- $oidcIssuerHost := "" -}}{{- if and $accountId $oidcId }}{{ $oidcIssuerHost = printf "oidc.eks.%s.amazonaws.com/id/%s" $region $oidcId }}{{ end -}}
@@ -89,13 +90,12 @@ spec:
           {{- $pgStorage := $pgResources.storageSize | default "20Gi" -}}
           {{- $commonLabels := dict
             "platform.kubecore.io/project" $projectName
-            "platform.kubecore.io/environment" $environmentName
             "platform.kubecore.io/cluster" (printf "%s-eks" $clusterName)
             "platform.kubecore.io/managed-by" "crossplane"
             "crossplane.io/composite" $name
           -}}
 
-          {{/* Namespace for this project-environment ML stack */}}
+          {{/* Namespace for this project ML stack */}}
           ---
           apiVersion: kubernetes.crossplane.io/v1alpha2
           kind: Object
@@ -121,7 +121,7 @@ spec:
 
           {{/* Postgres: secrets + cluster + managed databases when postgres enabled */}}
           {{- if $postgresEnabled }}
-          {{- $pgLakeFSSecretName := printf "%s-%s-pg-lakefs" $projectName $environmentName -}}
+          {{- $pgLakeFSSecretName := printf "%s-pg-lakefs" $projectName -}}
           ---
           apiVersion: kubernetes.crossplane.io/v1alpha2
           kind: Object
@@ -218,7 +218,7 @@ spec:
                   - name: barman-cloud.cloudnative-pg.io
                     isWALArchiver: true
                     parameters:
-                      barmanObjectName: {{ $projectName }}-{{ $environmentName }}-cnpg-backup-store
+                      barmanObjectName: {{ $projectName }}-cnpg-backup-store
                   {{- end }}
                   resources:
                     requests:
@@ -267,7 +267,7 @@ spec:
             providerConfigRef:
               name: {{ $awsProvider }}
             forProvider:
-              description: "CNPG backup IRSA role for project {{ $projectName }} env {{ $environmentName }}"
+              description: "CNPG backup IRSA role for project {{ $projectName }}"
               assumeRolePolicy: |
                 {
                   "Version": "2012-10-17",
@@ -333,7 +333,7 @@ spec:
                 apiVersion: barmancloud.cnpg.io/v1
                 kind: ObjectStore
                 metadata:
-                  name: {{ $projectName }}-{{ $environmentName }}-cnpg-backup-store
+                  name: {{ $projectName }}-cnpg-backup-store
                   namespace: {{ $nsName }}
                 spec:
                   configuration:
@@ -375,9 +375,7 @@ spec:
                     name: barman-cloud.cloudnative-pg.io
           {{- end }}
 
-          {{/* CNPG Database CRD: declaratively ensures the lakefs database exists.
-               Unlike postInitTemplateSQL, this works even if the cluster was created
-               before LakeFS was enabled -- CNPG reconciles it continuously. */}}
+          {{/* CNPG Database CRD: declaratively ensures the lakefs database exists. */}}
           ---
           apiVersion: kubernetes.crossplane.io/v1alpha2
           kind: Object
@@ -414,7 +412,7 @@ spec:
             annotations:
               gotemplating.fn.crossplane.io/composition-resource-name: ml-bucket
           spec:
-            deletionPolicy: Delete
+            deletionPolicy: Orphan
             managementPolicies: ["*"]
             providerConfigRef:
               name: {{ $awsProvider }}
@@ -422,12 +420,103 @@ spec:
               region: {{ $region | quote }}
               tags:
                 platform.kubecore.io/project: {{ $projectName }}
-                platform.kubecore.io/environment: {{ $environmentName }}
           {{- end }}
 
           {{/* MLflow Helm release when mlflow enabled (requires Postgres; optional S3) */}}
           {{- if $mlflowEnabled }}
           {{- $pgHost := printf "%s-rw.%s.svc" $pgClusterName $nsName -}}
+          {{- $mlflowSAName := printf "ml-%s-mlflow" $projectName -}}
+          {{- $mlflowRoleName := printf "ml-%s-mlflow-s3-role" $projectName -}}
+
+          {{/* IRSA: IAM Role for MLflow S3 artifact access */}}
+          {{- if and $hasOIDC $s3Enabled }}
+          ---
+          apiVersion: iam.aws.upbound.io/v1beta1
+          kind: Role
+          metadata:
+            name: {{ $mlflowRoleName }}
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: mlflow-irsa-role
+          spec:
+            deletionPolicy: Delete
+            managementPolicies: ["*"]
+            providerConfigRef:
+              name: {{ $awsProvider }}
+            forProvider:
+              description: "MLflow IRSA role for project ML stack {{ $projectName }}"
+              assumeRolePolicy: |
+                {
+                  "Version": "2012-10-17",
+                  "Statement": [
+                    {
+                      "Effect": "Allow",
+                      "Principal": {
+                        "Federated": "{{ $oidcProviderArn }}"
+                      },
+                      "Action": "sts:AssumeRoleWithWebIdentity",
+                      "Condition": {
+                        "StringEquals": {
+                          "{{ $oidcIssuerHost }}:aud": "sts.amazonaws.com",
+                          "{{ $oidcIssuerHost }}:sub": "system:serviceaccount:{{ $nsName }}:{{ $mlflowSAName }}"
+                        }
+                      }
+                    }
+                  ]
+                }
+              inlinePolicy:
+                - name: mlflow-s3-access
+                  policy: |
+                    {
+                      "Version": "2012-10-17",
+                      "Statement": [
+                        {
+                          "Effect": "Allow",
+                          "Action": [
+                            "s3:GetObject",
+                            "s3:PutObject",
+                            "s3:DeleteObject",
+                            "s3:ListBucket",
+                            "s3:GetBucketLocation",
+                            "s3:ListBucketMultipartUploads",
+                            "s3:AbortMultipartUpload",
+                            "s3:ListMultipartUploadParts"
+                          ],
+                          "Resource": [
+                            "arn:aws:s3:::{{ $bucketName }}",
+                            "arn:aws:s3:::{{ $bucketName }}/*"
+                          ]
+                        }
+                      ]
+                    }
+
+          {{/* IRSA: ServiceAccount for MLflow with role annotation */}}
+          ---
+          apiVersion: kubernetes.crossplane.io/v1alpha2
+          kind: Object
+          metadata:
+            name: {{ $name }}-mlflow-sa
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: mlflow-sa
+          spec:
+            deletionPolicy: Delete
+            managementPolicies: ["*"]
+            providerConfigRef:
+              name: {{ $k8sProvider }}
+            forProvider:
+              manifest:
+                apiVersion: v1
+                kind: ServiceAccount
+                metadata:
+                  name: {{ $mlflowSAName }}
+                  namespace: {{ $nsName }}
+                  annotations:
+                    eks.amazonaws.com/role-arn: "arn:aws:iam::{{ $accountId }}:role/{{ $mlflowRoleName }}"
+                  labels:
+                    {{- range $key, $value := $commonLabels }}
+                    {{ $key }}: "{{ $value }}"
+                    {{- end }}
+          {{- end }}
+
           ---
           apiVersion: helm.crossplane.io/v1beta1
           kind: Release
@@ -449,6 +538,11 @@ spec:
                 version: "0.12.0"
               namespace: {{ $nsName }}
               values:
+                {{- if and $hasOIDC $s3Enabled }}
+                serviceAccount:
+                  create: false
+                  name: {{ $mlflowSAName }}
+                {{- end }}
                 nodeSelector:
                   {{- range $key, $value := $nodeSelector }}
                   {{ $key }}: {{ $value | quote }}
@@ -500,8 +594,8 @@ spec:
           {{- if $lakeFSEnabled }}
           {{- $pgHost := printf "%s-rw.%s.svc" $pgClusterName $nsName -}}
           {{- $lakeFSPgConnString := printf "postgres://lakefs:%s@%s:5432/lakefs?sslmode=disable" $lakeFSPassword $pgHost -}}
-          {{- $lakeFSSAName := printf "ml-%s-%s-lakefs" $projectName $environmentName -}}
-          {{- $lakeFSRoleName := printf "ml-%s-%s-lakefs-s3-role" $projectName $environmentName -}}
+          {{- $lakeFSSAName := printf "ml-%s-lakefs" $projectName -}}
+          {{- $lakeFSRoleName := printf "ml-%s-lakefs-s3-role" $projectName -}}
 
           {{/* IRSA: IAM Role for LakeFS S3 access */}}
           {{- if $hasOIDC }}
@@ -518,7 +612,7 @@ spec:
             providerConfigRef:
               name: {{ $awsProvider }}
             forProvider:
-              description: "LakeFS IRSA role for ML stack {{ $projectName }}-{{ $environmentName }}"
+              description: "LakeFS IRSA role for project ML stack {{ $projectName }}"
               assumeRolePolicy: |
                 {
                   "Version": "2012-10-17",
@@ -563,11 +657,6 @@ spec:
                         }
                       ]
                     }
-              tags:
-                Name: {{ $lakeFSRoleName }}
-                "platform.kubecore.io/project": {{ $projectName }}
-                "platform.kubecore.io/environment": {{ $environmentName }}
-                Purpose: "LakeFS IRSA S3 access"
           {{- end }}
 
           {{/* IRSA: ServiceAccount for LakeFS with role annotation */}}
@@ -632,6 +721,10 @@ spec:
                     type: s3
                     s3:
                       region: {{ $region }}
+                  installation:
+                    user_name: admin
+                    access_key_id: {{ $lakeFSAccessKeyId }}
+                    secret_access_key: {{ $lakeFSPassword }}
                 {{- if $hasOIDC }}
                 serviceAccount:
                   name: {{ $lakeFSSAName }}
@@ -666,6 +759,369 @@ spec:
                     memory: "1Gi"
           {{- end }}
 
+          {{/* LakeFS admin credentials Secret for pipeline consumption */}}
+          {{- if $lakeFSEnabled }}
+          ---
+          apiVersion: kubernetes.crossplane.io/v1alpha2
+          kind: Object
+          metadata:
+            name: {{ $projectName }}-lakefs-admin-secret
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: lakefs-admin-secret
+            labels:
+              platform.kubecore.io/mlstack: {{ $projectName }}
+              platform.kubecore.io/component: lakefs-credentials
+          spec:
+            deletionPolicy: Delete
+            managementPolicies: ["*"]
+            providerConfigRef:
+              name: {{ $k8sProvider }}
+            forProvider:
+              manifest:
+                apiVersion: v1
+                kind: Secret
+                metadata:
+                  name: {{ $projectName }}-lakefs-admin
+                  namespace: {{ $nsName }}
+                  labels:
+                    platform.kubecore.io/mlstack: {{ $projectName }}
+                    platform.kubecore.io/component: lakefs-credentials
+                type: Opaque
+                stringData:
+                  accessKeyId: {{ $lakeFSAccessKeyId }}
+                  secretAccessKey: {{ $lakeFSPassword | quote }}
+          {{- end }}
+
+          {{/* MLflow admin credentials Secret for pipeline consumption */}}
+          {{- if $mlflowEnabled }}
+          ---
+          apiVersion: kubernetes.crossplane.io/v1alpha2
+          kind: Object
+          metadata:
+            name: {{ $projectName }}-mlflow-admin-secret
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: mlflow-admin-secret
+            labels:
+              platform.kubecore.io/mlstack: {{ $projectName }}
+              platform.kubecore.io/component: mlflow-credentials
+          spec:
+            deletionPolicy: Delete
+            managementPolicies: ["*"]
+            providerConfigRef:
+              name: {{ $k8sProvider }}
+            forProvider:
+              manifest:
+                apiVersion: v1
+                kind: Secret
+                metadata:
+                  name: {{ $projectName }}-mlflow-admin
+                  namespace: {{ $nsName }}
+                  labels:
+                    platform.kubecore.io/mlstack: {{ $projectName }}
+                    platform.kubecore.io/component: mlflow-credentials
+                type: Opaque
+                stringData:
+                  username: admin
+                  password: {{ $mlflowPassword | quote }}
+          {{- end }}
+
+          {{/* NOTE: Per-pipeline Karpenter NodePools + EC2NodeClasses have been moved to
+               the XK8sMLApp composition (compositions/apis/kubeapp/k8smlapp/).
+               Each ML pipeline is now a KubeApp with template type "ml-pipeline". */}}
+
+          {{/* IRSA: IAM Role for Argo Workflow SA (checkpoint uploads to S3) */}}
+          {{- $argoWorkflowRoleName := printf "ml-%s-argo-workflow-s3-role" $projectName -}}
+          {{- if and $hasOIDC $s3Enabled }}
+          ---
+          apiVersion: iam.aws.upbound.io/v1beta1
+          kind: Role
+          metadata:
+            name: {{ $argoWorkflowRoleName }}
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: argo-workflow-irsa-role
+          spec:
+            deletionPolicy: Delete
+            managementPolicies: ["*"]
+            providerConfigRef:
+              name: {{ $awsProvider }}
+            forProvider:
+              description: "Argo Workflow IRSA role for ML pipeline checkpoint uploads ({{ $projectName }})"
+              assumeRolePolicy: |
+                {
+                  "Version": "2012-10-17",
+                  "Statement": [
+                    {
+                      "Effect": "Allow",
+                      "Principal": {
+                        "Federated": "{{ $oidcProviderArn }}"
+                      },
+                      "Action": "sts:AssumeRoleWithWebIdentity",
+                      "Condition": {
+                        "StringEquals": {
+                          "{{ $oidcIssuerHost }}:aud": "sts.amazonaws.com",
+                          "{{ $oidcIssuerHost }}:sub": "system:serviceaccount:{{ $nsName }}:argo-workflow"
+                        }
+                      }
+                    }
+                  ]
+                }
+              inlinePolicy:
+                - name: workflow-s3-access
+                  policy: |
+                    {
+                      "Version": "2012-10-17",
+                      "Statement": [
+                        {
+                          "Effect": "Allow",
+                          "Action": [
+                            "s3:GetObject",
+                            "s3:PutObject",
+                            "s3:DeleteObject",
+                            "s3:ListBucket",
+                            "s3:GetBucketLocation",
+                            "s3:ListBucketMultipartUploads",
+                            "s3:AbortMultipartUpload",
+                            "s3:ListMultipartUploadParts"
+                          ],
+                          "Resource": [
+                            "arn:aws:s3:::{{ $bucketName }}",
+                            "arn:aws:s3:::{{ $bucketName }}/*"
+                          ]
+                        }
+                      ]
+                    }
+          {{- end }}
+
+          {{/* Argo Workflow ServiceAccount for pipeline execution */}}
+          ---
+          apiVersion: kubernetes.crossplane.io/v1alpha2
+          kind: Object
+          metadata:
+            name: {{ $projectName }}-argo-workflow-sa
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: argo-workflow-sa
+          spec:
+            deletionPolicy: Delete
+            managementPolicies: ["*"]
+            providerConfigRef:
+              name: {{ $k8sProvider }}
+            forProvider:
+              manifest:
+                apiVersion: v1
+                kind: ServiceAccount
+                metadata:
+                  name: argo-workflow
+                  namespace: {{ $nsName }}
+                  {{- if and $hasOIDC $s3Enabled }}
+                  annotations:
+                    eks.amazonaws.com/role-arn: "arn:aws:iam::{{ $accountId }}:role/{{ $argoWorkflowRoleName }}"
+                  {{- end }}
+                  labels:
+                    platform.kubecore.io/mlstack: {{ $projectName }}
+                    platform.kubecore.io/component: argo-workflow
+
+          {{/* Role for Argo Workflow execution in ML namespace */}}
+          ---
+          apiVersion: kubernetes.crossplane.io/v1alpha2
+          kind: Object
+          metadata:
+            name: {{ $projectName }}-argo-workflow-role
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: argo-workflow-role
+          spec:
+            deletionPolicy: Delete
+            managementPolicies: ["*"]
+            providerConfigRef:
+              name: {{ $k8sProvider }}
+            forProvider:
+              manifest:
+                apiVersion: rbac.authorization.k8s.io/v1
+                kind: Role
+                metadata:
+                  name: argo-workflow-role
+                  namespace: {{ $nsName }}
+                rules:
+                - apiGroups: ["argoproj.io"]
+                  resources: ["workflowtaskresults"]
+                  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+                - apiGroups: [""]
+                  resources: ["pods", "pods/log", "pods/status", "configmaps", "secrets", "services"]
+                  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+                - apiGroups: ["batch"]
+                  resources: ["jobs"]
+                  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+
+          {{/* RoleBinding for Argo Workflow execution */}}
+          ---
+          apiVersion: kubernetes.crossplane.io/v1alpha2
+          kind: Object
+          metadata:
+            name: {{ $projectName }}-argo-workflow-rolebinding
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: argo-workflow-rolebinding
+          spec:
+            deletionPolicy: Delete
+            managementPolicies: ["*"]
+            providerConfigRef:
+              name: {{ $k8sProvider }}
+            forProvider:
+              manifest:
+                apiVersion: rbac.authorization.k8s.io/v1
+                kind: RoleBinding
+                metadata:
+                  name: argo-workflow-rolebinding
+                  namespace: {{ $nsName }}
+                roleRef:
+                  apiGroup: rbac.authorization.k8s.io
+                  kind: Role
+                  name: argo-workflow-role
+                subjects:
+                - kind: ServiceAccount
+                  name: argo-workflow
+                  namespace: {{ $nsName }}
+
+  - step: generate-init-job
+    functionRef:
+      name: function-go-templating
+    input:
+      apiVersion: gotemplating.fn.crossplane.io/v1beta1
+      kind: GoTemplate
+      source: Inline
+      inline:
+        template: |
+          {{- $spec := .observed.composite.resource.spec -}}
+          {{- $envConfig := index .context "apiextensions.crossplane.io/environment" -}}
+          {{- if not $envConfig -}}
+            {{- fail "Environment configuration not found for ML init Job" -}}
+          {{- end -}}
+          {{- $projectName := $spec.projectName -}}
+          {{- $clusterName := $spec.clusterRef.name -}}
+          {{- $region := $spec.region | default $envConfig.region | default "us-east-1" -}}
+          {{- $nsName := printf "ml-%s" $projectName -}}
+          {{- $k8sProvider := (index ($envConfig.providerConfigs | default dict) "kubernetes") | default (printf "%s-eks-kubernetes" $clusterName) -}}
+          {{- $nodeSelector := ($envConfig.runtime | default dict).nodeSelector | default dict -}}
+          {{- $tolerations := ($envConfig.runtime | default dict).tolerations | default list -}}
+          {{- $mlflowSvcName := printf "%s-mlstack-mlflow" $projectName -}}
+          {{- $lakeFSSvcName := printf "%s-mlstack-lakefs" $projectName -}}
+          {{- $mlflowPassword := $envConfig.mlflowPassword | default "" -}}
+          {{- $bucketName := printf "%s-ml-artifacts-%s" $projectName $region -}}
+          ---
+          apiVersion: kubernetes.crossplane.io/v1alpha2
+          kind: Object
+          metadata:
+            name: {{ $projectName }}-ml-init-job
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: ml-init-job
+              gotemplating.fn.crossplane.io/ready: "True"
+          spec:
+            providerConfigRef:
+              name: {{ $k8sProvider }}
+            forProvider:
+              manifest:
+                apiVersion: batch/v1
+                kind: Job
+                metadata:
+                  name: {{ $projectName }}-ml-init
+                  namespace: {{ $nsName }}
+                  labels:
+                    kubecore.io/kubeproject: {{ $projectName | quote }}
+                    platform.kubecore.io/type: ml-init-job
+                  annotations:
+                    platform.kubecore.io/description: "Bootstrap lakeFS admin credentials and MLflow experiment"
+                spec:
+                  ttlSecondsAfterFinished: 600
+                  backoffLimit: 5
+                  template:
+                    spec:
+                      restartPolicy: OnFailure
+                      nodeSelector:
+                        {{- range $key, $value := $nodeSelector }}
+                        {{ $key }}: {{ $value | quote }}
+                        {{- end }}
+                      tolerations:
+                        {{- range $t := $tolerations }}
+                        - key: {{ $t.key | quote }}
+                          operator: {{ $t.operator | default "Equal" | quote }}
+                          {{- if $t.value }}
+                          value: {{ $t.value | quote }}
+                          {{- end }}
+                          {{- if $t.effect }}
+                          effect: {{ $t.effect | quote }}
+                          {{- end }}
+                        {{- end }}
+                      containers:
+                      - name: ml-init
+                        image: public.ecr.aws/l3k1j3t6/kubecore/ml-project-init:latest
+                        imagePullPolicy: Always
+                        env:
+                        - name: PROJECT_NAME
+                          value: {{ $projectName | quote }}
+                        - name: LAKEFS_ENDPOINT
+                          value: {{ printf "http://%s.%s.svc:80" $lakeFSSvcName $nsName | quote }}
+                        - name: LAKEFS_ACCESS_KEY_ID
+                          valueFrom:
+                            secretKeyRef:
+                              name: {{ $projectName }}-lakefs-admin
+                              key: accessKeyId
+                        - name: LAKEFS_SECRET_ACCESS_KEY
+                          valueFrom:
+                            secretKeyRef:
+                              name: {{ $projectName }}-lakefs-admin
+                              key: secretAccessKey
+                        - name: MLFLOW_ENDPOINT
+                          value: {{ printf "http://%s.%s.svc:5000" $mlflowSvcName $nsName | quote }}
+                        resources:
+                          requests:
+                            cpu: "100m"
+                            memory: "64Mi"
+                          limits:
+                            cpu: "200m"
+                            memory: "128Mi"
+
+  - step: patch-composite-status
+    functionRef:
+      name: function-go-templating
+    input:
+      apiVersion: gotemplating.fn.crossplane.io/v1beta1
+      kind: GoTemplate
+      source: Inline
+      inline:
+        template: |
+          {{- $xr := .observed.composite.resource -}}
+          {{- $spec := $xr.spec -}}
+          {{- $projectName := $spec.projectName -}}
+          {{- $clusterName := $spec.clusterRef.name -}}
+          {{- $region := $spec.region | default "us-east-1" -}}
+          {{- $nsName := printf "ml-%s" $projectName -}}
+          {{- $pgHost := printf "%s-pg-rw.%s.svc" $projectName $nsName -}}
+          {{- $mlflowSvcName := printf "%s-mlstack-mlflow" $projectName -}}
+          {{- $lakeFSSvcName := printf "%s-mlstack-lakefs" $projectName -}}
+          {{- $bucketName := printf "%s-ml-artifacts-%s" $projectName $region -}}
+          ---
+          apiVersion: {{ $xr.apiVersion }}
+          kind: {{ $xr.kind }}
+          metadata:
+            name: {{ $xr.metadata.name }}
+          status:
+            namespace: {{ $nsName | quote }}
+            {{- if index $spec.features "mlflow" }}
+            mlflowEndpoint: {{ printf "http://%s.%s.svc:5000" $mlflowSvcName $nsName | quote }}
+            {{- end }}
+            {{- if index $spec.features "lakefs" }}
+            lakeFSEndpoint: {{ printf "http://%s.%s.svc:80" $lakeFSSvcName $nsName | quote }}
+            {{- end }}
+            {{- if index $spec.features "s3" }}
+            s3Bucket: {{ $bucketName | quote }}
+            {{- end }}
+            {{- if index $spec.features "postgres" }}
+            postgresHost: {{ $pgHost | quote }}
+            {{- end }}
+            features:
+              mlflow: {{ index $spec.features "mlflow" | default false }}
+              lakefs: {{ index $spec.features "lakefs" | default false }}
+              s3: {{ index $spec.features "s3" | default false }}
+              postgres: {{ index $spec.features "postgres" | default false }}
+
   - step: auto-ready
     functionRef:
       name: function-auto-ready
@@ -674,3 +1130,4 @@ spec:
       kind: Input
       spec:
         policy: All
+

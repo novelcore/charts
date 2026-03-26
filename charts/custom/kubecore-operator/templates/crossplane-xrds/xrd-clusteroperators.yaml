@@ -41,6 +41,14 @@ spec:
                     type: boolean
                     description: "Enable CloudNativePG operator (and optionally shared Postgres when provisionSharedPostgres is true)"
                     default: false
+                  nvidiaGpu:
+                    type: boolean
+                    description: "Enable NVIDIA GPU Operator (device plugin, container toolkit, DCGM exporter)"
+                    default: false
+                  karpenter:
+                    type: boolean
+                    description: "Enable Karpenter node autoscaler for on-demand GPU/CPU pipeline nodes"
+                    default: false
               provisionSharedPostgres:
                 type: boolean
                 description: "When true (default), provision a shared Postgres cluster for MLflow. When false, only install the operator; ML stack is provisioned per KubeProject environment."
@@ -68,6 +76,20 @@ spec:
                     type: boolean
                   clusterName:
                     type: string
+                  namespace:
+                    type: string
+              nvidiaGpu:
+                type: object
+                properties:
+                  ready:
+                    type: boolean
+                  namespace:
+                    type: string
+              karpenter:
+                type: object
+                properties:
+                  ready:
+                    type: boolean
                   namespace:
                     type: string
               conditions:

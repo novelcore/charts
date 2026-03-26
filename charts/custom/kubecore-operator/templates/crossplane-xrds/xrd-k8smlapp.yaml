@@ -1,0 +1,110 @@
+{{- if .Values.crossplaneXRDs.enabled }}
+---
+---
+apiVersion: apiextensions.crossplane.io/v2
+kind: CompositeResourceDefinition
+metadata:
+  labels:
+    {{- include "chart.labels" . | nindent 4 }}
+  name: xk8smlapps.platform.kubecore.io
+spec:
+  group: platform.kubecore.io
+  names:
+    kind: XK8sMLApp
+    plural: xk8smlapps
+  scope: Cluster
+  defaultCompositionRef:
+    name: k8smlapp
+  versions:
+  - name: v1alpha1
+    served: true
+    referenceable: true
+    schema:
+      openAPIV3Schema:
+        type: object
+        properties:
+          spec:
+            type: object
+            properties:
+              appName:
+                type: string
+                description: "KubeApp name (pipeline identifier)"
+              projectName:
+                type: string
+                description: "KubeProject name"
+              clusterName:
+                type: string
+                description: "EKS cluster name for Karpenter discovery tags"
+              region:
+                type: string
+                description: "AWS region"
+              gpu:
+                type: object
+                description: "GPU Karpenter NodePool configuration"
+                x-kubernetes-preserve-unknown-fields: true
+              cpu:
+                type: object
+                description: "CPU Karpenter NodePool configuration"
+                x-kubernetes-preserve-unknown-fields: true
+              environmentConfigRef:
+                type: object
+                description: "Reference to the EnvironmentConfig for this ML app"
+                properties:
+                  name:
+                    type: string
+                required: [name]
+            required: [appName, projectName, clusterName, environmentConfigRef]
+          status:
+            type: object
+            properties:
+              ready:
+                type: boolean
+              gpuNodePool:
+                type: string
+                description: "Name of the GPU Karpenter NodePool"
+              cpuNodePool:
+                type: string
+                description: "Name of the CPU Karpenter NodePool"
+              lakeFSRepository:
+                type: string
+                description: "lakeFS repository for this pipeline"
+              workflowTemplateRendered:
+                type: boolean
+                description: "Whether initial WorkflowTemplate was rendered to gitops repo"
+              workflowTemplateLink:
+                type: string
+                description: "Path to the workflow template in the gitops repository"
+              ecrRegistryHost:
+                type: string
+                description: "ECR registry host for step images"
+              costTracking:
+                type: object
+                description: "ML pipeline cost tracking configuration and estimates"
+                properties:
+                  enabled:
+                    type: boolean
+                  dashboardUrl:
+                    type: string
+                    description: "Grafana dashboard URL filtered to this pipeline"
+                  estimatedGpuHourlyCost:
+                    type: string
+                    description: "Estimated max GPU hourly cost based on instance category"
+                  estimatedCpuHourlyCost:
+                    type: string
+                    description: "Estimated max CPU hourly cost based on instance category"
+                  gpuInstanceCategories:
+                    type: string
+                    description: "GPU instance families (e.g. g,p)"
+                  cpuInstanceCategories:
+                    type: string
+                    description: "CPU instance families (e.g. m,c,r)"
+              conditions:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    type: { type: string }
+                    status: { type: string }
+                    reason: { type: string }
+                    message: { type: string }
+{{- end }}

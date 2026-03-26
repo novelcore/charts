@@ -1578,10 +1578,8 @@ spec:
                 spec:
                   provider:
                     github:
-                      # TODO: These values should come from EnvironmentConfig
-                      # For now using static values from novelcore organization
-                      appID: 990334
-                      installationID: 54584049
+                      appID: {{ $github.appID | default 0 }}
+                      installationID: {{ $github.installationID | default 0 }}
                       organization: {{ $org | quote }}
                       repository: {{ $resourceName | quote }}
                       auth:

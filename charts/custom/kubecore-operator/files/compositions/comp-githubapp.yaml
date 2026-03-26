@@ -538,6 +538,56 @@ spec:
             providerConfigRef:
               name: {{ $githubProviderConfigName }}
 
+          ---
+          # Action Variables - App Name (used by ML CI/CD workflows)
+          apiVersion: actions.github.upbound.io/v1alpha1
+          kind: ActionsVariable
+          metadata:
+            name: {{ printf "%s-app-name" $baseName }}
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: action-var-app-name
+            labels:
+              kubecore.eu/kubeapp: {{ $repositoryName }}
+              kubecore.eu/kubeproject: {{ $project.name }}
+              kubecore.eu/part-of: "ci-cd"
+              kubecore.eu/deletion-order: "10"
+          spec:
+            forProvider:
+              {{ if eq $repositorySource.type "existing" }}
+              repository: {{ $repositorySource.existing.repository }}
+              {{ else }}
+              repository: {{ $baseName }}
+              {{ end }}
+              variableName: KUBECORE_APP_NAME
+              value: {{ $repositoryName }}
+            providerConfigRef:
+              name: {{ $githubProviderConfigName }}
+
+          ---
+          # Action Variables - Project Name (GitOps repo name, used by ML CI/CD workflows)
+          apiVersion: actions.github.upbound.io/v1alpha1
+          kind: ActionsVariable
+          metadata:
+            name: {{ printf "%s-project-name" $baseName }}
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: action-var-project-name
+            labels:
+              kubecore.eu/kubeapp: {{ $repositoryName }}
+              kubecore.eu/kubeproject: {{ $project.name }}
+              kubecore.eu/part-of: "ci-cd"
+              kubecore.eu/deletion-order: "10"
+          spec:
+            forProvider:
+              {{ if eq $repositorySource.type "existing" }}
+              repository: {{ $repositorySource.existing.repository }}
+              {{ else }}
+              repository: {{ $baseName }}
+              {{ end }}
+              variableName: KUBECORE_PROJECT_NAME
+              value: {{ $project.name }}
+            providerConfigRef:
+              name: {{ $githubProviderConfigName }}
+
           {{ if and $branchStrategy $branchStrategy.enabled }}
           ---
           # Action Variables - Kubeapp SDLC
@@ -591,9 +641,155 @@ spec:
               name: {{ $githubProviderConfigName }}
 
           # NOTE: Registry credentials (KUBECORE_REGISTRY_UNAME and KUBECORE_REGISTRY_PWD)
-          # are now handled by the k8sapp composition using PushSecret resources
+          # are now handled by the k8sapp/k8smlapp composition using PushSecret resources
           # that sync ECR credentials from External Secrets Operator.
           # The old ActionsSecret resources have been removed to prevent conflicts.
+
+          {{/* ML-specific GitHub Actions variables (only created when mlVars is present in EnvironmentConfig) */}}
+          {{- $mlVars := $envConfig.mlVars | default dict -}}
+          {{- if $mlVars }}
+
+          {{- if $mlVars.KUBECORE_ML_NAMESPACE }}
+          ---
+          # Action Variables - ML Namespace
+          apiVersion: actions.github.upbound.io/v1alpha1
+          kind: ActionsVariable
+          metadata:
+            name: {{ printf "%s-ml-namespace" $baseName }}
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: action-var-ml-namespace
+              crossplane.io/external-name: "{{ if eq $repositorySource.type "existing" }}{{ $repositorySource.existing.repository }}{{ else }}{{ $baseName }}{{ end }}:KUBECORE_ML_NAMESPACE"
+            labels:
+              kubecore.eu/kubeapp: {{ $repositoryName }}
+              kubecore.eu/kubeproject: {{ $project.name }}
+              kubecore.eu/part-of: "ci-cd"
+              kubecore.eu/deletion-order: "10"
+          spec:
+            forProvider:
+              {{ if eq $repositorySource.type "existing" }}
+              repository: {{ $repositorySource.existing.repository }}
+              {{ else }}
+              repository: {{ $baseName }}
+              {{ end }}
+              variableName: KUBECORE_ML_NAMESPACE
+              value: {{ $mlVars.KUBECORE_ML_NAMESPACE }}
+            providerConfigRef:
+              name: {{ $githubProviderConfigName }}
+          {{- end }}
+
+          {{- if $mlVars.KUBECORE_LAKEFS_ENDPOINT }}
+          ---
+          # Action Variables - LakeFS Endpoint
+          apiVersion: actions.github.upbound.io/v1alpha1
+          kind: ActionsVariable
+          metadata:
+            name: {{ printf "%s-lakefs-endpoint" $baseName }}
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: action-var-lakefs-endpoint
+              crossplane.io/external-name: "{{ if eq $repositorySource.type "existing" }}{{ $repositorySource.existing.repository }}{{ else }}{{ $baseName }}{{ end }}:KUBECORE_LAKEFS_ENDPOINT"
+            labels:
+              kubecore.eu/kubeapp: {{ $repositoryName }}
+              kubecore.eu/kubeproject: {{ $project.name }}
+              kubecore.eu/part-of: "ci-cd"
+              kubecore.eu/deletion-order: "10"
+          spec:
+            forProvider:
+              {{ if eq $repositorySource.type "existing" }}
+              repository: {{ $repositorySource.existing.repository }}
+              {{ else }}
+              repository: {{ $baseName }}
+              {{ end }}
+              variableName: KUBECORE_LAKEFS_ENDPOINT
+              value: {{ $mlVars.KUBECORE_LAKEFS_ENDPOINT }}
+            providerConfigRef:
+              name: {{ $githubProviderConfigName }}
+          {{- end }}
+
+          {{- if $mlVars.KUBECORE_MLFLOW_ENDPOINT }}
+          ---
+          # Action Variables - MLflow Endpoint
+          apiVersion: actions.github.upbound.io/v1alpha1
+          kind: ActionsVariable
+          metadata:
+            name: {{ printf "%s-mlflow-endpoint" $baseName }}
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: action-var-mlflow-endpoint
+              crossplane.io/external-name: "{{ if eq $repositorySource.type "existing" }}{{ $repositorySource.existing.repository }}{{ else }}{{ $baseName }}{{ end }}:KUBECORE_MLFLOW_ENDPOINT"
+            labels:
+              kubecore.eu/kubeapp: {{ $repositoryName }}
+              kubecore.eu/kubeproject: {{ $project.name }}
+              kubecore.eu/part-of: "ci-cd"
+              kubecore.eu/deletion-order: "10"
+          spec:
+            forProvider:
+              {{ if eq $repositorySource.type "existing" }}
+              repository: {{ $repositorySource.existing.repository }}
+              {{ else }}
+              repository: {{ $baseName }}
+              {{ end }}
+              variableName: KUBECORE_MLFLOW_ENDPOINT
+              value: {{ $mlVars.KUBECORE_MLFLOW_ENDPOINT }}
+            providerConfigRef:
+              name: {{ $githubProviderConfigName }}
+          {{- end }}
+
+          {{- if $mlVars.KUBECORE_PIPELINE_STEPS }}
+          ---
+          # Action Variables - Pipeline Steps JSON
+          apiVersion: actions.github.upbound.io/v1alpha1
+          kind: ActionsVariable
+          metadata:
+            name: {{ printf "%s-pipeline-steps" $baseName }}
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: action-var-pipeline-steps
+              crossplane.io/external-name: "{{ if eq $repositorySource.type "existing" }}{{ $repositorySource.existing.repository }}{{ else }}{{ $baseName }}{{ end }}:KUBECORE_PIPELINE_STEPS"
+            labels:
+              kubecore.eu/kubeapp: {{ $repositoryName }}
+              kubecore.eu/kubeproject: {{ $project.name }}
+              kubecore.eu/part-of: "ci-cd"
+              kubecore.eu/deletion-order: "10"
+          spec:
+            forProvider:
+              {{ if eq $repositorySource.type "existing" }}
+              repository: {{ $repositorySource.existing.repository }}
+              {{ else }}
+              repository: {{ $baseName }}
+              {{ end }}
+              variableName: KUBECORE_PIPELINE_STEPS
+              value: {{ $mlVars.KUBECORE_PIPELINE_STEPS | quote }}
+            providerConfigRef:
+              name: {{ $githubProviderConfigName }}
+          {{- end }}
+
+          {{- if $mlVars.KUBECORE_ECR_REPO }}
+          ---
+          # Action Variables - ECR Repository Name
+          apiVersion: actions.github.upbound.io/v1alpha1
+          kind: ActionsVariable
+          metadata:
+            name: {{ printf "%s-ecr-repo" $baseName }}
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: action-var-ecr-repo
+              crossplane.io/external-name: "{{ if eq $repositorySource.type "existing" }}{{ $repositorySource.existing.repository }}{{ else }}{{ $baseName }}{{ end }}:KUBECORE_ECR_REPO"
+            labels:
+              kubecore.eu/kubeapp: {{ $repositoryName }}
+              kubecore.eu/kubeproject: {{ $project.name }}
+              kubecore.eu/part-of: "ci-cd"
+              kubecore.eu/deletion-order: "10"
+          spec:
+            forProvider:
+              {{ if eq $repositorySource.type "existing" }}
+              repository: {{ $repositorySource.existing.repository }}
+              {{ else }}
+              repository: {{ $baseName }}
+              {{ end }}
+              variableName: KUBECORE_ECR_REPO
+              value: {{ $mlVars.KUBECORE_ECR_REPO }}
+            providerConfigRef:
+              name: {{ $githubProviderConfigName }}
+          {{- end }}
+
+          {{- end }}
 
           ---
           # Action Secrets - GitHub App ID
@@ -1430,6 +1626,15 @@ spec:
       - sequence:
         - "repository"
         - "action-var-kubeproject-domain"
+      - sequence:
+        - "repository"
+        - "action-var-app-name"
+      - sequence:
+        - "repository"
+        - "action-var-project-name"
+      - sequence:
+        - "repository"
+        - "action-var-ecr-repo"
 
       # Action secrets can be created in parallel after repository
       - sequence:
