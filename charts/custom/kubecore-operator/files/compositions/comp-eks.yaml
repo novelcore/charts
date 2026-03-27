@@ -406,6 +406,8 @@ spec:
             forProvider:
               region: {{ $primaryRegion }}
               version: {{ $eksVersion | quote }}
+              accessConfig:
+                - authenticationMode: API_AND_CONFIG_MAP
               roleArnSelector:
                 matchLabels:
                   role: "cluster-service-role"
