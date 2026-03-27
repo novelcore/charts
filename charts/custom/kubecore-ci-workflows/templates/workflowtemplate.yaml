@@ -8,6 +8,7 @@ metadata:
 spec:
   serviceAccountName: {{ include "kubecore-ci-workflows.serviceAccountName" . }}
   entrypoint: ci-build
+  onExit: exit-handler
   ttlStrategy:
     secondsAfterCompletion: {{ .Values.workflow.ttlStrategy.secondsAfterCompletion }}
   podGC:
@@ -216,8 +217,10 @@ spec:
         set -e
         cd /workspace/repo
         TOKEN=$(cat /etc/github-token/token)
-        TIMESTAMP=$(date +%Y%m%d-%H%M%S)
         NEW_VERSION="{{`{{inputs.parameters.new_version}}`}}"
+        IMAGE_TAG="{{`{{inputs.parameters.image_tag}}`}}"
+        # Extract timestamp from image_tag: dev-v1.2.0-20260326-143022-abc1234 -> 20260326-143022
+        TIMESTAMP=$(echo "$IMAGE_TAG" | sed -E 's/dev-v[0-9]+\.[0-9]+\.[0-9]+-([0-9]+-[0-9]+)-.*/\1/')
         DEV_TAG="dev-v${NEW_VERSION}-${TIMESTAMP}"
 
         git config user.name "KubeCore CI"
@@ -309,3 +312,15 @@ spec:
       - name: github-token
         mountPath: /etc/github-token
         readOnly: true
+
+  - name: exit-handler
+    steps:
+    - - name: post-failure-status
+        template: status
+        arguments:
+          parameters:
+          - name: state
+            value: "failure"
+          - name: description
+            value: "Build failed"
+        when: "{{`{{workflow.status}}`}} == Failed"
