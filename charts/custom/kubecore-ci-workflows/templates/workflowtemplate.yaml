@@ -1,8 +1,7 @@
 apiVersion: argoproj.io/v1alpha1
-kind: WorkflowTemplate
+kind: ClusterWorkflowTemplate
 metadata:
   name: ci-build
-  namespace: {{ include "kubecore-ci-workflows.namespace" . }}
   labels:
     {{- include "kubecore-ci-workflows.labels" . | nindent 4 }}
 spec:
