@@ -65,6 +65,19 @@ metadata:
 spec:
   package: xpkg.upbound.io/upbound/provider-aws-ecr:v2
 ---
+# AWS S3 Provider
+apiVersion: pkg.crossplane.io/v1
+kind: Provider
+metadata:
+  name: upbound-provider-aws-s3
+  labels:
+    {{- include "chart.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "15"
+spec:
+  package: xpkg.upbound.io/upbound/provider-aws-s3:v2
+---
 # AWS Account Provider
 apiVersion: pkg.crossplane.io/v1
 kind: Provider
