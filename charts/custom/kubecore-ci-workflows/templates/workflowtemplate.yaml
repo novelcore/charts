@@ -92,7 +92,9 @@ spec:
         set -e
         TOKEN=$(cat /etc/github-token/token)
         REPO_URL=$(echo "{{`{{workflow.parameters.repo_url}}`}}" | sed "s|https://|https://x-access-token:${TOKEN}@|")
-        git clone --depth=50 "${REPO_URL}" /workspace/repo
+        # Strip refs/heads/ prefix if present (push events send full ref, PR events send branch name)
+        BRANCH=$(echo "{{`{{workflow.parameters.branch}}`}}" | sed 's|^refs/heads/||')
+        git clone --depth=50 --branch "${BRANCH}" "${REPO_URL}" /workspace/repo
         cd /workspace/repo
         git checkout "{{`{{workflow.parameters.commit_sha}}`}}"
         echo "Cloned at $(git rev-parse HEAD)"
