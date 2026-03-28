@@ -408,6 +408,7 @@ spec:
               version: {{ $eksVersion | quote }}
               accessConfig:
                 authenticationMode: API_AND_CONFIG_MAP
+                bootstrapClusterCreatorAdminPermissions: true
               roleArnSelector:
                 matchLabels:
                   role: "cluster-service-role"
