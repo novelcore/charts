@@ -161,7 +161,6 @@ spec:
                 {{- if $affinity }}
                 affinity: {{ $affinity | toJson }}
                 {{- end }}
-          {{- end }}
 
           {{/* Barman Cloud CNPG-I plugin for S3/object-store backups */}}
           ---
