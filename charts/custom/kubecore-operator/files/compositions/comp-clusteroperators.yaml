@@ -163,6 +163,56 @@ spec:
                 {{- end }}
           {{- end }}
 
+          {{/* Barman Cloud CNPG-I plugin for S3/object-store backups */}}
+          ---
+          apiVersion: helm.crossplane.io/v1beta1
+          kind: Release
+          metadata:
+            name: {{ $clusterName }}-cnpg-barman-cloud
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: cnpg-barman-cloud
+            labels:
+              {{- range $key, $value := $commonLabels }}
+              {{ $key }}: "{{ $value }}"
+              {{- end }}
+              platform.kubecore.io/component: "cnpg-barman-cloud"
+          spec:
+            deletionPolicy: Delete
+            managementPolicies: ["*"]
+            providerConfigRef:
+              name: {{ $helmProvider }}
+            forProvider:
+              wait: true
+              waitTimeout: "5m"
+              chart:
+                name: plugin-barman-cloud
+                repository: https://cloudnative-pg.github.io/charts
+                version: "0.5.0"
+              namespace: cnpg-system
+              values:
+                nodeSelector:
+                  {{- range $key, $value := $nodeSelector }}
+                  {{ $key }}: {{ $value | quote }}
+                  {{- end }}
+                tolerations:
+                  {{- range $toleration := $tolerations }}
+                  - key: {{ $toleration.key | quote }}
+                    operator: {{ $toleration.operator | default "Equal" | quote }}
+                    {{- if $toleration.value }}
+                    value: {{ $toleration.value | quote }}
+                    {{- end }}
+                    {{- if $toleration.effect }}
+                    effect: {{ $toleration.effect | quote }}
+                    {{- end }}
+                    {{- if $toleration.tolerationSeconds }}
+                    tolerationSeconds: {{ $toleration.tolerationSeconds }}
+                    {{- end }}
+                  {{- end }}
+                {{- if $affinity }}
+                affinity: {{ $affinity | toJson }}
+                {{- end }}
+          {{- end }}
+
           {{/* No shared Postgres or ML namespaces here; ML stacks are per KubeProject environment. */}}
 
           {{/* Namespace for NVIDIA GPU Operator when nvidiaGpu is enabled */}}
