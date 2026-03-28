@@ -20,9 +20,18 @@ spec:
   tolerations:
     {{- toYaml . | nindent 4 }}
   {{- end }}
+  volumeClaimTemplates:
+  - metadata:
+      name: workspace
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      resources:
+        requests:
+          storage: {{ .Values.workspace.size | default "5Gi" }}
+      {{- with .Values.workspace.storageClassName }}
+      storageClassName: {{ . }}
+      {{- end }}
   volumes:
-  - name: workspace
-    emptyDir: {}
   - name: github-token
     secret:
       secretName: {{ .Values.github.tokenSecretName }}

@@ -49,6 +49,11 @@ serviceAccount:
 rbac:
   create: true
 
+# Workspace volume (shared across all workflow steps via PVC)
+workspace:
+  size: "5Gi"
+  # storageClassName: ""  # Leave empty to use cluster default storage class
+
 # Scheduling (typically set by composition from workflowDefaults, but can override per-template)
 nodeSelector: {}
 tolerations: []
