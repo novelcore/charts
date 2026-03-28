@@ -35,6 +35,9 @@ spec:
   - name: github-token
     secret:
       secretName: {{ .Values.github.tokenSecretName }}
+  - name: registry-auth
+    secret:
+      secretName: ci-registry-auth
   arguments:
     parameters:
     - name: repo_url
@@ -203,6 +206,12 @@ spec:
 
         cd /workspace/repo
 
+        # Build Docker config for registry auth
+        REG_USER=$(cat /etc/registry-auth/username)
+        REG_PASS=$(cat /etc/registry-auth/password)
+        mkdir -p /home/user/.docker
+        printf '{"auths":{"%s":{"username":"%s","password":"%s"}}}' "${REGISTRY}" "${REG_USER}" "${REG_PASS}" > /home/user/.docker/config.json
+
         buildctl-daemonless.sh build \
           --frontend dockerfile.v0 \
           --local context=${BUILD_CONTEXT} \
@@ -219,6 +228,9 @@ spec:
       volumeMounts:
       - name: workspace
         mountPath: /workspace
+      - name: registry-auth
+        mountPath: /etc/registry-auth
+        readOnly: true
 
   - name: tag
     inputs:
