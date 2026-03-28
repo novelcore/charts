@@ -50,6 +50,10 @@ spec:
       value: "false"
     - name: event_type
       value: "push"
+    - name: dockerfile_path
+      value: "./Dockerfile"
+    - name: build_context
+      value: "."
   templates:
   - name: ci-build
     steps:
@@ -194,14 +198,16 @@ spec:
         PROJECT="{{`{{workflow.parameters.project_name}}`}}"
         IMAGE_TAG="{{`{{inputs.parameters.image_tag}}`}}"
         FULL_IMAGE="${REGISTRY}/${PROJECT}/${APP_NAME}:${IMAGE_TAG}"
+        DOCKERFILE_PATH="{{`{{workflow.parameters.dockerfile_path}}`}}"
+        BUILD_CONTEXT="{{`{{workflow.parameters.build_context}}`}}"
 
         cd /workspace/repo
 
         buildctl-daemonless.sh build \
           --frontend dockerfile.v0 \
-          --local context={{ .Values.buildkit.buildContext }} \
-          --local dockerfile=$(dirname {{ .Values.buildkit.dockerfilePath }}) \
-          --opt filename=$(basename {{ .Values.buildkit.dockerfilePath }}) \
+          --local context=${BUILD_CONTEXT} \
+          --local dockerfile=$(dirname ${DOCKERFILE_PATH}) \
+          --opt filename=$(basename ${DOCKERFILE_PATH}) \
           --opt build-arg:REGISTRY_URL=${REGISTRY} \
           --opt build-arg:VERSION=${IMAGE_TAG} \
           --output type=image,name=${FULL_IMAGE},push=true,registry.insecure=true
