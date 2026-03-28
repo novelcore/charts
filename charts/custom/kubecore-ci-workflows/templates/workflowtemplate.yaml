@@ -219,7 +219,7 @@ spec:
           --opt filename=$(basename ${DOCKERFILE_PATH}) \
           --opt build-arg:REGISTRY_URL=${REGISTRY} \
           --opt build-arg:VERSION=${IMAGE_TAG} \
-          --output type=image,name=${FULL_IMAGE},push=true,registry.insecure=true
+          --output type=image,name=${FULL_IMAGE},push=true,registry.insecure=true,oci-mediatypes=true
 
         echo "Pushed: ${FULL_IMAGE}"
       env:
