@@ -304,7 +304,7 @@ spec:
       - name: image_tag
       - name: new_version
     container:
-      image: alpine/curl
+      image: alpine/git:latest
       command: [sh, -c]
       args:
       - |
@@ -312,30 +312,43 @@ spec:
         TOKEN=$(cat /etc/github-token/token)
         ORG="{{ .Values.github.org }}"
         PROJECT="{{`{{workflow.parameters.project_name}}`}}"
-        OPS_REPO="${ORG}/${PROJECT}{{ .Values.gitops.projectRepoSuffix }}"
         APP_NAME="{{`{{workflow.parameters.app_name}}`}}"
         IMAGE_TAG="{{`{{inputs.parameters.image_tag}}`}}"
-        NEW_VERSION="{{`{{inputs.parameters.new_version}}`}}"
         REGISTRY="{{ .Values.registry.internalUrl }}"
-        BRANCH_TYPE="{{`{{workflow.parameters.branch_type}}`}}"
+        FULL_IMAGE="${REGISTRY}/${PROJECT}/${APP_NAME}"
+        OPS_REPO="${ORG}/${PROJECT}"
+        APP_DIR="kubeapps/${PROJECT}-${APP_NAME}"
 
-        curl -s -X POST \
-          -H "Authorization: token ${TOKEN}" \
-          -H "Accept: application/vnd.github+json" \
-          "https://api.github.com/repos/${OPS_REPO}/dispatches" \
-          -d "{
-            \"event_type\": \"dev-environment-update\",
-            \"client_payload\": {
-              \"version\": \"${IMAGE_TAG}\",
-              \"image\": \"${REGISTRY}/${PROJECT}/${APP_NAME}:${IMAGE_TAG}\",
-              \"app_name\": \"${APP_NAME}\",
-              \"semantic_version\": \"v${NEW_VERSION}\",
-              \"branch_type\": \"${BRANCH_TYPE}\",
-              \"plain_image_name\": \"${REGISTRY}/${PROJECT}/${APP_NAME}\"
-            }
-          }"
+        # Clone ops repo
+        REPO_URL="https://x-access-token:${TOKEN}@github.com/${OPS_REPO}.git"
+        git clone --depth=1 "${REPO_URL}" /tmp/ops-repo
+        cd /tmp/ops-repo
 
-        echo "Dispatched dev-environment-update to ${OPS_REPO}"
+        # Install kustomize
+        wget -qO- "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh" | sh
+        mv ./kustomize /usr/local/bin/
+
+        # Update all dev-* overlays
+        UPDATED=0
+        for OVERLAY in ${APP_DIR}/overlays/dev-*/; do
+          [ -d "$OVERLAY" ] || continue
+          echo "Updating $OVERLAY"
+          (cd "$OVERLAY" && kustomize edit set image "${FULL_IMAGE}=${FULL_IMAGE}:${IMAGE_TAG}")
+          UPDATED=$((UPDATED + 1))
+        done
+
+        [ $UPDATED -gt 0 ] || { echo "No dev overlays found under ${APP_DIR}"; exit 0; }
+
+        # Commit and push
+        git config user.name "KubeCore CI"
+        git config user.email "ci@kubecore.io"
+        git add .
+        git diff --cached --quiet && { echo "No changes to commit"; exit 0; }
+        git commit -m "ci: update ${APP_NAME} image to ${IMAGE_TAG}"
+        git pull --rebase
+        git push
+
+        echo "Updated ${UPDATED} overlay(s), pushed to ${OPS_REPO}"
       volumeMounts:
       - name: github-token
         mountPath: /etc/github-token
