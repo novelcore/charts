@@ -324,26 +324,31 @@ spec:
         git clone --depth=1 "${REPO_URL}" /tmp/ops-repo
         cd /tmp/ops-repo
 
-        # Install kustomize
-        wget -qO- "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh" | sh
-        mv ./kustomize /usr/local/bin/
+        # Install kustomize (direct binary download — alpine sh doesn't support the bash install script)
+        KUSTOMIZE_VERSION="v5.6.0"
+        wget -q "https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2F${KUSTOMIZE_VERSION}/kustomize_${KUSTOMIZE_VERSION}_linux_amd64.tar.gz" -O /tmp/kustomize.tar.gz
+        tar -xzf /tmp/kustomize.tar.gz -C /usr/local/bin/
+        chmod +x /usr/local/bin/kustomize
 
         # Update all dev-* overlays
         UPDATED=0
-        for OVERLAY in ${APP_DIR}/overlays/dev-*/; do
-          [ -d "$OVERLAY" ] || continue
-          echo "Updating $OVERLAY"
-          (cd "$OVERLAY" && kustomize edit set image "${FULL_IMAGE}=${FULL_IMAGE}:${IMAGE_TAG}")
-          UPDATED=$((UPDATED + 1))
+        for OVERLAY_DIR in ${APP_DIR}/overlays/dev-*; do
+          if [ -d "$OVERLAY_DIR" ]; then
+            echo "Updating $OVERLAY_DIR"
+            cd "$OVERLAY_DIR"
+            kustomize edit set image "${FULL_IMAGE}=${FULL_IMAGE}:${IMAGE_TAG}"
+            cd /tmp/ops-repo
+            UPDATED=$((UPDATED + 1))
+          fi
         done
 
-        [ $UPDATED -gt 0 ] || { echo "No dev overlays found under ${APP_DIR}"; exit 0; }
+        if [ $UPDATED -eq 0 ]; then echo "No dev overlays found under ${APP_DIR}"; exit 0; fi
 
         # Commit and push
         git config user.name "KubeCore CI"
         git config user.email "ci@kubecore.io"
         git add .
-        git diff --cached --quiet && { echo "No changes to commit"; exit 0; }
+        if git diff --cached --quiet; then echo "No changes to commit"; exit 0; fi
         git commit -m "ci: update ${APP_NAME} image to ${IMAGE_TAG}"
         git pull --rebase
         git push
