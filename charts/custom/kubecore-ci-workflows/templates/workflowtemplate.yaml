@@ -314,7 +314,7 @@ spec:
         PROJECT="{{`{{workflow.parameters.project_name}}`}}"
         APP_NAME="{{`{{workflow.parameters.app_name}}`}}"
         IMAGE_TAG="{{`{{inputs.parameters.image_tag}}`}}"
-        REGISTRY="{{ .Values.registry.internalUrl }}"
+        REGISTRY="{{ .Values.registry.externalUrl }}"
         FULL_IMAGE="${REGISTRY}/${PROJECT}/${APP_NAME}"
         OPS_REPO="${ORG}/${PROJECT}"
         APP_DIR="kubeapps/${PROJECT}-${APP_NAME}"

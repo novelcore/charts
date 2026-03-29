@@ -4,6 +4,8 @@
 registry:
   # In-cluster Zot registry URL (for build push)
   internalUrl: "zot-registry.zot-registry.svc.cluster.local:5000"
+  # External registry hostname (for kustomize image references in GitOps manifests)
+  externalUrl: ""
 
 # GitHub configuration
 github:
