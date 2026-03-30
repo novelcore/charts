@@ -1,0 +1,459 @@
+apiVersion: argoproj.io/v1alpha1
+kind: ClusterWorkflowTemplate
+metadata:
+  name: ci-rc-build
+  labels:
+    {{- include "kubecore-ci-workflows.labels" . | nindent 4 }}
+spec:
+  serviceAccountName: {{ include "kubecore-ci-workflows.serviceAccountName" . }}
+  entrypoint: ci-rc-build
+  onExit: exit-handler
+  ttlStrategy:
+    secondsAfterCompletion: {{ .Values.workflow.ttlStrategy.secondsAfterCompletion }}
+  podGC:
+    strategy: {{ .Values.workflow.podGC.strategy }}
+  {{- with .Values.nodeSelector }}
+  nodeSelector:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with .Values.tolerations }}
+  tolerations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  volumes:
+  - name: workspace
+    emptyDir: {}
+  - name: github-token
+    secret:
+      secretName: {{ .Values.github.tokenSecretName }}
+  arguments:
+    parameters:
+    - name: repo_url
+    - name: commit_sha
+    - name: branch
+    - name: app_name
+    - name: project_name
+    - name: dockerfile_path
+      value: {{ .Values.buildkit.dockerfilePath | quote }}
+    - name: build_context
+      value: {{ .Values.buildkit.buildContext | quote }}
+  templates:
+  # ci-rc-build is the DAG entrypoint for the RC pipeline.
+  # Dependency order:
+  #   clone → version → build-push → tag
+  #                     build-push → status
+  #                     build-push → gitops-notify
+  #                     tag + build-push → release
+  #                     release + gitops-notify → issue
+  - name: ci-rc-build
+    dag:
+      tasks:
+      - name: clone
+        template: clone
+
+      - name: version
+        template: version
+        dependencies: [clone]
+
+      - name: build-push
+        template: build-push
+        dependencies: [version]
+        arguments:
+          parameters:
+          - name: image_tag
+            value: "{{`{{tasks.version.outputs.parameters.image_tag}}`}}"
+          - name: rc_tag
+            value: "{{`{{tasks.version.outputs.parameters.rc_tag}}`}}"
+
+      - name: tag
+        template: tag
+        dependencies: [build-push]
+        arguments:
+          parameters:
+          - name: rc_tag
+            value: "{{`{{tasks.version.outputs.parameters.rc_tag}}`}}"
+
+      - name: status
+        template: status
+        dependencies: [build-push]
+        arguments:
+          parameters:
+          - name: state
+            value: "success"
+          - name: description
+            value: "{{`RC build {{tasks.version.outputs.parameters.rc_tag}} succeeded`}}"
+
+      - name: gitops-notify
+        template: gitops-notify
+        dependencies: [build-push]
+        arguments:
+          parameters:
+          - name: image_tag
+            value: "{{`{{tasks.version.outputs.parameters.image_tag}}`}}"
+          - name: semantic_version
+            value: "{{`{{tasks.version.outputs.parameters.semantic_version}}`}}"
+
+      - name: release
+        template: release
+        dependencies: [tag, build-push]
+        arguments:
+          parameters:
+          - name: rc_tag
+            value: "{{`{{tasks.version.outputs.parameters.rc_tag}}`}}"
+
+      - name: issue
+        template: issue
+        dependencies: [release, gitops-notify]
+        arguments:
+          parameters:
+          - name: rc_tag
+            value: "{{`{{tasks.version.outputs.parameters.rc_tag}}`}}"
+          - name: semantic_version
+            value: "{{`{{tasks.version.outputs.parameters.semantic_version}}`}}"
+
+  # clone performs a full (non-shallow) clone so that all tags are available
+  # for RC number calculation in the version step.
+  - name: clone
+    container:
+      image: alpine/git:latest
+      command: [sh, -c]
+      args:
+      - |
+        set -e
+        TOKEN=$(cat /etc/github-token/token)
+        AUTH_URL=$(echo "{{`{{workflow.parameters.repo_url}}`}}" | sed "s|https://|https://x-access-token:${TOKEN}@|")
+        BRANCH=$(echo "{{`{{workflow.parameters.branch}}`}}" | sed 's|refs/heads/||')
+        git clone --branch "${BRANCH}" "${AUTH_URL}" /workspace/repo
+        cd /workspace/repo
+        git fetch --tags --force
+        git checkout "{{`{{workflow.parameters.commit_sha}}`}}"
+        echo "Cloned at $(git rev-parse HEAD)"
+      volumeMounts:
+      - name: workspace
+        mountPath: /workspace
+      - name: github-token
+        mountPath: /etc/github-token
+        readOnly: true
+
+  # version extracts the semantic version from the rc/* branch name, finds the
+  # highest existing rc tag for that version, and increments the RC number.
+  # Outputs: rc_tag (e.g. v1.2.3-rc4), semantic_version (e.g. 1.2.3),
+  #          image_tag (same value as rc_tag — used as the OCI image tag).
+  - name: version
+    outputs:
+      parameters:
+      - name: rc_tag
+        valueFrom:
+          path: /tmp/rc_tag
+      - name: semantic_version
+        valueFrom:
+          path: /tmp/semantic_version
+      - name: image_tag
+        valueFrom:
+          path: /tmp/image_tag
+    container:
+      image: alpine/git:latest
+      command: [sh, -c]
+      args:
+      - |
+        set -e
+        cd /workspace/repo
+
+        BRANCH="{{`{{workflow.parameters.branch}}`}}"
+
+        # Extract semantic version from branch name: refs/heads/rc/v1.2.3 → 1.2.3
+        SEMANTIC_VERSION=$(echo "$BRANCH" | sed -E 's|refs/heads/rc/v([0-9]+\.[0-9]+\.[0-9]+).*|\1|')
+
+        if [ "$SEMANTIC_VERSION" = "$BRANCH" ]; then
+          echo "ERROR: branch '${BRANCH}' does not match refs/heads/rc/v<semver> pattern"
+          exit 1
+        fi
+
+        # Find all existing rc tags for this semantic version and pick the next number
+        RC_TAGS=$(git tag -l "v${SEMANTIC_VERSION}-rc*" | sort -V)
+        if [ -z "$RC_TAGS" ]; then
+          RC_NUMBER=1
+        else
+          CURRENT_RC=$(echo "$RC_TAGS" | tail -n 1 | sed -E 's/.*-rc([0-9]+)/\1/')
+          RC_NUMBER=$((CURRENT_RC + 1))
+        fi
+
+        RC_TAG="v${SEMANTIC_VERSION}-rc${RC_NUMBER}"
+
+        echo -n "$RC_TAG" > /tmp/rc_tag
+        echo -n "$SEMANTIC_VERSION" > /tmp/semantic_version
+        # image_tag is identical to rc_tag — kept as a separate output for
+        # clarity at call sites that expect an image_tag parameter.
+        echo -n "$RC_TAG" > /tmp/image_tag
+
+        echo "Semantic version: ${SEMANTIC_VERSION}, RC tag: ${RC_TAG}"
+      volumeMounts:
+      - name: workspace
+        mountPath: /workspace
+
+  # build-push builds the Docker image with BuildKit and pushes it to the
+  # internal Zot registry. dockerfile_path and build_context follow the same
+  # Helm-value-driven pattern used by the ci-build template.
+  - name: build-push
+    inputs:
+      parameters:
+      - name: image_tag
+      - name: rc_tag
+    securityContext:
+      runAsUser: 1000
+      runAsGroup: 1000
+    container:
+      image: {{ .Values.buildkit.image }}
+      command: [sh, -c]
+      args:
+      - |
+        set -e
+        REGISTRY="{{ .Values.registry.internalUrl }}"
+        APP_NAME="{{`{{workflow.parameters.app_name}}`}}"
+        PROJECT="{{`{{workflow.parameters.project_name}}`}}"
+        IMAGE_TAG="{{`{{inputs.parameters.image_tag}}`}}"
+        FULL_IMAGE="${REGISTRY}/${PROJECT}/${APP_NAME}:${IMAGE_TAG}"
+
+        cd /workspace/repo
+
+        buildctl-daemonless.sh build \
+          --frontend dockerfile.v0 \
+          --local context={{ .Values.buildkit.buildContext }} \
+          --local dockerfile=$(dirname {{ .Values.buildkit.dockerfilePath }}) \
+          --opt filename=$(basename {{ .Values.buildkit.dockerfilePath }}) \
+          --opt build-arg:REGISTRY_URL=${REGISTRY} \
+          --opt build-arg:VERSION=${IMAGE_TAG} \
+          --output type=image,name=${FULL_IMAGE},push=true,registry.insecure=true
+
+        echo "Pushed: ${FULL_IMAGE}"
+      env:
+      - name: BUILDKITD_FLAGS
+        value: "--oci-worker-no-process-sandbox"
+      volumeMounts:
+      - name: workspace
+        mountPath: /workspace
+
+  # tag creates and pushes an annotated git tag for the RC to the origin remote.
+  - name: tag
+    inputs:
+      parameters:
+      - name: rc_tag
+    container:
+      image: alpine/git:latest
+      command: [sh, -c]
+      args:
+      - |
+        set -e
+        cd /workspace/repo
+        TOKEN=$(cat /etc/github-token/token)
+        RC_TAG="{{`{{inputs.parameters.rc_tag}}`}}"
+
+        git config user.name "KubeCore CI"
+        git config user.email "ci@kubecore.io"
+
+        REPO_URL=$(echo "{{`{{workflow.parameters.repo_url}}`}}" | sed "s|https://|https://x-access-token:${TOKEN}@|")
+        git remote set-url origin "${REPO_URL}"
+
+        git tag -a "$RC_TAG" -m "Release candidate $RC_TAG"
+        git push origin "$RC_TAG"
+        echo "Tagged: ${RC_TAG}"
+      volumeMounts:
+      - name: workspace
+        mountPath: /workspace
+      - name: github-token
+        mountPath: /etc/github-token
+        readOnly: true
+
+  # status posts a commit status to GitHub. Context is kubecore-ci/rc to
+  # distinguish RC build results from dev build results on the same commit.
+  - name: status
+    inputs:
+      parameters:
+      - name: state
+      - name: description
+    container:
+      image: alpine/curl
+      command: [sh, -c]
+      args:
+      - |
+        set -e
+        TOKEN=$(cat /etc/github-token/token)
+        REPO="{{`{{workflow.parameters.repo_url}}`}}"
+        OWNER_REPO=$(echo "$REPO" | sed 's|https://github.com/||' | sed 's|.git$||')
+        SHA="{{`{{workflow.parameters.commit_sha}}`}}"
+        STATE="{{`{{inputs.parameters.state}}`}}"
+        DESC="{{`{{inputs.parameters.description}}`}}"
+
+        curl -s -X POST \
+          -H "Authorization: token ${TOKEN}" \
+          -H "Accept: application/vnd.github+json" \
+          "https://api.github.com/repos/${OWNER_REPO}/statuses/${SHA}" \
+          -d "{\"state\":\"${STATE}\",\"description\":\"${DESC}\",\"context\":\"kubecore-ci/rc\"}"
+
+        echo "Posted status: ${STATE}"
+      volumeMounts:
+      - name: github-token
+        mountPath: /etc/github-token
+        readOnly: true
+
+  # gitops-notify dispatches a staging-environment-update repository_dispatch
+  # event to the project ops repo so that the GitOps pipeline can update the
+  # staging environment with the new RC image.
+  - name: gitops-notify
+    inputs:
+      parameters:
+      - name: image_tag
+      - name: semantic_version
+    container:
+      image: alpine/curl
+      command: [sh, -c]
+      args:
+      - |
+        set -e
+        TOKEN=$(cat /etc/github-token/token)
+        ORG="{{ .Values.github.org }}"
+        PROJECT="{{`{{workflow.parameters.project_name}}`}}"
+        OPS_REPO="${ORG}/${PROJECT}{{ .Values.gitops.projectRepoSuffix }}"
+        APP_NAME="{{`{{workflow.parameters.app_name}}`}}"
+        IMAGE_TAG="{{`{{inputs.parameters.image_tag}}`}}"
+        SEMANTIC_VERSION="{{`{{inputs.parameters.semantic_version}}`}}"
+        REGISTRY="{{ .Values.registry.internalUrl }}"
+
+        curl -s -X POST \
+          -H "Authorization: token ${TOKEN}" \
+          -H "Accept: application/vnd.github+json" \
+          "https://api.github.com/repos/${OPS_REPO}/dispatches" \
+          -d "{
+            \"event_type\": \"staging-environment-update\",
+            \"client_payload\": {
+              \"version\": \"${IMAGE_TAG}\",
+              \"image\": \"${REGISTRY}/${PROJECT}/${APP_NAME}:${IMAGE_TAG}\",
+              \"app_name\": \"${APP_NAME}\",
+              \"semantic_version\": \"v${SEMANTIC_VERSION}\",
+              \"plain_image_name\": \"${REGISTRY}/${PROJECT}/${APP_NAME}\"
+            }
+          }"
+
+        echo "Dispatched staging-environment-update to ${OPS_REPO}"
+      volumeMounts:
+      - name: github-token
+        mountPath: /etc/github-token
+        readOnly: true
+
+  # release creates a GitHub pre-release for the RC tag. The release is marked
+  # prerelease=true and targeted at the rc/* branch so it does not appear as
+  # the latest production release.
+  - name: release
+    inputs:
+      parameters:
+      - name: rc_tag
+    container:
+      image: alpine/curl
+      command: [sh, -c]
+      args:
+      - |
+        set -e
+        TOKEN=$(cat /etc/github-token/token)
+        REPO_URL="{{`{{workflow.parameters.repo_url}}`}}"
+        BRANCH="{{`{{workflow.parameters.branch}}`}}"
+        RC_TAG="{{`{{inputs.parameters.rc_tag}}`}}"
+        OWNER_REPO=$(echo "$REPO_URL" | sed 's|https://github.com/||;s|.git$||')
+        BRANCH_NAME=$(echo "$BRANCH" | sed 's|refs/heads/||')
+
+        curl -s -X POST \
+          -H "Authorization: token ${TOKEN}" \
+          -H "Accept: application/vnd.github+json" \
+          "https://api.github.com/repos/${OWNER_REPO}/releases" \
+          -d "{
+            \"tag_name\": \"${RC_TAG}\",
+            \"name\": \"Release Candidate ${RC_TAG}\",
+            \"body\": \"## Release Candidate ${RC_TAG}\n\nDeployed to staging via KAOS CI.\n\n### Checklist\n- [ ] Staging deployment verified\n- [ ] QA validation complete\n- [ ] Ready for production\",
+            \"prerelease\": true,
+            \"target_commitish\": \"${BRANCH_NAME}\"
+          }"
+
+        echo "Created pre-release: ${RC_TAG}"
+      volumeMounts:
+      - name: github-token
+        mountPath: /etc/github-token
+        readOnly: true
+
+  # issue searches for an open GitHub issue labelled release-candidate whose
+  # title contains the semantic version. If found, it updates the title to the
+  # new RC tag and adds a comment. If not found, it creates a new issue so that
+  # QA teams have a single tracking thread per release train.
+  - name: issue
+    inputs:
+      parameters:
+      - name: rc_tag
+      - name: semantic_version
+    container:
+      image: alpine/curl
+      command: [sh, -c]
+      args:
+      - |
+        set -e
+        TOKEN=$(cat /etc/github-token/token)
+        REPO_URL="{{`{{workflow.parameters.repo_url}}`}}"
+        SHA="{{`{{workflow.parameters.commit_sha}}`}}"
+        RC_TAG="{{`{{inputs.parameters.rc_tag}}`}}"
+        SEMANTIC_VERSION="{{`{{inputs.parameters.semantic_version}}`}}"
+        OWNER_REPO=$(echo "$REPO_URL" | sed 's|https://github.com/||;s|.git$||')
+
+        # Search for an open issue labelled release-candidate that mentions
+        # this semantic version in its title — handles multiple RC iterations
+        # against the same release train on a single issue thread.
+        ISSUES=$(curl -s \
+          -H "Authorization: token ${TOKEN}" \
+          -H "Accept: application/vnd.github+json" \
+          "https://api.github.com/repos/${OWNER_REPO}/issues?labels=release-candidate&state=open")
+
+        MATCHING=$(echo "$ISSUES" | grep -o "\"number\":[0-9]*" | head -1 | grep -o '[0-9]*' || true)
+
+        if [ -n "$MATCHING" ]; then
+          # Update the issue title to reflect the latest RC tag and add a comment
+          curl -s -X PATCH \
+            -H "Authorization: token ${TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${OWNER_REPO}/issues/${MATCHING}" \
+            -d "{\"title\":\"Release Candidate ${RC_TAG} Status\"}"
+
+          curl -s -X POST \
+            -H "Authorization: token ${TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${OWNER_REPO}/issues/${MATCHING}/comments" \
+            -d "{\"body\":\"New RC build: ${RC_TAG}\nCommit: ${SHA}\"}"
+
+          echo "Updated issue #${MATCHING} for ${RC_TAG}"
+        else
+          # No existing issue — create one for QA tracking
+          curl -s -X POST \
+            -H "Authorization: token ${TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${OWNER_REPO}/issues" \
+            -d "{
+              \"title\": \"Release Candidate ${RC_TAG} Status\",
+              \"body\": \"## ${RC_TAG}\n\n- [ ] Staging verified\n- [ ] QA complete\n- [ ] Ready for prod\",
+              \"labels\": [\"release-candidate\"]
+            }"
+
+          echo "Created tracking issue for ${RC_TAG}"
+        fi
+      volumeMounts:
+      - name: github-token
+        mountPath: /etc/github-token
+        readOnly: true
+
+  # exit-handler posts a failure commit status when the workflow ends in a
+  # Failed state. It mirrors the pattern used in the ci-build template.
+  - name: exit-handler
+    steps:
+    - - name: post-failure-status
+        template: status
+        arguments:
+          parameters:
+          - name: state
+            value: "failure"
+          - name: description
+            value: "RC build failed"
+        when: "{{`{{workflow.status}}`}} == Failed"
