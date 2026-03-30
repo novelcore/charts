@@ -162,7 +162,11 @@ spec:
                 affinity: {{ $affinity | toJson }}
                 {{- end }}
 
-          {{/* Barman Cloud CNPG-I plugin for S3/object-store backups */}}
+          {{/* Barman Cloud CNPG-I plugin for S3/object-store backups.
+               Requires the CNPG operator to be installed first (CRDs + cert-manager certs).
+               Gate on cnpg-operator being observed and ready to enforce ordering. */}}
+          {{- $cnpgOperator := index .observed.resources "cnpg-operator" }}
+          {{- if and $cnpgOperator $cnpgOperator.ready }}
           ---
           apiVersion: helm.crossplane.io/v1beta1
           kind: Release
@@ -210,6 +214,7 @@ spec:
                 {{- if $affinity }}
                 affinity: {{ $affinity | toJson }}
                 {{- end }}
+          {{- end }}
           {{- end }}
 
           {{/* No shared Postgres or ML namespaces here; ML stacks are per KubeProject environment. */}}
