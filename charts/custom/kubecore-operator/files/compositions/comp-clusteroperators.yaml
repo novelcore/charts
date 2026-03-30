@@ -165,7 +165,7 @@ spec:
           {{/* Barman Cloud CNPG-I plugin for S3/object-store backups.
                Requires the CNPG operator to be installed first (CRDs + cert-manager certs).
                Gate on cnpg-operator being observed and ready to enforce ordering. */}}
-          {{- if and (hasKey .observed.resources "cnpg-operator") (dig "cnpg-operator" "ready" false .observed.resources) }}
+          {{- if and (hasKey .observed.resources "cnpg-operator") ((index .observed.resources "cnpg-operator").ready) }}
           ---
           apiVersion: helm.crossplane.io/v1beta1
           kind: Release
