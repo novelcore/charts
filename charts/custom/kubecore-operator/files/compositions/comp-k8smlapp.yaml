@@ -1809,7 +1809,7 @@ spec:
               platform.kubecore.io/pipeline: {{ $appName }}
               platform.kubecore.io/resource-type: workflow-template
           spec:
-            managementPolicies: ["Create", "Delete"]
+            managementPolicies: ["Observe", "Create", "Delete"]
             providerConfigRef:
               name: {{ $githubProviderConfig }}
             deletionPolicy: Delete
