@@ -80,6 +80,7 @@ spec:
           {{- $mlflowOIDC := $envConfig.mlflowOIDC | default dict -}}
           {{- $mlflowOIDCEnabled := $mlflowOIDC.enabled | default false -}}
           {{- $baseDns := $envConfig.baseDns | default "" -}}
+          {{- $orgName := $envConfig.organizationName | default "" -}}
           {{/* ML infrastructure scheduling: dedicated Karpenter on-demand nodepool */}}
           {{- $runtime := $envConfig.runtime | default dict -}}
           {{- $defaultNodeSelector := dict "platform.kubecore.io/ml-infra" "true" -}}
@@ -537,7 +538,7 @@ spec:
               name: {{ $k8sProvider }}
             forProvider:
               manifest:
-                apiVersion: external-secrets.io/v1beta1
+                apiVersion: external-secrets.io/v1
                 kind: ExternalSecret
                 metadata:
                   name: mlflow-oidc-credentials
@@ -549,7 +550,7 @@ spec:
                 spec:
                   refreshInterval: "1h"
                   secretStoreRef:
-                    name: aws-secretsmanager
+                    name: {{ $orgName }}-infrastructure-secrets
                     kind: ClusterSecretStore
                   target:
                     name: mlflow-oidc-credentials
