@@ -181,7 +181,7 @@ spec:
                 apiVersion: apps/v1
                 kind: Deployment
                 metadata:
-                  name: cert-manager-webhook
+                  name: {{ $clusterName }}-eks-system-cert-manager-webhook
                   namespace: cert-manager
 
           {{/* Barman Cloud CNPG-I plugin for S3/object-store backups.
