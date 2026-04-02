@@ -1,14 +1,8 @@
-{{- if .Values.crd.enable }}
 ---
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
-  labels:
-    {{- include "chart.labels" . | nindent 4 }}
   annotations:
-    {{- if .Values.crd.keep }}
-    "helm.sh/resource-policy": keep
-    {{- end }}
     controller-gen.kubebuilder.io/version: v0.18.0
   name: kubepools.schema.kubecore.io
 spec:
@@ -945,6 +939,33 @@ spec:
                 description: LastTransitionTime records when the status was last updated
                 format: date-time
                 type: string
+              mlflowOIDC:
+                description: MlflowOIDC contains the Zitadel OIDC app status for MLflow
+                  SSO
+                properties:
+                  appId:
+                    description: AppID is the Zitadel application ID
+                    type: string
+                  clientId:
+                    description: ClientID is the OIDC client ID
+                    type: string
+                  discoveryUrl:
+                    description: DiscoveryURL is the OIDC discovery endpoint for the
+                      identity provider
+                    type: string
+                  projectId:
+                    description: ProjectID is the Zitadel project the app belongs
+                      to
+                    type: string
+                  ready:
+                    description: Ready indicates the OIDC app is created and credentials
+                      are pushed to AWS SM
+                    type: boolean
+                  secretName:
+                    description: SecretName is the AWS Secrets Manager key name for
+                      OIDC credentials
+                    type: string
+                type: object
               networkConfig:
                 description: NetworkConfig contains the network configuration allocated
                   for this cluster
@@ -1402,4 +1423,3 @@ spec:
     storage: true
     subresources:
       status: {}
-{{- end -}}
