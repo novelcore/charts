@@ -76,6 +76,10 @@ spec:
           {{- $oidcIssuerHost := "" -}}{{- if and $accountId $oidcId }}{{ $oidcIssuerHost = printf "oidc.eks.%s.amazonaws.com/id/%s" $region $oidcId }}{{ end -}}
           {{- $oidcProviderArn := "" -}}{{- if and $accountId $oidcId }}{{ $oidcProviderArn = printf "arn:aws:iam::%s:oidc-provider/%s" $accountId $oidcIssuerHost }}{{ end -}}
           {{- $hasOIDC := and $oidcIssuerHost $oidcProviderArn -}}
+          {{/* MLflow OIDC SSO via Zitadel */}}
+          {{- $mlflowOIDC := $envConfig.mlflowOIDC | default dict -}}
+          {{- $mlflowOIDCEnabled := $mlflowOIDC.enabled | default false -}}
+          {{- $baseDns := $envConfig.baseDns | default "" -}}
           {{/* ML infrastructure scheduling: dedicated Karpenter on-demand nodepool */}}
           {{- $runtime := $envConfig.runtime | default dict -}}
           {{- $defaultNodeSelector := dict "platform.kubecore.io/ml-infra" "true" -}}
@@ -517,6 +521,53 @@ spec:
                     {{- end }}
           {{- end }}
 
+          {{/* ExternalSecret for MLflow OIDC credentials from AWS Secrets Manager */}}
+          {{- if $mlflowOIDCEnabled }}
+          ---
+          apiVersion: kubernetes.crossplane.io/v1alpha2
+          kind: Object
+          metadata:
+            name: {{ $name }}-mlflow-oidc-secret
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: mlflow-oidc-secret
+          spec:
+            deletionPolicy: Delete
+            managementPolicies: ["*"]
+            providerConfigRef:
+              name: {{ $k8sProvider }}
+            forProvider:
+              manifest:
+                apiVersion: external-secrets.io/v1beta1
+                kind: ExternalSecret
+                metadata:
+                  name: mlflow-oidc-credentials
+                  namespace: {{ $nsName }}
+                  labels:
+                    {{- range $key, $value := $commonLabels }}
+                    {{ $key }}: "{{ $value }}"
+                    {{- end }}
+                spec:
+                  refreshInterval: "1h"
+                  secretStoreRef:
+                    name: aws-secretsmanager
+                    kind: ClusterSecretStore
+                  target:
+                    name: mlflow-oidc-credentials
+                  data:
+                  - secretKey: OIDC_CLIENT_ID
+                    remoteRef:
+                      key: {{ $mlflowOIDC.secretName | quote }}
+                      property: OIDC_CLIENT_ID
+                  - secretKey: OIDC_CLIENT_SECRET
+                    remoteRef:
+                      key: {{ $mlflowOIDC.secretName | quote }}
+                      property: OIDC_CLIENT_SECRET
+                  - secretKey: SECRET_KEY
+                    remoteRef:
+                      key: {{ $mlflowOIDC.secretName | quote }}
+                      property: SECRET_KEY
+          {{- end }}
+
           ---
           apiVersion: helm.crossplane.io/v1beta1
           kind: Release
@@ -564,10 +615,35 @@ spec:
                 {{- if $affinity }}
                 affinity: {{ $affinity | toJson }}
                 {{- end }}
+                {{- if $mlflowOIDCEnabled }}
+                auth:
+                  appName: "oidc-auth"
+                extraSecretNamesForEnvFrom:
+                  - mlflow-oidc-credentials
+                extraEnvVars:
+                  OIDC_REDIRECT_URI: "https://mlflow-{{ $projectName }}.{{ $baseDns }}/callback"
+                  OIDC_SCOPE: "openid profile email"
+                  OIDC_DISCOVERY_URL: {{ $mlflowOIDC.discoveryUrl | quote }}
+                ingress:
+                  enabled: true
+                  className: nginx
+                  annotations:
+                    cert-manager.io/cluster-issuer: letsencrypt-prod
+                  hosts:
+                    - host: "mlflow-{{ $projectName }}.{{ $baseDns }}"
+                      paths:
+                        - path: /
+                          pathType: Prefix
+                  tls:
+                    - secretName: "mlflow-{{ $projectName }}-tls"
+                      hosts:
+                        - "mlflow-{{ $projectName }}.{{ $baseDns }}"
+                {{- else }}
                 auth:
                   enabled: true
                   adminUsername: "admin"
                   adminPassword: {{ $mlflowPassword | quote }}
+                {{- end }}
                 backendStore:
                   databaseMigration: true
                   postgres:

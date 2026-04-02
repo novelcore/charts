@@ -162,10 +162,47 @@ spec:
                 affinity: {{ $affinity | toJson }}
                 {{- end }}
 
+          {{/* Observe cert-manager webhook to gate barman-cloud installation.
+               cert-manager is installed by XKubeSystem (separate composition).
+               barman-cloud creates Certificate CRs that need cert-manager's webhook. */}}
+          ---
+          apiVersion: kubernetes.crossplane.io/v1alpha2
+          kind: Object
+          metadata:
+            name: {{ $clusterName }}-cert-manager-check
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: cert-manager-check
+          spec:
+            managementPolicies: ["Observe"]
+            providerConfigRef:
+              name: {{ $k8sProvider }}
+            forProvider:
+              manifest:
+                apiVersion: apps/v1
+                kind: Deployment
+                metadata:
+                  name: cert-manager-webhook
+                  namespace: cert-manager
+
           {{/* Barman Cloud CNPG-I plugin for S3/object-store backups.
-               Emitted alongside the CNPG operator; Crossplane reconciles both and
-               the Helm provider's wait:true on cnpg-operator ensures CRDs exist
-               before this chart is installed. */}}
+               Gated on cert-manager webhook readiness since barman-cloud creates
+               Certificate resources. On first pool creation cert-manager may not
+               be ready yet (installed by XKubeSystem); Crossplane will retry. */}}
+          {{- $certManagerReady := false -}}
+          {{- if hasKey .observed.resources "cert-manager-check" -}}
+            {{- $cmRes := (index .observed.resources "cert-manager-check").resource -}}
+            {{- if and $cmRes $cmRes.status -}}
+              {{- if and (hasKey $cmRes.status "atProvider") (hasKey $cmRes.status.atProvider "manifest") -}}
+                {{- $manifest := $cmRes.status.atProvider.manifest -}}
+                {{- if and (hasKey $manifest "status") (hasKey $manifest.status "readyReplicas") -}}
+                  {{- if gt (int $manifest.status.readyReplicas) 0 -}}
+                    {{- $certManagerReady = true -}}
+                  {{- end -}}
+                {{- end -}}
+              {{- end -}}
+            {{- end -}}
+          {{- end -}}
+          {{- if $certManagerReady }}
           ---
           apiVersion: helm.crossplane.io/v1beta1
           kind: Release
@@ -213,7 +250,8 @@ spec:
                 {{- if $affinity }}
                 affinity: {{ $affinity | toJson }}
                 {{- end }}
-          {{- end }}
+          {{- end }}{{/* end certManagerReady */}}
+          {{- end }}{{/* end postgresEnabled */}}
 
           {{/* No shared Postgres or ML namespaces here; ML stacks are per KubeProject environment. */}}
 
