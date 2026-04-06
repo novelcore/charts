@@ -1097,7 +1097,7 @@ spec:
                 spec:
                   secretName: lakefs-{{ $projectName }}-tls
                   issuerRef:
-                    name: letsencrypt-prod
+                    name: {{ $clusterName }}-system-issuer
                     kind: ClusterIssuer
                   dnsNames:
                   - "lakefs-{{ $projectName }}.{{ $baseDns }}"
