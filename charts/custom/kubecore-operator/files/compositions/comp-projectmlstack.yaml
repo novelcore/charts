@@ -992,7 +992,7 @@ spec:
                         - --cookie-samesite=lax
                         - --cookie-expire=4h
                         - --cookie-refresh=1h
-                        - --upstream=static://202
+                        - --upstream=http://{{ $lakeFSAccessKeyId }}:{{ $lakeFSPassword }}@{{ $projectName }}-mlstack-lakefs.{{ $nsName }}.svc:80
                         - --http-address=0.0.0.0:4180
                         - --redirect-url=https://lakefs-{{ $projectName }}.{{ $baseDns }}/oauth2/callback
                         - --email-domain=*
@@ -1003,6 +1003,10 @@ spec:
                         - --extra-jwt-issuers={{ $lakeFSOIDCIssuerUrl }}=$(OIDC_CLIENT_ID)
                         - --reverse-proxy=true
                         - --set-xauthrequest=true
+                        - --pass-basic-auth=false
+                        - --pass-access-token=false
+                        - --set-authorization-header=false
+                        - --upstream-timeout=300s
                         envFrom:
                         - secretRef:
                             name: lakefs-oidc-credentials
@@ -1065,7 +1069,8 @@ spec:
                     protocol: TCP
           {{- end }}
 
-          {{/* LakeFS OIDC: Ingress with nginx auth_request to oauth2-proxy */}}
+          {{/* LakeFS OIDC: Ingress routing all traffic through oauth2-proxy (reverse proxy mode) */}}
+          {{/* oauth2-proxy handles SSO + JWT validation, then proxies to lakeFS with admin creds */}}
           {{- if $lakeFSOIDCEnabled }}
           ---
           apiVersion: kubernetes.crossplane.io/v1alpha2
@@ -1092,13 +1097,8 @@ spec:
                     {{- end }}
                   annotations:
                     cert-manager.io/cluster-issuer: letsencrypt-prod
-                    nginx.ingress.kubernetes.io/auth-url: "http://{{ $projectName }}-lakefs-oauth2-proxy.{{ $nsName }}.svc:4180/oauth2/auth"
-                    nginx.ingress.kubernetes.io/auth-signin: "https://lakefs-{{ $projectName }}.{{ $baseDns }}/oauth2/sign_in?rd=$scheme://$host$escaped_request_uri"
-                    nginx.ingress.kubernetes.io/auth-response-headers: "X-Auth-Request-User,X-Auth-Request-Email"
-                    nginx.ingress.kubernetes.io/configuration-snippet: |
-                      proxy_set_header Authorization "Basic {{ printf "%s:%s" $lakeFSAccessKeyId $lakeFSPassword | b64enc }}";
                 spec:
-                  ingressClassName: nginx
+                  ingressClassName: traefik
                   tls:
                   - hosts:
                     - "lakefs-{{ $projectName }}.{{ $baseDns }}"
@@ -1107,20 +1107,13 @@ spec:
                   - host: "lakefs-{{ $projectName }}.{{ $baseDns }}"
                     http:
                       paths:
-                      - path: /oauth2
+                      - path: /
                         pathType: Prefix
                         backend:
                           service:
                             name: {{ $projectName }}-lakefs-oauth2-proxy
                             port:
                               number: 4180
-                      - path: /
-                        pathType: Prefix
-                        backend:
-                          service:
-                            name: {{ $projectName }}-mlstack-lakefs
-                            port:
-                              number: 80
           {{- end }}
 
           {{/* MLflow admin credentials Secret for pipeline consumption */}}
