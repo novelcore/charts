@@ -81,6 +81,13 @@ spec:
           {{- $mlflowOIDCEnabled := $mlflowOIDC.enabled | default false -}}
           {{- $baseDns := $envConfig.baseDns | default "" -}}
           {{- $orgName := $envConfig.organizationName | default "" -}}
+          {{/* LakeFS OIDC SSO via Zitadel + oauth2-proxy */}}
+          {{- $lakeFSOIDC := $envConfig.lakeFSOIDC | default dict -}}
+          {{- $lakeFSOIDCEnabled := and $lakeFSEnabled ($lakeFSOIDC.enabled | default false) -}}
+          {{- $lakeFSOIDCIssuerUrl := "" -}}
+          {{- if $lakeFSOIDCEnabled -}}
+            {{- $lakeFSOIDCIssuerUrl = $lakeFSOIDC.discoveryUrl | default "" | replace "/.well-known/openid-configuration" "" -}}
+          {{- end -}}
           {{/* ML infrastructure scheduling: dedicated Karpenter on-demand nodepool */}}
           {{- $runtime := $envConfig.runtime | default dict -}}
           {{- $defaultNodeSelector := dict "platform.kubecore.io/ml-infra" "true" -}}
@@ -867,6 +874,253 @@ spec:
                 stringData:
                   accessKeyId: {{ $lakeFSAccessKeyId }}
                   secretAccessKey: {{ $lakeFSPassword | quote }}
+          {{- end }}
+
+          {{/* LakeFS OIDC: ExternalSecret for oauth2-proxy credentials from AWS Secrets Manager */}}
+          {{- if $lakeFSOIDCEnabled }}
+          ---
+          apiVersion: kubernetes.crossplane.io/v1alpha2
+          kind: Object
+          metadata:
+            name: {{ $name }}-lakefs-oidc-secret
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: lakefs-oidc-secret
+          spec:
+            deletionPolicy: Delete
+            managementPolicies: ["*"]
+            providerConfigRef:
+              name: {{ $k8sProvider }}
+            forProvider:
+              manifest:
+                apiVersion: external-secrets.io/v1
+                kind: ExternalSecret
+                metadata:
+                  name: lakefs-oidc-credentials
+                  namespace: {{ $nsName }}
+                  labels:
+                    {{- range $key, $value := $commonLabels }}
+                    {{ $key }}: "{{ $value }}"
+                    {{- end }}
+                spec:
+                  refreshInterval: "1h"
+                  secretStoreRef:
+                    name: {{ $orgName }}-infrastructure-secrets
+                    kind: ClusterSecretStore
+                  target:
+                    name: lakefs-oidc-credentials
+                  data:
+                  - secretKey: OIDC_CLIENT_ID
+                    remoteRef:
+                      key: {{ $lakeFSOIDC.secretName | quote }}
+                      property: OIDC_CLIENT_ID
+                  - secretKey: OIDC_CLIENT_SECRET
+                    remoteRef:
+                      key: {{ $lakeFSOIDC.secretName | quote }}
+                      property: OIDC_CLIENT_SECRET
+                  - secretKey: COOKIE_SECRET
+                    remoteRef:
+                      key: {{ $lakeFSOIDC.secretName | quote }}
+                      property: COOKIE_SECRET
+          {{- end }}
+
+          {{/* LakeFS OIDC: oauth2-proxy Deployment + Service for SSO and JWT validation */}}
+          {{- if $lakeFSOIDCEnabled }}
+          ---
+          apiVersion: kubernetes.crossplane.io/v1alpha2
+          kind: Object
+          metadata:
+            name: {{ $name }}-lakefs-oauth2-proxy
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: lakefs-oauth2-proxy
+          spec:
+            deletionPolicy: Delete
+            managementPolicies: ["*"]
+            providerConfigRef:
+              name: {{ $k8sProvider }}
+            forProvider:
+              manifest:
+                apiVersion: apps/v1
+                kind: Deployment
+                metadata:
+                  name: {{ $projectName }}-lakefs-oauth2-proxy
+                  namespace: {{ $nsName }}
+                  labels:
+                    app.kubernetes.io/name: lakefs-oauth2-proxy
+                    app.kubernetes.io/instance: {{ $projectName }}
+                    {{- range $key, $value := $commonLabels }}
+                    {{ $key }}: "{{ $value }}"
+                    {{- end }}
+                spec:
+                  replicas: 1
+                  selector:
+                    matchLabels:
+                      app.kubernetes.io/name: lakefs-oauth2-proxy
+                      app.kubernetes.io/instance: {{ $projectName }}
+                  template:
+                    metadata:
+                      labels:
+                        app.kubernetes.io/name: lakefs-oauth2-proxy
+                        app.kubernetes.io/instance: {{ $projectName }}
+                    spec:
+                      nodeSelector:
+                        {{- range $key, $value := $nodeSelector }}
+                        {{ $key }}: {{ $value | quote }}
+                        {{- end }}
+                      tolerations:
+                        {{- range $toleration := $tolerations }}
+                        - key: {{ $toleration.key | quote }}
+                          operator: {{ $toleration.operator | default "Equal" | quote }}
+                          {{- if $toleration.value }}
+                          value: {{ $toleration.value | quote }}
+                          {{- end }}
+                          {{- if $toleration.effect }}
+                          effect: {{ $toleration.effect | quote }}
+                          {{- end }}
+                        {{- end }}
+                      containers:
+                      - name: oauth2-proxy
+                        image: quay.io/oauth2-proxy/oauth2-proxy:v7.7.1
+                        args:
+                        - --provider=oidc
+                        - --oidc-issuer-url={{ $lakeFSOIDCIssuerUrl }}
+                        - --client-id=$(OIDC_CLIENT_ID)
+                        - --client-secret=$(OIDC_CLIENT_SECRET)
+                        - --cookie-secret=$(COOKIE_SECRET)
+                        - --cookie-name=_lakefs_oauth2
+                        - --cookie-secure=true
+                        - --cookie-httponly=true
+                        - --cookie-samesite=lax
+                        - --cookie-expire=4h
+                        - --cookie-refresh=1h
+                        - --upstream=static://202
+                        - --http-address=0.0.0.0:4180
+                        - --redirect-url=https://lakefs-{{ $projectName }}.{{ $baseDns }}/oauth2/callback
+                        - --email-domain=*
+                        - --oidc-audience-claim=aud
+                        - --allowed-group=
+                        - --skip-provider-button=true
+                        - --skip-jwt-bearer-tokens=true
+                        - --extra-jwt-issuers={{ $lakeFSOIDCIssuerUrl }}=$(OIDC_CLIENT_ID)
+                        - --reverse-proxy=true
+                        - --set-xauthrequest=true
+                        envFrom:
+                        - secretRef:
+                            name: lakefs-oidc-credentials
+                        ports:
+                        - containerPort: 4180
+                          name: http
+                          protocol: TCP
+                        livenessProbe:
+                          httpGet:
+                            path: /ping
+                            port: http
+                          initialDelaySeconds: 10
+                          periodSeconds: 10
+                        readinessProbe:
+                          httpGet:
+                            path: /ready
+                            port: http
+                          initialDelaySeconds: 5
+                          periodSeconds: 5
+                        resources:
+                          requests:
+                            cpu: "50m"
+                            memory: "64Mi"
+                          limits:
+                            cpu: "200m"
+                            memory: "128Mi"
+          ---
+          apiVersion: kubernetes.crossplane.io/v1alpha2
+          kind: Object
+          metadata:
+            name: {{ $name }}-lakefs-oauth2-proxy-svc
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: lakefs-oauth2-proxy-svc
+          spec:
+            deletionPolicy: Delete
+            managementPolicies: ["*"]
+            providerConfigRef:
+              name: {{ $k8sProvider }}
+            forProvider:
+              manifest:
+                apiVersion: v1
+                kind: Service
+                metadata:
+                  name: {{ $projectName }}-lakefs-oauth2-proxy
+                  namespace: {{ $nsName }}
+                  labels:
+                    app.kubernetes.io/name: lakefs-oauth2-proxy
+                    app.kubernetes.io/instance: {{ $projectName }}
+                    {{- range $key, $value := $commonLabels }}
+                    {{ $key }}: "{{ $value }}"
+                    {{- end }}
+                spec:
+                  selector:
+                    app.kubernetes.io/name: lakefs-oauth2-proxy
+                    app.kubernetes.io/instance: {{ $projectName }}
+                  ports:
+                  - name: http
+                    port: 4180
+                    targetPort: http
+                    protocol: TCP
+          {{- end }}
+
+          {{/* LakeFS OIDC: Ingress with nginx auth_request to oauth2-proxy */}}
+          {{- if $lakeFSOIDCEnabled }}
+          ---
+          apiVersion: kubernetes.crossplane.io/v1alpha2
+          kind: Object
+          metadata:
+            name: {{ $name }}-lakefs-ingress
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: lakefs-ingress
+          spec:
+            deletionPolicy: Delete
+            managementPolicies: ["*"]
+            providerConfigRef:
+              name: {{ $k8sProvider }}
+            forProvider:
+              manifest:
+                apiVersion: networking.k8s.io/v1
+                kind: Ingress
+                metadata:
+                  name: lakefs-{{ $projectName }}
+                  namespace: {{ $nsName }}
+                  labels:
+                    {{- range $key, $value := $commonLabels }}
+                    {{ $key }}: "{{ $value }}"
+                    {{- end }}
+                  annotations:
+                    cert-manager.io/cluster-issuer: letsencrypt-prod
+                    nginx.ingress.kubernetes.io/auth-url: "http://{{ $projectName }}-lakefs-oauth2-proxy.{{ $nsName }}.svc:4180/oauth2/auth"
+                    nginx.ingress.kubernetes.io/auth-signin: "https://lakefs-{{ $projectName }}.{{ $baseDns }}/oauth2/sign_in?rd=$scheme://$host$escaped_request_uri"
+                    nginx.ingress.kubernetes.io/auth-response-headers: "X-Auth-Request-User,X-Auth-Request-Email"
+                    nginx.ingress.kubernetes.io/configuration-snippet: |
+                      proxy_set_header Authorization "Basic {{ printf "%s:%s" $lakeFSAccessKeyId $lakeFSPassword | b64enc }}";
+                spec:
+                  ingressClassName: nginx
+                  tls:
+                  - hosts:
+                    - "lakefs-{{ $projectName }}.{{ $baseDns }}"
+                    secretName: "lakefs-{{ $projectName }}-tls"
+                  rules:
+                  - host: "lakefs-{{ $projectName }}.{{ $baseDns }}"
+                    http:
+                      paths:
+                      - path: /oauth2
+                        pathType: Prefix
+                        backend:
+                          service:
+                            name: {{ $projectName }}-lakefs-oauth2-proxy
+                            port:
+                              number: 4180
+                      - path: /
+                        pathType: Prefix
+                        backend:
+                          service:
+                            name: {{ $projectName }}-mlstack-lakefs
+                            port:
+                              number: 80
           {{- end }}
 
           {{/* MLflow admin credentials Secret for pipeline consumption */}}

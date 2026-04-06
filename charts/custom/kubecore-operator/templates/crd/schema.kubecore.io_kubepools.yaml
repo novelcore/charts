@@ -935,6 +935,33 @@ spec:
                       role for this cluster
                     type: string
                 type: object
+              lakeFSOIDC:
+                description: LakeFSOIDC contains the Zitadel OIDC app status for LakeFS
+                  SSO via oauth2-proxy
+                properties:
+                  appId:
+                    description: AppID is the Zitadel application ID
+                    type: string
+                  clientId:
+                    description: ClientID is the OIDC client ID
+                    type: string
+                  discoveryUrl:
+                    description: DiscoveryURL is the OIDC discovery endpoint for the
+                      identity provider
+                    type: string
+                  projectId:
+                    description: ProjectID is the Zitadel project the app belongs
+                      to
+                    type: string
+                  ready:
+                    description: Ready indicates the OIDC app is created and credentials
+                      are pushed to AWS SM
+                    type: boolean
+                  secretName:
+                    description: SecretName is the AWS Secrets Manager key name for
+                      OIDC credentials
+                    type: string
+                type: object
               lastTransitionTime:
                 description: LastTransitionTime records when the status was last updated
                 format: date-time
