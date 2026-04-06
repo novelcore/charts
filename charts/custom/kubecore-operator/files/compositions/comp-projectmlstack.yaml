@@ -1103,7 +1103,7 @@ spec:
                   - "lakefs-{{ $projectName }}.{{ $baseDns }}"
           {{- end }}
 
-          {{/* LakeFS OIDC: Traefik IngressRoute for oauth2-proxy (reverse proxy mode) */}}
+          {{/* LakeFS OIDC: Standard Ingress via Traefik for oauth2-proxy (reverse proxy mode) */}}
           {{- if $lakeFSOIDCEnabled }}
           ---
           apiVersion: kubernetes.crossplane.io/v1alpha2
@@ -1119,8 +1119,8 @@ spec:
               name: {{ $k8sProvider }}
             forProvider:
               manifest:
-                apiVersion: traefik.io/v1alpha1
-                kind: IngressRoute
+                apiVersion: networking.k8s.io/v1
+                kind: Ingress
                 metadata:
                   name: lakefs-{{ $projectName }}
                   namespace: {{ $nsName }}
@@ -1129,16 +1129,22 @@ spec:
                     {{ $key }}: "{{ $value }}"
                     {{- end }}
                 spec:
-                  entryPoints:
-                  - websecure
-                  routes:
-                  - match: "Host(`lakefs-{{ $projectName }}.{{ $baseDns }}`)"
-                    kind: Rule
-                    services:
-                    - name: {{ $projectName }}-lakefs-oauth2-proxy
-                      port: 4180
+                  ingressClassName: traefik-system
                   tls:
-                    secretName: lakefs-{{ $projectName }}-tls
+                  - hosts:
+                    - "lakefs-{{ $projectName }}.{{ $baseDns }}"
+                    secretName: "lakefs-{{ $projectName }}-tls"
+                  rules:
+                  - host: "lakefs-{{ $projectName }}.{{ $baseDns }}"
+                    http:
+                      paths:
+                      - path: /
+                        pathType: Prefix
+                        backend:
+                          service:
+                            name: {{ $projectName }}-lakefs-oauth2-proxy
+                            port:
+                              number: 4180
           {{- end }}
 
           {{/* MLflow admin credentials Secret for pipeline consumption */}}
