@@ -1069,8 +1069,41 @@ spec:
                     protocol: TCP
           {{- end }}
 
-          {{/* LakeFS OIDC: Ingress routing all traffic through oauth2-proxy (reverse proxy mode) */}}
-          {{/* oauth2-proxy handles SSO + JWT validation, then proxies to lakeFS with admin creds */}}
+          {{/* LakeFS OIDC: Certificate for TLS */}}
+          {{- if $lakeFSOIDCEnabled }}
+          ---
+          apiVersion: kubernetes.crossplane.io/v1alpha2
+          kind: Object
+          metadata:
+            name: {{ $name }}-lakefs-certificate
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: lakefs-certificate
+          spec:
+            deletionPolicy: Delete
+            managementPolicies: ["*"]
+            providerConfigRef:
+              name: {{ $k8sProvider }}
+            forProvider:
+              manifest:
+                apiVersion: cert-manager.io/v1
+                kind: Certificate
+                metadata:
+                  name: lakefs-{{ $projectName }}-tls
+                  namespace: {{ $nsName }}
+                  labels:
+                    {{- range $key, $value := $commonLabels }}
+                    {{ $key }}: "{{ $value }}"
+                    {{- end }}
+                spec:
+                  secretName: lakefs-{{ $projectName }}-tls
+                  issuerRef:
+                    name: letsencrypt-prod
+                    kind: ClusterIssuer
+                  dnsNames:
+                  - "lakefs-{{ $projectName }}.{{ $baseDns }}"
+          {{- end }}
+
+          {{/* LakeFS OIDC: Traefik IngressRoute for oauth2-proxy (reverse proxy mode) */}}
           {{- if $lakeFSOIDCEnabled }}
           ---
           apiVersion: kubernetes.crossplane.io/v1alpha2
@@ -1086,8 +1119,8 @@ spec:
               name: {{ $k8sProvider }}
             forProvider:
               manifest:
-                apiVersion: networking.k8s.io/v1
-                kind: Ingress
+                apiVersion: traefik.io/v1alpha1
+                kind: IngressRoute
                 metadata:
                   name: lakefs-{{ $projectName }}
                   namespace: {{ $nsName }}
@@ -1095,25 +1128,17 @@ spec:
                     {{- range $key, $value := $commonLabels }}
                     {{ $key }}: "{{ $value }}"
                     {{- end }}
-                  annotations:
-                    cert-manager.io/cluster-issuer: letsencrypt-prod
                 spec:
-                  ingressClassName: traefik
+                  entryPoints:
+                  - websecure
+                  routes:
+                  - match: "Host(`lakefs-{{ $projectName }}.{{ $baseDns }}`)"
+                    kind: Rule
+                    services:
+                    - name: {{ $projectName }}-lakefs-oauth2-proxy
+                      port: 4180
                   tls:
-                  - hosts:
-                    - "lakefs-{{ $projectName }}.{{ $baseDns }}"
-                    secretName: "lakefs-{{ $projectName }}-tls"
-                  rules:
-                  - host: "lakefs-{{ $projectName }}.{{ $baseDns }}"
-                    http:
-                      paths:
-                      - path: /
-                        pathType: Prefix
-                        backend:
-                          service:
-                            name: {{ $projectName }}-lakefs-oauth2-proxy
-                            port:
-                              number: 4180
+                    secretName: lakefs-{{ $projectName }}-tls
           {{- end }}
 
           {{/* MLflow admin credentials Secret for pipeline consumption */}}
