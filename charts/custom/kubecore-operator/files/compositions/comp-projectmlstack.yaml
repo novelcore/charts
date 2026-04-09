@@ -999,7 +999,7 @@ spec:
                         - --oidc-audience-claim=aud
                         - --allowed-group=
                         - --skip-provider-button=true
-                        - --skip-jwt-bearer-tokens=true
+                        - --skip-jwt-bearer-tokens=false
                         - --extra-jwt-issuers={{ $lakeFSOIDCIssuerUrl }}=$(OIDC_CLIENT_ID)
                         - --reverse-proxy=true
                         - --set-xauthrequest=true
