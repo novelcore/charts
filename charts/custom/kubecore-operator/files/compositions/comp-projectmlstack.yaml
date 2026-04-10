@@ -88,6 +88,7 @@ spec:
           {{- if $lakeFSOIDCEnabled -}}
             {{- $lakeFSOIDCIssuerUrl = $lakeFSOIDC.discoveryUrl | default "" | replace "/.well-known/openid-configuration" "" -}}
           {{- end -}}
+          {{- $lakeFSAPISecretName := $lakeFSOIDC.apiSecretName | default "" -}}
           {{/* ML infrastructure scheduling: dedicated Karpenter on-demand nodepool */}}
           {{- $runtime := $envConfig.runtime | default dict -}}
           {{- $defaultNodeSelector := dict "platform.kubecore.io/ml-infra" "true" -}}
@@ -921,6 +922,49 @@ spec:
                     remoteRef:
                       key: {{ $lakeFSOIDC.secretName | quote }}
                       property: COOKIE_SECRET
+          {{- end }}
+
+          {{/* LakeFS API: ExternalSecret for machine user credentials (programmatic API access) */}}
+          {{- if and $lakeFSOIDCEnabled $lakeFSAPISecretName }}
+          ---
+          apiVersion: kubernetes.crossplane.io/v1alpha2
+          kind: Object
+          metadata:
+            name: {{ $name }}-lakefs-api-secret
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: lakefs-api-secret
+          spec:
+            deletionPolicy: Delete
+            managementPolicies: ["*"]
+            providerConfigRef:
+              name: {{ $k8sProvider }}
+            forProvider:
+              manifest:
+                apiVersion: external-secrets.io/v1
+                kind: ExternalSecret
+                metadata:
+                  name: lakefs-api-credentials
+                  namespace: {{ $nsName }}
+                  labels:
+                    {{- range $key, $value := $commonLabels }}
+                    {{ $key }}: "{{ $value }}"
+                    {{- end }}
+                spec:
+                  refreshInterval: "1h"
+                  secretStoreRef:
+                    name: {{ $orgName }}-infrastructure-secrets
+                    kind: ClusterSecretStore
+                  target:
+                    name: lakefs-api-credentials
+                  data:
+                  - secretKey: LAKEFS_API_CLIENT_ID
+                    remoteRef:
+                      key: {{ $lakeFSAPISecretName | quote }}
+                      property: LAKEFS_API_CLIENT_ID
+                  - secretKey: LAKEFS_API_CLIENT_SECRET
+                    remoteRef:
+                      key: {{ $lakeFSAPISecretName | quote }}
+                      property: LAKEFS_API_CLIENT_SECRET
           {{- end }}
 
           {{/* LakeFS OIDC: oauth2-proxy Deployment + Service for SSO and JWT validation */}}

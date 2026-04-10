@@ -935,6 +935,26 @@ spec:
                       role for this cluster
                     type: string
                 type: object
+              lakeFSAPIUser:
+                description: LakeFSAPIUser contains the Zitadel machine user status
+                  for programmatic LakeFS API access
+                properties:
+                  clientId:
+                    description: ClientID is the client ID for client_credentials
+                      grant
+                    type: string
+                  ready:
+                    description: Ready indicates the machine user is created and credentials
+                      are pushed to AWS SM
+                    type: boolean
+                  secretName:
+                    description: SecretName is the AWS Secrets Manager key name for
+                      API credentials
+                    type: string
+                  userId:
+                    description: UserID is the Zitadel machine user ID
+                    type: string
+                type: object
               lakeFSOIDC:
                 description: LakeFSOIDC contains the Zitadel OIDC app status for LakeFS
                   SSO via oauth2-proxy
