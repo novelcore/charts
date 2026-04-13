@@ -967,6 +967,39 @@ spec:
                       property: LAKEFS_API_CLIENT_SECRET
           {{- end }}
 
+          {{/* LakeFS OIDC: oauth2-proxy alpha config for Basic auth injection to LakeFS */}}
+          {{- if $lakeFSOIDCEnabled }}
+          ---
+          apiVersion: kubernetes.crossplane.io/v1alpha2
+          kind: Object
+          metadata:
+            name: {{ $name }}-lakefs-oauth2-alpha-config
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: lakefs-oauth2-alpha-config
+          spec:
+            deletionPolicy: Delete
+            managementPolicies: ["*"]
+            providerConfigRef:
+              name: {{ $k8sProvider }}
+            forProvider:
+              manifest:
+                apiVersion: v1
+                kind: ConfigMap
+                metadata:
+                  name: lakefs-oauth2-alpha-config
+                  namespace: {{ $nsName }}
+                  labels:
+                    {{- range $key, $value := $commonLabels }}
+                    {{ $key }}: "{{ $value }}"
+                    {{- end }}
+                data:
+                  alpha-config.yaml: |
+                    injectRequestHeaders:
+                    - name: Authorization
+                      values:
+                      - value: {{ printf "%s:%s" $lakeFSAccessKeyId $lakeFSPassword | b64enc | printf "Basic %s" | quote }}
+          {{- end }}
+
           {{/* LakeFS OIDC: oauth2-proxy Deployment + Service for SSO and JWT validation */}}
           {{- if $lakeFSOIDCEnabled }}
           ---
@@ -1036,7 +1069,7 @@ spec:
                         - --cookie-samesite=lax
                         - --cookie-expire=4h
                         - --cookie-refresh=1h
-                        - --upstream=http://{{ $lakeFSAccessKeyId }}:{{ $lakeFSPassword }}@{{ $projectName }}-mlstack-lakefs.{{ $nsName }}.svc:80
+                        - --upstream=http://{{ $projectName }}-mlstack-lakefs.{{ $nsName }}.svc:80
                         - --http-address=0.0.0.0:4180
                         - --redirect-url=https://lakefs-{{ $projectName }}.{{ $baseDns }}/oauth2/callback
                         - --email-domain=*
@@ -1051,6 +1084,7 @@ spec:
                         - --pass-access-token=false
                         - --set-authorization-header=false
                         - --upstream-timeout=300s
+                        - --alpha-config=/etc/oauth2-proxy/alpha-config.yaml
                         envFrom:
                         - secretRef:
                             name: lakefs-oidc-credentials
@@ -1070,6 +1104,10 @@ spec:
                             port: http
                           initialDelaySeconds: 5
                           periodSeconds: 5
+                        volumeMounts:
+                        - name: alpha-config
+                          mountPath: /etc/oauth2-proxy
+                          readOnly: true
                         resources:
                           requests:
                             cpu: "50m"
@@ -1077,6 +1115,10 @@ spec:
                           limits:
                             cpu: "200m"
                             memory: "128Mi"
+                      volumes:
+                      - name: alpha-config
+                        configMap:
+                          name: lakefs-oauth2-alpha-config
           ---
           apiVersion: kubernetes.crossplane.io/v1alpha2
           kind: Object
