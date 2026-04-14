@@ -967,15 +967,15 @@ spec:
                       property: LAKEFS_API_CLIENT_SECRET
           {{- end }}
 
-          {{/* LakeFS OIDC: oauth2-proxy alpha config for Basic auth injection to LakeFS */}}
+          {{/* LakeFS OIDC: nginx auto-login config — intercepts /auth/login and auto-submits admin credentials */}}
           {{- if $lakeFSOIDCEnabled }}
           ---
           apiVersion: kubernetes.crossplane.io/v1alpha2
           kind: Object
           metadata:
-            name: {{ $name }}-lakefs-oauth2-alpha-config
+            name: {{ $name }}-lakefs-auto-login-config
             annotations:
-              gotemplating.fn.crossplane.io/composition-resource-name: lakefs-oauth2-alpha-config
+              gotemplating.fn.crossplane.io/composition-resource-name: lakefs-auto-login-config
           spec:
             deletionPolicy: Delete
             managementPolicies: ["*"]
@@ -986,19 +986,55 @@ spec:
                 apiVersion: v1
                 kind: ConfigMap
                 metadata:
-                  name: lakefs-oauth2-alpha-config
+                  name: lakefs-auto-login-config
                   namespace: {{ $nsName }}
                   labels:
                     {{- range $key, $value := $commonLabels }}
                     {{ $key }}: "{{ $value }}"
                     {{- end }}
                 data:
-                  alpha-config.yaml: |
-                    injectRequestHeaders:
-                    - name: Authorization
-                      values:
-                      - secretSource:
-                          value: {{ printf "Basic %s" (printf "%s:%s" $lakeFSAccessKeyId $lakeFSPassword | b64enc) | b64enc }}
+                  default.conf: |
+                    server {
+                      listen 8080;
+                      location = /auth/login {
+                        default_type text/html;
+                        alias /etc/nginx/html/auto-login.html;
+                      }
+                      location / {
+                        proxy_pass http://{{ $projectName }}-mlstack-lakefs.{{ $nsName }}.svc:80;
+                        proxy_set_header Host $host;
+                        proxy_set_header X-Real-IP $remote_addr;
+                        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                        proxy_set_header X-Forwarded-Proto https;
+                        proxy_read_timeout 300s;
+                      }
+                    }
+                  auto-login.html: |
+                    <!DOCTYPE html>
+                    <html><head><title>Logging in...</title></head>
+                    <body><p>Authenticating with LakeFS...</p>
+                    <script>
+                    fetch('/api/v1/auth/login', {
+                      method: 'POST',
+                      headers: {'Content-Type': 'application/json'},
+                      body: JSON.stringify({
+                        access_key_id: '{{ $lakeFSAccessKeyId }}',
+                        secret_access_key: '{{ $lakeFSPassword }}'
+                      })
+                    }).then(function(r) { return r.json(); })
+                    .then(function(d) {
+                      if (d.token) {
+                        document.cookie = 'access_token=' + d.token + ';path=/;SameSite=Lax';
+                        var next = new URLSearchParams(window.location.search).get('next') || '/';
+                        window.location.href = next;
+                      } else {
+                        document.body.innerHTML = '<p>Login failed. <a href="/">Retry</a></p>';
+                      }
+                    }).catch(function() {
+                      document.body.innerHTML = '<p>Login failed. <a href="/">Retry</a></p>';
+                    });
+                    </script>
+                    </body></html>
           {{- end }}
 
           {{/* LakeFS OIDC: oauth2-proxy Deployment + Service for SSO and JWT validation */}}
@@ -1070,7 +1106,7 @@ spec:
                         - --cookie-samesite=lax
                         - --cookie-expire=4h
                         - --cookie-refresh=1h
-                        - --upstream=http://{{ $projectName }}-mlstack-lakefs.{{ $nsName }}.svc:80
+                        - --upstream=http://localhost:8080
                         - --http-address=0.0.0.0:4180
                         - --redirect-url=https://lakefs-{{ $projectName }}.{{ $baseDns }}/oauth2/callback
                         - --email-domain=*
@@ -1085,7 +1121,6 @@ spec:
                         - --pass-access-token=false
                         - --set-authorization-header=false
                         - --upstream-timeout=300s
-                        - --alpha-config=/etc/oauth2-proxy/alpha-config.yaml
                         envFrom:
                         - secretRef:
                             name: lakefs-oidc-credentials
@@ -1105,10 +1140,6 @@ spec:
                             port: http
                           initialDelaySeconds: 5
                           periodSeconds: 5
-                        volumeMounts:
-                        - name: alpha-config
-                          mountPath: /etc/oauth2-proxy
-                          readOnly: true
                         resources:
                           requests:
                             cpu: "50m"
@@ -1116,10 +1147,28 @@ spec:
                           limits:
                             cpu: "200m"
                             memory: "128Mi"
+                      - name: lakefs-auth-proxy
+                        image: nginx:1.27-alpine
+                        ports:
+                        - containerPort: 8080
+                        volumeMounts:
+                        - name: auto-login-config
+                          mountPath: /etc/nginx/conf.d/default.conf
+                          subPath: default.conf
+                        - name: auto-login-config
+                          mountPath: /etc/nginx/html/auto-login.html
+                          subPath: auto-login.html
+                        resources:
+                          requests:
+                            cpu: "10m"
+                            memory: "16Mi"
+                          limits:
+                            cpu: "50m"
+                            memory: "32Mi"
                       volumes:
-                      - name: alpha-config
+                      - name: auto-login-config
                         configMap:
-                          name: lakefs-oauth2-alpha-config
+                          name: lakefs-auto-login-config
           ---
           apiVersion: kubernetes.crossplane.io/v1alpha2
           kind: Object
