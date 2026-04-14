@@ -997,7 +997,8 @@ spec:
                     injectRequestHeaders:
                     - name: Authorization
                       values:
-                      - value: {{ printf "%s:%s" $lakeFSAccessKeyId $lakeFSPassword | b64enc | printf "Basic %s" | quote }}
+                      - secretSource:
+                          value: {{ printf "Basic %s" (printf "%s:%s" $lakeFSAccessKeyId $lakeFSPassword | b64enc) | b64enc }}
           {{- end }}
 
           {{/* LakeFS OIDC: oauth2-proxy Deployment + Service for SSO and JWT validation */}}
