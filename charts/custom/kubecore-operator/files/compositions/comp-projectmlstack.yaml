@@ -635,9 +635,9 @@ spec:
                   OIDC_DISCOVERY_URL: {{ $mlflowOIDC.discoveryUrl | quote }}
                 ingress:
                   enabled: true
-                  className: nginx
+                  className: traefik-system
                   annotations:
-                    cert-manager.io/cluster-issuer: letsencrypt-prod
+                    cert-manager.io/cluster-issuer: {{ $clusterName }}-system-issuer
                   hosts:
                     - host: "mlflow-{{ $projectName }}.{{ $baseDns }}"
                       paths:
