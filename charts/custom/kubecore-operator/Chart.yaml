@@ -2,8 +2,8 @@ apiVersion: v2
 name: kubecore-operator
 description: A sophisticated Kubernetes operator that implements a four-layer framework architecture for provisioning and managing cloud infrastructure through Crossplane compositions.
 type: application
-version: 0.1.252
-appVersion: "0.1.252"
+version: 0.1.253
+appVersion: "0.1.253"
 
 # Maintainers
 maintainers:
@@ -49,10 +49,8 @@ annotations:
 
   # Changes for this chart version
   artifacthub.io/changes: |
-    - kind: changed
-      description: "Changed XEKS Cluster, ClusterAuth, and NodeGroup deletionPolicy from Orphan to Delete for proper AWS resource cleanup"
-    - kind: fixed
-      description: "Fixed XEKS deletion blocking issue caused by orphaned AWS resources preventing subnet deletion"
+    - kind: security
+      description: "LakeFS SSO: nginx sidecar now injects admin Basic auth on every upstream request; removed auto-login HTML that exposed admin credentials to browser clients. Client needs only a Zitadel JWT/cookie."
 
 # Kubernetes version compatibility
 kubeVersion: ">=1.20.0-0"
