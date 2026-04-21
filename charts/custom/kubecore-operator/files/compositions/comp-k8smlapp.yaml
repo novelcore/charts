@@ -2807,6 +2807,83 @@ spec:
               commitAuthor: "Kubecore Platform"
               commitEmail: "platform@kubecore.eu"
 
+          ---
+          # ml-wft-regenerate.yml — accepts full WorkflowTemplate YAML from app repo CI
+          # and overwrites workflows/<app>/<branch>/workflow-template.yaml. This lets a
+          # KubeApp's WFT track changes in the app repo (kubeline.yaml or the shipped
+          # workflows/workflow-template.yaml) instead of being frozen at scaffold time.
+          apiVersion: repo.github.upbound.io/v1alpha1
+          kind: RepositoryFile
+          metadata:
+            name: {{ $name }}-ml-wft-regenerate-wf
+            annotations:
+              gotemplating.fn.crossplane.io/composition-resource-name: ml-wft-regenerate-wf
+            labels:
+              platform.kubecore.io/project: {{ $projectName }}
+              platform.kubecore.io/pipeline: {{ $appName }}
+              platform.kubecore.io/resource-type: gitops-workflow
+          spec:
+            providerConfigRef:
+              name: {{ $githubProviderConfig }}
+            deletionPolicy: Delete
+            forProvider:
+              repositoryRef:
+                name: {{ $gitopsRepoName }}-repository
+              file: .github/workflows/ml-wft-regenerate.yml
+              content: |
+                name: ML WorkflowTemplate Regenerate
+
+                on:
+                  repository_dispatch:
+                    types:
+                      - ml-wft-regenerate
+
+                permissions:
+                  contents: write
+
+                jobs:
+                  regenerate-wft:
+                    runs-on: ubuntu-latest
+                    steps:
+                      - uses: actions/checkout@v4
+
+                      - name: Write WorkflowTemplate from payload
+                        run: |
+                          set -euo pipefail
+                          APP_NAME="${{ "{{" }} github.event.client_payload.app_name {{ "}}" }}"
+                          BRANCH="${{ "{{" }} github.event.client_payload.branch {{ "}}" }}"
+                          SOURCE_SHA="${{ "{{" }} github.event.client_payload.source_sha {{ "}}" }}"
+                          CONTENT_B64="${{ "{{" }} github.event.client_payload.content_b64 {{ "}}" }}"
+
+                          if [ -z "$APP_NAME" ] || [ -z "$BRANCH" ] || [ -z "$CONTENT_B64" ]; then
+                            echo "Missing required payload fields: app_name, branch, content_b64"
+                            exit 1
+                          fi
+
+                          WFT_DIR="workflows/${APP_NAME}/${BRANCH}"
+                          WFT_FILE="${WFT_DIR}/workflow-template.yaml"
+                          mkdir -p "$WFT_DIR"
+                          echo "$CONTENT_B64" | base64 -d > "$WFT_FILE"
+
+                          echo "Regenerated WorkflowTemplate at ${WFT_FILE} (source sha: ${SOURCE_SHA})"
+
+                      - name: Commit and push
+                        run: |
+                          APP_NAME="${{ "{{" }} github.event.client_payload.app_name {{ "}}" }}"
+                          BRANCH="${{ "{{" }} github.event.client_payload.branch {{ "}}" }}"
+                          SOURCE_SHA="${{ "{{" }} github.event.client_payload.source_sha {{ "}}" }}"
+
+                          git config user.name "Kubecore Platform"
+                          git config user.email "platform@kubecore.eu"
+                          git add -A
+                          git diff --cached --quiet && echo "No changes to commit" && exit 0
+                          git commit -m "chore(${APP_NAME}): regenerate WorkflowTemplate from ${SOURCE_SHA} [${BRANCH}]"
+                          git push
+              branch: main
+              commitMessage: "feat: Add ml-wft-regenerate dispatch handler workflow"
+              commitAuthor: "Kubecore Platform"
+              commitEmail: "platform@kubecore.eu"
+
           {{- end }}
 
   # ── Step 6.0: Parse GitHub credentials in control cluster ──────────────
