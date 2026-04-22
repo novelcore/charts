@@ -345,6 +345,9 @@ spec:
               # Require all conversations to be resolved before merging
               requireConversationResolution: true
 
+              {{/* ML apps don't publish the kubecore k8s-app check contexts (gate-check / validate-pr / build-scan-push). */}}
+              {{/* Skip requiredStatusChecks for ML apps so PRs aren't blocked on non-existent checks; keep PR review + conversation rules. */}}
+              {{- if not (hasKey $envConfig "mlVars") }}
               # Required status checks including deployment validation
               requiredStatusChecks:
               - strict: true # Require branches to be up to date before merging
@@ -356,6 +359,7 @@ spec:
                 # TODO: add quality gate
                 # - "deploy-preview"
                 # - "preview-deployment-validation"
+              {{- end }}
 
           ---
           # GitFlow Main Branch Protection Rules
@@ -400,6 +404,8 @@ spec:
               # Require all conversations to be resolved before merging
               requireConversationResolution: true
 
+              {{/* ML apps don't publish the kubecore k8s-app check contexts. Skip requiredStatusChecks to avoid blocking merges. */}}
+              {{- if not (hasKey $envConfig "mlVars") }}
               # Required status checks - validate-source-branch enforces that only rc/* and hotfix/* can merge
               requiredStatusChecks:
               - strict: true # Require branches to be up to date before merging
@@ -408,6 +414,7 @@ spec:
                 - "validate-pr"
                 - "build-scan-push"
                 - "validate-source-branch" # Enforces rc/* and hotfix/* source branch pattern
+              {{- end }}
           {{ end }}
           {{ end }}
 
