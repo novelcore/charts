@@ -1985,6 +1985,14 @@ spec:
                     - name: promote-to
                       value: ""
 
+                    # Developer-controlled: export (post-training optimized model export)
+                    - name: export-enabled
+                      value: "false"
+                    - name: export-formats
+                      value: "engine"
+                    - name: export-precisions
+                      value: "fp16"
+
                     # Platform-injected
                     - name: kubepool-name
                       value: "{{ $projectName }}"
@@ -2157,6 +2165,24 @@ spec:
 
                         RESUME="{{ "{{" }}workflow.parameters.checkpoint-resume-from{{ "}}" }}"
                         [ -n "$RESUME" ] && ARGS="$ARGS --checkpointing-resume-from $RESUME"
+
+                        # Dataset subset flags (Typer boolean: --flag / --no-flag)
+                        LABELS_ONLY="{{ "{{" }}workflow.parameters.dataset-labels-only{{ "}}" }}"
+                        if [ "$LABELS_ONLY" = "true" ]; then ARGS="$ARGS --labels-only"; else ARGS="$ARGS --no-labels-only"; fi
+                        MANIFEST_ONLY="{{ "{{" }}workflow.parameters.dataset-manifest-only{{ "}}" }}"
+                        if [ "$MANIFEST_ONLY" = "true" ]; then ARGS="$ARGS --manifest-only"; else ARGS="$ARGS --no-manifest-only"; fi
+
+                        # Export flags (post-training optimized model export)
+                        EXPORT_ENABLED="{{ "{{" }}workflow.parameters.export-enabled{{ "}}" }}"
+                        if [ "$EXPORT_ENABLED" = "true" ]; then
+                          ARGS="$ARGS --export"
+                          EXPORT_FORMATS="{{ "{{" }}workflow.parameters.export-formats{{ "}}" }}"
+                          [ -n "$EXPORT_FORMATS" ] && ARGS="$ARGS --export-formats $EXPORT_FORMATS"
+                          EXPORT_PRECISIONS="{{ "{{" }}workflow.parameters.export-precisions{{ "}}" }}"
+                          [ -n "$EXPORT_PRECISIONS" ] && ARGS="$ARGS --export-precisions $EXPORT_PRECISIONS"
+                        else
+                          ARGS="$ARGS --no-export"
+                        fi
 
                         ARGS="$ARGS --output-path /workspace/validated-config.json"
 
@@ -2444,6 +2470,18 @@ spec:
                         [ -n "$FREEZE" ] && ARGS="$ARGS --freeze $FREEZE"
                         RESUME="{{ "{{" }}workflow.parameters.checkpoint-resume-from{{ "}}" }}"
                         [ -n "$RESUME" ] && ARGS="$ARGS --resume-from $RESUME"
+
+                        # Post-training optimized export (TensorRT / ONNX)
+                        EXPORT_ENABLED="{{ "{{" }}workflow.parameters.export-enabled{{ "}}" }}"
+                        if [ "$EXPORT_ENABLED" = "true" ]; then
+                          ARGS="$ARGS --export"
+                          EXPORT_FORMATS="{{ "{{" }}workflow.parameters.export-formats{{ "}}" }}"
+                          [ -n "$EXPORT_FORMATS" ] && ARGS="$ARGS --export-formats $EXPORT_FORMATS"
+                          EXPORT_PRECISIONS="{{ "{{" }}workflow.parameters.export-precisions{{ "}}" }}"
+                          [ -n "$EXPORT_PRECISIONS" ] && ARGS="$ARGS --export-precisions $EXPORT_PRECISIONS"
+                        else
+                          ARGS="$ARGS --no-export"
+                        fi
 
                         # MLFLOW_RUN_ID is already exported as env var — YOLO picks it up automatically
 
