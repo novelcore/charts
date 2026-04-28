@@ -1146,54 +1146,6 @@ spec:
                           "options": { "colorMode": "value", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"] } }
                         },
                         {
-                          "id": 26,
-                          "type": "stat",
-                          "title": "GPU Cost (30d)",
-                          "description": "Total $ spent on GPU nodes in the last 30 days.",
-                          "gridPos": { "h": 4, "w": 3, "x": 19, "y": 6 },
-                          "datasource": null,
-                          "targets": [
-                            {
-                              "datasource": null,
-                              "expr": "sum(count by (instance_type, capacity_type, node_name) (max by (instance_type, capacity_type, node_name) (last_over_time(karpenter_nodes_allocatable{nodepool=\u0022{{ $pipelineLabel }}-gpu\u0022,resource_type=\u0022cpu\u0022}[30d]))) * on(instance_type, capacity_type) group_left() max by (instance_type, capacity_type) (karpenter_cloudprovider_instance_type_offering_price_estimate{capacity_type=\u0022on-demand\u0022}) * on(node_name) group_left() max by (node_name) (last_over_time(karpenter_nodes_current_lifetime_seconds{nodepool=\u0022{{ $pipelineLabel }}-gpu\u0022}[30d]) / 3600))"
-                            }
-                          ],
-                          "fieldConfig": {
-                            "defaults": {
-                              "unit": "currencyUSD",
-                              "decimals": 2,
-                              "noValue": "$0.00",
-                              "color": { "fixedColor": "purple", "mode": "fixed" }
-                            },
-                            "overrides": []
-                          },
-                          "options": { "colorMode": "value", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"] } }
-                        },
-                        {
-                          "id": 27,
-                          "type": "stat",
-                          "title": "CPU Cost (30d)",
-                          "description": "Total $ spent on CPU nodes in the last 30 days.",
-                          "gridPos": { "h": 4, "w": 2, "x": 22, "y": 6 },
-                          "datasource": null,
-                          "targets": [
-                            {
-                              "datasource": null,
-                              "expr": "sum(count by (instance_type, capacity_type, node_name) (max by (instance_type, capacity_type, node_name) (last_over_time(karpenter_nodes_allocatable{nodepool=\u0022{{ $pipelineLabel }}-cpu\u0022,resource_type=\u0022cpu\u0022}[30d]))) * on(instance_type, capacity_type) group_left() max by (instance_type, capacity_type) (karpenter_cloudprovider_instance_type_offering_price_estimate{capacity_type=\u0022on-demand\u0022}) * on(node_name) group_left() max by (node_name) (last_over_time(karpenter_nodes_current_lifetime_seconds{nodepool=\u0022{{ $pipelineLabel }}-cpu\u0022}[30d]) / 3600))"
-                            }
-                          ],
-                          "fieldConfig": {
-                            "defaults": {
-                              "unit": "currencyUSD",
-                              "decimals": 2,
-                              "noValue": "$0.00",
-                              "color": { "fixedColor": "orange", "mode": "fixed" }
-                            },
-                            "overrides": []
-                          },
-                          "options": { "colorMode": "value", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"] } }
-                        },
-                        {
                           "id": 16,
                           "type": "timeseries",
                           "title": "Pipeline Cost Over Time",
