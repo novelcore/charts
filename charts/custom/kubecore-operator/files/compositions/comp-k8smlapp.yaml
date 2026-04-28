@@ -680,12 +680,18 @@ spec:
                           "pipeline", "$1", "nodepool", "(.*)-cpu"
                         )
                     # ── Total cost: per-nodepool 30d spend (price/hr × lifetime_hours) ──
+                    # Wrap allocatable in count(max by(node_name,...)(...)) so each node contributes 1,
+                    # not its CPU count — otherwise cost is multiplied by allocatable_cpu (~4× for g6.xlarge).
                     - record: kubecore:ml:workflow_cost_total
                       expr: |
                         label_replace(
                           label_replace(
                             sum by (nodepool) (
-                              last_over_time(karpenter_nodes_allocatable{nodepool=~"{{ $pipelineLabel }}-(gpu|cpu)",resource_type="cpu"}[30d])
+                              count by (instance_type, capacity_type, node_name, nodepool) (
+                                max by (instance_type, capacity_type, node_name, nodepool) (
+                                  last_over_time(karpenter_nodes_allocatable{nodepool=~"{{ $pipelineLabel }}-(gpu|cpu)",resource_type="cpu"}[30d])
+                                )
+                              )
                               * on(instance_type, capacity_type) group_left()
                               max by (instance_type, capacity_type) (
                                 karpenter_cloudprovider_instance_type_offering_price_estimate{capacity_type="on-demand"}
@@ -704,7 +710,11 @@ spec:
                       expr: |
                         label_replace(
                           label_replace(
-                            last_over_time(karpenter_nodes_allocatable{nodepool=~"{{ $pipelineLabel }}-(gpu|cpu)",resource_type="cpu"}[30d])
+                            count by (instance_type, capacity_type, node_name, nodepool) (
+                              max by (instance_type, capacity_type, node_name, nodepool) (
+                                last_over_time(karpenter_nodes_allocatable{nodepool=~"{{ $pipelineLabel }}-(gpu|cpu)",resource_type="cpu"}[30d])
+                              )
+                            )
                             * on(instance_type, capacity_type) group_left()
                             max by (instance_type, capacity_type) (
                               karpenter_cloudprovider_instance_type_offering_price_estimate{capacity_type="on-demand"}
@@ -1145,7 +1155,7 @@ spec:
                           "targets": [
                             {
                               "datasource": null,
-                              "expr": "sum(last_over_time(karpenter_nodes_allocatable{nodepool=\u0022{{ $pipelineLabel }}-gpu\u0022,resource_type=\u0022cpu\u0022}[30d]) * on(instance_type, capacity_type) group_left() max by (instance_type, capacity_type) (karpenter_cloudprovider_instance_type_offering_price_estimate{capacity_type=\u0022on-demand\u0022}) * on(node_name) group_left() max by (node_name) (last_over_time(karpenter_nodes_current_lifetime_seconds{nodepool=\u0022{{ $pipelineLabel }}-gpu\u0022}[30d]) / 3600))"
+                              "expr": "sum(count by (instance_type, capacity_type, node_name) (max by (instance_type, capacity_type, node_name) (last_over_time(karpenter_nodes_allocatable{nodepool=\u0022{{ $pipelineLabel }}-gpu\u0022,resource_type=\u0022cpu\u0022}[30d]))) * on(instance_type, capacity_type) group_left() max by (instance_type, capacity_type) (karpenter_cloudprovider_instance_type_offering_price_estimate{capacity_type=\u0022on-demand\u0022}) * on(node_name) group_left() max by (node_name) (last_over_time(karpenter_nodes_current_lifetime_seconds{nodepool=\u0022{{ $pipelineLabel }}-gpu\u0022}[30d]) / 3600))"
                             }
                           ],
                           "fieldConfig": {
@@ -1169,7 +1179,7 @@ spec:
                           "targets": [
                             {
                               "datasource": null,
-                              "expr": "sum(last_over_time(karpenter_nodes_allocatable{nodepool=\u0022{{ $pipelineLabel }}-cpu\u0022,resource_type=\u0022cpu\u0022}[30d]) * on(instance_type, capacity_type) group_left() max by (instance_type, capacity_type) (karpenter_cloudprovider_instance_type_offering_price_estimate{capacity_type=\u0022on-demand\u0022}) * on(node_name) group_left() max by (node_name) (last_over_time(karpenter_nodes_current_lifetime_seconds{nodepool=\u0022{{ $pipelineLabel }}-cpu\u0022}[30d]) / 3600))"
+                              "expr": "sum(count by (instance_type, capacity_type, node_name) (max by (instance_type, capacity_type, node_name) (last_over_time(karpenter_nodes_allocatable{nodepool=\u0022{{ $pipelineLabel }}-cpu\u0022,resource_type=\u0022cpu\u0022}[30d]))) * on(instance_type, capacity_type) group_left() max by (instance_type, capacity_type) (karpenter_cloudprovider_instance_type_offering_price_estimate{capacity_type=\u0022on-demand\u0022}) * on(node_name) group_left() max by (node_name) (last_over_time(karpenter_nodes_current_lifetime_seconds{nodepool=\u0022{{ $pipelineLabel }}-cpu\u0022}[30d]) / 3600))"
                             }
                           ],
                           "fieldConfig": {
