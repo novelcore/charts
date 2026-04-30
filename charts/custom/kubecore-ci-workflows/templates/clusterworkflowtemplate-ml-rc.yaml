@@ -1,0 +1,153 @@
+{{/*
+ml-ci-rc-build — KubeCore ML pipeline RC ClusterWorkflowTemplate.
+
+Triggered by the per-KubeApp Sensor's rc-trigger (push to refs/heads/rc/*).
+Same matrix-build flow as ml-ci-build but:
+  - branch_type defaults to "rc" (no PATCH bump),
+  - patch-wft is unconditional (we always promote on RC),
+  - no source-repo dev tag (RC tags are managed by the human PR flow).
+
+This first revision is intentionally minimal — it reuses the templates
+defined in ml-ci-build by referencing them via templateRef, so any future
+change to the ml step pipeline lands in both flows. When RC promotion
+needs more (kustomize-image bumps, GitHub release creation, issue
+filing à la ci-rc-build), enrich here.
+*/}}
+apiVersion: argoproj.io/v1alpha1
+kind: ClusterWorkflowTemplate
+metadata:
+  name: ml-ci-rc-build
+  labels:
+    {{- include "kubecore-ci-workflows.labels" . | nindent 4 }}
+spec:
+  serviceAccountName: {{ include "kubecore-ci-workflows.serviceAccountName" . }}
+  entrypoint: ml-ci-rc-build
+  onExit: exit-handler
+  ttlStrategy:
+    secondsAfterCompletion: {{ .Values.workflow.ttlStrategy.secondsAfterCompletion }}
+  podGC:
+    strategy: {{ .Values.workflow.podGC.strategy }}
+  {{- with .Values.nodeSelector }}
+  nodeSelector:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with .Values.tolerations }}
+  tolerations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  volumeClaimTemplates:
+  - metadata:
+      name: workspace
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      resources:
+        requests:
+          storage: {{ .Values.workspace.size | default "5Gi" }}
+      {{- with .Values.workspace.storageClassName }}
+      storageClassName: {{ . }}
+      {{- end }}
+  volumes:
+  - name: github-token
+    secret:
+      secretName: {{ .Values.github.tokenSecretName }}
+  - name: registry-auth
+    secret:
+      secretName: ci-registry-auth
+  arguments:
+    parameters:
+    - name: repo_url
+    - name: commit_sha
+    - name: branch
+    - name: app_name
+    - name: project_name
+    - name: image_repository
+      value: ""
+    - name: registry_url
+      value: ""
+    - name: gitops_repository
+    - name: gitops_branch
+      value: "main"
+    - name: workflow_template_path
+    # Inherit the ml-ci-build defaults so its templates resolve uniformly.
+    - name: target_branch
+      value: "main"
+    - name: branch_type
+      value: "rc"
+    - name: pr_merged
+      value: "true"
+    - name: event_type
+      value: "rc"
+
+  templates:
+  - name: ml-ci-rc-build
+    steps:
+    - - name: clone
+        templateRef:
+          name: ml-ci-build
+          template: clone
+          clusterScope: true
+    - - name: detect-steps
+        templateRef:
+          name: ml-ci-build
+          template: detect-steps
+          clusterScope: true
+    - - name: version
+        templateRef:
+          name: ml-ci-build
+          template: version
+          clusterScope: true
+    - - name: build-push
+        templateRef:
+          name: ml-ci-build
+          template: build-push
+          clusterScope: true
+        when: "{{`{{steps.detect-steps.outputs.parameters.has_changes}}`}} == true"
+        arguments:
+          parameters:
+          - name: step_name
+            value: "{{`{{item.name}}`}}"
+          - name: step_path
+            value: "{{`{{item.path}}`}}"
+          - name: image_tag
+            value: "{{`{{steps.version.outputs.parameters.image_tag}}`}}"
+          - name: new_version
+            value: "{{`{{steps.version.outputs.parameters.new_version}}`}}"
+        withParam: "{{`{{steps.detect-steps.outputs.parameters.changed_steps}}`}}"
+    - - name: patch-wft
+        templateRef:
+          name: ml-ci-build
+          template: patch-wft
+          clusterScope: true
+        when: "{{`{{steps.detect-steps.outputs.parameters.has_changes}}`}} == true"
+        arguments:
+          parameters:
+          - name: image_tag
+            value: "{{`{{steps.version.outputs.parameters.image_tag}}`}}"
+          - name: changed_steps
+            value: "{{`{{steps.detect-steps.outputs.parameters.changed_steps}}`}}"
+    - - name: status
+        templateRef:
+          name: ml-ci-build
+          template: status
+          clusterScope: true
+        arguments:
+          parameters:
+          - name: state
+            value: "success"
+          - name: description
+            value: "ML RC build succeeded"
+
+  - name: exit-handler
+    steps:
+    - - name: post-failure-status
+        templateRef:
+          name: ml-ci-build
+          template: status
+          clusterScope: true
+        arguments:
+          parameters:
+          - name: state
+            value: "failure"
+          - name: description
+            value: "ML RC build failed"
+        when: "{{`{{workflow.status}}`}} == Failed"
