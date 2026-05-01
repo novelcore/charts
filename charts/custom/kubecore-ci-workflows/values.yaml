@@ -20,7 +20,12 @@ gitops:
   # Suffix for the project ops repository (e.g., "my-project" + "-ops" = "my-project-ops")
   projectRepoSuffix: "-ops"
 
-# BuildKit configuration
+# Kaniko configuration (build-push runs kaniko, not BuildKit)
+kaniko:
+  image: "gcr.io/kaniko-project/executor:v1.23.2"
+
+# BuildKit configuration (legacy — only retained for non-ML CWTs that
+# may still reference .Values.buildkit; ml-ci-build no longer uses it).
 buildkit:
   image: "moby/buildkit:rootless"
   # Default Dockerfile path relative to repo root

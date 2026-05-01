@@ -290,7 +290,13 @@ spec:
   # steps. Each pod self-clones into an emptyDir (no shared workspace PVC)
   # so the matrix isn't bottlenecked by ReadWriteOnce multi-attach. The
   # init container sets up the repo at the right SHA; the main container
-  # is BuildKit rootless doing the build and push.
+  # is kaniko, which builds and pushes without a daemon, no rootlesskit,
+  # no userns gymnastics — works identically on COS, Ubuntu, EKS, kind.
+  # Switched from rootless BuildKit because BuildKit's overlayfs snapshot
+  # copy-up performs poorly on GKE Container-Optimized OS for multi-GB
+  # images (e.g. PyTorch + ultralytics), getting stuck in "exporting
+  # layers" indefinitely. Kaniko's flat tar-based layer model handles
+  # large images consistently.
   - name: build-push
     inputs:
       parameters:
@@ -298,29 +304,14 @@ spec:
       - name: step_path
       - name: image_tag
       - name: new_version
-    securityContext:
-      runAsUser: 1000
-      runAsGroup: 1000
-      # rootless BuildKit on GKE Container-Optimized OS needs the host's
-      # default seccomp/AppArmor confinement disabled because rootlesskit
-      # remounts / inside a user namespace and the COS profiles deny that.
-      # The container itself still runs as UID 1000 (non-root); only the
-      # default profiles that prevent user-namespace mount sharing are
-      # relaxed. This matches the upstream BuildKit Kubernetes example
-      # (https://github.com/moby/buildkit/blob/master/examples/kubernetes/pod.rootless.yaml).
-      seccompProfile:
-        type: Unconfined
-      appArmorProfile:
-        type: Unconfined
     volumes:
     - name: build-workspace
+      emptyDir: {}
+    - name: kaniko-config
       emptyDir: {}
     initContainers:
     - name: clone
       image: alpine/git:latest
-      securityContext:
-        runAsUser: 1000
-        runAsGroup: 1000
       command: [sh, -c]
       args:
       - |
@@ -338,15 +329,39 @@ spec:
       - name: github-token
         mountPath: /etc/github-token
         readOnly: true
-    container:
-      image: {{ .Values.buildkit.image }}
+    - name: docker-config
+      image: alpine:3.20
       command: [sh, -c]
       args:
       - |
         set -e
+        REGISTRY="{{`{{workflow.parameters.registry_url}}`}}"
+        REG_USER=$(cat /etc/registry-auth/username)
+        REG_PASS=$(cat /etc/registry-auth/password)
+        AUTH=$(printf '%s:%s' "${REG_USER}" "${REG_PASS}" | base64 -w0)
+        # Kaniko reads /kaniko/.docker/config.json. Write the auth entry
+        # for the cluster-internal Zot URL (which is what BuildKit pushed
+        # to and what kubelet pulls from).
+        mkdir -p /kaniko/.docker
+        cat > /kaniko/.docker/config.json <<EOF
+        {"auths":{"${REGISTRY}":{"auth":"${AUTH}"}}}
+        EOF
+        echo "Wrote kaniko docker config for ${REGISTRY}"
+      volumeMounts:
+      - name: build-workspace
+        mountPath: /workspace
+      - name: registry-auth
+        mountPath: /etc/registry-auth
+        readOnly: true
+      - name: kaniko-config
+        mountPath: /kaniko/.docker
+    container:
+      image: {{ .Values.kaniko.image | default "gcr.io/kaniko-project/executor:v1.23.2" }}
+      command: ["/busybox/sh", "-c"]
+      args:
+      - |
+        set -e
 
-        # Choose registry URL + image_repository from per-KubeApp params
-        # (passed in by the Sensor) when provided, else fall back to chart defaults.
         REGISTRY="{{`{{workflow.parameters.registry_url}}`}}"
         if [ -z "$REGISTRY" ]; then REGISTRY="{{ .Values.registry.internalUrl }}"; fi
         IMAGE_REPO="{{`{{workflow.parameters.image_repository}}`}}"
@@ -357,46 +372,35 @@ spec:
         STEP_NAME="{{`{{inputs.parameters.step_name}}`}}"
         STEP_PATH="{{`{{inputs.parameters.step_path}}`}}"
         IMAGE_TAG="{{`{{inputs.parameters.image_tag}}`}}"
-        # Per-step versioned + latest tags. Step name is part of the tag so
-        # all step images share the same Zot repo with disjoint tag prefixes,
-        # mirroring the legacy ECR pattern <repo>:<step>-<sha>.
+
         VERSIONED_IMAGE="${REGISTRY}/${IMAGE_REPO}:${STEP_NAME}-${IMAGE_TAG}"
         LATEST_IMAGE="${REGISTRY}/${IMAGE_REPO}:${STEP_NAME}-latest"
 
-        cd /workspace/repo
-
-        REG_USER=$(cat /etc/registry-auth/username)
-        REG_PASS=$(cat /etc/registry-auth/password)
-        mkdir -p /home/user/.docker
-        printf '{"auths":{"%s":{"username":"%s","password":"%s"}}}' "${REGISTRY}" "${REG_USER}" "${REG_PASS}" > /home/user/.docker/config.json
-
         # Each ML step has Dockerfile at <step_path>/Dockerfile and uses
         # <step_path> as build context — kubeline.yaml's contract.
-        buildctl-daemonless.sh build \
-          --frontend dockerfile.v0 \
-          --local context=${STEP_PATH} \
-          --local dockerfile=${STEP_PATH} \
-          --opt filename=Dockerfile \
-          --opt build-arg:REGISTRY_URL=${REGISTRY} \
-          --opt build-arg:VERSION=${IMAGE_TAG} \
-          --output type=image,\"name=${VERSIONED_IMAGE},${LATEST_IMAGE}\",push=true,registry.insecure=true,oci-mediatypes=true
+        # --insecure: Zot uses HTTP inside the cluster (no TLS on
+        # zot.zot-registry.svc.cluster.local:5000).
+        # --skip-tls-verify: belt-and-braces for the same.
+        # --single-snapshot: produce one consolidated layer instead of
+        # one-per-Dockerfile-instruction; faster + smaller for ML images.
+        /kaniko/executor \
+          --context="/workspace/repo/${STEP_PATH}" \
+          --dockerfile="/workspace/repo/${STEP_PATH}/Dockerfile" \
+          --destination="${VERSIONED_IMAGE}" \
+          --destination="${LATEST_IMAGE}" \
+          --build-arg="REGISTRY_URL=${REGISTRY}" \
+          --build-arg="VERSION=${IMAGE_TAG}" \
+          --insecure \
+          --skip-tls-verify \
+          --single-snapshot \
+          --snapshot-mode=redo
 
         echo "Pushed ${STEP_NAME}: ${VERSIONED_IMAGE} + ${LATEST_IMAGE}"
-      env:
-      - name: BUILDKITD_FLAGS
-        value: "--oci-worker-no-process-sandbox"
-      # buildctl-daemonless.sh starts buildkitd in the background and
-      # polls for the socket. The default is 10 retries x 1s; under
-      # node CPU/memory pressure (eg. 4 parallel matrix pods on one
-      # node) buildkitd needs longer than 10s to come up and the other
-      # pods fail with "could not connect to ... after 10 trials".
-      # Bump to 60 retries so concurrent matrix builds survive
-      # contention on a loaded node.
-      - name: BUILDCTL_CONNECT_RETRIES_ON_STARTUP
-        value: "60"
       volumeMounts:
       - name: build-workspace
         mountPath: /workspace
+      - name: kaniko-config
+        mountPath: /kaniko/.docker
       - name: registry-auth
         mountPath: /etc/registry-auth
         readOnly: true
