@@ -385,6 +385,15 @@ spec:
       env:
       - name: BUILDKITD_FLAGS
         value: "--oci-worker-no-process-sandbox"
+      # buildctl-daemonless.sh starts buildkitd in the background and
+      # polls for the socket. The default is 10 retries x 1s; under
+      # node CPU/memory pressure (eg. 4 parallel matrix pods on one
+      # node) buildkitd needs longer than 10s to come up and the other
+      # pods fail with "could not connect to ... after 10 trials".
+      # Bump to 60 retries so concurrent matrix builds survive
+      # contention on a loaded node.
+      - name: BUILDCTL_CONNECT_RETRIES_ON_STARTUP
+        value: "60"
       volumeMounts:
       - name: build-workspace
         mountPath: /workspace
