@@ -378,11 +378,16 @@ spec:
 
         # Each ML step has Dockerfile at <step_path>/Dockerfile and uses
         # <step_path> as build context — kubeline.yaml's contract.
-        # --insecure: Zot uses HTTP inside the cluster (no TLS on
-        # zot.zot-registry.svc.cluster.local:5000).
-        # --skip-tls-verify: belt-and-braces for the same.
-        # --single-snapshot: produce one consolidated layer instead of
-        # one-per-Dockerfile-instruction; faster + smaller for ML images.
+        # --insecure / --skip-tls-verify: Zot uses HTTP inside the cluster.
+        # --single-snapshot + --snapshot-mode=redo: one consolidated layer
+        #   instead of one-per-instruction; cuts snapshot time and image size.
+        # --cleanup: delete intermediate layer files after push. Critical
+        #   for fat ML images (PyTorch+CUDA ≈ 23GiB peak ephemeral) on GKE
+        #   nodes with ~18GiB allocatable disk — without --cleanup the pod
+        #   gets evicted by kubelet for ephemeral-storage pressure.
+        # --use-new-run: lower-memory snapshot algorithm.
+        # --compressed-caching=false: trades RAM for less disk; better for
+        #   our scenario where disk is the binding constraint, not RAM.
         /kaniko/executor \
           --context="/workspace/repo/${STEP_PATH}" \
           --dockerfile="/workspace/repo/${STEP_PATH}/Dockerfile" \
@@ -393,7 +398,10 @@ spec:
           --insecure \
           --skip-tls-verify \
           --single-snapshot \
-          --snapshot-mode=redo
+          --snapshot-mode=redo \
+          --cleanup \
+          --use-new-run \
+          --compressed-caching=false
 
         echo "Pushed ${STEP_NAME}: ${VERSIONED_IMAGE} + ${LATEST_IMAGE}"
       volumeMounts:
