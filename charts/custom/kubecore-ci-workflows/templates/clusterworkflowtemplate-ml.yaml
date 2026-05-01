@@ -301,6 +301,17 @@ spec:
     securityContext:
       runAsUser: 1000
       runAsGroup: 1000
+      # rootless BuildKit on GKE Container-Optimized OS needs the host's
+      # default seccomp/AppArmor confinement disabled because rootlesskit
+      # remounts / inside a user namespace and the COS profiles deny that.
+      # The container itself still runs as UID 1000 (non-root); only the
+      # default profiles that prevent user-namespace mount sharing are
+      # relaxed. This matches the upstream BuildKit Kubernetes example
+      # (https://github.com/moby/buildkit/blob/master/examples/kubernetes/pod.rootless.yaml).
+      seccompProfile:
+        type: Unconfined
+      appArmorProfile:
+        type: Unconfined
     volumes:
     - name: build-workspace
       emptyDir: {}
