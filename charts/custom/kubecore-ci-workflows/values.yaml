@@ -20,9 +20,12 @@ gitops:
   # Suffix for the project ops repository (e.g., "my-project" + "-ops" = "my-project-ops")
   projectRepoSuffix: "-ops"
 
-# Kaniko configuration (build-push runs kaniko, not BuildKit)
+# Kaniko configuration (build-push runs kaniko, not BuildKit).
+# Use the :debug variant — it bundles /busybox/sh which Argo Workflows
+# needs for argoexec to wrap the build command. The non-debug image is
+# FROM scratch + the kaniko binary only and has no shell.
 kaniko:
-  image: "gcr.io/kaniko-project/executor:v1.23.2"
+  image: "gcr.io/kaniko-project/executor:v1.23.2-debug"
 
 # BuildKit configuration (legacy — only retained for non-ML CWTs that
 # may still reference .Values.buildkit; ml-ci-build no longer uses it).

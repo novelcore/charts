@@ -356,7 +356,7 @@ spec:
       - name: kaniko-config
         mountPath: /kaniko/.docker
     container:
-      image: {{ .Values.kaniko.image | default "gcr.io/kaniko-project/executor:v1.23.2" }}
+      image: {{ .Values.kaniko.image | default "gcr.io/kaniko-project/executor:v1.23.2-debug" }}
       command: ["/busybox/sh", "-c"]
       args:
       - |
