@@ -427,9 +427,20 @@ spec:
       parameters:
       - name: image_tag
       - name: changed_steps
+    # Run as root: this template installs git via apk add (the yq image
+    # ships only the yq binary, no git). apk needs root to write to
+    # /var/lib/apk/db; without this the container fails with
+    #   ERROR: Unable to lock database: Permission denied
+    # Alternative would be a custom yq+git image — overkill for one step.
+    securityContext:
+      runAsUser: 0
+      runAsGroup: 0
     container:
       image: mikefarah/yq:4.44.3
       command: [sh, -c]
+      securityContext:
+        runAsUser: 0
+        runAsGroup: 0
       args:
       - |
         set -e
