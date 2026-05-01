@@ -286,6 +286,11 @@ spec:
       - name: workspace
         mountPath: /workspace
 
+  # build-push runs in parallel via withParam over the matrix of changed
+  # steps. Each pod self-clones into an emptyDir (no shared workspace PVC)
+  # so the matrix isn't bottlenecked by ReadWriteOnce multi-attach. The
+  # init container sets up the repo at the right SHA; the main container
+  # is BuildKit rootless doing the build and push.
   - name: build-push
     inputs:
       parameters:
@@ -296,6 +301,32 @@ spec:
     securityContext:
       runAsUser: 1000
       runAsGroup: 1000
+    volumes:
+    - name: build-workspace
+      emptyDir: {}
+    initContainers:
+    - name: clone
+      image: alpine/git:latest
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+      command: [sh, -c]
+      args:
+      - |
+        set -e
+        TOKEN=$(cat /etc/github-token/token)
+        REPO_URL=$(echo "{{`{{workflow.parameters.repo_url}}`}}" | sed "s|https://|https://x-access-token:${TOKEN}@|")
+        BRANCH=$(echo "{{`{{workflow.parameters.branch}}`}}" | sed 's|^refs/heads/||')
+        git clone --depth=1 --branch "${BRANCH}" "${REPO_URL}" /workspace/repo
+        cd /workspace/repo
+        git checkout "{{`{{workflow.parameters.commit_sha}}`}}"
+        echo "Cloned at $(git rev-parse HEAD) for step {{`{{inputs.parameters.step_name}}`}}"
+      volumeMounts:
+      - name: build-workspace
+        mountPath: /workspace
+      - name: github-token
+        mountPath: /etc/github-token
+        readOnly: true
     container:
       image: {{ .Values.buildkit.image }}
       command: [sh, -c]
@@ -344,7 +375,7 @@ spec:
       - name: BUILDKITD_FLAGS
         value: "--oci-worker-no-process-sandbox"
       volumeMounts:
-      - name: workspace
+      - name: build-workspace
         mountPath: /workspace
       - name: registry-auth
         mountPath: /etc/registry-auth
