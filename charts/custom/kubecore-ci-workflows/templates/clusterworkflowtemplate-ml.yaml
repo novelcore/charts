@@ -475,11 +475,15 @@ spec:
 
         # changed_steps comes in as a JSON array `[{"name":"...","path":"..."},...]`
         # Loop over each and yq-patch the matching template's container.image.
+        # Force JSON input mode and YAML scalar output, then defensively strip
+        # any leftover wrapping double-quotes — the previous form leaked
+        # quoted scalars into the constructed image tag and broke the patch
+        # call with "invalid input text 'config-validatio...'" (2026-05-02).
         echo '{{`{{inputs.parameters.changed_steps}}`}}' > /tmp/changed.json
-        STEPS_LEN=$(yq e -o=json '.' /tmp/changed.json | yq e 'length' -)
+        STEPS_LEN=$(yq -p=json -o=yaml 'length' /tmp/changed.json)
         i=0
         while [ "$i" -lt "$STEPS_LEN" ]; do
-          STEP_NAME=$(yq e ".[$i].name" /tmp/changed.json)
+          STEP_NAME=$(yq -p=json -o=yaml ".[$i].name" /tmp/changed.json | tr -d '"')
           NEW_IMAGE="${REGISTRY}/${IMAGE_REPO}:${STEP_NAME}-${IMAGE_TAG}"
           echo "Patching step '${STEP_NAME}' → ${NEW_IMAGE}"
           yq e -i \
