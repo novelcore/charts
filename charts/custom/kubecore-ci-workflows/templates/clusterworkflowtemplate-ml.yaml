@@ -387,16 +387,31 @@ spec:
 
         # Each ML step has Dockerfile at <step_path>/Dockerfile and uses
         # <step_path> as build context — kubeline.yaml's contract.
-        # --insecure / --skip-tls-verify: Zot uses HTTP inside the cluster.
-        # --single-snapshot + --snapshot-mode=redo: one consolidated layer
-        #   instead of one-per-instruction; cuts snapshot time and image size.
-        # --cleanup: delete intermediate layer files after push. Critical
-        #   for fat ML images (PyTorch+CUDA ≈ 23GiB peak ephemeral) on GKE
-        #   nodes with ~18GiB allocatable disk — without --cleanup the pod
-        #   gets evicted by kubelet for ephemeral-storage pressure.
-        # --use-new-run: lower-memory snapshot algorithm.
-        # --compressed-caching=false: trades RAM for less disk; better for
-        #   our scenario where disk is the binding constraint, not RAM.
+        #
+        # Kaniko strategy for fat ML images (#332):
+        # --cache=true + --cache-repo: layer-level remote cache in Zot.
+        #   First build of model-training (PyTorch + CUDA, ~23 GiB) takes
+        #   the full snapshot wall (~50 min on pd-standard). Every
+        #   subsequent build hits cache for the heavy RUN layers and only
+        #   snapshots the small COPY app/ layer → seconds, not minutes.
+        # --cache-copy-layers + --cache-run-layers: cache both layer kinds.
+        # --snapshot-mode=time: mtime-based change detection. Cheaper than
+        #   redo (full re-hash) on the small per-commit delta layer.
+        # --single-snapshot was the previous trap — it forced one
+        #   monolithic post-build snapshot of the *entire* final
+        #   filesystem, defeating layer-level caching entirely. Removed.
+        # --cleanup: drop intermediate layer files after push (kept).
+        # --use-new-run + --compressed-caching=false: lower-memory
+        #   snapshot algorithm; better for disk-bound nodes (kept).
+        # --insecure / --skip-tls-verify: Zot serves HTTP in-cluster.
+        #
+        # The cache repo is a separate path in Zot
+        # ({org}/{app}/__kaniko-cache__) so it doesn't collide with
+        # actual app image tags. Kaniko keys cache entries by Dockerfile
+        # instruction hash, so two apps that happen to have an identical
+        # RUN pip install torch line do NOT share cache (different repo
+        # paths), which avoids cross-tenant cache poisoning.
+        CACHE_REPO="${REGISTRY}/${IMAGE_REPO}/__kaniko-cache__"
         /kaniko/executor \
           --context="/workspace/repo/${STEP_PATH}" \
           --dockerfile="/workspace/repo/${STEP_PATH}/Dockerfile" \
@@ -406,8 +421,11 @@ spec:
           --build-arg="VERSION=${IMAGE_TAG}" \
           --insecure \
           --skip-tls-verify \
-          --single-snapshot \
-          --snapshot-mode=redo \
+          --cache=true \
+          --cache-repo="${CACHE_REPO}" \
+          --cache-copy-layers \
+          --cache-run-layers \
+          --snapshot-mode=time \
           --cleanup \
           --use-new-run \
           --compressed-caching=false
