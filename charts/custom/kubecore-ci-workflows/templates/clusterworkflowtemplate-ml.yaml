@@ -82,6 +82,18 @@ spec:
     - name: image_repository
       value: ""
     - name: registry_url
+      # Registry URL written into the WorkflowTemplate's container.image
+      # by patch-wft. Must be a hostname the workload-cluster kubelet can
+      # resolve from its host network — typically the NodePort URL
+      # (e.g. localhost:30500 if Zot is on a NodePort and we want
+      # node-local routing), NOT the in-cluster service DNS.
+      value: ""
+    - name: build_registry_url
+      # Registry URL kaniko pushes layers to (--destination + auth).
+      # Must be a hostname the build-push pod can reach from inside
+      # the cluster network — typically the in-cluster service DNS
+      # (zot.zot-registry.svc.cluster.local:5000). Falls back to
+      # registry_url if empty (pre-0.9.7 compatibility).
       value: ""
     - name: gitops_repository
     - name: gitops_branch
@@ -344,13 +356,16 @@ spec:
       args:
       - |
         set -e
-        REGISTRY="{{`{{workflow.parameters.registry_url}}`}}"
+        # Use build_registry_url (in-cluster service DNS) for kaniko's
+        # docker auth entry — that's the URL kaniko pushes to. Falls
+        # back to registry_url for pre-0.9.7 callers that only pass one.
+        REGISTRY="{{`{{workflow.parameters.build_registry_url}}`}}"
+        if [ -z "$REGISTRY" ]; then REGISTRY="{{`{{workflow.parameters.registry_url}}`}}"; fi
         REG_USER=$(cat /etc/registry-auth/username)
         REG_PASS=$(cat /etc/registry-auth/password)
         AUTH=$(printf '%s:%s' "${REG_USER}" "${REG_PASS}" | base64 -w0)
         # Kaniko reads /kaniko/.docker/config.json. Write the auth entry
-        # for the cluster-internal Zot URL (which is what BuildKit pushed
-        # to and what kubelet pulls from).
+        # for the in-cluster Zot URL kaniko pushes to.
         mkdir -p /kaniko/.docker
         cat > /kaniko/.docker/config.json <<EOF
         {"auths":{"${REGISTRY}":{"auth":"${AUTH}"}}}
@@ -371,7 +386,12 @@ spec:
       - |
         set -e
 
-        REGISTRY="{{`{{workflow.parameters.registry_url}}`}}"
+        # Build-side registry: where kaniko pushes layers + cache. Must be
+        # reachable from inside the pod network (in-cluster service DNS).
+        # Falls back to registry_url for pre-0.9.7 callers, then to the
+        # chart's internalUrl value.
+        REGISTRY="{{`{{workflow.parameters.build_registry_url}}`}}"
+        if [ -z "$REGISTRY" ]; then REGISTRY="{{`{{workflow.parameters.registry_url}}`}}"; fi
         if [ -z "$REGISTRY" ]; then REGISTRY="{{ .Values.registry.internalUrl }}"; fi
         IMAGE_REPO="{{`{{workflow.parameters.image_repository}}`}}"
         if [ -z "$IMAGE_REPO" ]; then
