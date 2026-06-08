@@ -12,6 +12,7 @@ rules:
   resources:
   - configmaps
   - secrets
+  - serviceaccounts
   verbs:
   - create
   - delete
@@ -33,17 +34,6 @@ rules:
   - namespaces
   verbs:
   - create
-  - get
-  - list
-  - patch
-  - update
-- apiGroups:
-  - ""
-  resources:
-  - serviceaccounts
-  verbs:
-  - create
-  - delete
   - get
   - list
   - patch
@@ -77,12 +67,17 @@ rules:
 - apiGroups:
   - aws.m.upbound.io
   - gcp.m.upbound.io
-  - kubernetes.crossplane.io
+  - helm.m.crossplane.io
+  - kubernetes.m.crossplane.io
   resources:
   - providerconfigs
   verbs:
+  - create
+  - delete
   - get
   - list
+  - patch
+  - update
   - watch
 - apiGroups:
   - aws.provider.platform.kubecore.io
@@ -108,6 +103,8 @@ rules:
   - providerconfigs
   - resourcegroups
   verbs:
+  - create
+  - delete
   - get
   - list
   - patch
@@ -175,6 +172,25 @@ rules:
   - update
   - watch
 - apiGroups:
+  - dns.gcp.m.upbound.io
+  resources:
+  - managedzones
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - dns.gcp.m.upbound.io
+  resources:
+  - recordsets
+  verbs:
+  - create
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
   - ec2.aws.m.upbound.io
   resources:
   - eips
@@ -215,6 +231,7 @@ rules:
 - apiGroups:
   - eks.aws.m.upbound.io
   resources:
+  - clusters
   - nodegroups
   verbs:
   - get
@@ -308,19 +325,6 @@ rules:
   - update
   - watch
 - apiGroups:
-  - helm.m.crossplane.io
-  - kubernetes.m.crossplane.io
-  resources:
-  - providerconfigs
-  verbs:
-  - create
-  - delete
-  - get
-  - list
-  - patch
-  - update
-  - watch
-- apiGroups:
   - iam.aws.m.upbound.io
   resources:
   - policies
@@ -367,6 +371,14 @@ rules:
   - list
   - patch
   - update
+  - watch
+- apiGroups:
+  - kubernetes.crossplane.io
+  resources:
+  - providerconfigs
+  verbs:
+  - get
+  - list
   - watch
 - apiGroups:
   - kubernetes.crossplane.io
@@ -546,6 +558,17 @@ rules:
   - get
   - list
   - patch
+  - update
+  - watch
+- apiGroups:
+  - team.github.m.upbound.io
+  resources:
+  - members
+  - teammemberships
+  - teams
+  verbs:
+  - get
+  - list
   - update
   - watch
 {{- end -}}
