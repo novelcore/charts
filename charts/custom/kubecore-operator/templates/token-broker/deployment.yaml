@@ -101,7 +101,9 @@ spec:
       tolerations:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      {{- if .Values.registry.createImagePullSecret }}
+      {{- if .Values.registry.imagePullSecretName }}
+      # Attach the pull secret whenever a name is set — independent of who creates it
+      # (mirrors manager.yaml). Lets the broker reference an externally-managed Secret.
       imagePullSecrets:
         - name: {{ .Values.registry.imagePullSecretName }}
       {{- end }}

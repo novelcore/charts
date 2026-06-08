@@ -66,7 +66,10 @@ spec:
         {{- toYaml .Values.controllerManager.securityContext | nindent 8 }}
       serviceAccountName: {{ .Values.controllerManager.serviceAccountName }}
       terminationGracePeriodSeconds: {{ .Values.controllerManager.terminationGracePeriodSeconds }}
-      {{- if .Values.registry.createImagePullSecret }}
+      {{- if .Values.registry.imagePullSecretName }}
+      # Attach the pull secret whenever a name is set — independent of who creates it.
+      # createImagePullSecret only controls whether THIS chart creates the Secret;
+      # an externally-managed Secret of this name is referenced just the same.
       imagePullSecrets:
       - name: {{ .Values.registry.imagePullSecretName }}
       {{- end }}
