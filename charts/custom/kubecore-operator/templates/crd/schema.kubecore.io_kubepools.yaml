@@ -100,6 +100,15 @@ spec:
                                     platform.kubecore.io/nodegroup-type label that KubeApps target via
                                     nodeSelector. The Tier (cpu | gpu) drives default labels and toleration
                                     requirements on the WorkflowTemplate.
+
+                                    The CEL rule below is the data-integrity guard for #357/#361: spot
+                                    pricing (preemptible:true) is admitted ONLY on classes explicitly
+                                    declared computeProfile: ephemeral-training. Because computeProfile
+                                    defaults to stateful-serving, any class that sets preemptible:true
+                                    without an explicit ephemeral-training profile is REJECTED at admission
+                                    — including pre-existing classes from before this field existed, which
+                                    is the exact 2026-06-03 preemptible-reclaim hazard. gke.go enforces the
+                                    same invariant defensively even if admission is bypassed.
                                   properties:
                                     computeProfile:
                                       default: stateful-serving
@@ -399,6 +408,15 @@ spec:
                                     platform.kubecore.io/nodegroup-type label that KubeApps target via
                                     nodeSelector. The Tier (cpu | gpu) drives default labels and toleration
                                     requirements on the WorkflowTemplate.
+
+                                    The CEL rule below is the data-integrity guard for #357/#361: spot
+                                    pricing (preemptible:true) is admitted ONLY on classes explicitly
+                                    declared computeProfile: ephemeral-training. Because computeProfile
+                                    defaults to stateful-serving, any class that sets preemptible:true
+                                    without an explicit ephemeral-training profile is REJECTED at admission
+                                    — including pre-existing classes from before this field existed, which
+                                    is the exact 2026-06-03 preemptible-reclaim hazard. gke.go enforces the
+                                    same invariant defensively even if admission is bypassed.
                                   properties:
                                     computeProfile:
                                       default: stateful-serving
@@ -574,6 +592,15 @@ spec:
                         description: Region is the GCP region where the GKE cluster
                           will be created (e.g., europe-west1).
                         minLength: 1
+                        type: string
+                      zone:
+                        description: |-
+                          Zone optionally pins the zone for a zonal (non-production) GKE cluster, e.g.
+                          "us-central1-a". When empty, the operator derives region + "-c" by default.
+                          Set this to escape a GCE_STOCKOUT (capacity shortage) in the default "-c"
+                          zone without changing the region. Must belong to spec Region. Ignored for
+                          production (regional) clusters, which span all zones in the region.
+                        pattern: ^[a-z]+-[a-z0-9]+-[a-z]$
                         type: string
                     required:
                     - cluster
@@ -988,6 +1015,27 @@ spec:
                       MLConfig fine-tunes which ML components are provisioned when ML is true.
                       When nil, all default to true (backward compatible). Set to false to skip provisioning a component.
                     properties:
+                      hpc:
+                        description: |-
+                          HPC declares that this pool can burst ML pipeline steps to an external HPC
+                          target (e.g. MeluXina). Absent ⇒ no HPC, ever. When enabled, the operator
+                          deploys the bridge cross-cluster (later PRD) and flips status.hpc.ready;
+                          KubeApp WorkflowTemplates then render the HPC target step (Derive gating).
+                          PRD-MELUXINA-IO-001.
+                        properties:
+                          enabled:
+                            description: |-
+                              Enabled turns on HPC bursting for this pool. Absent/false ⇒ no HPC step is
+                              ever rendered into dependent WorkflowTemplates.
+                            type: boolean
+                          provider:
+                            description: |-
+                              Provider selects which org-level HPC tenancy to use. "meluxina" maps to
+                              KubeOrg.spec.meluxinaConfig. Only one provider is implemented today.
+                            enum:
+                            - meluxina
+                            type: string
+                        type: object
                       mlflow:
                         description: Mlflow deploys MLflow (Postgres backend, optional
                           S3 artifacts). Default true.
@@ -1379,6 +1427,23 @@ spec:
                     description: SecretName is the AWS Secrets Manager key name for
                       OIDC credentials
                     type: string
+                type: object
+              hpc:
+                description: |-
+                  HPC reports readiness of the external HPC burst bridge (e.g. MeluXina) when
+                  spec.features.mlConfig.hpc.enabled. Source of truth for Derive-gated
+                  WorkflowTemplate rendering: dependent KubeApps render the HPC target step
+                  only when HPC.Ready is true. PRD-MELUXINA-IO-001.
+                properties:
+                  endpoint:
+                    description: |-
+                      Endpoint is the in-cluster address pipeline steps use to reach the bridge
+                      (e.g. "slurm-proxy-svc:8888").
+                    type: string
+                  ready:
+                    description: Ready is true once the bridge Release and rotating-JWT
+                      secret are healthy.
+                    type: boolean
                 type: object
               kubernetesVersion:
                 description: KubernetesVersion is the requested Kubernetes version

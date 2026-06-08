@@ -347,12 +347,28 @@ spec:
                           Enabled turns SSO on for this service. When false (or block omitted),
                           the composition falls back to the chart's native admin-password auth.
                         type: boolean
+                      groupsClaim:
+                        description: |-
+                          GroupsClaim is the OIDC token claim the service's auth layer reads group
+                          membership from. For MLflow's mlflow-oidc-auth plugin this maps to
+                          OIDC_GROUPS_ATTRIBUTE and must match the Zitadel Action's emitted claim
+                          (default "urn:mlflow:groups", carrying kubeproject:{project}:{role} groups).
+                          Empty ⇒ the composition/plugin default. PRD-240 KubeTeam→MLflow RBAC.
+                        type: string
                       secretName:
                         description: |-
                           SecretName is the cloud Secret Manager key holding OIDC_CLIENT_ID,
                           OIDC_CLIENT_SECRET, and (where applicable) SECRET_KEY/COOKIE_SECRET.
                           The composition's ExternalSecret pulls from the org-level
                           ClusterSecretStore at key SecretName.
+                        type: string
+                      serviceUserSecretName:
+                        description: |-
+                          ServiceUserSecretName is the cloud Secret Manager key holding the
+                          programmatic service-user credentials (MLFLOW_TRACKING_USERNAME + access
+                          token) the operator mints so pipeline clients authenticate via the MLflow
+                          basic-auth protocol with zero code change. Optional — when unset, only
+                          interactive browser SSO is wired up.
                         type: string
                     type: object
                   mlflowOIDC:
@@ -373,12 +389,28 @@ spec:
                           Enabled turns SSO on for this service. When false (or block omitted),
                           the composition falls back to the chart's native admin-password auth.
                         type: boolean
+                      groupsClaim:
+                        description: |-
+                          GroupsClaim is the OIDC token claim the service's auth layer reads group
+                          membership from. For MLflow's mlflow-oidc-auth plugin this maps to
+                          OIDC_GROUPS_ATTRIBUTE and must match the Zitadel Action's emitted claim
+                          (default "urn:mlflow:groups", carrying kubeproject:{project}:{role} groups).
+                          Empty ⇒ the composition/plugin default. PRD-240 KubeTeam→MLflow RBAC.
+                        type: string
                       secretName:
                         description: |-
                           SecretName is the cloud Secret Manager key holding OIDC_CLIENT_ID,
                           OIDC_CLIENT_SECRET, and (where applicable) SECRET_KEY/COOKIE_SECRET.
                           The composition's ExternalSecret pulls from the org-level
                           ClusterSecretStore at key SecretName.
+                        type: string
+                      serviceUserSecretName:
+                        description: |-
+                          ServiceUserSecretName is the cloud Secret Manager key holding the
+                          programmatic service-user credentials (MLFLOW_TRACKING_USERNAME + access
+                          token) the operator mints so pipeline clients authenticate via the MLflow
+                          basic-auth protocol with zero code change. Optional — when unset, only
+                          interactive browser SSO is wired up.
                         type: string
                     type: object
                   pipelines:
@@ -919,6 +951,13 @@ spec:
                         description: ProjectID is the Zitadel project the app belongs
                           to.
                         type: string
+                      rbacSeeded:
+                        description: |-
+                          RBACSeeded indicates the operator has seeded MLflow group permissions for
+                          this project's (project,role) groups via the mlflow-oidc-auth plugin API
+                          (KubeTeam role → MLflow permission: admin=MANAGE, ops/dev=EDIT, business=READ).
+                          MLflow-only; LakeFS OSS has no per-user RBAC. PRD-240 KubeTeam→MLflow RBAC.
+                        type: boolean
                       ready:
                         description: |-
                           Ready indicates the OIDC app is created and credentials are pushed
@@ -927,6 +966,12 @@ spec:
                       secretName:
                         description: SecretName is the cloud Secret Manager key holding
                           OIDC credentials.
+                        type: string
+                      serviceUserSecretName:
+                        description: |-
+                          ServiceUserSecretName is the cloud Secret Manager key holding the minted
+                          pipeline service-user credentials (username + access token) for the MLflow
+                          basic-auth protocol. Empty until the operator provisions the service user.
                         type: string
                     type: object
                   lakeFSRepository:
@@ -963,6 +1008,13 @@ spec:
                         description: ProjectID is the Zitadel project the app belongs
                           to.
                         type: string
+                      rbacSeeded:
+                        description: |-
+                          RBACSeeded indicates the operator has seeded MLflow group permissions for
+                          this project's (project,role) groups via the mlflow-oidc-auth plugin API
+                          (KubeTeam role → MLflow permission: admin=MANAGE, ops/dev=EDIT, business=READ).
+                          MLflow-only; LakeFS OSS has no per-user RBAC. PRD-240 KubeTeam→MLflow RBAC.
+                        type: boolean
                       ready:
                         description: |-
                           Ready indicates the OIDC app is created and credentials are pushed
@@ -971,6 +1023,12 @@ spec:
                       secretName:
                         description: SecretName is the cloud Secret Manager key holding
                           OIDC credentials.
+                        type: string
+                      serviceUserSecretName:
+                        description: |-
+                          ServiceUserSecretName is the cloud Secret Manager key holding the minted
+                          pipeline service-user credentials (username + access token) for the MLflow
+                          basic-auth protocol. Empty until the operator provisions the service user.
                         type: string
                     type: object
                   namespace:

@@ -139,6 +139,14 @@ spec:
                 description: AzureConfig contains the Azure configuration for the
                   provider
                 properties:
+                  clientId:
+                    description: |-
+                      ClientID is the UAMI (User-Assigned Managed Identity) client UUID used by the
+                      OIDCTokenFile ProviderConfig that the operator creates in the org namespace.
+                      Required when the operator creates the ProviderConfig (D-03/D-07); the reconciler
+                      returns an error if this field is empty at ProviderConfig creation time.
+                    pattern: ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$
+                    type: string
                   dns:
                     description: |-
                       DNS holds the DNS ownership declaration for this provider.
@@ -873,6 +881,12 @@ spec:
                 description: ReconciliationAttempts tracks the number of reconciliation
                   attempts for backoff
                 type: integer
+              zitadelMachineUserId:
+                description: |-
+                  ZitadelMachineUserId is the deterministic id of this org's keyless Zitadel machine
+                  user (the JWT `sub` every cloud-federation trust pins). Published by the Reconciling
+                  phase; consumed by the in-cluster token-broker to impersonate this org (F-14, C1.5-a).
+                type: string
             type: object
         required:
         - spec
