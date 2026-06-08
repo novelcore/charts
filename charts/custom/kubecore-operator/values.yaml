@@ -15,12 +15,15 @@ controllerManager:
       - "--metrics-bind-address=:8443"
       - "--health-probe-bind-address=:8081"
     # Environment variables required by the operator
-    # Note: EKS_CLUSTER_ID must be exactly 32 characters
     env:
-      # EKS Control Plane Configuration
-      EKS_CLUSTER_ID: "KINDCLUSTER123456789012345678901"
-      EKS_REGION: "us-east-1"
-      KUBERNETES_PROVIDER_CONFIG: "kubesys-enhanced"
+      # Control Plane Configuration
+      CONTROL_PLANE_CLOUD: "aws"
+      CONTROL_PLANE_CLUSTER_ID: "kind-cluster-placeholder"
+      CONTROL_PLANE_REGION: "us-east-1"
+      # CONTROL_PLANE_OIDC_ISSUER_ID is an optional AWS-only override. When unset,
+      # the operator resolves it automatically via AWS DescribeCluster. Not required
+      # (and has no effect) when CONTROL_PLANE_CLOUD is set to "gcp".
+      # CONTROL_PLANE_OIDC_ISSUER_URL: "https://container.googleapis.com/v1/projects/<proj>/locations/<loc>/clusters/<cluster>"  # REQUIRED for Azure ESO (per-org serviceAccountRef FIC issuer, PRD-352 Option A)
 
       # Zitadel Integration Configuration
       # Set ZITADEL_ENABLED=true to enable Zitadel identity management integration
@@ -29,6 +32,12 @@ controllerManager:
       ZITADEL_ENABLED: "true"
       ZITADEL_SECRET_NAME: "zitadel-credentials"
       ZITADEL_SECRET_NAMESPACE: "kubecore-system"
+
+      # ZITADEL_WIF_POOL: Workload Identity Federation pool name used by the GCP
+      # composition's external_account credential. Defaults to "kubecore-zitadel".
+      ZITADEL_WIF_POOL: "kubecore-zitadel"
+      # ZITADEL_WIF_PROVIDER: WIF provider name within the pool. Defaults to "kubecore-zitadel".
+      ZITADEL_WIF_PROVIDER: "kubecore-zitadel"
     resources:
       limits:
         cpu: 500m
@@ -96,6 +105,130 @@ certmanager:
 networkPolicy:
   enable: false
 
+# [TOKEN BROKER]: In-cluster Zitadel JWT token-broker (F-11, PRD-352).
+# When enabled, deploys a sidecar Deployment (same operator image, --mode=broker)
+# that serves per-org JWTs at GET /token/{org} over ClusterIP :8080.
+# ESO (workloadIdentityFederation.externalTokenEndpoint) and provider-gcp
+# (external_account credential_source.url) consume tokens from this endpoint.
+tokenBroker:
+  # enabled: set to true to deploy the broker Deployment, Service, SA, and RBAC.
+  # Default false — must be explicitly enabled per environment.
+  enabled: false
+
+  # baseURL: override the TOKEN_BROKER_URL injected into the manager container.
+  # When empty (default), the chart derives the URL automatically as:
+  #   http://kubecore-operator-token-broker.<release-namespace>.svc.cluster.local:8080
+  # Only takes effect when tokenBroker.enabled=true. When enabled=false, no
+  # TOKEN_BROKER_URL env var is set and the GCP SecretStore is intentionally skipped.
+  baseURL: ""
+
+  # zitadelIssuerURL: full HTTPS base URL of the Zitadel instance.
+  # REQUIRED when enabled=true. Feeds ImpersonationConfig.Issuer.
+  # Example: "https://access.platform.kaos-labs.org"
+  zitadelIssuerURL: ""
+
+  # brokerAppClientId: confidential broker-application client id in Zitadel.
+  # REQUIRED when enabled=true. This id is also the `aud` claim in every minted
+  # token (RFC-8693 forces aud = the exchanging app's clientId). Non-secret —
+  # every cloud trust must pin this as the allowed audience.
+  # Created by scripts/setup-zitadel-broker-identity.sh (Phase 1, idempotent).
+  brokerAppClientId: ""
+
+  # actorClientId: actor service-user's client-credentials id in Zitadel.
+  # REQUIRED when enabled=true. The actor must hold the Zitadel IAM_ADMIN_IMPERSONATOR
+  # role at the instance level. Non-secret.
+  # Created by scripts/setup-zitadel-broker-identity.sh (Phase 1, idempotent).
+  actorClientId: ""
+
+  # impersonationSecretName: name of the Kubernetes Secret holding the broker's
+  # sensitive credentials. The Secret must contain keys:
+  #   appClientSecret  — broker-app client secret (SENSITIVE)
+  #   actorClientSecret — actor service-user secret (SENSITIVE)
+  # This Secret is the SINGLE broker credential replacing N per-org machine-key
+  # Secrets. It is created out-of-band by scripts/setup-zitadel-broker-identity.sh
+  # and must exist in the release namespace before the broker Deployment starts.
+  impersonationSecretName: "kubecore-operator-broker-impersonator"
+
+  # replicas: number of broker replicas. 1 is sufficient; the broker is stateless
+  # (cache is per-process; token re-mint on restart adds one Zitadel round-trip).
+  replicas: 1
+
+  # serviceAccountName: the SA the broker pod runs as.
+  # The corresponding ClusterRole/ClusterRoleBinding are created by this chart.
+  serviceAccountName: kubecore-operator-token-broker
+
+  # image: override the broker container image. Defaults to the operator image.
+  image:
+    repository: ""   # inherits controllerManager.container.image.repository
+    tag: ""          # inherits controllerManager.container.image.tag
+    pullPolicy: ""   # inherits controllerManager.container.image.pullPolicy
+
+  # resources: broker container resource requests/limits.
+  resources:
+    requests:
+      cpu: 10m
+      memory: 32Mi
+    limits:
+      cpu: 100m
+      memory: 64Mi
+
+  # nodeSelector: node labels required to schedule the broker pod.
+  # The broker holds key material and is a critical singleton workload; pin it to
+  # system nodes using the same selectors as the operator Deployment.
+  # Default empty — no affinity constraint. Override per environment:
+  #   nodeSelector:
+  #     platform.kubecore.io/system: "true"
+  nodeSelector: {}
+
+  # tolerations: pod tolerations for scheduling on tainted system nodes.
+  # Default empty. Override per environment to match the system node taint:
+  #   tolerations:
+  #     - key: "kubecore.eu/computation-type"
+  #       operator: Equal
+  #       value: kubecore-system
+  #       effect: NoSchedule
+  tolerations: []
+
+  # networkPolicy: controls the NetworkPolicy that restricts broker ingress to
+  # ESO and provider-gcp pods. Enabled by default when tokenBroker.enabled=true.
+  #
+  # SELECTOR STRATEGY (confirmed against gke_kaos-dev-gcp_europe-west1_kubecore-prod-kaos-v2-gke):
+  #   ESO pods (namespace external-secrets):
+  #     app.kubernetes.io/instance: external-secrets
+  #     app.kubernetes.io/name: external-secrets
+  #   provider-gcp pods (namespace crossplane-system):
+  #     pkg.crossplane.io/provider: upbound-provider-family-gcp
+  #
+  # The namespace selectors require the target namespaces to carry the label
+  # "kubecore.io/token-broker-client: true" — add it once per cluster:
+  #   kubectl label namespace external-secrets  kubecore.io/token-broker-client=true
+  #   kubectl label namespace crossplane-system kubecore.io/token-broker-client=true
+  networkPolicy:
+    enabled: true
+
+    # esoNamespaceSelector: label selector for the ESO namespace.
+    esoNamespaceSelector:
+      kubecore.io/token-broker-client: "true"
+
+    # esoPodSelector: label selector for ESO pods within the ESO namespace.
+    # Defaults to {} (match all pods in the namespace). The namespace label
+    # kubecore.io/token-broker-client=true is the primary discriminator. Override
+    # to restrict to the ESO controller pod once label stability is confirmed.
+    esoPodSelector: {}
+
+    # crossplaneNamespaceSelector: label selector for the crossplane-system namespace.
+    crossplaneNamespaceSelector:
+      kubecore.io/token-broker-client: "true"
+
+    # crossplanePodSelector: label selector for Crossplane provider pods within
+    # crossplane-system. Defaults to {} (match all pods in the namespace) because
+    # the actual GCP Secret Manager / IAM calls come from sub-provider pods
+    # (upbound-provider-gcp-secretmanager, -cloudplatform, etc.) that carry their
+    # own pkg.crossplane.io/provider value — not the family pod label. The namespace
+    # label kubecore.io/token-broker-client=true is the primary discriminator; the
+    # pod selector can be narrowed here once sub-provider labels are confirmed stable.
+    crossplanePodSelector: {}
+
 # [REGISTRY]: Container registry configuration
 registry:
   # Registry URL (e.g., novelcore.azurecr.io)
@@ -111,159 +244,23 @@ registry:
   # Name of the imagePullSecret (will be created in the release namespace)
   imagePullSecretName: "kubecore-operator-registry-secret"
 
-# [CROSSPLANE]: Crossplane dependency configuration
-crossplane:
-  # Enable Crossplane installation as a dependency
-  # IMPORTANT: Due to Helm subchart namespace inheritance, Crossplane will be installed
-  # in the same namespace as this chart (not in crossplane-system).
-  # For production deployments, it is STRONGLY RECOMMENDED to:
-  #   1. Install Crossplane separately in crossplane-system namespace first
-  #   2. Set enabled: false here
-  # To install separately:
-  #   helm install crossplane crossplane-stable/crossplane \
-  #     --namespace crossplane-system --create-namespace --version 2.1.0
+# [COMPOSITIONS]: Crossplane Configuration package settings.
+# The compositions ship as an OCI Configuration package versioned ATOMICALLY with
+# the operator. CI stamps the exact ACR ref + version into `package` at publish time;
+# on the v2 branch it holds the 0.0.0-dev placeholder below.
+compositions:
   enabled: true
-  # Namespace parameter (only affects Crossplane's internal configuration, not installation location)
-  namespace: crossplane-system
-  # Additional Crossplane values can be passed through
-  # These will be forwarded to the Crossplane subchart
-  # See charts/external/crossplane/values.yaml for available options
-
-# [EXTERNAL SECRETS OPERATOR]: ESO dependency configuration
-externalSecrets:
-  # Enable External Secrets Operator installation as a dependency
-  # IMPORTANT: Due to Helm subchart namespace inheritance, ESO will be installed
-  # in the same namespace as this chart.
-  # For production deployments, it is STRONGLY RECOMMENDED to:
-  #   1. Install External Secrets Operator separately in its own namespace first
-  #   2. Set enabled: false here
-  # To install separately:
-  #   helm install external-secrets external-secrets/external-secrets \
-  #     --namespace external-secrets-system --create-namespace --version 1.0.0
-  enabled: true
-  # Additional ESO values can be passed through
-  # These will be forwarded to the external-secrets subchart
-  # See https://external-secrets.io/latest/introduction/getting-started/ for available options
-
-# [CROSSPLANE FUNCTIONS]: Crossplane functions configuration
-crossplaneFunctions:
-  # Enable installation of Crossplane functions
-  # Set to false if Crossplane functions are already installed in your cluster
-  enabled: true
-  
-  # Go Templating Function configuration
-  goTemplating:
-    # Function package
-    package: "xpkg.crossplane.io/crossplane-contrib/function-go-templating:v0.10.0"
-    # Optional runtime config reference
-    runtimeConfigRef: {}
-  
-  # Auto Ready Function configuration
-  autoReady:
-    # Function package
-    package: "xpkg.upbound.io/crossplane-contrib/function-auto-ready:v0.5.0"
-    # Optional runtime config reference
-    runtimeConfigRef: {}
-  
-  # Patch and Transform Function configuration
-  patchAndTransform:
-    # Function package
-    package: "xpkg.upbound.io/upbound/function-patch-and-transform:v0.9.0"
-    # Optional runtime config reference
-    runtimeConfigRef: {}
-  
-  # Sequencer Function configuration
-  sequencer:
-    # Function package
-    package: "xpkg.upbound.io/crossplane-contrib/function-sequencer:v0.2.3"
-    # Optional runtime config reference
-    runtimeConfigRef: {}
-  
-  # Environment Configs Function configuration
-  environmentConfigs:
-    # Function package
-    package: "xpkg.upbound.io/crossplane-contrib/function-environment-configs:v0.4.0"
-    # Optional runtime config reference
-    runtimeConfigRef: {}
-  
-  # Extra Resources Function configuration
-  extraResources:
-    # Function package
-    package: "xpkg.upbound.io/crossplane-contrib/function-extra-resources:v0.2.0"
-    # Optional runtime config reference
-    runtimeConfigRef: {}
-
-# [CROSSPLANE PROVIDERS]: Crossplane providers and provider configs configuration
-crossplaneProviders:
-  # Enable installation of Crossplane providers and provider configs
-  # Set to false if providers are already installed in your cluster
-  enabled: true
-  
-  # Kubernetes Provider configuration
-  kubernetes:
-    # Optional runtime config reference
-    runtimeConfigRef:
-      name: kubesys-admin-runtime
-  
-  # GitHub Provider configuration
-  github:
-    # Provider package
-    package: "ghcr.io/crossplane-contrib/provider-upjet-github:v0.19-provider-cache-testing-a3b6345"
-    # Optional runtime config reference
-    runtimeConfigRef: {}
-  
-  # Helm Provider configuration
-  helm:
-    # Optional runtime config reference
-    runtimeConfigRef: {}
-  
-  # Provider Configs configuration
-  providerConfigs:
-    # Kubernetes ProviderConfig name
-    kubernetes:
-      name: kubesys-enhanced
-    # AWS ProviderConfig configuration
-    aws:
-      name: aws-default
-      secretRef:
-        key: credentials
-        name: aws-secret
-        namespace: crossplane-system
-
-# [CROSSPLANE XRDs]: Crossplane Composite Resource Definitions (XRDs) configuration
-crossplaneXRDs:
-  # Enable installation of Crossplane XRDs
-  # Set to false if XRDs are already installed in your cluster
-  # XRDs define the custom resource APIs used by KubeCore platform compositions:
-  # - XAWSProvider: AWS infrastructure provisioning
-  # - XGitHubProvider: GitHub integration
-  # - XAWSNetwork: VPC and networking
-  # - XEKS: EKS cluster management
-  # - XKubeSystem: Platform system components
-  # - XGitHubProject: Project repository management
-  # - XKubEnv: Kubernetes environment (namespaces, quotas)
-  # - XGitHubApp: Application repository management
-  # - XK8sApp: Application deployment
-  # - XKubeAppTemplate: Application templates
-  # - XQualityGateInstance: Quality gate instances
-  # - XQualityGateTemplate: Quality gate templates
-  enabled: true
-
-# [CROSSPLANE COMPOSITIONS]: Crossplane Compositions configuration
-crossplaneCompositions:
-  # Enable installation of Crossplane Compositions
-  # Set to false if Compositions are already installed in your cluster
-  # Compositions implement the infrastructure provisioning logic for XRDs:
-  # - awsprovider: AWS infrastructure and IAM setup
-  # - githubprovider: GitHub provider integration
-  # - awsnetwork: VPC and networking infrastructure
-  # - eks: EKS cluster provisioning
-  # - kubesystem: Platform system installations
-  # - githubproject: GitHub repositories and teams
-  # - kubenv: Kubernetes namespaces and quotas
-  # - githubapp: Application repository management
-  # - k8sapp: Application deployments
-  # - kubeapptemplate: Application templates
-  # - qualitygate-template: Quality gate templates
-  # - qualitygate-instance: Quality gate instances
-  enabled: true
+  # OCI image for the kubecore-compositions Configuration package.
+  # CI overwrites this with novelcore.azurecr.io/kubecore/kubecore-compositions:vX.Y.Z
+  # at release. Required (must be non-empty) when compositions.enabled=true.
+  package: "novelcore.azurecr.io/kubecore/kubecore-compositions:v0.1.261"
+  # pullPolicy controls when Crossplane downloads the package.
+  # Options: IfNotPresent (default), Always, Never
+  pullPolicy: IfNotPresent
+  # packagePullSecrets: Crossplane resolves these in ITS OWN namespace
+  # (crossplane-system), NOT this chart's release namespace. The release-namespace
+  # ACR secret (registry.imagePullSecretName) is for kubelet operator/broker image
+  # pulls only and CANNOT satisfy this. Leave empty; kaos provisions the ACR pull
+  # secret (e.g. "acr-pull") in crossplane-system per the deployment contract.
+  packagePullSecrets: []
+  # - name: acr-pull

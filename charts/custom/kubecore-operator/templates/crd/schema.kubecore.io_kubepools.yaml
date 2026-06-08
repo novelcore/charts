@@ -1,8 +1,14 @@
+{{- if .Values.crd.enable }}
 ---
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
+  labels:
+    {{- include "chart.labels" . | nindent 4 }}
   annotations:
+    {{- if .Values.crd.keep }}
+    "helm.sh/resource-policy": keep
+    {{- end }}
     controller-gen.kubebuilder.io/version: v0.18.0
   name: kubepools.schema.kubecore.io
 spec:
@@ -12,7 +18,7 @@ spec:
     listKind: KubePoolList
     plural: kubepools
     singular: kubepool
-  scope: Cluster
+  scope: Namespaced
   versions:
   - additionalPrinterColumns:
     - jsonPath: .status.phase
@@ -21,13 +27,16 @@ spec:
     - jsonPath: .spec.kubeOrgRef
       name: KubeOrg
       type: string
-    - jsonPath: .spec.region
+    - jsonPath: .status.cloudProvider
+      name: Cloud Provider
+      type: string
+    - jsonPath: .status.region
       name: Region
       type: string
-    - jsonPath: .spec.cluster.type
+    - jsonPath: .status.clusterType
       name: Cluster Type
       type: string
-    - jsonPath: .spec.cluster.kubernetesVersion
+    - jsonPath: .status.kubernetesVersion
       name: K8s Version
       type: string
     - jsonPath: .metadata.creationTimestamp
@@ -58,48 +67,545 @@ spec:
           spec:
             description: KubePoolSpec defines the desired state of KubePool
             properties:
-              cluster:
-                description: Cluster defines the EKS cluster configuration
+              cloudProvider:
+                description: |-
+                  CloudProvider holds the cloud-provider-specific cluster configuration.
+                  Exactly one sub-spec (e.g., aws) must be set.
                 properties:
-                  kubernetesVersion:
-                    default: "1.35"
-                    description: KubernetesVersion specifies the Kubernetes version
-                      for the cluster
-                    pattern: ^[0-9]+\.[0-9]+$
-                    type: string
-                  system:
-                    description: System defines configuration for the system node
-                      group (kubecoresys)
+                  aws:
+                    description: |-
+                      AWS holds AWS-specific cluster configuration. Set this field to provision
+                      an EKS cluster on Amazon Web Services. Mutually exclusive with other providers.
                     properties:
-                      capacityType:
-                        default: SPOT
-                        description: CapacityType specifies the capacity type for
-                          system nodes
-                        enum:
-                        - ON_DEMAND
-                        - SPOT
+                      cluster:
+                        description: Cluster defines the EKS cluster configuration.
+                        properties:
+                          compute:
+                            description: |-
+                              Compute defines the catalog of CPU/GPU compute classes available to ML
+                              KubeApps on this cluster. See MLComputeConfig for semantics. AWS-side
+                              per-class Karpenter NodePool emission is a follow-up; the field is
+                              honoured by the type system today so KubeApp validation can pin
+                              classes that exist in the cluster catalog.
+                            properties:
+                              mlClasses:
+                                description: |-
+                                  MLClasses is the list of CPU and GPU classes the cluster exposes.
+                                  The operator provisions one NodePool per class; idle classes scale
+                                  to zero nodes.
+                                items:
+                                  description: |-
+                                    MLComputeClass declares one named compute class in the cluster catalog.
+                                    The Name becomes both the GKE NodePool name and the value of the
+                                    platform.kubecore.io/nodegroup-type label that KubeApps target via
+                                    nodeSelector. The Tier (cpu | gpu) drives default labels and toleration
+                                    requirements on the WorkflowTemplate.
+                                  properties:
+                                    computeProfile:
+                                      default: stateful-serving
+                                      description: |-
+                                        ComputeProfile declares the data-integrity posture of workloads that
+                                        run on this class, which gates whether spot (preemptible) pricing is
+                                        allowed:
+                                          - "ephemeral-training": stateless/checkpointed jobs that tolerate
+                                            mid-run eviction (the ONLY profile permitted to set
+                                            preemptible:true).
+                                          - "stateful-serving": serving pods holding model-weight / cache PVCs
+                                            whose eviction loses in-flight or local state (#361).
+                                          - "stateful-database": single-instance datastores (e.g. CNPG)
+                                            where preemption + write-in-flight risks corruption / total
+                                            loss (#357).
+                                        Defaults to "stateful-serving" so an un-annotated class can never be
+                                        scheduled on preemptible nodes — safety is the pool-wide default.
+                                      enum:
+                                      - ephemeral-training
+                                      - stateful-serving
+                                      - stateful-database
+                                      type: string
+                                    description:
+                                      description: |-
+                                        Description is shown in dashboard tooltips and in KubeApp validation
+                                        error messages. Keep it short — "n2-standard-8 (8 vCPU, 32 GiB) —
+                                        feature engineering / dataset transform".
+                                      maxLength: 200
+                                      type: string
+                                    diskSizeGb:
+                                      default: 50
+                                      description: |-
+                                        DiskSizeGb pins the per-node boot disk size. Bump for GPU
+                                        training (model checkpoints + dataset cache fill quickly).
+                                      format: int32
+                                      maximum: 2000
+                                      minimum: 20
+                                      type: integer
+                                    guestAccelerator:
+                                      description: |-
+                                        GuestAccelerator is required when Tier="gpu" on GCP. Its presence
+                                        and validity is checked by the operator's reconciling phase.
+                                      properties:
+                                        count:
+                                          description: |-
+                                            Count is the number of GPUs per node. Most classes use 1; multi-
+                                            GPU classes (e.g. 8×A100) use larger values bound by the machine
+                                            type's spec.
+                                          format: int32
+                                          maximum: 16
+                                          minimum: 1
+                                          type: integer
+                                        type:
+                                          description: |-
+                                            Type names the GCP accelerator (e.g. "nvidia-l4",
+                                            "nvidia-tesla-t4", "nvidia-tesla-a100", "nvidia-h100-80gb").
+                                            Must match GCP's accelerator catalog for the chosen MachineType.
+                                          pattern: ^nvidia-[a-z0-9-]+$
+                                          type: string
+                                      required:
+                                      - count
+                                      - type
+                                      type: object
+                                    machineType:
+                                      description: |-
+                                        MachineType is the GCP machine type (e.g. "n2-standard-8",
+                                        "g2-standard-4", "a2-highgpu-1g"). On AWS this field doubles as
+                                        the EC2 instance type ("m6i.large", "g5.xlarge"); the operator
+                                        adapter validates against the cloud's published catalog.
+                                      minLength: 2
+                                      type: string
+                                    maxNodeCount:
+                                      default: 4
+                                      description: |-
+                                        MaxNodeCount caps the autoscale ceiling for this class. Defaults
+                                        to 4 — small enough to prevent runaway spend, large enough for
+                                        most pipelines.
+                                      format: int32
+                                      maximum: 64
+                                      minimum: 1
+                                      type: integer
+                                    name:
+                                      description: |-
+                                        Name is the developer-facing class name (e.g. "cpu-balanced",
+                                        "gpu-l4-small"). Becomes the NodePool name and the
+                                        platform.kubecore.io/nodegroup-type label. Must be DNS-1035
+                                        compatible (lowercase, digits, hyphens; starts with a letter,
+                                        ends with a letter or digit).
+                                      maxLength: 40
+                                      minLength: 2
+                                      pattern: ^[a-z][a-z0-9-]*[a-z0-9]$
+                                      type: string
+                                    preemptible:
+                                      description: |-
+                                        Preemptible enables spot-tier pricing (~70% discount, eviction
+                                        risk). Only set true on classes that explicitly handle preemption
+                                        in their workflow steps. Admission rejects preemptible:true unless
+                                        ComputeProfile is "ephemeral-training" (#357/#361).
+                                      type: boolean
+                                    tier:
+                                      description: |-
+                                        Tier is "cpu" or "gpu". Drives default labels/taints and
+                                        determines whether GuestAccelerator is required.
+                                      enum:
+                                      - cpu
+                                      - gpu
+                                      type: string
+                                  required:
+                                  - machineType
+                                  - name
+                                  - tier
+                                  type: object
+                                  x-kubernetes-validations:
+                                  - message: preemptible:true is only allowed when
+                                      computeProfile is ephemeral-training (stateful-serving/stateful-database
+                                      classes must run on-demand to avoid data loss
+                                      on preemption)
+                                    rule: '!has(self.preemptible) || !self.preemptible
+                                      || self.computeProfile == ''ephemeral-training'''
+                                maxItems: 32
+                                type: array
+                            type: object
+                          kubernetesVersion:
+                            default: "1.35"
+                            description: KubernetesVersion specifies the Kubernetes
+                              version for the cluster
+                            pattern: ^[0-9]+\.[0-9]+$
+                            type: string
+                          system:
+                            description: System defines configuration for the system
+                              node group (kubecoresys)
+                            properties:
+                              capacityType:
+                                default: SPOT
+                                description: CapacityType specifies the capacity type
+                                  for system nodes
+                                enum:
+                                - ON_DEMAND
+                                - SPOT
+                                type: string
+                            type: object
+                          tags:
+                            additionalProperties:
+                              type: string
+                            description: Tags are additional tags to apply to the
+                              EKS cluster
+                            type: object
+                          type:
+                            allOf:
+                            - enum:
+                              - shared
+                              - dedicated
+                            - enum:
+                              - shared
+                              - dedicated
+                            description: Type specifies whether this is a shared or
+                              dedicated cluster
+                            type: string
+                        required:
+                        - kubernetesVersion
+                        - type
+                        type: object
+                      region:
+                        description: |-
+                          Region is the AWS region where the EKS cluster will be created.
+                          Must match one of the regions configured in the referenced KubeOrg.
+                        pattern: ^[a-z]{2}-[a-z]+-[0-9]{1}$
                         type: string
+                    required:
+                    - cluster
+                    - region
                     type: object
-                  tags:
-                    additionalProperties:
-                      type: string
-                    description: Tags are additional tags to apply to the EKS cluster
+                  azure:
+                    description: |-
+                      Azure holds Azure-specific cluster configuration. Set this field to
+                      provision an AKS cluster on Microsoft Azure. Mutually exclusive with
+                      other providers.
+                    properties:
+                      cluster:
+                        description: Cluster defines the AKS cluster configuration.
+                        properties:
+                          kubernetesVersion:
+                            default: "1.35"
+                            description: KubernetesVersion specifies the AKS version.
+                            pattern: ^[0-9]+\.[0-9]+$
+                            type: string
+                          private:
+                            description: Private enables private cluster mode (API
+                              server not exposed publicly).
+                            type: boolean
+                          system:
+                            description: System defines configuration for the system
+                              node pool (kubecsys per CON-AZ-03).
+                            properties:
+                              machineType:
+                                description: |-
+                                  MachineType specifies the Azure VM size for system nodes.
+                                  Default (operator-side): Standard_D2ds_v5.
+                                  Must be a Ddsv5 (or compatible local-SSD) family for ephemeral OS disk.
+                                type: string
+                              preemptible:
+                                description: |-
+                                  Preemptible overrides whether the system pool uses Spot priority. When
+                                  nil, the operator default applies (false / on-demand — system addons are
+                                  eviction-sensitive). Set explicitly only when the operator default is
+                                  not appropriate for your subscription's quota or stability needs.
+                                type: boolean
+                            type: object
+                          tags:
+                            additionalProperties:
+                              type: string
+                            description: Tags are additional Azure tags to apply to
+                              the AKS cluster.
+                            type: object
+                          tools:
+                            description: |-
+                              Tools defines configuration for the KubeCore tools node pool
+                              (kubecoresys). Presence of this field opts the cluster into the
+                              dual-pool architecture (D-AZ-12-7). When nil, legacy single-pool
+                              layout is used.
+                            properties:
+                              machineType:
+                                description: |-
+                                  MachineType specifies the Azure VM size for tools nodes.
+                                  Default (operator-side): Standard_D4ds_v5.
+                                  Must be a Ddsv5 (or compatible local-SSD) family for ephemeral OS disk.
+                                type: string
+                              maxNodes:
+                                default: 2
+                                description: MaxNodes is the maximum number of nodes
+                                  (autoscaler ceiling).
+                                format: int32
+                                minimum: 1
+                                type: integer
+                              minNodes:
+                                default: 1
+                                description: MinNodes is the minimum number of nodes
+                                  (autoscaler floor).
+                                format: int32
+                                minimum: 1
+                                type: integer
+                              preemptible:
+                                description: |-
+                                  Preemptible overrides whether the tools pool uses Spot priority. When
+                                  nil, the operator default applies (true / spot — dev-mode cost
+                                  optimization). Set false to use on-demand capacity (e.g. when the
+                                  subscription's LowPriorityCores quota is insufficient).
+                                type: boolean
+                            type: object
+                          type:
+                            allOf:
+                            - enum:
+                              - shared
+                              - dedicated
+                            - enum:
+                              - shared
+                              - dedicated
+                            description: Type specifies whether this is a shared or
+                              dedicated cluster.
+                            type: string
+                        required:
+                        - kubernetesVersion
+                        - type
+                        type: object
+                      region:
+                        description: Region is the Azure region where the AKS cluster
+                          will be created (e.g., westeurope).
+                        minLength: 1
+                        type: string
+                    required:
+                    - cluster
+                    - region
                     type: object
-                  type:
-                    allOf:
-                    - enum:
-                      - shared
-                      - dedicated
-                    - enum:
-                      - shared
-                      - dedicated
-                    description: Type specifies whether this is a shared or dedicated
-                      cluster
-                    type: string
-                required:
-                - kubernetesVersion
-                - type
+                  gcp:
+                    description: GCP holds GCP-specific cluster configuration. Mutually
+                      exclusive with other providers.
+                    properties:
+                      cluster:
+                        description: Cluster defines the GKE cluster configuration.
+                        properties:
+                          compute:
+                            description: |-
+                              Compute defines the catalog of CPU/GPU compute classes available to ML
+                              KubeApps on this cluster (PRD-247 D-03 follow-up). Each class becomes a
+                              dedicated GKE NodePool that autoscales from 0 — no nodes when idle.
+                              KubeApps pick by name via spec.k8sAppConfig.compute.{cpuClass,gpuClass}.
+                            properties:
+                              mlClasses:
+                                description: |-
+                                  MLClasses is the list of CPU and GPU classes the cluster exposes.
+                                  The operator provisions one NodePool per class; idle classes scale
+                                  to zero nodes.
+                                items:
+                                  description: |-
+                                    MLComputeClass declares one named compute class in the cluster catalog.
+                                    The Name becomes both the GKE NodePool name and the value of the
+                                    platform.kubecore.io/nodegroup-type label that KubeApps target via
+                                    nodeSelector. The Tier (cpu | gpu) drives default labels and toleration
+                                    requirements on the WorkflowTemplate.
+                                  properties:
+                                    computeProfile:
+                                      default: stateful-serving
+                                      description: |-
+                                        ComputeProfile declares the data-integrity posture of workloads that
+                                        run on this class, which gates whether spot (preemptible) pricing is
+                                        allowed:
+                                          - "ephemeral-training": stateless/checkpointed jobs that tolerate
+                                            mid-run eviction (the ONLY profile permitted to set
+                                            preemptible:true).
+                                          - "stateful-serving": serving pods holding model-weight / cache PVCs
+                                            whose eviction loses in-flight or local state (#361).
+                                          - "stateful-database": single-instance datastores (e.g. CNPG)
+                                            where preemption + write-in-flight risks corruption / total
+                                            loss (#357).
+                                        Defaults to "stateful-serving" so an un-annotated class can never be
+                                        scheduled on preemptible nodes — safety is the pool-wide default.
+                                      enum:
+                                      - ephemeral-training
+                                      - stateful-serving
+                                      - stateful-database
+                                      type: string
+                                    description:
+                                      description: |-
+                                        Description is shown in dashboard tooltips and in KubeApp validation
+                                        error messages. Keep it short — "n2-standard-8 (8 vCPU, 32 GiB) —
+                                        feature engineering / dataset transform".
+                                      maxLength: 200
+                                      type: string
+                                    diskSizeGb:
+                                      default: 50
+                                      description: |-
+                                        DiskSizeGb pins the per-node boot disk size. Bump for GPU
+                                        training (model checkpoints + dataset cache fill quickly).
+                                      format: int32
+                                      maximum: 2000
+                                      minimum: 20
+                                      type: integer
+                                    guestAccelerator:
+                                      description: |-
+                                        GuestAccelerator is required when Tier="gpu" on GCP. Its presence
+                                        and validity is checked by the operator's reconciling phase.
+                                      properties:
+                                        count:
+                                          description: |-
+                                            Count is the number of GPUs per node. Most classes use 1; multi-
+                                            GPU classes (e.g. 8×A100) use larger values bound by the machine
+                                            type's spec.
+                                          format: int32
+                                          maximum: 16
+                                          minimum: 1
+                                          type: integer
+                                        type:
+                                          description: |-
+                                            Type names the GCP accelerator (e.g. "nvidia-l4",
+                                            "nvidia-tesla-t4", "nvidia-tesla-a100", "nvidia-h100-80gb").
+                                            Must match GCP's accelerator catalog for the chosen MachineType.
+                                          pattern: ^nvidia-[a-z0-9-]+$
+                                          type: string
+                                      required:
+                                      - count
+                                      - type
+                                      type: object
+                                    machineType:
+                                      description: |-
+                                        MachineType is the GCP machine type (e.g. "n2-standard-8",
+                                        "g2-standard-4", "a2-highgpu-1g"). On AWS this field doubles as
+                                        the EC2 instance type ("m6i.large", "g5.xlarge"); the operator
+                                        adapter validates against the cloud's published catalog.
+                                      minLength: 2
+                                      type: string
+                                    maxNodeCount:
+                                      default: 4
+                                      description: |-
+                                        MaxNodeCount caps the autoscale ceiling for this class. Defaults
+                                        to 4 — small enough to prevent runaway spend, large enough for
+                                        most pipelines.
+                                      format: int32
+                                      maximum: 64
+                                      minimum: 1
+                                      type: integer
+                                    name:
+                                      description: |-
+                                        Name is the developer-facing class name (e.g. "cpu-balanced",
+                                        "gpu-l4-small"). Becomes the NodePool name and the
+                                        platform.kubecore.io/nodegroup-type label. Must be DNS-1035
+                                        compatible (lowercase, digits, hyphens; starts with a letter,
+                                        ends with a letter or digit).
+                                      maxLength: 40
+                                      minLength: 2
+                                      pattern: ^[a-z][a-z0-9-]*[a-z0-9]$
+                                      type: string
+                                    preemptible:
+                                      description: |-
+                                        Preemptible enables spot-tier pricing (~70% discount, eviction
+                                        risk). Only set true on classes that explicitly handle preemption
+                                        in their workflow steps. Admission rejects preemptible:true unless
+                                        ComputeProfile is "ephemeral-training" (#357/#361).
+                                      type: boolean
+                                    tier:
+                                      description: |-
+                                        Tier is "cpu" or "gpu". Drives default labels/taints and
+                                        determines whether GuestAccelerator is required.
+                                      enum:
+                                      - cpu
+                                      - gpu
+                                      type: string
+                                  required:
+                                  - machineType
+                                  - name
+                                  - tier
+                                  type: object
+                                  x-kubernetes-validations:
+                                  - message: preemptible:true is only allowed when
+                                      computeProfile is ephemeral-training (stateful-serving/stateful-database
+                                      classes must run on-demand to avoid data loss
+                                      on preemption)
+                                    rule: '!has(self.preemptible) || !self.preemptible
+                                      || self.computeProfile == ''ephemeral-training'''
+                                maxItems: 32
+                                type: array
+                            type: object
+                          kubernetesVersion:
+                            default: "1.35"
+                            description: KubernetesVersion specifies the GKE version.
+                            type: string
+                          labels:
+                            additionalProperties:
+                              type: string
+                            description: Labels are additional GCP resource labels
+                              to apply to the GKE cluster.
+                            type: object
+                          private:
+                            default: true
+                            description: Private enables private cluster mode (nodes
+                              get only private IPs).
+                            type: boolean
+                          releaseChannel:
+                            default: REGULAR
+                            description: ReleaseChannel specifies the GKE release
+                              channel for managed version upgrades.
+                            enum:
+                            - RAPID
+                            - REGULAR
+                            - STABLE
+                            type: string
+                          system:
+                            description: System defines configuration for the system
+                              node pool (kubecoresys).
+                            properties:
+                              machineType:
+                                default: e2-standard-4
+                                description: MachineType specifies the GCE machine
+                                  type for system nodes.
+                                type: string
+                            type: object
+                          type:
+                            allOf:
+                            - enum:
+                              - shared
+                              - dedicated
+                            - enum:
+                              - shared
+                              - dedicated
+                            description: Type specifies whether this is a shared or
+                              dedicated cluster.
+                            type: string
+                        required:
+                        - kubernetesVersion
+                        - type
+                        type: object
+                      region:
+                        description: Region is the GCP region where the GKE cluster
+                          will be created (e.g., europe-west1).
+                        minLength: 1
+                        type: string
+                    required:
+                    - cluster
+                    - region
+                    type: object
                 type: object
+              clusterMode:
+                allOf:
+                - enum:
+                  - dev
+                  - production
+                - enum:
+                  - dev
+                  - production
+                default: dev
+                description: |-
+                  ClusterMode declares the intent of this cluster: "dev" (cost-optimized,
+                  single-pool co-location, platform tools at replicas=1, zonal GKE placement)
+                  or "production" (dedicated node pools, platform tools at replicas>=2 with
+                  hostname anti-affinity, regional GKE placement).
+
+                  Immutable after creation — switching modes would require destructive
+                  rebuilds of node pools and workloads. To move a workload between modes,
+                  create a new KubePool and migrate.
+
+                  Default "dev" preserves backward compatibility with existing KubePools
+                  that were created before this field existed and already run the
+                  single-pool topology that dev mode codifies.
+                type: string
+                x-kubernetes-validations:
+                - message: clusterMode is immutable
+                  rule: self == oldSelf
               environmentTemplates:
                 description: |-
                   EnvironmentTemplates define rich templates for KubEnv creation by KubeProject resources
@@ -168,6 +674,28 @@ spec:
                           default: true
                           description: Logging enables logging stack for the environment
                           type: boolean
+                        mlStack:
+                          description: |-
+                            MLStack defines ML stack toggles for environments using this template.
+                            Only applied when the KubePool has features.ml and operators.postgres (cluster is ML capable).
+                            Provisions one Postgres + MLflow + optional S3 per project environment when enabled.
+                          properties:
+                            mlflow:
+                              default: false
+                              description: MLflow enables MLflow for this environment
+                                (requires Postgres as backend)
+                              type: boolean
+                            postgres:
+                              default: false
+                              description: Postgres enables a Postgres instance for
+                                this environment's ML stack (MLflow backend)
+                              type: boolean
+                            s3:
+                              default: false
+                              description: S3 enables S3 bucket and IRSA for MLflow
+                                artifact storage (only used when MLflow is enabled)
+                              type: boolean
+                          type: object
                         monitoring:
                           default: true
                           description: Monitoring enables monitoring stack for the
@@ -450,9 +978,34 @@ spec:
                 description: Features defines which platform features are enabled
                   for this cluster
                 properties:
+                  ml:
+                    description: |-
+                      ML enables the ML platform tools (MLflow, lakeFS, pricing cache).
+                      When true, creates an XMLSystem claim; requires Operators.Postgres when using shared Postgres.
+                    type: boolean
+                  mlConfig:
+                    description: |-
+                      MLConfig fine-tunes which ML components are provisioned when ML is true.
+                      When nil, all default to true (backward compatible). Set to false to skip provisioning a component.
+                    properties:
+                      mlflow:
+                        description: Mlflow deploys MLflow (Postgres backend, optional
+                          S3 artifacts). Default true.
+                        type: boolean
+                      s3:
+                        description: |-
+                          S3 creates an S3 bucket and configures MLflow to use it for artifacts. Default true.
+                          When false, MLflow uses the default artifact store (no S3 bucket or IRSA).
+                        type: boolean
+                    type: object
                   observability:
                     description: Observability enables VictoriaMetrics observability
                       stack
+                    type: boolean
+                  zotRegistry:
+                    description: |-
+                      ZotRegistry enables in-cluster Zot OCI container registry.
+                      Defaults to true when not specified. Set to false to disable.
                     type: boolean
                 type: object
               kubeOrgRef:
@@ -501,36 +1054,6 @@ spec:
                   Postgres cluster) so XMLSystem and other workloads can use it. Operators run before
                   XMLSystem; observability stays in XKubeSystem.
                 properties:
-                  karpenter:
-                    description: |-
-                      Karpenter configures the Karpenter node autoscaler.
-                      When present and enabled, XClusterOperators installs the Karpenter Helm chart.
-                      App-level ML NodePools are configured via KubeApp.spec.mlPipeline and provisioned
-                      by the XK8sMLApp composition for per-app workload isolation and cost attribution.
-                    properties:
-                      controllerRoleArn:
-                        description: ControllerRoleArn is the IRSA ARN for the Karpenter
-                          controller ServiceAccount.
-                        type: string
-                      enabled:
-                        default: true
-                        description: Enabled toggles Karpenter. Defaults to true when
-                          the karpenter block is present.
-                        type: boolean
-                      nodeRoleName:
-                        description: |-
-                          NodeRoleName overrides the IAM role for Karpenter-provisioned nodes.
-                          Defaults to "{clusterName}-eks-karpenter-node".
-                        type: string
-                    required:
-                    - enabled
-                    type: object
-                  nvidiaGpu:
-                    description: |-
-                      NvidiaGpu enables the NVIDIA GPU Operator (device plugin, container toolkit, DCGM exporter).
-                      Required when the cluster uses XGPUNodeGroup so pods requesting nvidia.com/gpu resources
-                      are scheduled. Configured with driver.enabled=false (AL2_x86_64_GPU has pre-installed drivers).
-                    type: boolean
                   postgres:
                     description: |-
                       Postgres enables the CloudNativePG operator and a shared Postgres cluster (30Gi, 1 instance).
@@ -538,11 +1061,21 @@ spec:
                       workloads use this cluster instead of deploying their own Postgres.
                     type: boolean
                 type: object
-              region:
+              systemProfile:
+                allOf:
+                - enum:
+                  - small
+                  - medium
+                  - ha
+                - enum:
+                  - small
+                  - medium
+                  - ha
                 description: |-
-                  Region is the AWS region where the EKS cluster will be created
-                  Must match one of the regions configured in the referenced KubeOrg
-                pattern: ^[a-z]{2}-[a-z]+-[0-9]{1}$
+                  SystemProfile controls the sizing of the platform system node group.
+                  The composition set translates this to provider-specific instance types and scaling.
+                  "small": minimal footprint (dev/test), "medium": balanced (staging),
+                  "ha": high availability (production).
                 type: string
               tls:
                 description: TLS defines TLS configuration for the cluster platform
@@ -569,10 +1102,13 @@ spec:
                     type: object
                 type: object
             required:
-            - cluster
+            - cloudProvider
             - kubeOrgRef
-            - region
             type: object
+            x-kubernetes-validations:
+            - message: exactly one cloud provider must be specified
+              rule: '(has(self.cloudProvider.aws) ? 1 : 0) + (has(self.cloudProvider.gcp)
+                ? 1 : 0) + (has(self.cloudProvider.azure) ? 1 : 0) == 1'
           status:
             description: KubePoolStatus defines the observed state of KubePool
             properties:
@@ -655,6 +1191,49 @@ spec:
                   BaseDns is the base DNS domain for this cluster: {poolName}.{orgDns}
                   e.g., "wow-dev.kaos.io.kubecore.eu"
                 type: string
+              cloudProvider:
+                description: |-
+                  CloudProvider records the active cloud provider name (e.g., "aws") at the time
+                  the Reconciling phase completes. Used by the DeletingPhase to route to the correct
+                  CompositionSetContract even when spec.cloudProvider may have been cleared.
+                type: string
+              cluster:
+                description: Cluster contains a reference to the created cluster XR
+                  resource
+                properties:
+                  apiVersion:
+                    description: API version of the resource
+                    type: string
+                  kind:
+                    description: Kind of the resource
+                    type: string
+                  name:
+                    description: Name of the resource
+                    type: string
+                  namespace:
+                    description: Namespace of the resource (if namespaced)
+                    type: string
+                  uid:
+                    description: UID of the resource
+                    type: string
+                type: object
+              clusterAddons:
+                description: ClusterAddons contains status of managed cluster add-ons
+                items:
+                  description: ClusterAddonStatus contains the status of a managed
+                    cluster add-on
+                  properties:
+                    name:
+                      description: Name of the add-on
+                      type: string
+                    status:
+                      description: Status of the add-on
+                      type: string
+                    version:
+                      description: Version of the add-on
+                      type: string
+                  type: object
+                type: array
               clusterEndpoint:
                 description: ClusterEndpoint contains the endpoint URL of the EKS
                   cluster
@@ -664,13 +1243,16 @@ spec:
                   ARN, actual version, region)
                 properties:
                   arn:
-                    description: ARN is the EKS cluster ARN
+                    description: |-
+                      ARN is the cloud-provider resource identifier for the cluster.
+                      For AWS EKS this is the cluster ARN. Not set for GKE.
                     type: string
                   clusterName:
-                    description: ClusterName is the EKS cluster name
+                    description: ClusterName is the cluster name as known to the cloud
+                      provider
                     type: string
                   region:
-                    description: Region is the AWS region where the cluster is deployed
+                    description: Region is the cloud region where the cluster is deployed
                     type: string
                   version:
                     description: Version is the actual running Kubernetes version
@@ -695,6 +1277,9 @@ spec:
               clusterStatus:
                 description: ClusterStatus contains the current status of the EKS
                   cluster
+                type: string
+              clusterType:
+                description: ClusterType is the cluster type (shared or dedicated)
                 type: string
               conditions:
                 description: Conditions represent the latest available observations
@@ -772,138 +1357,6 @@ spec:
                     description: StartTime is when deployment started
                     type: string
                 type: object
-              directCost:
-                description: DirectCost contains the cost information for this cluster
-                  pool
-                properties:
-                  calculationStatus:
-                    description: CalculationStatus indicates the status of the last
-                      calculation
-                    enum:
-                    - success
-                    - failed
-                    - pending
-                    type: string
-                  daily:
-                    description: Daily contains the last 24-hour cost
-                    properties:
-                      amount:
-                        description: Amount is the total daily cost
-                        type: string
-                      breakdown:
-                        additionalProperties:
-                          type: string
-                        description: Breakdown contains cost per service
-                        type: object
-                      currency:
-                        default: USD
-                        description: Currency is the currency code (always USD)
-                        type: string
-                      lastUpdated:
-                        description: LastUpdated is when this daily cost was calculated
-                        format: date-time
-                        type: string
-                    type: object
-                  error:
-                    description: Error contains the error message if calculation failed
-                    type: string
-                  lastCalculated:
-                    description: LastCalculated is when the cost was last successfully
-                      calculated
-                    format: date-time
-                    type: string
-                  monthToDate:
-                    description: MonthToDate contains the current month's aggregated
-                      cost
-                    properties:
-                      amount:
-                        description: Amount is the total month-to-date cost
-                        type: string
-                      averageDaily:
-                        description: AverageDaily is the average daily cost
-                        type: string
-                      breakdown:
-                        additionalProperties:
-                          type: string
-                        description: Breakdown contains cost per service
-                        type: object
-                      currency:
-                        default: USD
-                        description: Currency is the currency code (always USD)
-                        type: string
-                      daysIncluded:
-                        description: DaysIncluded is the number of days in the calculation
-                        type: integer
-                      endDate:
-                        description: EndDate is the end of the billing period (today)
-                        type: string
-                      projectedMonthly:
-                        description: ProjectedMonthly is the projected monthly cost
-                        type: string
-                      startDate:
-                        description: StartDate is the start of the billing period
-                        type: string
-                    type: object
-                  nextCalculation:
-                    description: NextCalculation is when the next calculation is scheduled
-                    format: date-time
-                    type: string
-                type: object
-              eksAddons:
-                description: EksAddons contains status of EKS managed add-ons
-                items:
-                  description: EksAddonStatus contains the status of an EKS add-on
-                  properties:
-                    name:
-                      description: Name of the add-on
-                      type: string
-                    status:
-                      description: Status of the add-on
-                      type: string
-                    version:
-                      description: Version of the add-on
-                      type: string
-                  type: object
-                type: array
-              eksCluster:
-                description: EKSCluster contains a reference to the created XEKS resource
-                properties:
-                  apiVersion:
-                    description: API version of the resource
-                    type: string
-                  kind:
-                    description: Kind of the resource
-                    type: string
-                  name:
-                    description: Name of the resource
-                    type: string
-                  namespace:
-                    description: Namespace of the resource (if namespaced)
-                    type: string
-                  uid:
-                    description: UID of the resource
-                    type: string
-                type: object
-              environmentConfig:
-                description: EnvironmentConfig contains a reference to the created
-                  EnvironmentConfig resource
-                properties:
-                  apiVersion:
-                    description: API version of the resource
-                    type: string
-                  kind:
-                    description: Kind of the resource
-                    type: string
-                  name:
-                    description: Name of the resource
-                    type: string
-                  namespace:
-                    description: Namespace of the resource (if namespaced)
-                    type: string
-                  uid:
-                    description: UID of the resource
-                    type: string
-                type: object
               grafanaOIDC:
                 description: GrafanaOIDC contains the Zitadel OIDC app status for
                   Grafana SSO
@@ -927,92 +1380,14 @@ spec:
                       OIDC credentials
                     type: string
                 type: object
-              iamRoles:
-                description: IAMRoles contains IAM roles created for this cluster
-                properties:
-                  ecrRole:
-                    description: ECRRole contains the ARN of the ECR credentials IAM
-                      role for this cluster
-                    type: string
-                type: object
-              lakeFSAPIUser:
-                description: LakeFSAPIUser contains the Zitadel machine user status
-                  for programmatic LakeFS API access
-                properties:
-                  clientId:
-                    description: ClientID is the client ID for client_credentials
-                      grant
-                    type: string
-                  ready:
-                    description: Ready indicates the machine user is created and credentials
-                      are pushed to AWS SM
-                    type: boolean
-                  secretName:
-                    description: SecretName is the AWS Secrets Manager key name for
-                      API credentials
-                    type: string
-                  userId:
-                    description: UserID is the Zitadel machine user ID
-                    type: string
-                type: object
-              lakeFSOIDC:
-                description: LakeFSOIDC contains the Zitadel OIDC app status for LakeFS
-                  SSO via oauth2-proxy
-                properties:
-                  appId:
-                    description: AppID is the Zitadel application ID
-                    type: string
-                  clientId:
-                    description: ClientID is the OIDC client ID
-                    type: string
-                  discoveryUrl:
-                    description: DiscoveryURL is the OIDC discovery endpoint for the
-                      identity provider
-                    type: string
-                  projectId:
-                    description: ProjectID is the Zitadel project the app belongs
-                      to
-                    type: string
-                  ready:
-                    description: Ready indicates the OIDC app is created and credentials
-                      are pushed to AWS SM
-                    type: boolean
-                  secretName:
-                    description: SecretName is the AWS Secrets Manager key name for
-                      OIDC credentials
-                    type: string
-                type: object
+              kubernetesVersion:
+                description: KubernetesVersion is the requested Kubernetes version
+                  for this cluster
+                type: string
               lastTransitionTime:
                 description: LastTransitionTime records when the status was last updated
                 format: date-time
                 type: string
-              mlflowOIDC:
-                description: MlflowOIDC contains the Zitadel OIDC app status for MLflow
-                  SSO
-                properties:
-                  appId:
-                    description: AppID is the Zitadel application ID
-                    type: string
-                  clientId:
-                    description: ClientID is the OIDC client ID
-                    type: string
-                  discoveryUrl:
-                    description: DiscoveryURL is the OIDC discovery endpoint for the
-                      identity provider
-                    type: string
-                  projectId:
-                    description: ProjectID is the Zitadel project the app belongs
-                      to
-                    type: string
-                  ready:
-                    description: Ready indicates the OIDC app is created and credentials
-                      are pushed to AWS SM
-                    type: boolean
-                  secretName:
-                    description: SecretName is the AWS Secrets Manager key name for
-                      OIDC credentials
-                    type: string
-                type: object
               networkConfig:
                 description: NetworkConfig contains the network configuration allocated
                   for this cluster
@@ -1327,12 +1702,54 @@ spec:
                         description: Version of the tool
                         type: string
                     type: object
+                  grafana:
+                    description: |-
+                      Grafana tool status (sourced from XObservability — synthesized from
+                      status.observability.components.grafana and top-level namespace/version/installed fields)
+                    properties:
+                      enabled:
+                        description: Enabled indicates if the tool is enabled
+                        type: boolean
+                      namespace:
+                        description: Namespace where the tool is installed
+                        type: string
+                      status:
+                        description: Status of the tool (Pending, Installing, Ready,
+                          Error)
+                        type: string
+                      url:
+                        description: URL is the access URL for the tool (if applicable)
+                        type: string
+                      version:
+                        description: Version of the tool
+                        type: string
+                    type: object
                   systemStatus:
                     description: SystemStatus is the overall system deployment status
                       (Pending/Deploying/Ready/Error)
                     type: string
                   traefik:
                     description: Traefik tool status
+                    properties:
+                      enabled:
+                        description: Enabled indicates if the tool is enabled
+                        type: boolean
+                      namespace:
+                        description: Namespace where the tool is installed
+                        type: string
+                      status:
+                        description: Status of the tool (Pending, Installing, Ready,
+                          Error)
+                        type: string
+                      url:
+                        description: URL is the access URL for the tool (if applicable)
+                        type: string
+                      version:
+                        description: Version of the tool
+                        type: string
+                    type: object
+                  zotRegistry:
+                    description: ZotRegistry tool status
                     properties:
                       enabled:
                         description: Enabled indicates if the tool is enabled
@@ -1381,6 +1798,13 @@ spec:
                 description: ReconciliationAttempts tracks the number of reconciliation
                   attempts for backoff
                 type: integer
+              region:
+                description: Region is the cloud region where this cluster is provisioned
+                type: string
+              registryEndpoint:
+                description: RegistryEndpoint is the in-cluster OCI registry URL (e.g.,
+                  registry.system.{clusterDomain})
+                type: string
               resourceSummary:
                 description: ResourceSummary contains a summary of composed resource
                   counts
@@ -1470,3 +1894,4 @@ spec:
     storage: true
     subresources:
       status: {}
+{{- end -}}

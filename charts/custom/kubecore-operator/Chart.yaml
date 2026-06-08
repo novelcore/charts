@@ -2,8 +2,8 @@ apiVersion: v2
 name: kubecore-operator
 description: A sophisticated Kubernetes operator that implements a four-layer framework architecture for provisioning and managing cloud infrastructure through Crossplane compositions.
 type: application
-version: 0.1.260
-appVersion: "0.1.260"
+version: 0.1.261
+appVersion: "0.1.261"
 
 # Maintainers
 maintainers:
@@ -49,19 +49,11 @@ annotations:
 
   # Changes for this chart version
   artifacthub.io/changes: |
-    - kind: security
-      description: "LakeFS SSO: nginx sidecar now injects admin Basic auth on every upstream request; removed auto-login HTML that exposed admin credentials to browser clients. Client needs only a Zitadel JWT/cookie."
+    - kind: changed
+      description: "Changed XEKS Cluster, ClusterAuth, and NodeGroup deletionPolicy from Orphan to Delete for proper AWS resource cleanup"
+    - kind: fixed
+      description: "Fixed XEKS deletion blocking issue caused by orphaned AWS resources preventing subnet deletion"
 
 # Kubernetes version compatibility
 kubeVersion: ">=1.20.0-0"
 
-# Dependencies
-dependencies:
-- name: crossplane
-  version: "2.1.0"
-  repository: "https://charts.crossplane.io/stable"
-  condition: crossplane.enabled
-- name: external-secrets
-  version: "1.0.0"
-  repository: "https://charts.external-secrets.io"
-  condition: externalSecrets.enabled

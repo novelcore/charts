@@ -18,7 +18,7 @@ spec:
     listKind: KubeAppList
     plural: kubeapps
     singular: kubeapp
-  scope: Cluster
+  scope: Namespaced
   versions:
   - additionalPrinterColumns:
     - jsonPath: .status.phase
@@ -123,6 +123,18 @@ spec:
                       branchStrategy:
                         description: BranchStrategy defines branch strategy configuration
                         properties:
+                          devBranch:
+                            default: dev
+                            description: |-
+                              DevBranch is the integration branch a push to which fires the
+                              in-cluster CI (the Argo Events Sensor's push-dep trigger). Defaults
+                              to "dev" — the gitFlow convention. Set this when the repo's
+                              integration branch is named differently (e.g. "main" for trunk-based
+                              development), otherwise pushes to that branch never trigger a build
+                              (#347). Must be a plain branch name, not a full ref — the operator
+                              prefixes "refs/heads/".
+                            pattern: ^[a-zA-Z0-9._/-]+$
+                            type: string
                           enabled:
                             default: true
                             description: Enabled indicates whether branch strategy
@@ -144,14 +156,6 @@ spec:
                     type: object
                   repository:
                     description: Repository feature configuration
-                    properties:
-                      enabled:
-                        default: true
-                        description: Enabled indicates whether the feature is enabled
-                        type: boolean
-                    type: object
-                  teams:
-                    description: Teams feature configuration
                     properties:
                       enabled:
                         default: true
@@ -241,6 +245,42 @@ spec:
                             type: string
                         type: object
                     type: object
+                  compute:
+                    description: |-
+                      Compute selects ML compute classes from the parent KubePool's catalog
+                      (KubePool.spec.cloudProvider.{aws,gcp}.cluster.compute.mlClasses[]).
+                      Only meaningful when the KubeApp resolves to the ml-pipeline
+                      KubeAppTemplate. Ignored for non-ML KubeApps.
+                    properties:
+                      cpuClass:
+                        description: |-
+                          CPUClass picks a class with tier=cpu. ALL CPU steps default to this
+                          class. If unset, the operator picks the first cpu-tier class on the
+                          KubePool with a soft warning condition.
+                        maxLength: 40
+                        pattern: ^[a-z][a-z0-9-]*[a-z0-9]$
+                        type: string
+                      gpuClass:
+                        description: |-
+                          GPUClass picks a class with tier=gpu. Required only if
+                          Features.GPUStep.Enabled=true. If GPUStep is enabled and GPUClass
+                          is unset OR points to a non-existent class, the operator emits a
+                          Failed condition listing the available class names.
+                        maxLength: 40
+                        pattern: ^[a-z][a-z0-9-]*[a-z0-9]$
+                        type: string
+                      perStepOverrides:
+                        additionalProperties:
+                          type: string
+                        description: |-
+                          PerStepOverrides lets a KubeApp override the default CPUClass for
+                          a specific WorkflowTemplate step (e.g. dataset-loading: cpu-burst
+                          on a pipeline that needs heavy I/O). Step names must match the
+                          composition's DAG: config-validation | dataset-loading |
+                          model-training | model-registration. Unknown step names are
+                          ignored with a warning condition.
+                        type: object
+                    type: object
                   environmentVariables:
                     additionalProperties:
                       additionalProperties:
@@ -290,78 +330,6 @@ spec:
                   application
                 minLength: 1
                 type: string
-              mlPipeline:
-                description: |-
-                  MLPipeline defines ML pipeline-specific configuration.
-                  Only used when the referenced KubeAppTemplate has type "ml-pipeline".
-                properties:
-                  cpu:
-                    description: CPU configures the CPU Karpenter NodePool for non-GPU
-                      pipeline steps.
-                    properties:
-                      consolidateAfter:
-                        description: ConsolidateAfter is how long before removing
-                          empty nodes (e.g. "60s","5m").
-                        type: string
-                      diskSizeGi:
-                        description: DiskSizeGi is the root EBS volume size in GiB.
-                        minimum: 20
-                        type: integer
-                      instanceFamilies:
-                        description: |-
-                          InstanceFamilies are allowed EC2 instance families (e.g. ["g5","g6"] for GPU).
-                          Use ["*"] to allow all instance families (no instance-category requirement on NodePool).
-                        items:
-                          type: string
-                        minItems: 1
-                        type: array
-                      instanceSizes:
-                        description: |-
-                          InstanceSizes are allowed EC2 instance sizes (e.g. ["xlarge","2xlarge"]).
-                          Use ["*"] to allow all instance sizes (no instance-size requirement on NodePool).
-                        items:
-                          type: string
-                        minItems: 1
-                        type: array
-                      maxResources:
-                        description: 'MaxResources is the NodePool limit: "nvidia.com/gpu"
-                          count for GPU, or vCPU count for CPU.'
-                        type: string
-                    type: object
-                  gpu:
-                    description: GPU configures the GPU Karpenter NodePool for training
-                      workloads.
-                    properties:
-                      consolidateAfter:
-                        description: ConsolidateAfter is how long before removing
-                          empty nodes (e.g. "60s","5m").
-                        type: string
-                      diskSizeGi:
-                        description: DiskSizeGi is the root EBS volume size in GiB.
-                        minimum: 20
-                        type: integer
-                      instanceFamilies:
-                        description: |-
-                          InstanceFamilies are allowed EC2 instance families (e.g. ["g5","g6"] for GPU).
-                          Use ["*"] to allow all instance families (no instance-category requirement on NodePool).
-                        items:
-                          type: string
-                        minItems: 1
-                        type: array
-                      instanceSizes:
-                        description: |-
-                          InstanceSizes are allowed EC2 instance sizes (e.g. ["xlarge","2xlarge"]).
-                          Use ["*"] to allow all instance sizes (no instance-size requirement on NodePool).
-                        items:
-                          type: string
-                        minItems: 1
-                        type: array
-                      maxResources:
-                        description: 'MaxResources is the NodePool limit: "nvidia.com/gpu"
-                          count for GPU, or vCPU count for CPU.'
-                        type: string
-                    type: object
-                type: object
               profile:
                 default: small
                 description: Profile specifies the resource profile size for the application
@@ -378,6 +346,15 @@ spec:
                     description: PromotionsEnabled indicates if promotions are enabled
                     type: boolean
                 type: object
+              visibility:
+                default: private
+                description: Visibility sets the repository visibility (private, public,
+                  internal)
+                enum:
+                - private
+                - public
+                - internal
+                type: string
             required:
             - description
             - displayName
@@ -536,102 +513,6 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
-              directCost:
-                description: DirectCost contains the cost information for this application
-                properties:
-                  calculationStatus:
-                    description: CalculationStatus indicates the status of the last
-                      calculation
-                    enum:
-                    - success
-                    - failed
-                    - pending
-                    type: string
-                  daily:
-                    description: Daily contains the last 24-hour cost
-                    properties:
-                      amount:
-                        description: Amount is the total daily cost
-                        type: string
-                      breakdown:
-                        additionalProperties:
-                          type: string
-                        description: Breakdown contains cost per service
-                        type: object
-                      currency:
-                        default: USD
-                        description: Currency is the currency code (always USD)
-                        type: string
-                      lastUpdated:
-                        description: LastUpdated is when this daily cost was calculated
-                        format: date-time
-                        type: string
-                    type: object
-                  error:
-                    description: Error contains the error message if calculation failed
-                    type: string
-                  lastCalculated:
-                    description: LastCalculated is when the cost was last successfully
-                      calculated
-                    format: date-time
-                    type: string
-                  monthToDate:
-                    description: MonthToDate contains the current month's aggregated
-                      cost
-                    properties:
-                      amount:
-                        description: Amount is the total month-to-date cost
-                        type: string
-                      averageDaily:
-                        description: AverageDaily is the average daily cost
-                        type: string
-                      breakdown:
-                        additionalProperties:
-                          type: string
-                        description: Breakdown contains cost per service
-                        type: object
-                      currency:
-                        default: USD
-                        description: Currency is the currency code (always USD)
-                        type: string
-                      daysIncluded:
-                        description: DaysIncluded is the number of days in the calculation
-                        type: integer
-                      endDate:
-                        description: EndDate is the end of the billing period (today)
-                        type: string
-                      projectedMonthly:
-                        description: ProjectedMonthly is the projected monthly cost
-                        type: string
-                      startDate:
-                        description: StartDate is the start of the billing period
-                        type: string
-                    type: object
-                  nextCalculation:
-                    description: NextCalculation is when the next calculation is scheduled
-                    format: date-time
-                    type: string
-                type: object
-              environmentConfigRef:
-                description: EnvironmentConfigRef contains a reference to the created
-                  EnvironmentConfig resource
-                properties:
-                  apiVersion:
-                    description: API version of the resource
-                    type: string
-                  kind:
-                    description: Kind of the resource
-                    type: string
-                  name:
-                    description: Name of the resource
-                    type: string
-                  namespace:
-                    description: Namespace of the resource (if namespaced)
-                    type: string
-                  uid:
-                    description: UID of the resource
-                    type: string
-                type: object
               gitHubProviderConfig:
                 description: GitHubProviderConfig contains the GitHub provider configuration
                   name
@@ -647,53 +528,48 @@ spec:
                     description: BranchName is the branch used for GitOps operations
                     type: string
                 type: object
-              k8sAppStatus:
-                description: K8sAppStatus contains K8s application status information
-                properties:
-                  applicationImage:
-                    description: ApplicationImage contains the final application image
-                      URL
-                    type: string
-                  ecrRepository:
-                    description: ECRRepository contains ECR repository information
-                    properties:
-                      arn:
-                        description: ARN of the ECR repository
-                        type: string
-                      name:
-                        description: Name of the ECR repository
-                        type: string
-                      url:
-                        description: URL of the ECR repository
-                        type: string
-                    type: object
-                  ready:
-                    description: Ready indicates whether the K8s app is ready
-                    type: boolean
-                type: object
+              inheritedTeams:
+                description: |-
+                  InheritedTeams mirrors the parent KubeProject's effective team set per CON-04
+                  (KubeApp inherits without overrides). Surfaced for operator debugging — avoids
+                  having to inspect the parent KubeProject separately to see which teams have
+                  repo bindings on this app's repository. Populated by the Reporting phase.
+                items:
+                  description: |-
+                    EffectiveTeamStatus is the resolved per-team status entry surfaced by both
+                    KubeProject.status.effectiveTeams[] and KubeApp.status.inheritedTeams[]
+                    (PRD-331 F-13, Q-03). All three fields are operator-managed.
+
+                    GithubTeamID is empty until the corresponding KubeTeam's XGitHubTeam composite
+                    reaches Ready and the team ID is surfaced via F-04. Empty is a valid transient
+                    state — operators should not treat an empty GithubTeamID as a hard error.
+                  properties:
+                    githubTeamID:
+                      description: |-
+                        GithubTeamID mirrors KubeTeam.status.githubTeamID. Empty when XGitHubTeam
+                        has not yet emitted status.teamID (transient — next reconcile picks it up).
+                      type: string
+                    name:
+                      description: Name is the KubeTeam name (1:1 with the GitHub
+                        team name per CON-01).
+                      type: string
+                    role:
+                      description: 'Role is one of: business, dev, ops, admin (D-01).'
+                      enum:
+                      - business
+                      - dev
+                      - ops
+                      - admin
+                      type: string
+                  required:
+                  - name
+                  - role
+                  type: object
+                type: array
               lastTransitionTime:
                 description: LastTransitionTime records when the status was last updated
                 format: date-time
                 type: string
-              mlPipelineStatus:
-                description: MLPipelineStatus contains ML pipeline-specific status
-                  information
-                properties:
-                  cpuNodePool:
-                    description: CPUNodePool is the name of the CPU Karpenter NodePool
-                    type: string
-                  gpuNodePool:
-                    description: GPUNodePool is the name of the GPU Karpenter NodePool
-                    type: string
-                  lakeFSRepository:
-                    description: LakeFSRepository is the lakeFS repository for this
-                      pipeline
-                    type: string
-                  ready:
-                    description: Ready indicates whether all ML pipeline resources
-                      are ready
-                    type: boolean
-                type: object
               observedGeneration:
                 description: ObservedGeneration is the most recent generation observed
                   by the controller
@@ -865,26 +741,6 @@ spec:
                 type: object
               xK8sAppRef:
                 description: XK8sAppRef contains a reference to the created XK8sApp
-                  resource
-                properties:
-                  apiVersion:
-                    description: API version of the resource
-                    type: string
-                  kind:
-                    description: Kind of the resource
-                    type: string
-                  name:
-                    description: Name of the resource
-                    type: string
-                  namespace:
-                    description: Namespace of the resource (if namespaced)
-                    type: string
-                  uid:
-                    description: UID of the resource
-                    type: string
-                type: object
-              xK8sMLAppRef:
-                description: XK8sMLAppRef contains a reference to the created XK8sMLApp
                   resource
                 properties:
                   apiVersion:

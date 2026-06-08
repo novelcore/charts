@@ -18,7 +18,7 @@ spec:
     listKind: KubeProjectList
     plural: kubeprojects
     singular: kubeproject
-  scope: Cluster
+  scope: Namespaced
   versions:
   - additionalPrinterColumns:
     - jsonPath: .status.phase
@@ -135,6 +135,23 @@ spec:
                           description: Labels to add to the environment (merged with
                             template labels)
                           type: object
+                        mlStack:
+                          description: MLStack overrides for ML stack toggles (within
+                            template limits; only applied when pool is ML capable)
+                          properties:
+                            mlflow:
+                              description: MLflow overrides MLflow enablement for
+                                this environment
+                              type: boolean
+                            postgres:
+                              description: Postgres overrides Postgres instance enablement
+                                for this environment
+                              type: boolean
+                            s3:
+                              description: S3 overrides S3 artifact store enablement
+                                for this environment
+                              type: boolean
+                          type: object
                         scaling:
                           description: Scaling overrides for node group scaling configuration
                           properties:
@@ -240,29 +257,6 @@ spec:
                         - existing
                         type: string
                     type: object
-                  teamMembers:
-                    description: TeamMembers configuration for different teams (REQUIRED)
-                    properties:
-                      business:
-                        items:
-                          type: string
-                        minItems: 1
-                        type: array
-                      ops:
-                        items:
-                          type: string
-                        minItems: 1
-                        type: array
-                      software:
-                        items:
-                          type: string
-                        minItems: 1
-                        type: array
-                    required:
-                    - business
-                    - ops
-                    - software
-                    type: object
                   visibility:
                     default: private
                     description: Visibility setting for the repository (defaults to
@@ -272,85 +266,170 @@ spec:
                     - private
                     - internal
                     type: string
-                required:
-                - teamMembers
                 type: object
               kubeOrgRef:
                 description: KubeOrgRef references the KubeOrg that owns this project
                 type: string
               ml:
                 description: |-
-                  ML defines project-wide ML platform configuration (MLflow, LakeFS, S3, Postgres).
-                  When enabled, the KubeProject operator provisions a single per-project ML stack
-                  using XProjectMLStack composition, scheduled on system nodes of the specified KubePool.
+                  ML defines project-wide ML platform configuration (MLflow, LakeFS, object storage, Postgres).
+                  When enabled, the KubeProject operator provisions a single per-project XProjectMLStack
+                  composite resource. The composition router (MLCompositionSetContract) dispatches to the
+                  AWS or GCP implementation based on the referenced KubePool's cloudProvider union.
+                  Ported from v1 KubeProject.spec.ml; preserved verbatim at the user-facing YAML layer.
                 properties:
                   components:
                     description: Components controls which ML components are deployed.
                     properties:
                       lakefs:
-                        description: Lakefs enables LakeFS for this project (per environment).
+                        description: Lakefs enables LakeFS for this project.
                         type: boolean
                       mlflow:
-                        description: Mlflow enables MLflow for this project (per environment).
+                        description: Mlflow enables MLflow for this project.
                         type: boolean
                     type: object
+                  dataLifecycle:
+                    description: |-
+                      DataLifecycle controls whether data-bearing resources created by the
+                      per-project XProjectMLStack (object-store buckets — S3 on AWS, GCS on
+                      GCP — CNPG WAL stores, LakeFS object storage, Zot artifact buckets)
+                      force-destroy on KubeProject delete.
+
+                      "retain" is the safe production default and matches Crossplane's
+                      behavior: non-empty buckets block deletion, requiring an operator to
+                      manually drain. "wipe-on-delete" sets forceDestroy=true on every data
+                      resource so dev/test environments can tear down cleanly.
+
+                      When unset, the operator does not force the value: the composition's
+                      own default (retain) takes effect. To opt into wipe-on-delete,
+                      declare it explicitly here. This is intentionally a project-level
+                      declaration, not per-environment, because the ML stack is one
+                      XProjectMLStack per project (CON-07).
+                    enum:
+                    - retain
+                    - wipe-on-delete
+                    type: string
                   enabled:
                     description: |-
                       Enabled turns the ML platform on for this project. When true, the operator
-                      provisions a single per-project ML stack (Postgres, S3, MLflow, optionally LakeFS)
-                      scheduled on system nodes of the specified KubePool.
+                      provisions a single per-project XProjectMLStack composite resource (Postgres,
+                      object storage, MLflow, optionally LakeFS) scheduled on system nodes of the
+                      specified KubePool.
                     type: boolean
                   kubePool:
                     description: |-
-                      KubePool specifies which KubePool's system nodes host the ML stack for this project.
-                      This is required when ML is enabled so that ML components can inherit the correct
-                      scheduling configuration from the selected pool's system EnvironmentConfig.
+                      KubePool specifies which KubePool's system nodes host the ML stack for this
+                      project. The referenced KubePool's cloudProvider union selects the ML
+                      composition set (AWS vs GCP) via the MLCompositionSetContract router.
                     type: string
+                  lakeFSOIDC:
+                    description: |-
+                      LakeFSOIDC enables Zitadel OIDC SSO on LakeFS via oauth2-proxy + an
+                      nginx Basic-auth-injection sidecar (LakeFS OSS lacks native OIDC).
+                      When set + Enabled, the composition emits the oauth2-proxy Deployment
+                      Zitadel client credentials and oauth2-proxy cookie secret. PRD-240 F-18.
+                    properties:
+                      apiSecretName:
+                        description: |-
+                          APISecretName is the cloud Secret Manager key for the LakeFS machine
+                          user (LAKEFS_API_CLIENT_ID + LAKEFS_API_CLIENT_SECRET) used by
+                          programmatic clients (lakectl, MLflow LakeFS plugin) to obtain a JWT
+                          without going through the browser SSO flow. Optional — when unset,
+                          only browser-based access is wired up.
+                        type: string
+                      discoveryUrl:
+                        description: |-
+                          DiscoveryURL is the Zitadel OIDC issuer's discovery endpoint, e.g.
+                          "https://identity.{baseDns}/.well-known/openid-configuration".
+                        type: string
+                      enabled:
+                        description: |-
+                          Enabled turns SSO on for this service. When false (or block omitted),
+                          the composition falls back to the chart's native admin-password auth.
+                        type: boolean
+                      secretName:
+                        description: |-
+                          SecretName is the cloud Secret Manager key holding OIDC_CLIENT_ID,
+                          OIDC_CLIENT_SECRET, and (where applicable) SECRET_KEY/COOKIE_SECRET.
+                          The composition's ExternalSecret pulls from the org-level
+                          ClusterSecretStore at key SecretName.
+                        type: string
+                    type: object
+                  mlflowOIDC:
+                    description: |-
+                      MlflowOIDC enables Zitadel OIDC SSO on MLflow via the chart's native OIDC
+                      plugin. When set + Enabled, the composition emits an ExternalSecret
+                      pulling client credentials from the org-level ClusterSecretStore, sets
+                      MLflow's auth.appName to "oidc-auth", and renders a traefik-class
+                      Ingress with cluster-issuer cert-manager annotation. PRD-240 F-18.
+                    properties:
+                      discoveryUrl:
+                        description: |-
+                          DiscoveryURL is the Zitadel OIDC issuer's discovery endpoint, e.g.
+                          "https://identity.{baseDns}/.well-known/openid-configuration".
+                        type: string
+                      enabled:
+                        description: |-
+                          Enabled turns SSO on for this service. When false (or block omitted),
+                          the composition falls back to the chart's native admin-password auth.
+                        type: boolean
+                      secretName:
+                        description: |-
+                          SecretName is the cloud Secret Manager key holding OIDC_CLIENT_ID,
+                          OIDC_CLIENT_SECRET, and (where applicable) SECRET_KEY/COOKIE_SECRET.
+                          The composition's ExternalSecret pulls from the org-level
+                          ClusterSecretStore at key SecretName.
+                        type: string
+                    type: object
                   pipelines:
                     description: |-
-                      Pipelines declares per-project pipeline templates. Each pipeline gets its own
-                      Karpenter NodePool + EC2NodeClass (GPU and/or CPU), labeled with project and
-                      pipeline name for per-project cost attribution via Karpenter metrics.
+                      Pipelines declares per-project pipeline templates. In v2, compute is
+                      autoscaler-native (D-02, CON-05) — these entries become hints consumed by
+                      ComputeProviderContract (D-05) implementations (Karpenter on AWS, GKE
+                      autoscaler on GCP). Per-app XGPUNodeGroup is forbidden (CON-05).
                     items:
                       description: MLPipeline defines a pipeline template with its
                         node resource configuration.
                       properties:
                         cpu:
-                          description: CPU configures the CPU NodePool for pipeline
-                            steps (validate, prepare, register).
+                          description: CPU configures CPU node requirements for pipeline
+                            steps.
                           properties:
                             consolidateAfter:
                               description: ConsolidateAfter is how long before removing
                                 empty nodes (e.g. "60s","5m").
                               type: string
                             diskSizeGi:
-                              description: DiskSizeGi is the root EBS volume size
-                                in GiB.
+                              description: DiskSizeGi is the root volume size in GiB.
                               minimum: 20
                               type: integer
                             instanceFamilies:
                               description: |-
-                                InstanceFamilies are allowed EC2 instance families (e.g. ["g5","g6"] for GPU).
-                                Use ["*"] to allow all instance families (no instance-category requirement on NodePool).
+                                InstanceFamilies are allowed instance families (e.g. ["g5","g6"] for GPU).
+                                Use ["*"] to allow all families (no family constraint applied).
+                                Provider-specific interpretation:
+                                  AWS  — EC2 instance families (g5, g6, m5, c5, ...).
+                                  GCP  — N1/N2/A2 accelerator families (ComputeProviderContract maps them).
                               items:
                                 type: string
                               minItems: 1
                               type: array
                             instanceSizes:
                               description: |-
-                                InstanceSizes are allowed EC2 instance sizes (e.g. ["xlarge","2xlarge"]).
-                                Use ["*"] to allow all instance sizes (no instance-size requirement on NodePool).
+                                InstanceSizes are allowed instance sizes (e.g. ["xlarge","2xlarge"]).
+                                Use ["*"] to allow all sizes (no size constraint applied).
                               items:
                                 type: string
                               minItems: 1
                               type: array
                             maxResources:
-                              description: 'MaxResources is the NodePool limit: "nvidia.com/gpu"
-                                count for GPU, or vCPU count for CPU.'
+                              description: |-
+                                MaxResources is the autoscaler resource limit:
+                                  "nvidia.com/gpu" count for GPU pools, or vCPU count for CPU pools.
                               type: string
                           type: object
                         gpu:
-                          description: GPU configures the GPU NodePool for training
+                          description: GPU configures GPU node requirements for training
                             workloads in this pipeline.
                           properties:
                             consolidateAfter:
@@ -358,29 +437,32 @@ spec:
                                 empty nodes (e.g. "60s","5m").
                               type: string
                             diskSizeGi:
-                              description: DiskSizeGi is the root EBS volume size
-                                in GiB.
+                              description: DiskSizeGi is the root volume size in GiB.
                               minimum: 20
                               type: integer
                             instanceFamilies:
                               description: |-
-                                InstanceFamilies are allowed EC2 instance families (e.g. ["g5","g6"] for GPU).
-                                Use ["*"] to allow all instance families (no instance-category requirement on NodePool).
+                                InstanceFamilies are allowed instance families (e.g. ["g5","g6"] for GPU).
+                                Use ["*"] to allow all families (no family constraint applied).
+                                Provider-specific interpretation:
+                                  AWS  — EC2 instance families (g5, g6, m5, c5, ...).
+                                  GCP  — N1/N2/A2 accelerator families (ComputeProviderContract maps them).
                               items:
                                 type: string
                               minItems: 1
                               type: array
                             instanceSizes:
                               description: |-
-                                InstanceSizes are allowed EC2 instance sizes (e.g. ["xlarge","2xlarge"]).
-                                Use ["*"] to allow all instance sizes (no instance-size requirement on NodePool).
+                                InstanceSizes are allowed instance sizes (e.g. ["xlarge","2xlarge"]).
+                                Use ["*"] to allow all sizes (no size constraint applied).
                               items:
                                 type: string
                               minItems: 1
                               type: array
                             maxResources:
-                              description: 'MaxResources is the NodePool limit: "nvidia.com/gpu"
-                                count for GPU, or vCPU count for CPU.'
+                              description: |-
+                                MaxResources is the autoscaler resource limit:
+                                  "nvidia.com/gpu" count for GPU pools, or vCPU count for CPU pools.
                               type: string
                           type: object
                         name:
@@ -395,7 +477,7 @@ spec:
                       type: object
                     type: array
                   postgres:
-                    description: Postgres controls resource sizing for the per-environment
+                    description: Postgres controls resource sizing for the per-project
                       CloudNativePG cluster.
                     properties:
                       cpu:
@@ -412,11 +494,14 @@ spec:
                         type: string
                     type: object
                   s3:
-                    description: S3 controls S3 artifact store provisioning.
+                    description: |-
+                      S3 controls artifact-store provisioning. The field name is retained from v1
+                      for schema compatibility; the v2 StorageProviderContract returns S3 on AWS,
+                      GCS on GCP, and may return POSIX on a future HPC provider (D-06).
                     properties:
                       enabled:
-                        description: Enabled controls whether per-environment S3 buckets
-                          are created for ML artifacts.
+                        description: Enabled controls whether a per-project bucket
+                          is created for ML artifacts.
                         type: boolean
                     type: object
                 type: object
@@ -424,6 +509,32 @@ spec:
                 description: Owner specifies the owner or team responsible for this
                   project
                 type: string
+              teams:
+                description: |-
+                  Teams is the list of KubeTeam references granting access to this project.
+                  Each referenced KubeTeam contributes its members and its role to the effective
+                  project access. Org-wide teams declared on the parent KubeOrg are merged in by
+                  the reconciler (F-05); on conflict, org-level wins (CON-04). No role override
+                  at the project level — role comes from the KubeTeam itself (CON-03, D-05).
+                items:
+                  description: |-
+                    KubeTeamRef references a KubeTeam resource by name within the same KubeOrg namespace.
+                    Only the name is required; role and permissions come from the referenced KubeTeam itself
+                    (CON-03: one role per team; CON-04: org-level teams cannot be overridden at project level).
+                    Env-scoped roles are deferred per D-05 — no per-environment fields here.
+                  properties:
+                    name:
+                      description: |-
+                        Name of the KubeTeam to reference. Must exist in the same namespace
+                        as the consumer (KubeProject or KubeOrg) — i.e., the KubeOrg namespace.
+                      maxLength: 253
+                      minLength: 1
+                      pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                      type: string
+                  required:
+                  - name
+                  type: object
+                type: array
             required:
             - description
             - githubConfiguration
@@ -493,82 +604,63 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
-              directCost:
-                description: DirectCost contains the cost information for this project
-                properties:
-                  calculationStatus:
-                    description: CalculationStatus indicates the status of the last
-                      calculation
-                    enum:
-                    - success
-                    - failed
-                    - pending
-                    type: string
-                  daily:
-                    description: Daily contains the last 24-hour cost
-                    properties:
-                      amount:
-                        description: Amount is the total daily cost
-                        type: string
-                      breakdown:
-                        additionalProperties:
-                          type: string
-                        description: Breakdown contains cost per service
-                        type: object
-                      currency:
-                        default: USD
-                        description: Currency is the currency code (always USD)
-                        type: string
-                      lastUpdated:
-                        description: LastUpdated is when this daily cost was calculated
-                        format: date-time
-                        type: string
-                    type: object
-                  error:
-                    description: Error contains the error message if calculation failed
-                    type: string
-                  lastCalculated:
-                    description: LastCalculated is when the cost was last successfully
-                      calculated
-                    format: date-time
-                    type: string
-                  monthToDate:
-                    description: MonthToDate contains the current month's aggregated
-                      cost
-                    properties:
-                      amount:
-                        description: Amount is the total month-to-date cost
-                        type: string
-                      averageDaily:
-                        description: AverageDaily is the average daily cost
-                        type: string
-                      breakdown:
-                        additionalProperties:
-                          type: string
-                        description: Breakdown contains cost per service
-                        type: object
-                      currency:
-                        default: USD
-                        description: Currency is the currency code (always USD)
-                        type: string
-                      daysIncluded:
-                        description: DaysIncluded is the number of days in the calculation
-                        type: integer
-                      endDate:
-                        description: EndDate is the end of the billing period (today)
-                        type: string
-                      projectedMonthly:
-                        description: ProjectedMonthly is the projected monthly cost
-                        type: string
-                      startDate:
-                        description: StartDate is the start of the billing period
-                        type: string
-                    type: object
-                  nextCalculation:
-                    description: NextCalculation is when the next calculation is scheduled
-                    format: date-time
-                    type: string
-                type: object
+              effectiveMembersHash:
+                description: |-
+                  EffectiveMembersHash is a stable SHA-256 hash used for KubeTeam drift
+                  detection in the Ready phase (Bug F — PRD-237 follow-up).
+
+                  Hash semantic (updated PRD-331 Commit 4 / Q-05 narrowing):
+                  Covers the effective team set (name + role pairs), NOT member identities.
+                  Algorithm: sorted "<name>:<role>" strings joined by "|", SHA-256 hex.
+
+                  Field name retained for backward compatibility: existing on-cluster
+                  KubeProjects keep their stored hash; on first reconcile after PRD-331
+                  deploy the stored value (old member hash) will differ from the new teams
+                  hash, causing a one-time benign Reconciling transition per project.
+                  Subsequent reconciles will be stable.
+
+                  The Reconciling phase writes this on each successful sync. The Ready phase
+                  recomputes it and transitions back to Reconciling when it differs (AC-11
+                  role cascade; team-set changes).  Member-only changes (AC-13) do NOT
+                  change this hash — they are handled by the narrowed F-07 watch predicate.
+                type: string
+              effectiveTeams:
+                description: |-
+                  EffectiveTeams is the resolved per-team status surfaced for operator debugging
+                  (PRD-331 F-13, Q-03). Includes org-level + project-level + admin-fan-out teams
+                  after CON-04 dedupe. Populated by the Reporting phase from KubeTeam objects.
+                items:
+                  description: |-
+                    EffectiveTeamStatus is the resolved per-team status entry surfaced by both
+                    KubeProject.status.effectiveTeams[] and KubeApp.status.inheritedTeams[]
+                    (PRD-331 F-13, Q-03). All three fields are operator-managed.
+
+                    GithubTeamID is empty until the corresponding KubeTeam's XGitHubTeam composite
+                    reaches Ready and the team ID is surfaced via F-04. Empty is a valid transient
+                    state — operators should not treat an empty GithubTeamID as a hard error.
+                  properties:
+                    githubTeamID:
+                      description: |-
+                        GithubTeamID mirrors KubeTeam.status.githubTeamID. Empty when XGitHubTeam
+                        has not yet emitted status.teamID (transient — next reconcile picks it up).
+                      type: string
+                    name:
+                      description: Name is the KubeTeam name (1:1 with the GitHub
+                        team name per CON-01).
+                      type: string
+                    role:
+                      description: 'Role is one of: business, dev, ops, admin (D-01).'
+                      enum:
+                      - business
+                      - dev
+                      - ops
+                      - admin
+                      type: string
+                  required:
+                  - name
+                  - role
+                  type: object
+                type: array
               environments:
                 description: Environments contains the status of each environment
                 items:
@@ -579,33 +671,9 @@ spec:
                         BaseDns is the per-environment DNS base: {envName}.{projectName}.{kubePool.Status.BaseDns}
                         e.g., "sandbox.snoopy.wow-dev.kaos.io.kubecore.eu"
                       type: string
-                    environmentConfigRef:
-                      description: EnvironmentConfigRef contains a reference to the
-                        created EnvironmentConfig resource
-                      properties:
-                        apiVersion:
-                          description: API version of the resource
-                          type: string
-                        kind:
-                          description: Kind of the resource
-                          type: string
-                        name:
-                          description: Name of the resource
-                          type: string
-                        namespace:
-                          description: Namespace of the resource (if namespaced)
-                          type: string
-                        uid:
-                          description: UID of the resource
-                          type: string
-                      type: object
                     environmentType:
                       description: EnvironmentType shows the resolved environment
                         type from the template
-                      type: string
-                    estimatedMonthlyCost:
-                      description: EstimatedMonthlyCost contains the estimated monthly
-                        cost in USD as a string
                       type: string
                     kubePool:
                       description: KubePool used for this environment
@@ -665,10 +733,10 @@ spec:
                           items:
                             type: string
                           type: array
-                        nodeSelectors:
+                        nodeSelector:
                           additionalProperties:
                             type: string
-                          description: NodeSelectors are the node labels to use as
+                          description: NodeSelector are the node labels to use as
                             scheduling constraints
                           type: object
                         tolerations:
@@ -727,25 +795,6 @@ spec:
                   defaultBranch:
                     description: DefaultBranch is the default branch of the repository
                     type: string
-                  gitHubEnvironmentConfigRef:
-                    description: GitHubEnvironmentConfigRef reference to GitHub EnvironmentConfig
-                    properties:
-                      apiVersion:
-                        description: API version of the resource
-                        type: string
-                      kind:
-                        description: Kind of the resource
-                        type: string
-                      name:
-                        description: Name of the resource
-                        type: string
-                      namespace:
-                        description: Namespace of the resource (if namespaced)
-                        type: string
-                      uid:
-                        description: UID of the resource
-                        type: string
-                    type: object
                   gitHubProjectRef:
                     description: GitHubProjectRef reference to XGitHubProject
                     properties:
@@ -784,23 +833,6 @@ spec:
                     description: 'State of GitHub resources: "Pending", "Creating",
                       "Ready", "Failed"'
                     type: string
-                  teams:
-                    description: Teams contains the GitHub team IDs created for this
-                      project
-                    properties:
-                      business:
-                        description: Business is the ID of the business team
-                        type: string
-                      main:
-                        description: Main is the ID of the main team
-                        type: string
-                      ops:
-                        description: Ops is the ID of the ops team
-                        type: string
-                      software:
-                        description: Software is the ID of the software team
-                        type: string
-                    type: object
                 required:
                 - state
                 type: object
@@ -848,30 +880,12 @@ spec:
                 format: date-time
                 type: string
               mlStack:
-                description: MLStack tracks the per-project ML platform stack (XProjectMLStack)
+                description: |-
+                  MLStack tracks the per-project ML stack (XProjectMLStack) status.
+                  Populated only when spec.ml.enabled is true (PRD #240, F-07).
                 properties:
-                  environmentConfigRef:
-                    description: EnvironmentConfigRef is a reference to the ML stack
-                      EnvironmentConfig
-                    properties:
-                      apiVersion:
-                        description: API version of the resource
-                        type: string
-                      kind:
-                        description: Kind of the resource
-                        type: string
-                      name:
-                        description: Name of the resource
-                        type: string
-                      namespace:
-                        description: Namespace of the resource (if namespaced)
-                        type: string
-                      uid:
-                        description: UID of the resource
-                        type: string
-                    type: object
                   features:
-                    description: Features records which ML components are enabled
+                    description: Features records which ML stack components are enabled.
                     properties:
                       lakefs:
                         type: boolean
@@ -884,40 +898,105 @@ spec:
                     type: object
                   lakeFSEndpoint:
                     description: LakeFSEndpoint is the in-cluster service URL for
-                      lakeFS
+                      LakeFS.
                     type: string
+                  lakeFSOIDC:
+                    description: |-
+                      LakeFSOIDC tracks the Zitadel OIDC app and secret-chain status for
+                      LakeFS SSO via oauth2-proxy (PRD-240 F-18).
+                    properties:
+                      appId:
+                        description: AppID is the Zitadel application ID.
+                        type: string
+                      clientId:
+                        description: ClientID is the OIDC client ID.
+                        type: string
+                      discoveryUrl:
+                        description: DiscoveryURL is the Zitadel OIDC issuer's discovery
+                          endpoint.
+                        type: string
+                      projectId:
+                        description: ProjectID is the Zitadel project the app belongs
+                          to.
+                        type: string
+                      ready:
+                        description: |-
+                          Ready indicates the OIDC app is created and credentials are pushed
+                          to the cloud Secret Manager.
+                        type: boolean
+                      secretName:
+                        description: SecretName is the cloud Secret Manager key holding
+                          OIDC credentials.
+                        type: string
+                    type: object
                   lakeFSRepository:
-                    description: LakeFSRepository is the lakeFS repository name
+                    description: LakeFSRepository is the LakeFS repository name.
                     type: string
                   lastReconciled:
-                    description: LastReconciled is when the ML stack was last reconciled
+                    description: LastReconciled is when the ML stack was last reconciled.
                     format: date-time
                     type: string
                   message:
-                    description: Message contains details about the current state
+                    description: Message contains details about the current state.
                     type: string
                   mlflowEndpoint:
                     description: MLflowEndpoint is the in-cluster service URL for
-                      MLflow
+                      MLflow.
                     type: string
+                  mlflowOIDC:
+                    description: |-
+                      MlflowOIDC tracks the Zitadel OIDC app and secret-chain status for
+                      MLflow SSO. Populated by the Reconciling phase when the parent
+                      KubeOrg has a Ready IdentityProvider (PRD-240 F-18).
+                    properties:
+                      appId:
+                        description: AppID is the Zitadel application ID.
+                        type: string
+                      clientId:
+                        description: ClientID is the OIDC client ID.
+                        type: string
+                      discoveryUrl:
+                        description: DiscoveryURL is the Zitadel OIDC issuer's discovery
+                          endpoint.
+                        type: string
+                      projectId:
+                        description: ProjectID is the Zitadel project the app belongs
+                          to.
+                        type: string
+                      ready:
+                        description: |-
+                          Ready indicates the OIDC app is created and credentials are pushed
+                          to the cloud Secret Manager.
+                        type: boolean
+                      secretName:
+                        description: SecretName is the cloud Secret Manager key holding
+                          OIDC credentials.
+                        type: string
+                    type: object
                   namespace:
-                    description: Namespace is the Kubernetes namespace hosting the
-                      ML stack (e.g., ml-{project})
+                    description: |-
+                      Namespace is the Kubernetes namespace hosting the ML stack in the client
+                      KubePool cluster (typically "ml-{project}").
+                    type: string
+                  objectStorageBucket:
+                    description: |-
+                      ObjectStorageBucket is the name of the artifact bucket. The scheme
+                      (s3://, gs://, file:///...) is resolved by StorageProviderContract at
+                      composition rendering time (D-06); this field carries only the name.
                     type: string
                   postgresHost:
-                    description: PostgresHost is the in-cluster Postgres connection
-                      host (e.g., {project}-pg-rw.ml-{project}.svc)
-                    type: string
-                  s3Bucket:
-                    description: S3Bucket is the name of the S3 bucket for ML artifacts
+                    description: |-
+                      PostgresHost is the in-cluster Postgres read-write service host
+                      (e.g., "{project}-pg-rw.ml-{project}.svc").
                     type: string
                   state:
                     description: 'State of the ML stack: "Pending", "Creating", "Ready",
-                      "Failed"'
+                      "Failed".'
                     type: string
                   xProjectMLStackRef:
-                    description: XProjectMLStackRef is a reference to the created
-                      XProjectMLStack claim
+                    description: |-
+                      XProjectMLStackRef references the created namespaced XProjectMLStack XR
+                      in the KubeOrg namespace.
                     properties:
                       apiVersion:
                         description: API version of the resource

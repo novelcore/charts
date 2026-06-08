@@ -1,0 +1,25 @@
+{{- if .Values.tokenBroker.enabled }}
+# Token-broker ClusterIP Service (F-11, PRD-352).
+# In-cluster consumers (ESO workloadIdentityFederation.externalTokenEndpoint and
+# provider-gcp external_account credential_source.url) reach the broker at:
+#   http://kubecore-operator-token-broker.<release-namespace>.svc.cluster.local/token/{org}
+# The Service is ClusterIP-only — it is never exposed outside the cluster.
+apiVersion: v1
+kind: Service
+metadata:
+  name: kubecore-operator-token-broker
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "chart.labels" . | nindent 4 }}
+    app.kubernetes.io/component: token-broker
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "chart.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: token-broker
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+      protocol: TCP
+{{- end }}

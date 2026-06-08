@@ -1,0 +1,29 @@
+{{- if .Values.tokenBroker.enabled }}
+# Token-broker ClusterRole (F-14, C1.5-a, PRD-352).
+#
+# RBAC REDUCTION (T-09 mitigation — Phase 3b):
+# The broker no longer reads per-org machine-key Secrets. Token minting has been
+# replaced with RFC-8693 impersonation: the broker resolves the org's Zitadel
+# machine-user id from KubeOrg.Status.ZitadelMachineUserId (schema.kubecore.io
+# resource) and calls the impersonation token exchange using a single shared
+# credential. This eliminates the cluster-wide Secrets get/list rule that was the
+# largest RBAC surface in the old key-based path.
+#
+# What the broker now needs:
+#   - kubeorgs get/list/watch (schema.kubecore.io): read ZitadelMachineUserId from
+#     KubeOrg status to resolve the impersonation subject for each org.
+#
+# What the broker no longer needs:
+#   - secrets get/list (""): removed; no per-org machine-key Secret is read.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kubecore-operator-token-broker
+  labels:
+    {{- include "chart.labels" . | nindent 4 }}
+    app.kubernetes.io/component: token-broker
+rules:
+  - apiGroups: ["schema.kubecore.io"]
+    resources: ["kubeorgs"]
+    verbs: ["get", "list", "watch"]
+{{- end }}

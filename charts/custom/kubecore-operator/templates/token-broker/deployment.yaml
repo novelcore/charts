@@ -1,0 +1,108 @@
+{{- if .Values.tokenBroker.enabled }}
+# Token-broker Deployment (F-11, PRD-352).
+# Runs the same operator image with --mode=broker to serve per-org Zitadel JWTs at
+# GET /token/{org} over ClusterIP. Only ESO and provider-gcp pods may reach it
+# (enforced by the NetworkPolicy in this directory).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kubecore-operator-token-broker
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "chart.labels" . | nindent 4 }}
+    app.kubernetes.io/component: token-broker
+spec:
+  replicas: {{ .Values.tokenBroker.replicas | default 1 }}
+  selector:
+    matchLabels:
+      {{- include "chart.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: token-broker
+  template:
+    metadata:
+      labels:
+        {{- include "chart.labels" . | nindent 8 }}
+        app.kubernetes.io/component: token-broker
+    spec:
+      serviceAccountName: {{ .Values.tokenBroker.serviceAccountName | default "kubecore-operator-token-broker" }}
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: broker
+          image: {{ .Values.tokenBroker.image.repository | default .Values.controllerManager.container.image.repository }}:{{ .Values.tokenBroker.image.tag | default .Values.controllerManager.container.image.tag }}
+          imagePullPolicy: {{ .Values.tokenBroker.image.pullPolicy | default .Values.controllerManager.container.image.pullPolicy | default "IfNotPresent" }}
+          command:
+            - /manager
+          args:
+            - "--mode=broker"
+          env:
+            # ZITADEL_ISSUER_URL: full HTTPS base URL of the Zitadel instance.
+            # Feeds ImpersonationConfig.Issuer; token endpoint = Issuer + /oauth/v2/token.
+            # Example: "https://access.platform.kaos-labs.org"
+            - name: ZITADEL_ISSUER_URL
+              value: {{ .Values.tokenBroker.zitadelIssuerURL | quote }}
+            # BROKER_APP_CLIENT_ID: confidential broker-application client id.
+            # Also the `aud` claim in every minted token (RFC-8693 forces this).
+            # Non-secret; sourced from values.
+            - name: BROKER_APP_CLIENT_ID
+              value: {{ .Values.tokenBroker.brokerAppClientId | quote }}
+            # BROKER_APP_CLIENT_SECRET: broker-application secret. SENSITIVE.
+            # Sourced from the impersonation Secret (created out-of-band by
+            # scripts/setup-zitadel-broker-identity.sh — the single broker credential
+            # replacing N per-org machine-key Secrets).
+            - name: BROKER_APP_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.tokenBroker.impersonationSecretName }}
+                  key: appClientSecret
+            # BROKER_ACTOR_CLIENT_ID: actor service-user client id.
+            # The actor holds Zitadel IAM_ADMIN_IMPERSONATOR at instance level. Non-secret.
+            - name: BROKER_ACTOR_CLIENT_ID
+              value: {{ .Values.tokenBroker.actorClientId | quote }}
+            # BROKER_ACTOR_CLIENT_SECRET: actor service-user secret. SENSITIVE.
+            - name: BROKER_ACTOR_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.tokenBroker.impersonationSecretName }}
+                  key: actorClientSecret
+            - name: BROKER_LISTEN_ADDR
+              value: ":8080"
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.tokenBroker.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - "ALL"
+            readOnlyRootFilesystem: true
+      terminationGracePeriodSeconds: 10
+      {{- with .Values.tokenBroker.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tokenBroker.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- if .Values.registry.createImagePullSecret }}
+      imagePullSecrets:
+        - name: {{ .Values.registry.imagePullSecretName }}
+      {{- end }}
+{{- end }}

@@ -10,11 +10,11 @@ To get started with kubecore-operator:
 2. Check the CRDs are installed:
    kubectl get crd | grep kubecore.io
 
-3. Verify Crossplane is installed (if enabled):
-   kubectl get pods -n {{ .Values.crossplane.namespace | default "crossplane-system" }}
+3. Verify Crossplane is installed (managed separately by kaos):
+   kubectl get pods -n crossplane-system
 
-4. Check Crossplane functions are installed (if enabled):
-   kubectl get functions -n {{ .Values.crossplane.namespace | default "crossplane-system" }}
+4. Check Crossplane functions are installed (managed separately by kaos):
+   kubectl get functions -n crossplane-system
 
 5. Create your first KubeOrg resource:
    kubectl apply -f config/samples/schema_v1beta1_kubeorg.yaml

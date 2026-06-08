@@ -1,0 +1,17 @@
+{{- if .Values.compositions.enabled }}
+apiVersion: pkg.crossplane.io/v1
+kind: Configuration
+metadata:
+  name: kubecore-compositions
+  labels:
+    {{- include "chart.labels" . | nindent 4 }}
+spec:
+  package: {{ required "compositions.package is required when compositions.enabled=true" .Values.compositions.package | quote }}
+  packagePullPolicy: {{ .Values.compositions.pullPolicy | default "IfNotPresent" }}
+  revisionActivationPolicy: Automatic
+  revisionHistoryLimit: 2
+  {{- with .Values.compositions.packagePullSecrets }}
+  packagePullSecrets:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+{{- end }}

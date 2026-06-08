@@ -30,11 +30,24 @@ rules:
 - apiGroups:
   - ""
   resources:
+  - namespaces
+  verbs:
+  - create
+  - get
+  - list
+  - patch
+  - update
+- apiGroups:
+  - ""
+  resources:
   - serviceaccounts
   verbs:
+  - create
   - delete
   - get
   - list
+  - patch
+  - update
 - apiGroups:
   - apiextensions.crossplane.io
   resources:
@@ -54,6 +67,24 @@ rules:
   verbs:
   - get
 - apiGroups:
+  - authorization.azure.m.upbound.io
+  resources:
+  - roleassignments
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - aws.m.upbound.io
+  - gcp.m.upbound.io
+  - kubernetes.crossplane.io
+  resources:
+  - providerconfigs
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
   - aws.provider.platform.kubecore.io
   resources:
   - xawsproviders
@@ -72,9 +103,61 @@ rules:
   verbs:
   - get
 - apiGroups:
-  - aws.upbound.io
+  - azure.m.upbound.io
   resources:
   - providerconfigs
+  - resourcegroups
+  verbs:
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - azure.provider.platform.kubecore.io
+  resources:
+  - xazureproviders
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - azure.provider.platform.kubecore.io
+  resources:
+  - xazureproviders/status
+  verbs:
+  - get
+- apiGroups:
+  - cloudplatform.gcp.m.upbound.io
+  resources:
+  - projectiammembers
+  - serviceaccountiammembers
+  - serviceaccounts
+  verbs:
+  - get
+  - list
+  - patch
+  - update
+- apiGroups:
+  - compute.gcp.m.upbound.io
+  resources:
+  - firewalls
+  - networks
+  - routernats
+  - routers
+  - subnetworks
+  verbs:
+  - delete
+  - get
+  - list
+- apiGroups:
+  - container.gcp.m.upbound.io
+  resources:
+  - clusters
   verbs:
   - get
   - list
@@ -92,7 +175,7 @@ rules:
   - update
   - watch
 - apiGroups:
-  - ec2.aws.upbound.io
+  - ec2.aws.m.upbound.io
   resources:
   - eips
   - internetgateways
@@ -104,9 +187,8 @@ rules:
   - get
   - list
 - apiGroups:
-  - ec2.aws.upbound.io
+  - ec2.aws.m.upbound.io
   resources:
-  - natgateways
   - subnets
   - vpcs
   verbs:
@@ -114,32 +196,14 @@ rules:
   - list
   - watch
 - apiGroups:
-  - ec2.aws.upbound.io
+  - ec2.aws.m.upbound.io
   resources:
   - subnets/status
   - vpcs/status
   verbs:
   - get
 - apiGroups:
-  - eks.aws.crossplane.io
-  resources:
-  - xeks
-  verbs:
-  - create
-  - delete
-  - get
-  - list
-  - patch
-  - update
-  - watch
-- apiGroups:
-  - eks.aws.crossplane.io
-  resources:
-  - xeks/status
-  verbs:
-  - get
-- apiGroups:
-  - eks.aws.upbound.io
+  - eks.aws.m.upbound.io
   resources:
   - clusterauths
   verbs:
@@ -149,7 +213,7 @@ rules:
   - update
   - watch
 - apiGroups:
-  - eks.aws.upbound.io
+  - eks.aws.m.upbound.io
   resources:
   - nodegroups
   verbs:
@@ -157,7 +221,7 @@ rules:
   - list
   - watch
 - apiGroups:
-  - eks.aws.upbound.io
+  - eks.aws.m.upbound.io
   resources:
   - nodegroups/status
   verbs:
@@ -166,6 +230,7 @@ rules:
   - external-secrets.io
   resources:
   - clustersecretstores
+  - secretstores
   verbs:
   - get
   - list
@@ -192,11 +257,30 @@ rules:
   - update
   - watch
 - apiGroups:
+  - gcp.provider.platform.kubecore.io
+  resources:
+  - xgcpproviders
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - gcp.provider.platform.kubecore.io
+  resources:
+  - xgcpproviders/status
+  verbs:
+  - get
+- apiGroups:
   - github.platform.kubecore.io
   resources:
   - xgithubapps
   - xgithubprojects
   - xgithubproviders
+  - xgithubteams
   verbs:
   - create
   - delete
@@ -210,12 +294,12 @@ rules:
   resources:
   - xgithubprojects/status
   - xgithubproviders/status
+  - xgithubteams/status
   verbs:
   - get
 - apiGroups:
-  - helm.crossplane.io
+  - helm.m.crossplane.io
   resources:
-  - providerconfigs
   - releases
   verbs:
   - get
@@ -224,34 +308,10 @@ rules:
   - update
   - watch
 - apiGroups:
-  - iam.aws.upbound.io
+  - helm.m.crossplane.io
+  - kubernetes.m.crossplane.io
   resources:
-  - policies
-  verbs:
-  - get
-  - list
-  - patch
-  - update
-- apiGroups:
-  - iam.aws.upbound.io
-  resources:
-  - roles
-  verbs:
-  - get
-  - list
-  - patch
-  - update
-  - watch
-- apiGroups:
-  - iam.aws.upbound.io
-  resources:
-  - roles/status
-  verbs:
-  - get
-- apiGroups:
-  - k8s.platform.kubecore.io
-  resources:
-  - xk8sapps
+  - providerconfigs
   verbs:
   - create
   - delete
@@ -261,10 +321,37 @@ rules:
   - update
   - watch
 - apiGroups:
-  - kubernetes.crossplane.io
+  - iam.aws.m.upbound.io
   resources:
-  - objects
+  - policies
   verbs:
+  - get
+  - list
+  - patch
+  - update
+- apiGroups:
+  - iam.aws.m.upbound.io
+  resources:
+  - roles
+  verbs:
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - iam.aws.m.upbound.io
+  resources:
+  - roles/status
+  verbs:
+  - get
+- apiGroups:
+  - k8s.platform.kubecore.io
+  resources:
+  - xk8sapps
+  - xk8smlapps
+  verbs:
+  - create
   - delete
   - get
   - list
@@ -272,9 +359,9 @@ rules:
   - update
   - watch
 - apiGroups:
-  - kubernetes.crossplane.io
+  - keyvault.azure.m.upbound.io
   resources:
-  - providerconfigs
+  - vaults
   verbs:
   - get
   - list
@@ -288,17 +375,52 @@ rules:
   verbs:
   - get
 - apiGroups:
+  - kubernetes.m.crossplane.io
+  resources:
+  - objects
+  verbs:
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - managedidentity.azure.m.upbound.io
+  resources:
+  - federatedidentitycredentials
+  - userassignedidentities
+  verbs:
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - network.azure.m.upbound.io
+  resources:
+  - dnszones
+  verbs:
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
   - platform.kubecore.io
   resources:
+  - xaks
   - xawsnetworks
+  - xazurenetworks
   - xclusteroperators
   - xeks
-  - xk8smlapps
+  - xgcpnetworks
+  - xgcpobservabilitycosts
   - xkubenvs
   - xkubesystems
   - xmlsystems
+  - xobservabilities
   - xprojectenvmlstacks
-  - xprojectmlstacks
   verbs:
   - create
   - delete
@@ -310,14 +432,30 @@ rules:
 - apiGroups:
   - platform.kubecore.io
   resources:
+  - xakskubesystems
+  - xekskubesystems
+  - xgkekubesystems
+  verbs:
+  - delete
+  - get
+  - list
+  - watch
+- apiGroups:
+  - platform.kubecore.io
+  resources:
+  - xakskubesystems/status
   - xawsnetworks/status
   - xawsproviders/status
+  - xazurenetworks/status
   - xeks/status
-  - xk8smlapps/status
+  - xekskubesystems/status
+  - xgcpnetworks/status
+  - xgcpobservabilitycosts/status
+  - xgkekubesystems/status
   - xkubenvs/status
   - xkubesystems/status
+  - xobservabilities/status
   - xprojectenvmlstacks/status
-  - xprojectmlstacks/status
   verbs:
   - get
 - apiGroups:
@@ -328,6 +466,16 @@ rules:
   verbs:
   - get
   - list
+  - watch
+- apiGroups:
+  - platform.kubecore.io
+  resources:
+  - xgkes
+  verbs:
+  - get
+  - list
+  - patch
+  - update
   - watch
 - apiGroups:
   - protection.crossplane.io
@@ -342,7 +490,7 @@ rules:
   - update
   - watch
 - apiGroups:
-  - route53.aws.upbound.io
+  - route53.aws.m.upbound.io
   resources:
   - zones
   verbs:
@@ -356,6 +504,7 @@ rules:
   - kubeorgs
   - kubepools
   - kubeprojects
+  - kubeteams
   verbs:
   - create
   - delete
@@ -371,6 +520,7 @@ rules:
   - kubeorgs/finalizers
   - kubepools/finalizers
   - kubeprojects/finalizers
+  - kubeteams/finalizers
   verbs:
   - update
 - apiGroups:
@@ -380,8 +530,22 @@ rules:
   - kubeorgs/status
   - kubepools/status
   - kubeprojects/status
+  - kubeteams/status
   verbs:
   - get
   - patch
   - update
+- apiGroups:
+  - secretmanager.gcp.m.upbound.io
+  resources:
+  - secrets
+  - secretversions
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
 {{- end -}}

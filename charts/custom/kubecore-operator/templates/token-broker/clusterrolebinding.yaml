@@ -1,0 +1,20 @@
+{{- if .Values.tokenBroker.enabled }}
+# Token-broker ClusterRoleBinding (F-11, PRD-352).
+# Binds the broker ServiceAccount to its ClusterRole (read Secrets cluster-wide).
+# See clusterrole.yaml for the RBAC scoping discussion and limitations.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: kubecore-operator-token-broker
+  labels:
+    {{- include "chart.labels" . | nindent 4 }}
+    app.kubernetes.io/component: token-broker
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: kubecore-operator-token-broker
+subjects:
+  - kind: ServiceAccount
+    name: {{ .Values.tokenBroker.serviceAccountName | default "kubecore-operator-token-broker" }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}

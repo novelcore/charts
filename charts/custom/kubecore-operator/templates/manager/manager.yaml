@@ -35,11 +35,15 @@ spec:
             - /manager
           image: {{ .Values.controllerManager.container.image.repository }}:{{ .Values.controllerManager.container.image.tag }}
           imagePullPolicy: {{ .Values.controllerManager.container.image.pullPolicy | default "IfNotPresent" }}
-          {{- if .Values.controllerManager.container.env }}
+          {{- if or .Values.controllerManager.container.env .Values.tokenBroker.enabled }}
           env:
             {{- range $key, $value := .Values.controllerManager.container.env }}
             - name: {{ $key }}
               value: {{ $value | quote }}
+            {{- end }}
+            {{- if .Values.tokenBroker.enabled }}
+            - name: TOKEN_BROKER_URL
+              value: {{ .Values.tokenBroker.baseURL | default (printf "http://kubecore-operator-token-broker.%s.svc.cluster.local:8080" .Release.Namespace) | quote }}
             {{- end }}
           {{- end }}
           livenessProbe:
