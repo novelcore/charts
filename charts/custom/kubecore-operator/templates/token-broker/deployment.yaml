@@ -30,7 +30,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: broker
-          image: {{ .Values.tokenBroker.image.repository | default .Values.controllerManager.container.image.repository }}:{{ .Values.tokenBroker.image.tag | default .Values.controllerManager.container.image.tag }}
+          image: {{ .Values.tokenBroker.image.repository | default .Values.controllerManager.container.image.repository }}:{{ .Values.tokenBroker.image.tag | default .Values.controllerManager.container.image.tag | default .Chart.AppVersion }}
           imagePullPolicy: {{ .Values.tokenBroker.image.pullPolicy | default .Values.controllerManager.container.image.pullPolicy | default "IfNotPresent" }}
           command:
             - /manager

@@ -6,8 +6,11 @@ controllerManager:
       # Docker image repository
       # Example: novelcore.azurecr.io/kubecore/kubecore-operator
       repository: novelcore.azurecr.io/kubecore/kubecore-operator
-      # Image tag/version
-      tag: v0.1.18
+      # Image tag/version. Empty by default so the templates fall back to the
+      # chart's appVersion (release.yml stamps Chart.yaml appVersion = release
+      # version). One-pin: consumers pin only the chart version; the image tag
+      # follows automatically and can never drift from the chart.
+      tag: ""
       # Image pull policy
       pullPolicy: IfNotPresent
     args:
@@ -253,7 +256,7 @@ compositions:
   # OCI image for the kubecore-compositions Configuration package.
   # CI overwrites this with novelcore.azurecr.io/kubecore/kubecore-compositions:vX.Y.Z
   # at release. Required (must be non-empty) when compositions.enabled=true.
-  package: "novelcore.azurecr.io/kubecore/kubecore-compositions:v0.2.3"
+  package: "novelcore.azurecr.io/kubecore/kubecore-compositions:v0.2.4"
   # pullPolicy controls when Crossplane downloads the package.
   # Options: IfNotPresent (default), Always, Never
   pullPolicy: IfNotPresent
