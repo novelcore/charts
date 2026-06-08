@@ -195,6 +195,7 @@ rules:
   resources:
   - eips
   - internetgateways
+  - natgateways
   - routes
   - routetableassociations
   - routetables
@@ -208,6 +209,7 @@ rules:
   - subnets
   - vpcs
   verbs:
+  - delete
   - get
   - list
   - watch
