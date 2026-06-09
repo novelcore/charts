@@ -424,12 +424,16 @@ rules:
   - platform.kubecore.io
   resources:
   - xaks
+  - xakskubesystems
   - xawsnetworks
   - xazurenetworks
   - xclusteroperators
   - xeks
+  - xekskubesystems
   - xgcpnetworks
   - xgcpobservabilitycosts
+  - xgkekubesystems
+  - xgkes
   - xkubenvs
   - xkubesystems
   - xmlsystems
@@ -442,17 +446,6 @@ rules:
   - list
   - patch
   - update
-  - watch
-- apiGroups:
-  - platform.kubecore.io
-  resources:
-  - xakskubesystems
-  - xekskubesystems
-  - xgkekubesystems
-  verbs:
-  - delete
-  - get
-  - list
   - watch
 - apiGroups:
   - platform.kubecore.io
@@ -480,16 +473,6 @@ rules:
   verbs:
   - get
   - list
-  - watch
-- apiGroups:
-  - platform.kubecore.io
-  resources:
-  - xgkes
-  verbs:
-  - get
-  - list
-  - patch
-  - update
   - watch
 - apiGroups:
   - protection.crossplane.io
