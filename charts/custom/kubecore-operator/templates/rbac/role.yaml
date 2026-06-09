@@ -439,6 +439,7 @@ rules:
   - xmlsystems
   - xobservabilities
   - xprojectenvmlstacks
+  - xprojectmlstacks
   verbs:
   - create
   - delete
@@ -463,6 +464,7 @@ rules:
   - xkubesystems/status
   - xobservabilities/status
   - xprojectenvmlstacks/status
+  - xprojectmlstacks/status
   verbs:
   - get
 - apiGroups:
@@ -486,6 +488,37 @@ rules:
   - patch
   - update
   - watch
+- apiGroups:
+  - rbac.authorization.k8s.io
+  resourceNames:
+  - admin
+  - cluster-admin
+  - edit
+  - view
+  resources:
+  - clusterroles
+  verbs:
+  - bind
+- apiGroups:
+  - rbac.authorization.k8s.io
+  resources:
+  - rolebindings
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - repo.github.upbound.io
+  resources:
+  - repositoryfiles
+  verbs:
+  - delete
+  - get
+  - list
 - apiGroups:
   - route53.aws.m.upbound.io
   resources:
