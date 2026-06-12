@@ -810,14 +810,21 @@ spec:
           i=$((i + 1))
         done
 
+        # Write last-built-sha so the level-triggered reconciler (CronWorkflow,
+        # #459) can compare HEAD against the last successfully-built SHA and
+        # skip a redundant ml-ci-build submission when nothing has changed.
+        COMMIT_SHA="{{`{{workflow.parameters.commit_sha}}`}}"
+        yq e -i ".data.\"last-built-sha\" = \"${COMMIT_SHA}\"" "${IMAGES_PATH}"
+        echo "Recorded last-built-sha: ${COMMIT_SHA}"
+
         git config user.name "KubeCore CI"
         git config user.email "ci@kubecore.io"
         git add "${IMAGES_PATH}"
         if git diff --cached --quiet; then
-          echo "No changes to commit (image tags already match)"
+          echo "No changes to commit (image tags and last-built-sha already match)"
           exit 0
         fi
-        git commit -m "ml-ci(${APP_NAME}): bump step images to ${IMAGE_TAG} in pipeline-images ConfigMap"
+        git commit -m "ml-ci(${APP_NAME}): bump step images to ${IMAGE_TAG} + record last-built-sha in pipeline-images ConfigMap"
         git pull --rebase origin "${GITOPS_BRANCH}"
         git push
         echo "Pushed image-tag update to ${ORG}/${GITOPS_REPO}@${GITOPS_BRANCH}"

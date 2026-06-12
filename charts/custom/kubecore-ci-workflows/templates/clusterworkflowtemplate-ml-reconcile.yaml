@@ -1,0 +1,236 @@
+{{/*
+ml-ci-reconcile — level-triggered CI reconciler ClusterWorkflowTemplate (#459).
+
+Invoked every 3 minutes by the per-app CronWorkflow rendered in the ci namespace
+by the k8smlapp Crossplane composition (generate-ci-resources step). Provides the
+level-triggered backstop for the WorkflowEventBinding: a dropped push webhook costs
+≤ poll interval, never a permanently missed build.
+
+Flow:
+  fetch-head-sha     — git ls-remote the app repo at the configured branch to
+                       get the current HEAD SHA (no full clone needed).
+  compare-and-submit — read last-built-sha from the {app_name}-pipeline-images
+                       ConfigMap in ci_namespace. If SHAs match, exit 0 (no build
+                       needed). If they differ, submit ml-ci-build CWT.
+
+The CronWorkflow in the ci namespace mounts the {orgName}-ci-github-token ESO
+secret as a github-token volume so fetch-head-sha can authenticate. The
+compare-and-submit step uses the kubectl image to both read the ConfigMap and
+submit the Workflow object — no argo CLI required.
+
+Required volumes (supplied by the CronWorkflow):
+  - github-token: Secret {orgName}-ci-github-token (ESO-managed, ci namespace)
+
+Parameters are supplied by the CronWorkflow via its workflowSpec.arguments.
+*/}}
+apiVersion: argoproj.io/v1alpha1
+kind: ClusterWorkflowTemplate
+metadata:
+  name: ml-ci-reconcile
+  labels:
+    {{- include "kubecore-ci-workflows.labels" . | nindent 4 }}
+spec:
+  entrypoint: ml-ci-reconcile
+  ttlStrategy:
+    secondsAfterCompletion: {{ .Values.workflow.ttlStrategy.secondsAfterCompletion }}
+  podGC:
+    strategy: {{ .Values.workflow.podGC.strategy }}
+  {{- with .Values.nodeSelector }}
+  nodeSelector:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with .Values.tolerations }}
+  tolerations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  arguments:
+    parameters:
+    - name: app_name
+      description: "KubeApp name (e.g. yolo-mlops)"
+    - name: project_name
+      description: "KubeProject name (e.g. mlops-demo)"
+    - name: repo_url
+      description: "GitHub repository HTTPS clone URL"
+      value: ""
+    - name: branch
+      description: "Branch to reconcile (bare name, e.g. dev — no refs/heads/ prefix)"
+      value: "dev"
+    - name: ci_namespace
+      description: "CI namespace where {app_name}-pipeline-images ConfigMap lives"
+      value: "default-ci"
+    - name: image_repository
+      value: ""
+    - name: registry_url
+      value: ""
+    - name: build_registry_url
+      value: ""
+    - name: gitops_repository
+      value: ""
+    - name: gitops_branch
+      value: "main"
+    - name: workflow_template_path
+      value: ""
+
+  templates:
+  - name: ml-ci-reconcile
+    steps:
+    - - name: fetch-head-sha
+        template: fetch-head-sha
+    - - name: compare-and-submit
+        template: compare-and-submit
+        arguments:
+          parameters:
+          - name: head_sha
+            value: "{{`{{steps.fetch-head-sha.outputs.parameters.head_sha}}`}}"
+
+  - name: fetch-head-sha
+    outputs:
+      parameters:
+      - name: head_sha
+        valueFrom:
+          path: /tmp/head_sha
+    container:
+      image: alpine/git:latest
+      command: [sh, -c]
+      args:
+      - |
+        set -eu
+        REPO_URL="{{`{{workflow.parameters.repo_url}}`}}"
+        BRANCH="{{`{{workflow.parameters.branch}}`}}"
+
+        if [ -z "$REPO_URL" ]; then
+          echo "repo_url not supplied — skipping reconcile (app repo not yet known)"
+          echo -n "unknown" > /tmp/head_sha
+          exit 0
+        fi
+
+        # Authenticate with the GitHub App installation token.
+        if [ -f /etc/github-token/token ]; then
+          TOKEN=$(cat /etc/github-token/token)
+          AUTH_URL=$(echo "$REPO_URL" | sed "s|https://|https://x-access-token:${TOKEN}@|")
+        else
+          AUTH_URL="$REPO_URL"
+        fi
+
+        # git ls-remote avoids a full clone — only the ref HEAD is fetched.
+        SHA=$(git ls-remote "$AUTH_URL" "refs/heads/${BRANCH}" | awk '{print $1}')
+        if [ -z "$SHA" ]; then
+          echo "WARNING: branch ${BRANCH} not found at ${REPO_URL} — skipping reconcile"
+          echo -n "unknown" > /tmp/head_sha
+          exit 0
+        fi
+
+        echo "HEAD SHA for ${BRANCH}: ${SHA}"
+        echo -n "$SHA" > /tmp/head_sha
+      volumeMounts:
+      - name: github-token
+        mountPath: /etc/github-token
+        readOnly: true
+
+  - name: compare-and-submit
+    inputs:
+      parameters:
+      - name: head_sha
+    container:
+      image: gcr.io/cloud-builders/kubectl:latest
+      command: [sh, -c]
+      args:
+      - |
+        set -eu
+        APP_NAME="{{`{{workflow.parameters.app_name}}`}}"
+        CI_NS="{{`{{workflow.parameters.ci_namespace}}`}}"
+        HEAD_SHA="{{`{{inputs.parameters.head_sha}}`}}"
+
+        if [ "$HEAD_SHA" = "unknown" ]; then
+          echo "HEAD SHA unknown — nothing to reconcile"
+          exit 0
+        fi
+
+        # Read last-built-sha from {app_name}-pipeline-images ConfigMap.
+        # This key is written by the ml-ci-build patch-images step (#459).
+        LAST_SHA=$(kubectl -n "$CI_NS" get configmap "${APP_NAME}-pipeline-images" \
+          -o jsonpath='{.data.last-built-sha}' 2>/dev/null || echo "")
+
+        echo "HEAD SHA:       ${HEAD_SHA}"
+        echo "last-built-sha: ${LAST_SHA:-<none>}"
+
+        if [ "$HEAD_SHA" = "$LAST_SHA" ]; then
+          echo "SHAs match — no build needed"
+          exit 0
+        fi
+
+        echo "SHA drift detected — submitting ml-ci-build"
+
+        APP_NAME="{{`{{workflow.parameters.app_name}}`}}"
+        PROJECT_NAME="{{`{{workflow.parameters.project_name}}`}}"
+        REPO_URL="{{`{{workflow.parameters.repo_url}}`}}"
+        BRANCH="{{`{{workflow.parameters.branch}}`}}"
+        IMAGE_REPO="{{`{{workflow.parameters.image_repository}}`}}"
+        REGISTRY_URL="{{`{{workflow.parameters.registry_url}}`}}"
+        BUILD_REGISTRY_URL="{{`{{workflow.parameters.build_registry_url}}`}}"
+        GITOPS_REPO="{{`{{workflow.parameters.gitops_repository}}`}}"
+        GITOPS_BRANCH="{{`{{workflow.parameters.gitops_branch}}`}}"
+        WFT_PATH="{{`{{workflow.parameters.workflow_template_path}}`}}"
+
+        # Token secret for ml-ci-build volumes block. The convention set by the
+        # k8smlapp composition is {orgName}-ci-github-token; here we derive it
+        # from the CronWorkflow's mounted volume (same secret, mounted into the
+        # reconciler CWT's workflowSpec.volumes by the composition).
+        TOKEN_SECRET="${APP_NAME}-ci-github-token"
+
+        # Submit a Workflow referencing ml-ci-build CWT. kubectl apply is
+        # idempotent on generateName-based names because each run produces a
+        # unique name; we use create rather than apply.
+        kubectl -n "$CI_NS" create -f - <<EOF
+        apiVersion: argoproj.io/v1alpha1
+        kind: Workflow
+        metadata:
+          generateName: ml-ci-reconcile-${APP_NAME}-
+          namespace: ${CI_NS}
+          labels:
+            platform.kubecore.io/app: ${APP_NAME}
+            platform.kubecore.io/ci-trigger: reconciler
+        spec:
+          serviceAccountName: ci-build-sa
+          workflowTemplateRef:
+            name: ml-ci-build
+            clusterScope: true
+          volumes:
+          - name: github-token
+            secret:
+              secretName: ${TOKEN_SECRET}
+          arguments:
+            parameters:
+            - name: repo_url
+              value: "${REPO_URL}"
+            - name: commit_sha
+              value: "${HEAD_SHA}"
+            - name: branch
+              value: "refs/heads/${BRANCH}"
+            - name: target_branch
+              value: "dev"
+            - name: branch_type
+              value: "feature"
+            - name: app_name
+              value: "${APP_NAME}"
+            - name: project_name
+              value: "${PROJECT_NAME}"
+            - name: pr_merged
+              value: "true"
+            - name: event_type
+              value: "reconciler"
+            - name: image_repository
+              value: "${IMAGE_REPO}"
+            - name: registry_url
+              value: "${REGISTRY_URL}"
+            - name: build_registry_url
+              value: "${BUILD_REGISTRY_URL}"
+            - name: gitops_repository
+              value: "${GITOPS_REPO}"
+            - name: gitops_branch
+              value: "${GITOPS_BRANCH}"
+            - name: workflow_template_path
+              value: "${WFT_PATH}"
+        EOF
+
+        echo "ml-ci-build Workflow submitted to ${CI_NS}"
