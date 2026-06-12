@@ -555,6 +555,7 @@ spec:
         cpu_cls = compute.get('cpu', {})
         gpu_cls = compute.get('gpu', {})
         hpc = ctx.get('hpc', {})
+        checkpoints = ctx.get('checkpoints', {})
         sa = ctx.get('serviceAccountName', 'argo-workflow')
 
         steps = kubeline.get('steps', [])
@@ -642,6 +643,17 @@ spec:
                 {'name': 'MLFLOW_TRACKING_USERNAME', 'valueFrom': {'secretKeyRef': {'name': mlflow.get('svcSecret', f"{project_name}-mlflow-admin"), 'key': 'username'}}},
                 {'name': 'MLFLOW_TRACKING_PASSWORD', 'valueFrom': {'secretKeyRef': {'name': mlflow.get('svcSecret', f"{project_name}-mlflow-admin"), 'key': 'password'}}},
             ]
+            # Inject platform-derived checkpoint location when present in context.yaml.
+            # checkpoints.bucket = lakeFS repository name; checkpoints.prefix = branch/path
+            # within that repo (lakeFS S3 gateway addressing: bucket=repo, prefix=branch/...).
+            # Only injected when the composition wrote the checkpoints block; absent on
+            # legacy deployments that pre-date Edit 1 — kubeline shims tolerate absence.
+            ckpt_bucket = checkpoints.get('bucket', '')
+            ckpt_prefix = checkpoints.get('prefix', '')
+            if ckpt_bucket:
+                env_list.append({'name': 'CHECKPOINT_BUCKET', 'value': ckpt_bucket})
+            if ckpt_prefix:
+                env_list.append({'name': 'CHECKPOINT_PREFIX', 'value': ckpt_prefix})
             for e in (step.get('env') or []):
                 env_list.append(e)
             container['env'] = env_list
