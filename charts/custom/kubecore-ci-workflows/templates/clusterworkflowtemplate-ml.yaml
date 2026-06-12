@@ -738,7 +738,13 @@ spec:
           python3 /tmp/render_wft.py
 
         cd /tmp/gitops
-        git add "workflows/${APP_NAME}/${BRANCH}/workflow-template.yaml"
+        # Stage the DISCOVERED path (kubeapps/{app}/{gitops-branch}/...), not a
+        # hardcoded workflows/{app}/{push-branch}/ — the old pathspec pointed at
+        # a file that never existed (wrong basePath AND wrong branch segment),
+        # so git add exited 128 after a perfectly good render. Live log,
+        # gke-dev/yolo 2026-06-13: "discovered: kubeapps/yolo-training/main" →
+        # "fatal: pathspec 'workflows/yolo-training/dev/...'".
+        git add "${GITOPS_WORKFLOWS_PATH}/workflow-template.yaml"
         if git diff --cached --quiet; then
           echo "No WFT changes to commit"
         else
