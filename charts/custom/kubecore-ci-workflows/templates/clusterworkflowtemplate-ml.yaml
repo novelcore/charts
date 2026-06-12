@@ -504,20 +504,25 @@ spec:
         git config --global user.email "ci@kubecore.io"
 
         # pipeline-context.yaml is written by the k8smlapp Crossplane composition
-        # at workflows/{appName}/{gitopsBranch}/pipeline-context.yaml — the gitops
-        # repo target branch (typically "main"), NOT the app repo push branch.
-        # The WFT render output also lands in the gitops branch path so ArgoCD
-        # picks it up. The APP_BRANCH (dev/feature/etc) is used only for the
-        # kaniko build context and image tag; it does not drive gitops file paths.
-        GITOPS_WORKFLOWS_PATH="workflows/${APP_NAME}/${GITOPS_BRANCH}"
-        CONTEXT_PATH="/tmp/gitops/${GITOPS_WORKFLOWS_PATH}/pipeline-context.yaml"
+        # at {basePath}/{appName}/{gitopsBranch}/pipeline-context.yaml. basePath
+        # is operator-configured (gitOpsConfig.basePath, default "kubeapps" —
+        # NOT "workflows"; live layout verified on gke-dev/yolo 2026-06-13) and
+        # is not passed to this workflow, so DISCOVER the directory by locating
+        # the context file in the clone. The WFT render output lands next to it
+        # so the ArgoCD app watching that path picks it up. The APP_BRANCH
+        # (dev/feature/etc) is used only for the kaniko build context and image
+        # tag; it does not drive gitops file paths.
+        CONTEXT_PATH=$(find /tmp/gitops -path "*/${APP_NAME}/${GITOPS_BRANCH}/pipeline-context.yaml" | head -1)
         KUBELINE_PATH="/workspace/repo/kubeline.yaml"
-        WFT_OUT="/tmp/gitops/${GITOPS_WORKFLOWS_PATH}/workflow-template.yaml"
 
-        if [ ! -f "$CONTEXT_PATH" ]; then
-          echo "WARNING: pipeline-context.yaml not found at $CONTEXT_PATH — skipping render"
-          exit 0
+        if [ -z "$CONTEXT_PATH" ] || [ ! -f "$CONTEXT_PATH" ]; then
+          echo "ERROR: pipeline-context.yaml not found anywhere under */${APP_NAME}/${GITOPS_BRANCH}/ in the gitops repo."
+          echo "The k8smlapp composition writes it; without it the WFT cannot be rendered. Failing loudly (a skipped render previously masked a path mismatch)."
+          exit 1
         fi
+        GITOPS_WORKFLOWS_PATH=$(dirname "${CONTEXT_PATH#/tmp/gitops/}")
+        WFT_OUT="/tmp/gitops/${GITOPS_WORKFLOWS_PATH}/workflow-template.yaml"
+        echo "gitops pipeline dir discovered: ${GITOPS_WORKFLOWS_PATH}"
 
         cat > /tmp/render_wft.py << 'PYEOF'
         import sys, yaml, os
@@ -788,14 +793,18 @@ spec:
         git clone --depth=1 --branch "${GITOPS_BRANCH}" "${REPO_URL}" /tmp/gitops
         cd /tmp/gitops
 
-        # pipeline-images.yaml is written by Crossplane at the gitops branch path,
-        # NOT the app repo's push branch. Use GITOPS_BRANCH (e.g. "main") here.
-        IMAGES_PATH="workflows/${APP_NAME}/${GITOPS_BRANCH}/pipeline-images.yaml"
+        # pipeline-images.yaml is written by Crossplane at
+        # {basePath}/{appName}/{gitopsBranch}/ — basePath is operator-configured
+        # (default "kubeapps") and not passed here, so discover it by locating
+        # the file (same discovery as render-wft; live layout verified
+        # gke-dev/yolo 2026-06-13).
+        IMAGES_PATH=$(find . -path "*/${APP_NAME}/${GITOPS_BRANCH}/pipeline-images.yaml" | head -1)
 
-        if [ ! -f "${IMAGES_PATH}" ]; then
-          echo "WARNING: pipeline-images.yaml not found at ${IMAGES_PATH} — skipping image tag patch"
-          exit 0
+        if [ -z "${IMAGES_PATH}" ] || [ ! -f "${IMAGES_PATH}" ]; then
+          echo "ERROR: pipeline-images.yaml not found anywhere under */${APP_NAME}/${GITOPS_BRANCH}/ — the WFT resolves image parameters from this ConfigMap; failing loudly."
+          exit 1
         fi
+        echo "pipeline-images discovered at ${IMAGES_PATH}"
 
         # changed_steps comes in as a JSON array `[{"name":"...","path":"..."},...]`
         # Update each step's image key in the pipeline-images ConfigMap.
