@@ -123,8 +123,17 @@ spec:
           - name: new_version
             value: "{{`{{steps.version.outputs.parameters.new_version}}`}}"
         withParam: "{{`{{steps.detect-steps.outputs.parameters.changed_steps}}`}}"
-    - - name: patch-wft
-        template: patch-wft
+    - - name: render-wft
+        template: render-wft
+        when: "{{`{{steps.detect-steps.outputs.parameters.has_changes}}`}} == true && {{`{{workflow.parameters.pr_merged}}`}} == true && {{`{{workflow.parameters.branch_type}}`}} != chore"
+        arguments:
+          parameters:
+          - name: image_tag
+            value: "{{`{{steps.version.outputs.parameters.image_tag}}`}}"
+          - name: changed_steps
+            value: "{{`{{steps.detect-steps.outputs.parameters.changed_steps}}`}}"
+    - - name: patch-images
+        template: patch-images
         when: "{{`{{steps.detect-steps.outputs.parameters.has_changes}}`}} == true && {{`{{workflow.parameters.pr_merged}}`}} == true && {{`{{workflow.parameters.branch_type}}`}} != chore"
         arguments:
           parameters:
@@ -460,16 +469,291 @@ spec:
         mountPath: /etc/registry-auth
         readOnly: true
 
-  - name: patch-wft
+  - name: render-wft
     inputs:
       parameters:
       - name: image_tag
       - name: changed_steps
-    # Run as root: this template installs git via apk add (the yq image
-    # ships only the yq binary, no git). apk needs root to write to
-    # /var/lib/apk/db; without this the container fails with
-    #   ERROR: Unable to lock database: Permission denied
-    # Alternative would be a custom yq+git image — overkill for one step.
+    securityContext:
+      runAsUser: 0
+      runAsGroup: 0
+    container:
+      image: python:3.12-alpine
+      command: [sh, -c]
+      securityContext:
+        runAsUser: 0
+        runAsGroup: 0
+      args:
+      - |
+        set -e
+        apk add --no-cache git >/dev/null
+        pip install pyyaml --quiet
+
+        TOKEN=$(cat /etc/github-token/token)
+        ORG="{{ .Values.github.org }}"
+        GITOPS_REPO="{{`{{workflow.parameters.gitops_repository}}`}}"
+        GITOPS_BRANCH="{{`{{workflow.parameters.gitops_branch}}`}}"
+        APP_NAME="{{`{{workflow.parameters.app_name}}`}}"
+        PROJECT_NAME="{{`{{workflow.parameters.project_name}}`}}"
+        IMAGE_TAG="{{`{{inputs.parameters.image_tag}}`}}"
+        BRANCH=$(echo "{{`{{workflow.parameters.branch}}`}}" | sed 's|^refs/heads/||')
+
+        REPO_URL="https://x-access-token:${TOKEN}@github.com/${ORG}/${GITOPS_REPO}.git"
+        git clone --depth=1 --branch "${GITOPS_BRANCH}" "${REPO_URL}" /tmp/gitops
+        git config --global user.name "KubeCore CI"
+        git config --global user.email "ci@kubecore.io"
+
+        # pipeline-context.yaml is written by the k8smlapp Crossplane composition
+        # at workflows/{appName}/{gitopsBranch}/pipeline-context.yaml — the gitops
+        # repo target branch (typically "main"), NOT the app repo push branch.
+        # The WFT render output also lands in the gitops branch path so ArgoCD
+        # picks it up. The APP_BRANCH (dev/feature/etc) is used only for the
+        # kaniko build context and image tag; it does not drive gitops file paths.
+        GITOPS_WORKFLOWS_PATH="workflows/${APP_NAME}/${GITOPS_BRANCH}"
+        CONTEXT_PATH="/tmp/gitops/${GITOPS_WORKFLOWS_PATH}/pipeline-context.yaml"
+        KUBELINE_PATH="/workspace/repo/kubeline.yaml"
+        WFT_OUT="/tmp/gitops/${GITOPS_WORKFLOWS_PATH}/workflow-template.yaml"
+
+        if [ ! -f "$CONTEXT_PATH" ]; then
+          echo "WARNING: pipeline-context.yaml not found at $CONTEXT_PATH — skipping render"
+          exit 0
+        fi
+
+        cat > /tmp/render_wft.py << 'PYEOF'
+        import sys, yaml, os
+
+        # Argo brace delimiters as variables so Helm does not parse them.
+        OB = chr(123) + chr(123)
+        CB = chr(125) + chr(125)
+
+        kubeline_path = os.environ['KUBELINE_PATH']
+        context_path = os.environ['CONTEXT_PATH']
+        wft_out = os.environ['WFT_OUT']
+        app_name = os.environ['APP_NAME']
+        project_name = os.environ['PROJECT_NAME']
+        branch = os.environ.get('BRANCH', 'main')
+
+        with open(kubeline_path) as f:
+            kubeline = yaml.safe_load(f)
+
+        version = kubeline.get('version')
+        if version != 2:
+            print(f"WARNING: kubeline.yaml version={version!r} (expected 2). Skipping WFT render (v1 fallback).", file=sys.stderr)
+            sys.exit(0)
+
+        with open(context_path) as f:
+            raw_cm = yaml.safe_load(f)
+        ctx = yaml.safe_load(raw_cm['data']['context.yaml'])
+
+        ml_ns = ctx['namespace']
+        pipeline_name = ctx['pipelineName']
+        registry_url = ctx.get('registryUrl', '')
+        image_repo = ctx.get('imageRepo', f"{project_name}/{app_name}")
+        lakefs = ctx.get('lakefs', {})
+        mlflow = ctx.get('mlflow', {})
+        compute = ctx.get('computeClasses', {})
+        cpu_cls = compute.get('cpu', {})
+        gpu_cls = compute.get('gpu', {})
+        hpc = ctx.get('hpc', {})
+        checkpoints = ctx.get('checkpoints', {})
+        sa = ctx.get('serviceAccountName', 'argo-workflow')
+
+        steps = kubeline.get('steps', [])
+        pipeline_params = kubeline.get('pipeline', {}).get('parameters', [])
+
+        args_params = []
+        for p in pipeline_params:
+            args_params.append({'name': p['name'], 'value': p.get('default', ''), 'description': p.get('description', '')})
+
+        cpu_class_name = cpu_cls.get('name', f"{pipeline_name}-cpu")
+        gpu_class_name = gpu_cls.get('name', f"{pipeline_name}-gpu")
+        args_params.append({'name': 'cpu-class', 'value': cpu_class_name, 'description': cpu_cls.get('description', 'CPU compute class selector')})
+        args_params.append({'name': 'gpu-class', 'value': gpu_class_name, 'description': gpu_cls.get('description', 'GPU compute class selector')})
+
+        for step in steps:
+            args_params.append({
+                'name': f"image-{step['name']}",
+                'valueFrom': {'configMapKeyRef': {'name': f"{app_name}-pipeline-images", 'key': step['name']}}
+            })
+
+        args_params += [
+            {'name': 'registered-model-name', 'value': f"{app_name}-model"},
+            {'name': 'promote-to', 'value': ''},
+            {'name': 'kubepool-name', 'value': project_name},
+            {'name': 'mlflow-endpoint', 'value': mlflow.get('trackingUri', '')},
+            {'name': 'lakefs-endpoint', 'value': lakefs.get('endpoint', '')},
+            {'name': 'lakefs-repo', 'value': lakefs.get('repository', app_name)},
+            {'name': 'lakefs-branch', 'value': branch},
+        ]
+        args_params += [
+            {'name': 'cpu-step-cpu-limit', 'value': '2'},
+            {'name': 'cpu-step-mem-limit', 'value': '4Gi'},
+            {'name': 'gpu-step-cpu-limit', 'value': '4'},
+            {'name': 'gpu-step-mem-limit', 'value': '28Gi'},
+            {'name': 'gpu-step-gpu-limit', 'value': '1'},
+        ]
+
+        templates = []
+        dag_tasks = []
+        for step in steps:
+            task = {'name': step['name'], 'template': step['name'], 'dependencies': step.get('dependencies', []) or []}
+            inp_params = step.get('inputs', {}).get('parameters', []) if step.get('inputs') else []
+            if inp_params:
+                task_args = [{'name': ip['name'], 'value': OB + f"tasks.{ip['from']}.outputs.parameters.{ip['name']}" + CB} for ip in inp_params if ip.get('from')]
+                if task_args:
+                    task['arguments'] = {'parameters': task_args}
+            dag_tasks.append(task)
+        templates.append({'name': f"{app_name}-pipeline", 'dag': {'tasks': dag_tasks}})
+
+        for step in steps:
+            compute_type = step.get('compute', 'cpu')
+            is_gpu = compute_type == 'gpu'
+            class_param = 'gpu-class' if is_gpu else 'cpu-class'
+            tol_key = gpu_cls.get('tolerationKey', 'nvidia.com/gpu') if is_gpu else cpu_cls.get('tolerationKey', 'platform.kubecore.io/burst')
+            tol_val = gpu_cls.get('tolerationValue', '') if is_gpu else cpu_cls.get('tolerationValue', 'true')
+            tol = {'key': tol_key, 'operator': 'Exists' if not tol_val else 'Equal', 'effect': 'NoSchedule'}
+            if tol_val:
+                tol['value'] = tol_val
+
+            if step.get('resources'):
+                res = step['resources']
+                requests = res.get('requests', {})
+                limits = res.get('limits', {})
+            elif is_gpu:
+                requests = {'cpu': '1', 'memory': '10Gi', 'ephemeral-storage': '10Gi', 'nvidia.com/gpu': '1'}
+                limits = {'cpu': '4', 'memory': '28Gi', 'ephemeral-storage': '30Gi', 'nvidia.com/gpu': '1'}
+            else:
+                requests = {'cpu': '1', 'memory': '2Gi', 'ephemeral-storage': '1Gi'}
+                limits = {'cpu': '2', 'memory': '4Gi', 'ephemeral-storage': '4Gi'}
+
+            container = {
+                'image': OB + 'workflow.parameters.image-' + step['name'] + CB,
+                'resources': {'requests': requests, 'limits': limits},
+            }
+            if step.get('command'):
+                container['command'] = step['command']
+            if step.get('args'):
+                container['args'] = step['args']
+
+            env_list = [
+                {'name': 'MLFLOW_TRACKING_URI', 'value': OB + 'workflow.parameters.mlflow-endpoint' + CB},
+                {'name': 'LAKEFS_ENDPOINT', 'value': OB + 'workflow.parameters.lakefs-endpoint' + CB},
+                {'name': 'LAKEFS_ACCESS_KEY', 'valueFrom': {'secretKeyRef': {'name': lakefs.get('adminSecret', f"{project_name}-lakefs-admin"), 'key': 'accessKeyId'}}},
+                {'name': 'LAKEFS_SECRET_KEY', 'valueFrom': {'secretKeyRef': {'name': lakefs.get('adminSecret', f"{project_name}-lakefs-admin"), 'key': 'secretAccessKey'}}},
+                {'name': 'MLFLOW_TRACKING_USERNAME', 'valueFrom': {'secretKeyRef': {'name': mlflow.get('svcSecret', f"{project_name}-mlflow-admin"), 'key': 'username'}}},
+                {'name': 'MLFLOW_TRACKING_PASSWORD', 'valueFrom': {'secretKeyRef': {'name': mlflow.get('svcSecret', f"{project_name}-mlflow-admin"), 'key': 'password'}}},
+            ]
+            # Inject platform-derived checkpoint location when present in context.yaml.
+            # checkpoints.bucket = lakeFS repository name; checkpoints.prefix = branch/path
+            # within that repo (lakeFS S3 gateway addressing: bucket=repo, prefix=branch/...).
+            # Only injected when the composition wrote the checkpoints block; absent on
+            # legacy deployments that pre-date Edit 1 — kubeline shims tolerate absence.
+            ckpt_bucket = checkpoints.get('bucket', '')
+            ckpt_prefix = checkpoints.get('prefix', '')
+            if ckpt_bucket:
+                env_list.append({'name': 'CHECKPOINT_BUCKET', 'value': ckpt_bucket})
+            if ckpt_prefix:
+                env_list.append({'name': 'CHECKPOINT_PREFIX', 'value': ckpt_prefix})
+            for e in (step.get('env') or []):
+                env_list.append(e)
+            container['env'] = env_list
+
+            tmpl = {
+                'name': step['name'],
+                'metadata': {
+                    'labels': {
+                        'platform.kubecore.io/project': project_name,
+                        'platform.kubecore.io/pipeline': pipeline_name,
+                        'platform.kubecore.io/step': step['name'],
+                        'platform.kubecore.io/compute-type': compute_type,
+                        'platform.kubecore.io/compute-class': OB + 'workflow.parameters.' + class_param + CB,
+                    }
+                },
+                'nodeSelector': {'platform.kubecore.io/nodegroup-type': OB + 'workflow.parameters.' + class_param + CB},
+                'tolerations': [tol],
+                'serviceAccountName': sa,
+                'container': container,
+            }
+
+            inp = step.get('inputs', {}).get('parameters', []) if step.get('inputs') else []
+            if inp:
+                tmpl['inputs'] = {'parameters': [{'name': p['name']} for p in inp]}
+            out = step.get('outputs', {}).get('parameters', []) if step.get('outputs') else []
+            if out:
+                tmpl['outputs'] = {'parameters': [{'name': p['name'], 'valueFrom': {'path': p['path']}} for p in out]}
+
+            templates.append(tmpl)
+
+        if hpc.get('enabled'):
+            provider = hpc.get('provider', 'none')
+            templates.append({
+                'name': 'hpc-burst',
+                'container': {
+                    'image': 'busybox:1.36',
+                    'command': ['sh', '-c'],
+                    'args': [f'echo "HPC burst placeholder, provider={provider} not yet wired"']
+                }
+            })
+
+        wft = {
+            'apiVersion': 'argoproj.io/v1alpha1',
+            'kind': 'WorkflowTemplate',
+            'metadata': {
+                'name': f"{app_name}-pipeline",
+                'namespace': ml_ns,
+                'annotations': {
+                    'platform.kubecore.io/cost-tracking': 'enabled',
+                    'platform.kubecore.io/pipeline': pipeline_name,
+                    'platform.kubecore.io/gpu-nodepool': f"{pipeline_name}-gpu",
+                    'platform.kubecore.io/cpu-nodepool': f"{pipeline_name}-cpu",
+                    'platform.kubecore.io/generated-by': 'ml-ci-build/render-wft',
+                },
+                'labels': {
+                    'platform.kubecore.io/project': project_name,
+                    'platform.kubecore.io/app': app_name,
+                    'platform.kubecore.io/managed-by': 'kubecore-ci',
+                }
+            },
+            'spec': {
+                'serviceAccountName': sa,
+                'entrypoint': f"{app_name}-pipeline",
+                'arguments': {'parameters': args_params},
+                'templates': templates,
+            }
+        }
+
+        os.makedirs(os.path.dirname(wft_out), exist_ok=True)
+        with open(wft_out, 'w') as f:
+            yaml.dump(wft, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
+        print(f"render-wft: wrote {wft_out}")
+        PYEOF
+
+        KUBELINE_PATH="$KUBELINE_PATH" CONTEXT_PATH="$CONTEXT_PATH" WFT_OUT="$WFT_OUT" \
+          APP_NAME="$APP_NAME" PROJECT_NAME="$PROJECT_NAME" BRANCH="$BRANCH" \
+          python3 /tmp/render_wft.py
+
+        cd /tmp/gitops
+        git add "workflows/${APP_NAME}/${BRANCH}/workflow-template.yaml"
+        if git diff --cached --quiet; then
+          echo "No WFT changes to commit"
+        else
+          git commit -m "ml-ci(${APP_NAME}): render WFT from kubeline.yaml v2 at ${IMAGE_TAG}"
+          git pull --rebase origin "${GITOPS_BRANCH}"
+          git push
+          echo "Pushed rendered WFT to ${ORG}/${GITOPS_REPO}@${GITOPS_BRANCH}"
+        fi
+      volumeMounts:
+      - name: workspace
+        mountPath: /workspace
+      - name: github-token
+        mountPath: /etc/github-token
+        readOnly: true
+
+  - name: patch-images
+    inputs:
+      parameters:
+      - name: image_tag
+      - name: changed_steps
     securityContext:
       runAsUser: 0
       runAsGroup: 0
@@ -486,9 +770,9 @@ spec:
         ORG="{{ .Values.github.org }}"
         GITOPS_REPO="{{`{{workflow.parameters.gitops_repository}}`}}"
         GITOPS_BRANCH="{{`{{workflow.parameters.gitops_branch}}`}}"
-        WFT_PATH="{{`{{workflow.parameters.workflow_template_path}}`}}"
         APP_NAME="{{`{{workflow.parameters.app_name}}`}}"
         IMAGE_TAG="{{`{{inputs.parameters.image_tag}}`}}"
+        BRANCH=$(echo "{{`{{workflow.parameters.branch}}`}}" | sed 's|^refs/heads/||')
 
         REGISTRY="{{`{{workflow.parameters.registry_url}}`}}"
         if [ -z "$REGISTRY" ]; then REGISTRY="{{ .Values.registry.externalUrl }}"; fi
@@ -498,49 +782,45 @@ spec:
           IMAGE_REPO="{{`{{workflow.parameters.project_name}}`}}/${APP_NAME}"
         fi
 
-        # Install git on the yq image (it doesn't ship one)
         apk add --no-cache git >/dev/null
 
         REPO_URL="https://x-access-token:${TOKEN}@github.com/${ORG}/${GITOPS_REPO}.git"
         git clone --depth=1 --branch "${GITOPS_BRANCH}" "${REPO_URL}" /tmp/gitops
         cd /tmp/gitops
 
-        if [ ! -f "${WFT_PATH}" ]; then
-          echo "ERROR: WorkflowTemplate not found at ${WFT_PATH}"
-          ls -la "$(dirname "${WFT_PATH}")" || true
-          exit 1
+        # pipeline-images.yaml is written by Crossplane at the gitops branch path,
+        # NOT the app repo's push branch. Use GITOPS_BRANCH (e.g. "main") here.
+        IMAGES_PATH="workflows/${APP_NAME}/${GITOPS_BRANCH}/pipeline-images.yaml"
+
+        if [ ! -f "${IMAGES_PATH}" ]; then
+          echo "WARNING: pipeline-images.yaml not found at ${IMAGES_PATH} — skipping image tag patch"
+          exit 0
         fi
 
         # changed_steps comes in as a JSON array `[{"name":"...","path":"..."},...]`
-        # Loop over each and yq-patch the matching template's container.image.
-        # Force JSON input mode and YAML scalar output, then defensively strip
-        # any leftover wrapping double-quotes — the previous form leaked
-        # quoted scalars into the constructed image tag and broke the patch
-        # call with "invalid input text 'config-validatio...'" (2026-05-02).
+        # Update each step's image key in the pipeline-images ConfigMap.
         echo '{{`{{inputs.parameters.changed_steps}}`}}' > /tmp/changed.json
         STEPS_LEN=$(yq -p=json -o=yaml 'length' /tmp/changed.json)
         i=0
         while [ "$i" -lt "$STEPS_LEN" ]; do
           STEP_NAME=$(yq -p=json -o=yaml ".[$i].name" /tmp/changed.json | tr -d '"')
           NEW_IMAGE="${REGISTRY}/${IMAGE_REPO}:${STEP_NAME}-${IMAGE_TAG}"
-          echo "Patching step '${STEP_NAME}' → ${NEW_IMAGE}"
-          yq e -i \
-            "(.spec.templates[] | select(.name == \"${STEP_NAME}\") | .container.image) = \"${NEW_IMAGE}\"" \
-            "${WFT_PATH}"
+          echo "Updating pipeline-images key '${STEP_NAME}' → ${NEW_IMAGE}"
+          yq e -i ".data.\"${STEP_NAME}\" = \"${NEW_IMAGE}\"" "${IMAGES_PATH}"
           i=$((i + 1))
         done
 
         git config user.name "KubeCore CI"
         git config user.email "ci@kubecore.io"
-        git add "${WFT_PATH}"
+        git add "${IMAGES_PATH}"
         if git diff --cached --quiet; then
           echo "No changes to commit (image tags already match)"
           exit 0
         fi
-        git commit -m "ml-ci(${APP_NAME}): bump step images to ${IMAGE_TAG}"
-        git pull --rebase
+        git commit -m "ml-ci(${APP_NAME}): bump step images to ${IMAGE_TAG} in pipeline-images ConfigMap"
+        git pull --rebase origin "${GITOPS_BRANCH}"
         git push
-        echo "Pushed image-tag bump to ${ORG}/${GITOPS_REPO}@${GITOPS_BRANCH}"
+        echo "Pushed image-tag update to ${ORG}/${GITOPS_REPO}@${GITOPS_BRANCH}"
       volumeMounts:
       - name: github-token
         mountPath: /etc/github-token
