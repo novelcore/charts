@@ -113,10 +113,22 @@ spec:
           - name: new_version
             value: "{{`{{steps.version.outputs.parameters.new_version}}`}}"
         withParam: "{{`{{steps.detect-steps.outputs.parameters.changed_steps}}`}}"
-    - - name: patch-wft
+    - - name: render-wft
         templateRef:
           name: ml-ci-build
-          template: patch-wft
+          template: render-wft
+          clusterScope: true
+        when: "{{`{{steps.detect-steps.outputs.parameters.has_changes}}`}} == true"
+        arguments:
+          parameters:
+          - name: image_tag
+            value: "{{`{{steps.version.outputs.parameters.image_tag}}`}}"
+          - name: changed_steps
+            value: "{{`{{steps.detect-steps.outputs.parameters.changed_steps}}`}}"
+    - - name: patch-images
+        templateRef:
+          name: ml-ci-build
+          template: patch-images
           clusterScope: true
         when: "{{`{{steps.detect-steps.outputs.parameters.has_changes}}`}} == true"
         arguments:
