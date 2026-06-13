@@ -657,8 +657,12 @@ spec:
                 {'name': 'LAKEFS_ENDPOINT', 'value': OB + 'workflow.parameters.lakefs-endpoint' + CB},
                 {'name': 'LAKEFS_ACCESS_KEY', 'valueFrom': {'secretKeyRef': {'name': lakefs.get('adminSecret', f"{project_name}-lakefs-admin"), 'key': 'accessKeyId'}}},
                 {'name': 'LAKEFS_SECRET_KEY', 'valueFrom': {'secretKeyRef': {'name': lakefs.get('adminSecret', f"{project_name}-lakefs-admin"), 'key': 'secretAccessKey'}}},
-                {'name': 'MLFLOW_TRACKING_USERNAME', 'valueFrom': {'secretKeyRef': {'name': mlflow.get('svcSecret', f"{project_name}-mlflow-admin"), 'key': 'username'}}},
-                {'name': 'MLFLOW_TRACKING_PASSWORD', 'valueFrom': {'secretKeyRef': {'name': mlflow.get('svcSecret', f"{project_name}-mlflow-admin"), 'key': 'password'}}},
+                # Secret keys match the operator-created {project}-mlflow-svc secret
+                # (MLFLOW_TRACKING_USERNAME/MLFLOW_TRACKING_PASSWORD, NOT username/
+                # password — live CreateContainerConfigError, gke-dev 2026-06-13).
+                # optional: the secret exists only when MLflow OIDC is enabled.
+                {'name': 'MLFLOW_TRACKING_USERNAME', 'valueFrom': {'secretKeyRef': {'name': mlflow.get('svcSecret', f"{project_name}-mlflow-svc"), 'key': 'MLFLOW_TRACKING_USERNAME', 'optional': True}}},
+                {'name': 'MLFLOW_TRACKING_PASSWORD', 'valueFrom': {'secretKeyRef': {'name': mlflow.get('svcSecret', f"{project_name}-mlflow-svc"), 'key': 'MLFLOW_TRACKING_PASSWORD', 'optional': True}}},
             ]
             # Inject platform-derived checkpoint location when present in context.yaml.
             # checkpoints.bucket = lakeFS repository name; checkpoints.prefix = branch/path
