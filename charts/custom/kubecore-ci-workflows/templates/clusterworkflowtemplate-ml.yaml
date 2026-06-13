@@ -619,11 +619,23 @@ spec:
             tol = {'key': tol_key, 'operator': 'Exists' if not tol_val else 'Equal', 'effect': 'NoSchedule'}
             if tol_val:
                 tol['value'] = tol_val
+            step_tolerations = [tol]
+            if is_gpu:
+                # GKE auto-taints accelerator nodes with nvidia.com/gpu; without
+                # this toleration a gpu-tier step Pends forever on its own pool.
+                step_tolerations.append({'key': 'nvidia.com/gpu', 'operator': 'Exists', 'effect': 'NoSchedule'})
 
             if step.get('resources'):
                 res = step['resources']
                 requests = res.get('requests', {})
                 limits = res.get('limits', {})
+                if is_gpu:
+                    # MERGE the device into user overrides — gpu tier must always
+                    # request the accelerator; a kubeline resources override is
+                    # for sizing, not for silently dropping the GPU (live render
+                    # had cpu/mem/ephemeral only -> CPU-bound 'GPU' training).
+                    requests.setdefault('nvidia.com/gpu', '1')
+                    limits.setdefault('nvidia.com/gpu', '1')
             elif is_gpu:
                 requests = {'cpu': '1', 'memory': '10Gi', 'ephemeral-storage': '10Gi', 'nvidia.com/gpu': '1'}
                 limits = {'cpu': '4', 'memory': '28Gi', 'ephemeral-storage': '30Gi', 'nvidia.com/gpu': '1'}
@@ -675,7 +687,7 @@ spec:
                     }
                 },
                 'nodeSelector': {'platform.kubecore.io/nodegroup-type': OB + 'workflow.parameters.' + class_param + CB},
-                'tolerations': [tol],
+                'tolerations': step_tolerations,
                 'serviceAccountName': sa,
                 'container': container,
             }
