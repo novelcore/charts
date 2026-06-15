@@ -275,6 +275,21 @@ spec:
                   GithubConfig contains the GitHub provider configuration
                   When provided, enables GitHub provider integration
                 properties:
+                  credentialsSecretRef:
+                    description: |-
+                      CredentialsSecretRef optionally names a Secret in this KubeOrg's namespace
+                      holding a dedicated GitHub App's credentials (keys: appId, privateKey).
+                      When omitted, the org uses the shared cluster-wide GitHub App.
+                      installationId always comes from spec, never from this secret.
+                    properties:
+                      name:
+                        description: Name of the Secret in the same namespace as the
+                          referencing resource.
+                        minLength: 1
+                        type: string
+                    required:
+                    - name
+                    type: object
                   installationId:
                     description: |-
                       InstallationId is the GitHub App installation ID for this organization
