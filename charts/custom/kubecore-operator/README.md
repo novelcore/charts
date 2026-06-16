@@ -1,6 +1,6 @@
 # kubecore-operator
 
-A sophisticated Kubernetes operator that implements a four-layer framework architecture for provisioning and managing cloud infrastructure through Crossplane compositions.
+A sophisticated Kubernetes operator that implements a hierarchical framework architecture for provisioning and managing cloud infrastructure through Crossplane compositions.
 
 ## Introduction
 
@@ -71,7 +71,7 @@ controllerManager:
   replicas: 1
   container:
     image:
-      repository: novelcore.azurecr.io/demo-project/kubecore-operator
+      repository: <your-registry>/kubecore-operator
       tag: v0.1.0
 
 crossplane:
@@ -87,7 +87,7 @@ crossplaneFunctions:
 controllerManager:
   container:
     image:
-      repository: novelcore.azurecr.io/demo-project/kubecore-operator
+      repository: <your-registry>/kubecore-operator
       tag: v0.1.0
 
 crossplane:
@@ -99,17 +99,17 @@ crossplaneFunctions:
 
 ## Resource Types
 
-The operator manages four Custom Resource Definitions:
+The operator manages five Custom Resource Definitions:
 
 ### KubeOrg
 Manages organization-level infrastructure:
-- AWS infrastructure setup (IAM roles, OIDC providers, ECR repositories)
+- Cloud infrastructure setup (IAM roles, OIDC providers, VPC networking — AWS, GCP, Azure)
 - GitHub provider integration and webhook configuration
-- VPC networking and multi-region support
+- Multi-region support; dedicated GitHub App per org via `spec.githubConfig.credentialsSecretRef`
 
 ### KubePool
 Manages cluster-level infrastructure:
-- EKS cluster provisioning with auto-scaling node groups
+- EKS/GKE/AKS cluster provisioning with auto-scaling node groups
 - Platform system installations (ArgoCD, Crossplane, monitoring)
 - Integration with organization-level networking and IAM
 
@@ -124,9 +124,13 @@ Manages project-level resources:
 Manages individual application deployments:
 - Application repository creation from templates
 - CI/CD pipeline configuration and webhooks
-- Automated ECR → GitHub Actions credential synchronization
-- Application-specific resource management
+- Application-specific resource management (image registry: in-cluster Zot, CON-18)
 - Explicit environment selection with flexible targeting strategies
+
+### KubeTeam
+Manages GitHub team membership and Zitadel identity:
+- GitHub team creation and member synchronization
+- Zitadel member resolution scoped to the parent KubeOrg's identity organization
 
 ## Crossplane Integration
 
@@ -136,8 +140,9 @@ The chart includes Crossplane as a dependency and automatically installs require
 - `function-auto-ready` - Automatic readiness condition management
 - `function-patch-and-transform` - Advanced patching and transformation
 - `function-sequencer` - Ordered resource creation
-- `function-environment-configs` - Environment-specific configuration injection
 - `function-extra-resources` - Extra resources configuration
+
+Note: `function-environment-configs` is **not installed** — EnvironmentConfig is prohibited (CON-13). All composition configuration flows through `spec.parameters`.
 
 ## Troubleshooting
 
