@@ -220,16 +220,70 @@ spec:
         echo "Changed files vs HEAD~1:"
         echo "$CHANGED_FILES"
 
-        # Walk each step in kubeline.yaml; emit if its path/* changed.
+        # #457: a step must be (re)built if EITHER its source changed OR it has
+        # no published image yet. detect-steps used to key only on the git diff,
+        # so a step whose directory was untouched (typical first push: README /
+        # kubeline tweak) was never built — its pipeline-images ConfigMap key
+        # stayed at the Crossplane-seeded ":{step}-latest" placeholder, which is
+        # never produced by build-push (it always tags {step}-{branch}-v…-{sha}).
+        # The first training run then hit ImagePullBackOff on those steps with no
+        # signal pointing at CI ("resubmit until every step gets touched").
+        #
+        # Registry-aware first build: clone the gitops repo, read the
+        # pipeline-images.yaml the WFT resolves images from, and treat any step
+        # whose key is ABSENT or still ends in "-latest" (placeholder = never
+        # built) as changed. Reading the gitops ConfigMap is a reliable proxy for
+        # "image exists in the registry" — patch-images writes the versioned tag
+        # there only after a successful build+push.
+        UNBUILT_STEPS=""
+        GITOPS_REPO="{{`{{workflow.parameters.gitops_repository}}`}}"
+        GITOPS_BRANCH="{{`{{workflow.parameters.gitops_branch}}`}}"
+        APP_NAME="{{`{{workflow.parameters.app_name}}`}}"
+        if [ -f /etc/github-token/token ] && [ -n "$GITOPS_REPO" ]; then
+          GH_TOKEN=$(cat /etc/github-token/token)
+          GITOPS_URL="https://x-access-token:${GH_TOKEN}@github.com/{{ .Values.github.org }}/${GITOPS_REPO}.git"
+          if git clone --depth=1 --branch "${GITOPS_BRANCH}" "${GITOPS_URL}" /tmp/gitops 2>/dev/null; then
+            # basePath is operator-configured (default "kubeapps") and not passed
+            # here, so discover the file (same pattern as render-wft/patch-images).
+            IMAGES_PATH=$(find /tmp/gitops -path "*/${APP_NAME}/${GITOPS_BRANCH}/pipeline-images.yaml" | head -1)
+            if [ -n "$IMAGES_PATH" ] && [ -f "$IMAGES_PATH" ]; then
+              echo "pipeline-images discovered at ${IMAGES_PATH}"
+            else
+              echo "pipeline-images.yaml not found — treating all steps as unbuilt (first build)"
+              IMAGES_PATH=""
+              UNBUILT_STEPS="__ALL__"
+            fi
+          else
+            echo "WARN: could not clone gitops repo; skipping registry-aware check"
+          fi
+        fi
+
+        # Walk each step in kubeline.yaml; emit if its path/* changed OR it has no
+        # published image yet (#457).
         STEP_COUNT=$(yq e '.steps | length' kubeline.yaml)
         CHANGED_JSON="[]"
         i=0
         while [ "$i" -lt "$STEP_COUNT" ]; do
           STEP_NAME=$(yq e ".steps[$i].name" kubeline.yaml)
           STEP_PATH=$(yq e ".steps[$i].path" kubeline.yaml)
+
+          REASON=""
           if echo "$CHANGED_FILES" | grep -qE "^${STEP_PATH}/"; then
+            REASON="source changed"
+          elif [ "$UNBUILT_STEPS" = "__ALL__" ]; then
+            REASON="no pipeline-images (first build)"
+          elif [ -n "${IMAGES_PATH:-}" ]; then
+            # ConfigMap key value for this step; absent → null. A value still
+            # ending in "-latest" is the seeded placeholder = never built.
+            CUR_IMAGE=$(yq e ".data.\"${STEP_NAME}\" // \"\"" "$IMAGES_PATH")
+            case "$CUR_IMAGE" in
+              ""|*-latest) REASON="image unbuilt (${CUR_IMAGE:-missing})" ;;
+            esac
+          fi
+
+          if [ -n "$REASON" ]; then
             CHANGED_JSON=$(echo "$CHANGED_JSON" | yq e -o=json '. + [{"name":"'"$STEP_NAME"'","path":"'"$STEP_PATH"'"}]' -)
-            echo "step changed: $STEP_NAME ($STEP_PATH)"
+            echo "step changed: $STEP_NAME ($STEP_PATH) — ${REASON}"
           fi
           i=$((i + 1))
         done
@@ -246,6 +300,11 @@ spec:
       volumeMounts:
       - name: workspace
         mountPath: /workspace
+      # #457: detect-steps now clones the gitops repo to read pipeline-images.yaml
+      # for the registry-aware first-build check; it needs the GitHub App token.
+      - name: github-token
+        mountPath: /etc/github-token
+        readOnly: true
 
   - name: version
     outputs:
