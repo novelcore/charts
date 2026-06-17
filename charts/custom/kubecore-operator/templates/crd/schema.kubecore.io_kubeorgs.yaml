@@ -296,6 +296,19 @@ spec:
                       The appId and privateKey come from the global github-app-credentials secret
                     minLength: 1
                     type: string
+                  platformRepo:
+                    default: platform
+                    description: |-
+                      PlatformRepo names the GitHub repository within the org that holds the
+                      KAOS platform/GitOps resources. This is the repository the client selects
+                      when installing the dedicated GitHub App in their organization: when the
+                      App is installed with "Only select repositories" (rather than "All
+                      repositories"), GitHub requires at least one repository to be chosen at
+                      install time. The App natively has access to repositories it creates, but
+                      not to repositories that pre-existed in the org, so this names the
+                      bootstrap repository granted to the App during installation.
+                      It is descriptive metadata only; the operator does not act on it.
+                    type: string
                 required:
                 - installationId
                 type: object
