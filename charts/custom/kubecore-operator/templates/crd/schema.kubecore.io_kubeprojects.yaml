@@ -1031,6 +1031,14 @@ spec:
                           basic-auth protocol. Empty until the operator provisions the service user.
                         type: string
                     type: object
+                  mlflowPipelineIdentityReady:
+                    description: |-
+                      MlflowPipelineIdentityReady is true once the per-project MLflow *pipeline*
+                      machine identity (Zitadel machine user + key, published to
+                      {project}-mlflow-svc) has been provisioned. The Ready phase re-triggers
+                      Reconciling while this is nil/false so existing projects self-heal into the
+                      bearer-JWT pipeline-auth model with no manual reconcile.
+                    type: boolean
                   namespace:
                     description: |-
                       Namespace is the Kubernetes namespace hosting the ML stack in the client
