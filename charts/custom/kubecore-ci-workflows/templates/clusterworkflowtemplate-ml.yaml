@@ -645,6 +645,11 @@ spec:
             {'name': 'promote-to', 'value': ''},
             {'name': 'kubepool-name', 'value': project_name},
             {'name': 'mlflow-endpoint', 'value': mlflow.get('trackingUri', '')},
+            # Zitadel domain for the pipeline's MLflow bearer-JWT auth provider
+            # (mints a token via the JWT-profile grant at https://{domain}/oauth/v2/token).
+            # Sourced from the pipeline-context mlflow.oidcDomain the operator derives
+            # from the OIDC discovery URL. Empty on legacy/non-OIDC deployments.
+            {'name': 'zitadel-domain', 'value': mlflow.get('oidcDomain', '')},
             {'name': 'lakefs-endpoint', 'value': lakefs.get('endpoint', '')},
             {'name': 'lakefs-repo', 'value': lakefs.get('repository', app_name)},
             {'name': 'lakefs-branch', 'value': branch},
@@ -716,12 +721,16 @@ spec:
                 {'name': 'LAKEFS_ENDPOINT', 'value': OB + 'workflow.parameters.lakefs-endpoint' + CB},
                 {'name': 'LAKEFS_ACCESS_KEY', 'valueFrom': {'secretKeyRef': {'name': lakefs.get('adminSecret', f"{project_name}-lakefs-admin"), 'key': 'accessKeyId'}}},
                 {'name': 'LAKEFS_SECRET_KEY', 'valueFrom': {'secretKeyRef': {'name': lakefs.get('adminSecret', f"{project_name}-lakefs-admin"), 'key': 'secretAccessKey'}}},
-                # Secret keys match the operator-created {project}-mlflow-svc secret
-                # (MLFLOW_TRACKING_USERNAME/MLFLOW_TRACKING_PASSWORD, NOT username/
-                # password — live CreateContainerConfigError, gke-dev 2026-06-13).
-                # optional: the secret exists only when MLflow OIDC is enabled.
-                {'name': 'MLFLOW_TRACKING_USERNAME', 'valueFrom': {'secretKeyRef': {'name': mlflow.get('svcSecret', f"{project_name}-mlflow-svc"), 'key': 'MLFLOW_TRACKING_USERNAME', 'optional': True}}},
-                {'name': 'MLFLOW_TRACKING_PASSWORD', 'valueFrom': {'secretKeyRef': {'name': mlflow.get('svcSecret', f"{project_name}-mlflow-svc"), 'key': 'MLFLOW_TRACKING_PASSWORD', 'optional': True}}},
+                # MLflow auth = Zitadel machine-identity bearer JWT (NOT basic-auth).
+                # The step's MLflow client selects the 'zitadel' RequestAuthProvider
+                # (app.mlflow_zitadel_auth), which mints + auto-refreshes a JWT from the
+                # machine key the operator publishes to {project}-mlflow-svc (key:
+                # ZITADEL_MACHINE_KEY). The key is mounted as a file (below) so the
+                # provider can sign the JWT-profile assertion. No password, no DB seeding,
+                # no mid-run expiry.
+                {'name': 'MLFLOW_TRACKING_AUTH', 'value': 'zitadel'},
+                {'name': 'ZITADEL_MACHINE_KEY_FILE', 'value': '/etc/zitadel/machine-key.json'},
+                {'name': 'ZITADEL_DOMAIN', 'value': OB + 'workflow.parameters.zitadel-domain' + CB},
             ]
             # Inject platform-derived checkpoint location when present in context.yaml.
             # checkpoints.bucket = lakeFS repository name; checkpoints.prefix = branch/path
@@ -738,6 +747,15 @@ spec:
                 env_list.append(e)
             container['env'] = env_list
 
+            # Mount the Zitadel machine key (published by the operator to
+            # {project}-mlflow-svc, key ZITADEL_MACHINE_KEY) as a file so the
+            # MLflow auth provider can sign the JWT-profile assertion. optional:
+            # the secret exists only when MLflow OIDC is enabled.
+            mlflow_svc_secret = mlflow.get('svcSecret', f"{project_name}-mlflow-svc")
+            container['volumeMounts'] = [
+                {'name': 'zitadel-machine-key', 'mountPath': '/etc/zitadel', 'readOnly': True},
+            ]
+
             tmpl = {
                 'name': step['name'],
                 'metadata': {
@@ -753,6 +771,16 @@ spec:
                 'tolerations': step_tolerations,
                 'serviceAccountName': sa,
                 'container': container,
+                'volumes': [
+                    {
+                        'name': 'zitadel-machine-key',
+                        'secret': {
+                            'secretName': mlflow_svc_secret,
+                            'optional': True,
+                            'items': [{'key': 'ZITADEL_MACHINE_KEY', 'path': 'machine-key.json'}],
+                        },
+                    },
+                ],
             }
 
             inp = step.get('inputs', {}).get('parameters', []) if step.get('inputs') else []
