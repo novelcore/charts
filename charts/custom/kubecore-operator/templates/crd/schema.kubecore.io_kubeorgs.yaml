@@ -329,10 +329,10 @@ spec:
                       this organization
                     properties:
                       enabled:
-                        default: false
+                        default: true
                         description: |-
-                          Enabled activates the instance-level GitHub IDP for this organization
-                          Users can link their GitHub accounts but cannot auto-register
+                          Enabled activates the instance-level GitHub IDP for this organization.
+                          Defaults to true; users can link their GitHub accounts but cannot auto-register.
                         type: boolean
                     type: object
                   initialAdmin:
@@ -924,6 +924,10 @@ spec:
             set (CON-AZ-01: Azure Key Vault names are derived as {orgName}-{shortHash}
             and must fit in 24 chars)'
           rule: '!has(self.spec.azureConfig) || size(self.metadata.name) <= 17'
+        - message: metadata.name must be ≤19 characters when spec.gcpConfig is set
+            (GCP service-account-id limit is 30; longest derived suffix -gcp-eso-sa/-gcp-dns-sa/-crossplane
+            = 11 chars)
+          rule: '!has(self.spec.gcpConfig) || size(self.metadata.name) <= 19'
     served: true
     storage: true
     subresources:
