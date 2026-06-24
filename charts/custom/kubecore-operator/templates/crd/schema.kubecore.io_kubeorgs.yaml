@@ -275,42 +275,45 @@ spec:
                   GithubConfig contains the GitHub provider configuration
                   When provided, enables GitHub provider integration
                 properties:
-                  credentialsSecretRef:
+                  dedicatedApp:
                     description: |-
-                      CredentialsSecretRef optionally names a Secret in this KubeOrg's namespace
-                      holding a dedicated GitHub App's credentials (keys: appId, privateKey).
-                      When omitted, the org uses the shared cluster-wide GitHub App.
-                      installationId always comes from spec, never from this secret.
+                      DedicatedApp, when set, selects the dedicated GitHub App model: the App
+                      credential is staged in the customer's GCP Secret Manager and pulled into
+                      DedicatedApp.SecretRef by the githubprovider composition; the operator then
+                      derives installationId and verifies contents:write on PlatformRepo.
+                      Absence = the shared cluster-wide GitHub App.
                     properties:
-                      name:
-                        description: Name of the Secret in the same namespace as the
-                          referencing resource.
-                        minLength: 1
-                        type: string
+                      secretRef:
+                        description: |-
+                          SecretRef names the org-namespace Secret that the githubprovider composition
+                          PRODUCES (keys: appId, privateKey) by pulling the customer-staged GSM secret.
+                          The operator does NOT require this Secret to pre-exist — it appears only
+                          post-federation, once the org GCP SecretStore is live.
+                        properties:
+                          name:
+                            description: Name of the Secret in the same namespace
+                              as the referencing resource.
+                            minLength: 1
+                            type: string
+                        required:
+                        - name
+                        type: object
                     required:
-                    - name
+                    - secretRef
                     type: object
                   installationId:
                     description: |-
-                      InstallationId is the GitHub App installation ID for this organization
-                      The appId and privateKey come from the global github-app-credentials secret
-                    minLength: 1
+                      InstallationId is the GitHub App installation ID for this organization.
+                      Shared-app path only — supplied by the caller. On the dedicated-app path
+                      (spec.githubConfig.dedicatedApp set) the operator DERIVES it from the App
+                      private key and this field is ignored.
                     type: string
                   platformRepo:
                     default: platform
                     description: |-
-                      PlatformRepo names the GitHub repository within the org that holds the
-                      KAOS platform/GitOps resources. This is the repository the client selects
-                      when installing the dedicated GitHub App in their organization: when the
-                      App is installed with "Only select repositories" (rather than "All
-                      repositories"), GitHub requires at least one repository to be chosen at
-                      install time. The App natively has access to repositories it creates, but
-                      not to repositories that pre-existed in the org, so this names the
-                      bootstrap repository granted to the App during installation.
-                      It is descriptive metadata only; the operator does not act on it.
+                      PlatformRepo names the GitHub repository the dedicated App is granted at
+                      install time, and against which the operator verifies contents:write.
                     type: string
-                required:
-                - installationId
                 type: object
               identity:
                 description: |-
@@ -615,6 +618,21 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
+              gitHubAppDiscovered:
+                description: |-
+                  GitHubAppDiscovered records dedicated GitHub App discovery/verify outcome (derived
+                  installationId + contents:write). Populated by the Reconciling phase on the dedicated path.
+                properties:
+                  appId:
+                    type: string
+                  contentsWrite:
+                    type: boolean
+                  installationId:
+                    type: string
+                  verifiedAt:
+                    format: date-time
+                    type: string
+                type: object
               identityProvider:
                 description: IdentityProvider contains Zitadel integration status
                 properties:
