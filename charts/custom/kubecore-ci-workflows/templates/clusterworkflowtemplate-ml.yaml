@@ -663,6 +663,12 @@ spec:
             # OIDC discovery URL host; empty when MLflow OIDC is disabled (steps then
             # fall back to no auth header — fine for an unauthenticated MLflow).
             {'name': 'zitadel-domain', 'value': mlflow.get('oidcDomain', '')},
+            # Zitadel project ID of the MLflow OIDC app. The auth provider requests
+            # urn:zitadel:iam:org:project:id:{id}:aud so the minted token is audienced
+            # to the MLflow app (and carries project roles) — without it the token is
+            # audienced to the machine user's own client with no groups → the plugin
+            # rejects it "Invalid token payload"/401 (yolo-final2, 2026-06-26).
+            {'name': 'zitadel-mlflow-project-id', 'value': mlflow.get('oidcProjectId', '')},
             {'name': 'lakefs-endpoint', 'value': lakefs.get('endpoint', '')},
             {'name': 'lakefs-repo', 'value': lakefs.get('repository', app_name)},
             {'name': 'lakefs-branch', 'value': branch},
@@ -749,6 +755,10 @@ spec:
                 # audience (issuer). zitadel-domain is the render-wft workflow param
                 # the k8smlapp composition derives from the MLflow OIDC discovery URL.
                 {'name': 'ZITADEL_DOMAIN', 'value': OB + 'workflow.parameters.zitadel-domain' + CB},
+                # ZITADEL_MLFLOW_PROJECT_ID → the auth provider adds the project-aud
+                # scope so the token is accepted by the MLflow OIDC app (fixes 401
+                # "Invalid token payload"). Empty when MLflow OIDC is disabled.
+                {'name': 'ZITADEL_MLFLOW_PROJECT_ID', 'value': OB + 'workflow.parameters.zitadel-mlflow-project-id' + CB},
             ]
             # Inject platform-derived checkpoint location when present in context.yaml.
             # checkpoints.bucket = lakeFS repository name; checkpoints.prefix = branch/path
