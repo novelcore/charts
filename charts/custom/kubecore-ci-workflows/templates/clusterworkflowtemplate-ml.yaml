@@ -172,6 +172,13 @@ spec:
         # Need at least 2 commits for change detection (HEAD~1 vs HEAD)
         git clone --depth=50 --branch "${BRANCH}" "${REPO_URL}" /workspace/repo
         cd /workspace/repo
+        # Explicitly fetch the target commit before checkout. A shallow clone of
+        # the branch tip does NOT necessarily contain a specific commit_sha if a
+        # newer commit landed on the branch between the webhook firing and this
+        # clone running (two quick pushes → the earlier build's commit is no
+        # longer in the shallow window → "fatal: unable to read tree <sha>" →
+        # exit 128). Fetching the SHA directly makes the checkout deterministic.
+        git fetch --depth=50 origin "{{`{{workflow.parameters.commit_sha}}`}}" || true
         git checkout "{{`{{workflow.parameters.commit_sha}}`}}"
         echo "Cloned at $(git rev-parse HEAD)"
         if [ ! -f kubeline.yaml ]; then
@@ -410,6 +417,12 @@ spec:
         BRANCH=$(echo "{{`{{workflow.parameters.branch}}`}}" | sed 's|^refs/heads/||')
         git clone --depth=1 --branch "${BRANCH}" "${REPO_URL}" /workspace/repo
         cd /workspace/repo
+        # depth=1 fetches ONLY the branch tip; if a newer commit landed since the
+        # webhook fired (two quick pushes), the target commit_sha is absent and
+        # the checkout fails "unable to read tree <sha>" → exit 128. Fetch the
+        # SHA explicitly so each per-step build-push checks out its own commit
+        # deterministically regardless of later pushes to the branch.
+        git fetch --depth=1 origin "{{`{{workflow.parameters.commit_sha}}`}}" || true
         git checkout "{{`{{workflow.parameters.commit_sha}}`}}"
         echo "Cloned at $(git rev-parse HEAD) for step {{`{{inputs.parameters.step_name}}`}}"
       volumeMounts:
