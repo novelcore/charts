@@ -391,10 +391,14 @@ spec:
                         properties:
                           compute:
                             description: |-
-                              Compute defines the catalog of CPU/GPU compute classes available to ML
-                              KubeApps on this cluster (PRD-247 D-03 follow-up). Each class becomes a
+                              Compute defines the cluster's ML compute classes (PRD-247 D-03 follow-up).
+                              Declare exactly one cpu-tier and one gpu-tier class; each becomes a
                               dedicated GKE NodePool that autoscales from 0 — no nodes when idle.
-                              KubeApps pick by name via spec.k8sAppConfig.compute.{cpuClass,gpuClass}.
+                              These two classes are the SINGLE source of truth for ML pipeline compute:
+                              the operator projects the cpu+gpu pair into each ML KubeApp's pipeline
+                              context. A pipeline step routes to the gpu class iff its {step}-gpu submit
+                              param is >0, else the cpu class — the engineer sets the request on the
+                              Argo Submit form. KubeApps declare no class selection.
                             properties:
                               mlClasses:
                                 description: |-
