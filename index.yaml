@@ -10,7 +10,7 @@ entries:
         url: https://argoproj.github.io/argo-helm/pgp_keys.asc
     apiVersion: v2
     appVersion: v3.0.12
-    created: "2026-06-26T16:11:12.863290911Z"
+    created: "2026-06-26T16:31:40.299610027Z"
     dependencies:
     - condition: redis-ha.enabled
       name: redis-ha
@@ -46,7 +46,7 @@ entries:
         url: https://argoproj.github.io/argo-helm/pgp_keys.asc
     apiVersion: v2
     appVersion: v3.0.12
-    created: "2026-06-26T16:11:12.874298313Z"
+    created: "2026-06-26T16:31:40.314166703Z"
     dependencies:
     - condition: redis-ha.enabled
       name: redis-ha
@@ -58,7 +58,7 @@ entries:
       version: 2.40.3
     description: A Helm chart for Argo CD with Argo Rollouts included, a declarative,
       GitOps continuous delivery tool for Kubernetes.
-    digest: 416c825abd908ab8f586e137d97d32af1f3f073e4e9c60f29c5f14858e07bdfd
+    digest: 241f04922adfc85976cb39d20c1af3b262bf5d6e3ca5039a57293156066276d1
     home: https://github.com/argoproj/argo-helm
     icon: https://argo-cd.readthedocs.io/en/stable/assets/logo.png
     keywords:
@@ -86,10 +86,10 @@ entries:
         url: https://argoproj.github.io/argo-helm/pgp_keys.asc
     apiVersion: v2
     appVersion: v1.9.6
-    created: "2026-06-26T16:11:12.876208731Z"
+    created: "2026-06-26T16:31:40.31641173Z"
     description: A Helm chart for Argo Events, the event-driven workflow automation
       framework
-    digest: 172bf5cc30fd4269ffe34d0366bb411b55a0b7ffa6a7b19bc49980e4848e8719
+    digest: 336470ab0bd5629a8b5b51fc0a90a70665ab6cab4637fd450e0a6b7000132dc6
     home: https://github.com/argoproj/argo-helm
     icon: https://avatars.githubusercontent.com/u/30269780?s=200&v=4
     keywords:
@@ -114,9 +114,9 @@ entries:
         url: https://argoproj.github.io/argo-helm/pgp_keys.asc
     apiVersion: v2
     appVersion: v1.8.3
-    created: "2026-06-26T16:11:12.880161367Z"
+    created: "2026-06-26T16:31:40.320994485Z"
     description: A Helm chart for Argo Rollouts
-    digest: 8ff4296693e4707077fb969c52077b0b476ec34067873dd4a4f64ed8f29aaaae
+    digest: 3bb783ec6c0ceef75994c1db348db2a00a56354ad289d856149080977f519aff
     home: https://github.com/argoproj/argo-helm
     icon: https://argoproj.github.io/argo-rollouts/assets/logo.png
     keywords:
@@ -141,9 +141,9 @@ entries:
         url: https://argoproj.github.io/argo-helm/pgp_keys.asc
     apiVersion: v2
     appVersion: v3.6.5
-    created: "2026-06-26T16:11:12.882458489Z"
+    created: "2026-06-26T16:31:40.323329013Z"
     description: A Helm chart for Argo Workflows
-    digest: 42c832de29c8f325921409b43b78c37fe6b2af5a46cc02b3e34089064f9ed260
+    digest: 16c5b3eabcde7fa44d85cc4563a4f193483ff6bc5cd4df20e114fb4907e8e0ff
     home: https://github.com/argoproj/argo-helm
     icon: https://argo-workflows.readthedocs.io/en/stable/assets/logo.png
     maintainers:
@@ -159,9 +159,9 @@ entries:
   atlas-operator:
   - apiVersion: v2
     appVersion: 0.7.7
-    created: "2026-06-26T16:11:12.882899693Z"
+    created: "2026-06-26T16:31:40.323768519Z"
     description: The Atlas Kubernetes Operator
-    digest: 4f9dd0b544b93deeb271369ce5cf7d23e35df303051a97625f43f6b1757e79a3
+    digest: e961a7f824259d057afd5429420562e72b5118560f65cbdcc9f54dd11b293791
     name: atlas-operator
     type: application
     urls:
@@ -177,9 +177,9 @@ entries:
         url: https://cert-manager.io/public-keys/cert-manager-keyring-2021-09-20-1020CF3C033D4F35BAE1C19E1226061C665DF13E.gpg
     apiVersion: v2
     appVersion: v1.17.1
-    created: "2026-06-26T16:11:12.887881939Z"
+    created: "2026-06-26T16:31:40.331062106Z"
     description: A Helm chart for cert-manager
-    digest: 6ef1f03c917e163766255897845cb8bb61854eb38266eb2ce07d22d028a65cdd
+    digest: 4bd3c75fd48783146775f050c35ec8e6f598a21c70de72a56d8c81bd60788756
     home: https://cert-manager.io
     icon: https://raw.githubusercontent.com/cert-manager/community/4d35a69437d21b76322157e6284be4cd64e6d2b7/logo/logo-small.png
     keywords:
@@ -201,11 +201,11 @@ entries:
   crossplane:
   - apiVersion: v1
     appVersion: 1.20.0
-    created: "2026-06-26T16:11:12.889160451Z"
+    created: "2026-06-26T16:31:40.331983818Z"
     description: Crossplane is an open source Kubernetes add-on that enables platform
       teams to assemble infrastructure from multiple vendors, and expose higher level
       self-service APIs for application teams to consume.
-    digest: 219c8444d60134bd009c18b0c9324849c8f0b1f6c05965365ba43015bac4d5c8
+    digest: 2aea609e51489f25816ab32f92d019c3be632078c39d756e3814897a2bc65638
     home: https://crossplane.io
     icon: https://docs.crossplane.io/android-chrome-192x192.png
     keywords:
@@ -241,14 +241,14 @@ entries:
   eck-operator:
   - apiVersion: v2
     appVersion: 3.0.0
-    created: "2026-06-26T16:11:12.895074806Z"
+    created: "2026-06-26T16:31:40.3388047Z"
     dependencies:
     - condition: installCRDs
       name: eck-operator-crds
       repository: ""
       version: 3.0.0
     description: Elastic Cloud on Kubernetes (ECK) operator
-    digest: 3802a7fa7433468b6234ee3944eded78b76a5f05e9d687c609135fac6730fcb9
+    digest: 0b55e9ea00ab5acbf5f9874ce8446169395493a96f359341109bcdd26b97f905
     home: https://github.com/elastic/cloud-on-k8s
     icon: https://helm.elastic.co/icons/eck.png
     keywords:
@@ -272,7 +272,7 @@ entries:
   everest:
   - apiVersion: v2
     appVersion: 1.6.0
-    created: "2026-06-26T16:11:12.944735167Z"
+    created: "2026-06-26T16:31:40.38613757Z"
     dependencies:
     - name: common
       repository: file://charts/common
@@ -296,7 +296,7 @@ entries:
       repository: https://percona.github.io/percona-helm-charts
       version: 1.3.*
     description: A cloud-native database platform
-    digest: fa8de2bebd01ee55a8cefb01037d5b6679b364aed3ae42e5385ef103247e47e9
+    digest: 9b8a919c525d961d6c0a70bbb2c59005b97f0bb5be47a3d44ea70211be7122d8
     kubeVersion: '>= 1.27.0-0'
     maintainers:
     - email: mayank.shah@percona.com
@@ -335,10 +335,10 @@ entries:
           url: https://github.com/argoproj-labs/gitops-promoter/releases/tag/v0.22.6
     apiVersion: v2
     appVersion: 0.22.6
-    created: "2026-06-26T16:11:12.985749148Z"
+    created: "2026-06-26T16:31:40.429907398Z"
     description: A Helm chart for GitOps Promoter - A tool for promoting changes between
       environments in GitOps workflows
-    digest: 02d12b8b4c3be30c4ca943aa8007141a1305781492f9075ed8839feaa964aa25
+    digest: 2fd2c543dfa04960dad7355d440be0a4ce64cbc113faf1b0e1f05f4fe5c9c659
     home: https://github.com/argoproj-labs/gitops-promoter
     keywords:
     - gitops
@@ -375,7 +375,7 @@ entries:
           url: https://github.com/argoproj-labs/gitops-promoter/releases/tag/v0.22.6
     apiVersion: v2
     appVersion: 0.22.6
-    created: "2026-06-26T16:11:12.981371807Z"
+    created: "2026-06-26T16:31:40.426741059Z"
     description: A Helm chart for GitOps Promoter - A tool for promoting changes between
       environments in GitOps workflows
     digest: 48533cd08f8b341f71b00ffee4b7db4fc483aa6062a5779316640981733ce162
@@ -415,7 +415,7 @@ entries:
           url: https://github.com/argoproj-labs/gitops-promoter/releases/tag/v0.22.6
     apiVersion: v2
     appVersion: 0.22.6
-    created: "2026-06-26T16:11:12.977548272Z"
+    created: "2026-06-26T16:31:40.421700599Z"
     description: A Helm chart for GitOps Promoter - A tool for promoting changes between
       environments in GitOps workflows
     digest: 5c078a753b69368feb01d4f3d805380d2e7333232225a698d7acd8a1ebbb86be
@@ -457,7 +457,7 @@ entries:
           url: https://github.com/argoproj-labs/gitops-promoter/releases/tag/v0.20.3
     apiVersion: v2
     appVersion: 0.20.3
-    created: "2026-06-26T16:11:12.974616744Z"
+    created: "2026-06-26T16:31:40.419175868Z"
     description: A Helm chart for GitOps Promoter - A tool for promoting changes between
       environments in GitOps workflows
     digest: 643fae5a94850b873d5938b15a244489c322ddd74295730d90dab76c3f48ba2a
@@ -503,7 +503,7 @@ entries:
           url: https://github.com/argoproj-labs/gitops-promoter/releases/tag/v0.17.0
     apiVersion: v2
     appVersion: 0.17.0
-    created: "2026-06-26T16:11:12.97087251Z"
+    created: "2026-06-26T16:31:40.416678138Z"
     description: A Helm chart for GitOps Promoter - A tool for promoting changes between
       environments in GitOps workflows
     digest: 890d9627171bf017c0a2c4cf18902970847dee9eba7179ff37ea3fe98f751b86
@@ -551,7 +551,7 @@ entries:
           url: https://github.com/argoproj-labs/gitops-promoter/releases/tag/v0.14.0
     apiVersion: v2
     appVersion: 0.14.0
-    created: "2026-06-26T16:11:12.966697171Z"
+    created: "2026-06-26T16:31:40.414529912Z"
     description: A Helm chart for GitOps Promoter - A tool for promoting changes between
       environments in GitOps workflows
     digest: df783d0be0ab25ff23795b3ebb4f90ae06ae9c65719b39538b71a74a34babb9b
@@ -595,7 +595,7 @@ entries:
           url: https://github.com/argoproj-labs/gitops-promoter/releases/tag/v0.14.0
     apiVersion: v2
     appVersion: 0.14.0
-    created: "2026-06-26T16:11:12.96447245Z"
+    created: "2026-06-26T16:31:40.411155872Z"
     description: A Helm chart for GitOps Promoter - A tool for promoting changes between
       environments in GitOps workflows
     digest: 6da630d75b7d855fe2b3e3511046654441c686763dc1f5f9e3eb4fbaf945f888
@@ -645,7 +645,7 @@ entries:
           url: https://github.com/argoproj-labs/gitops-promoter/releases/tag/v0.14.0
     apiVersion: v2
     appVersion: 0.14.0
-    created: "2026-06-26T16:11:12.962102128Z"
+    created: "2026-06-26T16:31:40.408163336Z"
     description: A Helm chart for GitOps Promoter - A tool for promoting changes between
       environments in GitOps workflows
     digest: b084173aca6f143e093a7efec0c00c80dfdcc9b1298a1797b55531bc812914e5
@@ -689,7 +689,7 @@ entries:
           url: https://github.com/argoproj-labs/gitops-promoter/releases/tag/v0.14.0
     apiVersion: v2
     appVersion: 0.14.0
-    created: "2026-06-26T16:11:12.959739206Z"
+    created: "2026-06-26T16:31:40.405372502Z"
     description: A Helm chart for GitOps Promoter - A tool for promoting changes between
       environments in GitOps workflows
     digest: fd1f83a1dd60c93c51ffbdb3db01f5a837b560a423a61132cde53751094165b3
@@ -737,7 +737,7 @@ entries:
           url: https://github.com/argoproj-labs/gitops-promoter/releases/tag/v0.14.0
     apiVersion: v2
     appVersion: 0.14.0
-    created: "2026-06-26T16:11:12.95799209Z"
+    created: "2026-06-26T16:31:40.40357968Z"
     description: A Helm chart for GitOps Promoter - A tool for promoting changes between
       environments in GitOps workflows
     digest: bb3db3fa2ee4892008ba8a91d65bebaf8f2b806683395fc5e63c256bf6ddd8dd
@@ -791,7 +791,7 @@ entries:
           url: https://github.com/argoproj-labs/gitops-promoter/releases/tag/v0.10.2
     apiVersion: v2
     appVersion: 0.10.2
-    created: "2026-06-26T16:11:12.956628877Z"
+    created: "2026-06-26T16:31:40.401109051Z"
     description: A Helm chart for GitOps Promoter - A tool for promoting changes between
       environments in GitOps workflows
     digest: 8f718592cee70c19a99ced964ba3e34d6281b15e1454c5a2116e8a15596c344c
@@ -845,7 +845,7 @@ entries:
           url: https://github.com/argoproj-labs/gitops-promoter/releases/tag/v0.10.2
     apiVersion: v2
     appVersion: 0.10.2
-    created: "2026-06-26T16:11:12.955256165Z"
+    created: "2026-06-26T16:31:40.399564332Z"
     description: A Helm chart for GitOps Promoter - A tool for promoting changes between
       environments in GitOps workflows
     digest: 85ff354e021406706ab74f8009547a97d387a29f1acfceeecacf4c9d96a7239b
@@ -899,7 +899,7 @@ entries:
           url: https://github.com/argoproj-labs/gitops-promoter/releases/tag/v0.10.2
     apiVersion: v2
     appVersion: 0.10.2
-    created: "2026-06-26T16:11:12.953873452Z"
+    created: "2026-06-26T16:31:40.396723698Z"
     description: A Helm chart for GitOps Promoter - A tool for promoting changes between
       environments in GitOps workflows
     digest: 00971acf297b6b35776c53d2a8e34e34b605603fa7183b348598e9a8b5f0de52
@@ -953,7 +953,7 @@ entries:
           url: https://github.com/argoproj-labs/gitops-promoter/releases/tag/v0.10.2
     apiVersion: v2
     appVersion: 0.10.2
-    created: "2026-06-26T16:11:12.952436238Z"
+    created: "2026-06-26T16:31:40.395160079Z"
     description: A Helm chart for GitOps Promoter - A tool for promoting changes between
       environments in GitOps workflows
     digest: cf60f9422a3aac115492ede04e21526dccee0cb26fab8630ad519da2e786460a
@@ -1007,7 +1007,7 @@ entries:
           url: https://github.com/argoproj-labs/gitops-promoter/releases/tag/v0.10.2
     apiVersion: v2
     appVersion: 0.10.2
-    created: "2026-06-26T16:11:12.951026725Z"
+    created: "2026-06-26T16:31:40.393730462Z"
     description: A Helm chart for GitOps Promoter - A tool for promoting changes between
       environments in GitOps workflows
     digest: 6277e42fa91020500439437550b12c56ffc6d87608fc07e5622b5e578b4a1a76
@@ -1061,7 +1061,7 @@ entries:
           url: https://github.com/argoproj-labs/gitops-promoter/releases/tag/v0.10.2
     apiVersion: v2
     appVersion: 0.10.2
-    created: "2026-06-26T16:11:12.949621512Z"
+    created: "2026-06-26T16:31:40.392239644Z"
     description: A Helm chart for GitOps Promoter - A tool for promoting changes between
       environments in GitOps workflows
     digest: 7c6449efd739bf17fa0e4912207482cf2246cab2e240941d0ccccda728df042c
@@ -1115,7 +1115,7 @@ entries:
           url: https://github.com/argoproj-labs/gitops-promoter/releases/tag/v0.10.2
     apiVersion: v2
     appVersion: 0.10.2
-    created: "2026-06-26T16:11:12.948243399Z"
+    created: "2026-06-26T16:31:40.390683825Z"
     description: A Helm chart for GitOps Promoter - A tool for promoting changes between
       environments in GitOps workflows
     digest: ec14be04c19e41ba9232a5043e6ee976a835bd349e2627a41f2d7c69f314a8d1
@@ -1161,7 +1161,7 @@ entries:
           url: https://github.com/argoproj-labs/gitops-promoter/releases/tag/v0.10.2
     apiVersion: v2
     appVersion: 0.10.2
-    created: "2026-06-26T16:11:12.946910187Z"
+    created: "2026-06-26T16:31:40.389270808Z"
     description: A Helm chart for GitOps Promoter - A tool for promoting changes between
       environments in GitOps workflows
     digest: 2de6b82a5eda5ae9c4359b63505f00d41c22c1352847572ea57229b0efac9651
@@ -1207,7 +1207,7 @@ entries:
           url: https://github.com/argoproj-labs/gitops-promoter/releases/tag/v0.10.2
     apiVersion: v2
     appVersion: 0.10.2
-    created: "2026-06-26T16:11:12.945821077Z"
+    created: "2026-06-26T16:31:40.387191183Z"
     description: A Helm chart for GitOps Promoter - A tool for promoting changes between
       environments in GitOps workflows
     digest: ce25747621432432c87cf6b212b13facb34f4c8a32ba57cfedb88c6d0fb2107d
@@ -1232,9 +1232,9 @@ entries:
   grafana-operator:
   - apiVersion: v2
     appVersion: v5.17.1
-    created: "2026-06-26T16:11:12.98924558Z"
+    created: "2026-06-26T16:31:40.432882333Z"
     description: Helm chart for the Grafana Operator
-    digest: df3956d33677c133fd825cfe7569db4161ff513fb0618433f391472fcf986aef
+    digest: 4348fd585b586c256155f358179adceefb61c2afedb664504b42e01fe73ddae1
     name: grafana-operator
     type: application
     urls:
@@ -1243,9 +1243,9 @@ entries:
   keda:
   - apiVersion: v2
     appVersion: 2.17.0
-    created: "2026-06-26T16:11:12.995484738Z"
+    created: "2026-06-26T16:31:40.438769004Z"
     description: Event-based autoscaler for workloads on Kubernetes
-    digest: 4f5a90df7f1dbfae2caba52ff053750d4dcba879552f548c1035ccd40b56cd89
+    digest: b365c6245906132d36ac8c584f1afa33c42728534540fbf8f363a95920d95ce1
     home: https://github.com/kedacore/keda
     icon: https://raw.githubusercontent.com/kedacore/keda/main/images/keda-logo-500x500-white.png
     kubeVersion: '>=v1.23.0-0'
@@ -1265,9 +1265,9 @@ entries:
   kubecore-ci-workflows:
   - apiVersion: v2
     appVersion: 0.9.9
-    created: "2026-06-26T16:11:12.998151063Z"
+    created: "2026-06-26T16:31:40.441349035Z"
     description: Argo Workflows CI pipeline templates for KubeCore platform
-    digest: 4d63877a6899d3d04afdf25611fde9288c71d89df0702a3d1cfa034b03858100
+    digest: 416bda7c0779263e7688dfeb48050464dc9b4d831199d976f35e9de04403395e
     home: https://github.com/novelcore/charts
     keywords:
     - ci-cd
@@ -1287,7 +1287,7 @@ entries:
     version: 0.10.2
   - apiVersion: v2
     appVersion: 0.9.9
-    created: "2026-06-26T16:11:12.997384656Z"
+    created: "2026-06-26T16:31:40.440578426Z"
     description: Argo Workflows CI pipeline templates for KubeCore platform
     digest: 4b88b2e460d992a308ab0ec4d252202d195b47a1eb3bdd403ef7bc181f803053
     home: https://github.com/novelcore/charts
@@ -1309,7 +1309,7 @@ entries:
     version: 0.10.1
   - apiVersion: v2
     appVersion: 0.9.9
-    created: "2026-06-26T16:11:12.996608149Z"
+    created: "2026-06-26T16:31:40.439825317Z"
     description: Argo Workflows CI pipeline templates for KubeCore platform
     digest: 795f32fb08c7004bc9ddd2b05c7e65e3a38af1dda5767301afb876d22d8a2b66
     home: https://github.com/novelcore/charts
@@ -1331,7 +1331,7 @@ entries:
     version: 0.10.0
   - apiVersion: v2
     appVersion: 0.9.9
-    created: "2026-06-26T16:11:13.015557525Z"
+    created: "2026-06-26T16:31:40.456841122Z"
     description: Argo Workflows CI pipeline templates for KubeCore platform
     digest: 7f1ebdbacc1395fe60bfff3e0be6fc6000b8717098d654b5f5032b31d3b481e9
     home: https://github.com/novelcore/charts
@@ -1353,7 +1353,7 @@ entries:
     version: 0.9.17
   - apiVersion: v2
     appVersion: 0.9.9
-    created: "2026-06-26T16:11:13.014849818Z"
+    created: "2026-06-26T16:31:40.456096413Z"
     description: Argo Workflows CI pipeline templates for KubeCore platform
     digest: de7052a019e469914c6ddb5bfe893c830c67875616c371732edd68f03202f02e
     home: https://github.com/novelcore/charts
@@ -1375,7 +1375,7 @@ entries:
     version: 0.9.16
   - apiVersion: v2
     appVersion: 0.9.9
-    created: "2026-06-26T16:11:13.013907709Z"
+    created: "2026-06-26T16:31:40.455396105Z"
     description: Argo Workflows CI pipeline templates for KubeCore platform
     digest: aff8f33c2c76af13a490e4fabb3aabfd1cc3d0fa79b5f9da3914ca07e87b986e
     home: https://github.com/novelcore/charts
@@ -1397,7 +1397,7 @@ entries:
     version: 0.9.15
   - apiVersion: v2
     appVersion: 0.9.9
-    created: "2026-06-26T16:11:13.012776199Z"
+    created: "2026-06-26T16:31:40.454709196Z"
     description: Argo Workflows CI pipeline templates for KubeCore platform
     digest: 642357057baa250e32438469bb059afc5066a8f1a8ca046d8df7b7f903075573
     home: https://github.com/novelcore/charts
@@ -1419,7 +1419,7 @@ entries:
     version: 0.9.14
   - apiVersion: v2
     appVersion: 0.9.9
-    created: "2026-06-26T16:11:13.011568688Z"
+    created: "2026-06-26T16:31:40.453997788Z"
     description: Argo Workflows CI pipeline templates for KubeCore platform
     digest: af589796b7b678f150d2cb0da4a0d16aeaf40510c4ab214a2b0d8df08591e324
     home: https://github.com/novelcore/charts
@@ -1441,7 +1441,7 @@ entries:
     version: 0.9.13
   - apiVersion: v2
     appVersion: 0.9.9
-    created: "2026-06-26T16:11:13.010433577Z"
+    created: "2026-06-26T16:31:40.45333898Z"
     description: Argo Workflows CI pipeline templates for KubeCore platform
     digest: 0a38a5c28bb53b0ce0e9b2e4f0a5933b55ab1a49bdb1dc362a06752641ee6729
     home: https://github.com/novelcore/charts
@@ -1463,7 +1463,7 @@ entries:
     version: 0.9.12
   - apiVersion: v2
     appVersion: 0.9.9
-    created: "2026-06-26T16:11:13.009411067Z"
+    created: "2026-06-26T16:31:40.452668572Z"
     description: Argo Workflows CI pipeline templates for KubeCore platform
     digest: ea0dd75d52828c47067cfebab73d41db7eb40b6a748c807960e171ceb9db6a0c
     home: https://github.com/novelcore/charts
@@ -1485,7 +1485,7 @@ entries:
     version: 0.9.11
   - apiVersion: v2
     appVersion: 0.9.9
-    created: "2026-06-26T16:11:13.008772262Z"
+    created: "2026-06-26T16:31:40.451971163Z"
     description: Argo Workflows CI pipeline templates for KubeCore platform
     digest: 8c7f3c4b50e31efc8e6efc2dcf7990de2cf9510e7030cd0dc748a98f74967ba4
     home: https://github.com/novelcore/charts
@@ -1507,7 +1507,7 @@ entries:
     version: 0.9.10
   - apiVersion: v2
     appVersion: 0.9.9
-    created: "2026-06-26T16:11:13.019486361Z"
+    created: "2026-06-26T16:31:40.462113386Z"
     description: Argo Workflows CI pipeline templates for KubeCore platform
     digest: 842456b999128e122f6cee41856beb4f0fbdbf91b180fac4631703f436f5fcc0
     home: https://github.com/novelcore/charts
@@ -1529,7 +1529,7 @@ entries:
     version: 0.9.9
   - apiVersion: v2
     appVersion: 0.9.7
-    created: "2026-06-26T16:11:13.018858855Z"
+    created: "2026-06-26T16:31:40.461087273Z"
     description: Argo Workflows CI pipeline templates for KubeCore platform
     digest: c3e8d304106ba8ed0f91ba3791ee7700085f400f41fd82a6617bca874de35b47
     home: https://github.com/novelcore/charts
@@ -1551,7 +1551,7 @@ entries:
     version: 0.9.7
   - apiVersion: v2
     appVersion: 0.9.6
-    created: "2026-06-26T16:11:13.01830285Z"
+    created: "2026-06-26T16:31:40.459907459Z"
     description: Argo Workflows CI pipeline templates for KubeCore platform
     digest: 6419f2cc086357766d71ace3fc8679713bdbcea847c7daa303ca63697a4c1ad2
     home: https://github.com/novelcore/charts
@@ -1573,7 +1573,7 @@ entries:
     version: 0.9.6
   - apiVersion: v2
     appVersion: 0.9.5
-    created: "2026-06-26T16:11:13.017743845Z"
+    created: "2026-06-26T16:31:40.459059049Z"
     description: Argo Workflows CI pipeline templates for KubeCore platform
     digest: 82df019200c3849083c13ac45b324b0f8d0f3f0ad849040d3601558ebadaff38
     home: https://github.com/novelcore/charts
@@ -1595,7 +1595,7 @@ entries:
     version: 0.9.5
   - apiVersion: v2
     appVersion: 0.9.4
-    created: "2026-06-26T16:11:13.01719764Z"
+    created: "2026-06-26T16:31:40.458425441Z"
     description: Argo Workflows CI pipeline templates for KubeCore platform
     digest: 169d6d15745e82fbbdb2bb2886991e5ebbf7d3977f5e7e28794a2d9c66f8a73d
     home: https://github.com/novelcore/charts
@@ -1617,7 +1617,7 @@ entries:
     version: 0.9.4
   - apiVersion: v2
     appVersion: 0.9.3
-    created: "2026-06-26T16:11:13.016656235Z"
+    created: "2026-06-26T16:31:40.457894635Z"
     description: Argo Workflows CI pipeline templates for KubeCore platform
     digest: c7f4925f0f8573d7c3bbccd0470db92fb8750d6dcab336702337a1dfb5e00308
     home: https://github.com/novelcore/charts
@@ -1639,7 +1639,7 @@ entries:
     version: 0.9.3
   - apiVersion: v2
     appVersion: 0.9.2
-    created: "2026-06-26T16:11:13.01609283Z"
+    created: "2026-06-26T16:31:40.457369329Z"
     description: Argo Workflows CI pipeline templates for KubeCore platform
     digest: 975b3fadb40448d7dd9b116d23b883b817d02a4de917bb7335ca3b46c7e43e60
     home: https://github.com/novelcore/charts
@@ -1661,7 +1661,7 @@ entries:
     version: 0.9.2
   - apiVersion: v2
     appVersion: 0.9.1
-    created: "2026-06-26T16:11:13.008000154Z"
+    created: "2026-06-26T16:31:40.451317156Z"
     description: Argo Workflows CI pipeline templates for KubeCore platform
     digest: 672211abef30651256afba50ecfd6a5161bf8e08ec9bf3f1b7ebc99a97102d57
     home: https://github.com/novelcore/charts
@@ -1683,7 +1683,7 @@ entries:
     version: 0.9.1
   - apiVersion: v2
     appVersion: 0.9.0
-    created: "2026-06-26T16:11:13.007321448Z"
+    created: "2026-06-26T16:31:40.450419145Z"
     description: Argo Workflows CI pipeline templates for KubeCore platform
     digest: a6f6cd2bc44efc27d44e630b37b4bcb6431d350ae04708d7a1529efad768f01d
     home: https://github.com/novelcore/charts
@@ -1705,7 +1705,7 @@ entries:
     version: 0.9.0
   - apiVersion: v2
     appVersion: 0.8.4
-    created: "2026-06-26T16:11:13.006761043Z"
+    created: "2026-06-26T16:31:40.449596135Z"
     description: Argo Workflows CI pipeline templates for KubeCore platform
     digest: 3c217cbd3865e6af00b99c63b059cf73f64ccc04dc31890a032664e17256d7de
     home: https://github.com/novelcore/charts
@@ -1727,7 +1727,7 @@ entries:
     version: 0.8.4
   - apiVersion: v2
     appVersion: 0.8.3
-    created: "2026-06-26T16:11:13.006223038Z"
+    created: "2026-06-26T16:31:40.448782225Z"
     description: Argo Workflows CI pipeline templates for KubeCore platform
     digest: 3d92961933ab1807240320660d71c02c378646ea588b240fb635a6872e8f0ff5
     home: https://github.com/novelcore/charts
@@ -1749,7 +1749,7 @@ entries:
     version: 0.8.3
   - apiVersion: v2
     appVersion: 0.8.2
-    created: "2026-06-26T16:11:13.005696033Z"
+    created: "2026-06-26T16:31:40.447950015Z"
     description: Argo Workflows CI pipeline templates for KubeCore platform
     digest: 8ed9e482ad2768ebb8f2898e7b2566fc0f8ebece7329d1e9c6b56372cf7b410d
     home: https://github.com/novelcore/charts
@@ -1771,7 +1771,7 @@ entries:
     version: 0.8.2
   - apiVersion: v2
     appVersion: 0.8.1
-    created: "2026-06-26T16:11:13.005181228Z"
+    created: "2026-06-26T16:31:40.447042604Z"
     description: Argo Workflows CI pipeline templates for KubeCore platform
     digest: 73c942fc5628c808fef03e018cfc9282810a51f4e13762cdf019bb686465c36f
     home: https://github.com/novelcore/charts
@@ -1793,7 +1793,7 @@ entries:
     version: 0.8.1
   - apiVersion: v2
     appVersion: 0.8.0
-    created: "2026-06-26T16:11:13.004683824Z"
+    created: "2026-06-26T16:31:40.446193594Z"
     description: Argo Workflows CI pipeline templates for KubeCore platform
     digest: 8b63bc62ef2a9fd1bdd7b780043d832fb36aa0a7cfdf099b2ac81f8c036bd73b
     home: https://github.com/novelcore/charts
@@ -1815,7 +1815,7 @@ entries:
     version: 0.8.0
   - apiVersion: v2
     appVersion: 0.7.0
-    created: "2026-06-26T16:11:13.004174119Z"
+    created: "2026-06-26T16:31:40.445510686Z"
     description: Argo Workflows CI pipeline templates for KubeCore platform
     digest: b80fafc5d7043609d2391edfcaa210f0a09ab0aa98e7847f1e6f328888a59b8e
     home: https://github.com/novelcore/charts
@@ -1837,7 +1837,7 @@ entries:
     version: 0.7.0
   - apiVersion: v2
     appVersion: 0.6.2
-    created: "2026-06-26T16:11:13.003727615Z"
+    created: "2026-06-26T16:31:40.445114981Z"
     description: Argo Workflows CI pipeline templates for KubeCore platform
     digest: c0c69fea561505faa11f6f26176fc018e56b8c8e249284ed5b70a152e70a5700
     home: https://github.com/novelcore/charts
@@ -1859,7 +1859,7 @@ entries:
     version: 0.6.2
   - apiVersion: v2
     appVersion: 0.6.1
-    created: "2026-06-26T16:11:13.001603495Z"
+    created: "2026-06-26T16:31:40.444776777Z"
     description: Argo Workflows CI pipeline templates for KubeCore platform
     digest: ec9adadf1ac6b48f4312e9006bce16d2c6eb4efe29e34b5fa342cbd667271fb7
     home: https://github.com/novelcore/charts
@@ -1881,7 +1881,7 @@ entries:
     version: 0.6.1
   - apiVersion: v2
     appVersion: 0.6.0
-    created: "2026-06-26T16:11:13.000992389Z"
+    created: "2026-06-26T16:31:40.444350072Z"
     description: Argo Workflows CI pipeline templates for KubeCore platform
     digest: 944f7605b191fac64f71b380617601c3e67ab559c98d19eef37b87d788ff0da1
     home: https://github.com/novelcore/charts
@@ -1903,7 +1903,7 @@ entries:
     version: 0.6.0
   - apiVersion: v2
     appVersion: 0.5.1
-    created: "2026-06-26T16:11:13.000439884Z"
+    created: "2026-06-26T16:31:40.443992167Z"
     description: Argo Workflows CI pipeline templates for KubeCore platform
     digest: acc57a8989825fd23376fb316f0732a5ce1096ff50970cac279fc12a420ef49b
     home: https://github.com/novelcore/charts
@@ -1925,7 +1925,7 @@ entries:
     version: 0.5.1
   - apiVersion: v2
     appVersion: 0.5.0
-    created: "2026-06-26T16:11:12.999734078Z"
+    created: "2026-06-26T16:31:40.442998955Z"
     description: Argo Workflows CI pipeline templates for KubeCore platform
     digest: 07ebaca02e079abb9843e304c43d189aadbf27a62d52a46991b0a8a71b24a216
     home: https://github.com/novelcore/charts
@@ -1947,7 +1947,7 @@ entries:
     version: 0.5.0
   - apiVersion: v2
     appVersion: 0.4.0
-    created: "2026-06-26T16:11:12.999413575Z"
+    created: "2026-06-26T16:31:40.442662751Z"
     description: Argo Workflows CI pipeline templates for KubeCore platform
     digest: bd483fca6060b8c826e7c05c51fc60ba597df8161191d59867396d11c3b0cc9d
     home: https://github.com/novelcore/charts
@@ -1969,7 +1969,7 @@ entries:
     version: 0.4.0
   - apiVersion: v2
     appVersion: 0.3.0
-    created: "2026-06-26T16:11:12.999094272Z"
+    created: "2026-06-26T16:31:40.442329847Z"
     description: Argo Workflows CI pipeline templates for KubeCore platform
     digest: c860174fad019ed9e0591bd3a1bb2069107ce8e2ec801e14342a8a6a0570f4d2
     home: https://github.com/novelcore/charts
@@ -1991,7 +1991,7 @@ entries:
     version: 0.3.0
   - apiVersion: v2
     appVersion: 0.2.1
-    created: "2026-06-26T16:11:12.998774269Z"
+    created: "2026-06-26T16:31:40.441993043Z"
     description: Argo Workflows CI pipeline templates for KubeCore platform
     digest: 7ce75fed08f422240deb03e3914be10aac07a77e196c2a290a0596cc3f98313e
     home: https://github.com/novelcore/charts
@@ -2013,7 +2013,7 @@ entries:
     version: 0.2.1
   - apiVersion: v2
     appVersion: 0.2.0
-    created: "2026-06-26T16:11:12.998464566Z"
+    created: "2026-06-26T16:31:40.441669739Z"
     description: Argo Workflows CI pipeline templates for KubeCore platform
     digest: 275342cf05528c3ed3b19e2dc7d6ec5d1e6514d313f3c8c5e3c7fe9a741761ad
     home: https://github.com/novelcore/charts
@@ -2035,7 +2035,7 @@ entries:
     version: 0.2.0
   - apiVersion: v2
     appVersion: 0.1.0
-    created: "2026-06-26T16:11:12.995824741Z"
+    created: "2026-06-26T16:31:40.439091608Z"
     description: Argo Workflows CI pipeline templates for KubeCore platform
     digest: 0db508273a08cd1d34538a8b020324a221d4a1044fe10a6af37197c53894bb43
     home: https://github.com/novelcore/charts
@@ -2058,9 +2058,9 @@ entries:
   kubecore-observability-rules:
   - apiVersion: v2
     appVersion: 1.0.0
-    created: "2026-06-26T16:11:13.027369334Z"
+    created: "2026-06-26T16:31:40.468322361Z"
     description: KubeCore observability rules and dashboards from external sources
-    digest: fa2900f7fa9e379e53c51eeb07fc94fc0228579c3451e656d6fce5b2c38b7149
+    digest: 4f74094ba367911a4afce5039b3ace411e7cf86b2bc0a8047873bc934069bc4d
     home: https://github.com/novelcore/kubecore-operator
     keywords:
     - kubecore
@@ -2095,8 +2095,53 @@ entries:
         - name: Release Notes
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
+    appVersion: 0.14.7
+    created: "2026-06-26T16:31:42.55362569Z"
+    description: A sophisticated Kubernetes operator that implements a four-layer
+      framework architecture for provisioning and managing cloud infrastructure through
+      Crossplane compositions.
+    digest: cd0f0be07c914c11551f11a0cbfa9d3a5fc2bc6734783e1f42331cf510545478
+    home: https://github.com/novelcore/kubecore-operator
+    icon: https://github.com/novelcore/kubecore-operator/raw/main/docs/icon.png
+    keywords:
+    - kubernetes
+    - kubecore
+    - operator
+    - crossplane
+    - infrastructure
+    - gitops
+    - platform
+    - kubecore
+    - infrastructure-as-code
+    kubeVersion: '>=1.20.0-0'
+    maintainers:
+    - email: platform@novelcore.io
+      name: Novelcore Platform Team
+    name: kubecore-operator
+    sources:
+    - https://github.com/novelcore/kubecore-operator
+    type: application
+    urls:
+    - https://novelcore.github.io/charts/kubecore-operator-0.14.7.tgz
+    version: 0.14.7
+  - annotations:
+      artifacthub.io/category: automation
+      artifacthub.io/changes: |
+        - kind: changed
+          description: "Changed XEKS Cluster, ClusterAuth, and NodeGroup deletionPolicy from Orphan to Delete for proper AWS resource cleanup"
+        - kind: fixed
+          description: "Fixed XEKS deletion blocking issue caused by orphaned AWS resources preventing subnet deletion"
+      artifacthub.io/license: Apache-2.0
+      artifacthub.io/links: |
+        - name: GitHub Repository
+          url: https://github.com/novelcore/kubecore-operator
+        - name: Documentation
+          url: https://github.com/novelcore/kubecore-operator/blob/main/README.md
+        - name: Release Notes
+          url: https://github.com/novelcore/kubecore-operator/releases
+    apiVersion: v2
     appVersion: 0.14.6
-    created: "2026-06-26T16:11:15.091225799Z"
+    created: "2026-06-26T16:31:42.550930757Z"
     description: A sophisticated Kubernetes operator that implements a four-layer
       framework architecture for provisioning and managing cloud infrastructure through
       Crossplane compositions.
@@ -2141,7 +2186,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.14.5
-    created: "2026-06-26T16:11:15.088678476Z"
+    created: "2026-06-26T16:31:42.548406327Z"
     description: A sophisticated Kubernetes operator that implements a four-layer
       framework architecture for provisioning and managing cloud infrastructure through
       Crossplane compositions.
@@ -2186,7 +2231,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.14.4
-    created: "2026-06-26T16:11:15.086199953Z"
+    created: "2026-06-26T16:31:42.545756195Z"
     description: A sophisticated Kubernetes operator that implements a four-layer
       framework architecture for provisioning and managing cloud infrastructure through
       Crossplane compositions.
@@ -2231,7 +2276,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.14.3
-    created: "2026-06-26T16:11:15.08379553Z"
+    created: "2026-06-26T16:31:42.543128763Z"
     description: A sophisticated Kubernetes operator that implements a four-layer
       framework architecture for provisioning and managing cloud infrastructure through
       Crossplane compositions.
@@ -2276,7 +2321,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.14.2
-    created: "2026-06-26T16:11:15.079712192Z"
+    created: "2026-06-26T16:31:42.539087615Z"
     description: A sophisticated Kubernetes operator that implements a four-layer
       framework architecture for provisioning and managing cloud infrastructure through
       Crossplane compositions.
@@ -2321,7 +2366,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.14.1
-    created: "2026-06-26T16:11:15.076597663Z"
+    created: "2026-06-26T16:31:42.535823175Z"
     description: A sophisticated Kubernetes operator that implements a four-layer
       framework architecture for provisioning and managing cloud infrastructure through
       Crossplane compositions.
@@ -2366,7 +2411,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.14.0
-    created: "2026-06-26T16:11:15.074122841Z"
+    created: "2026-06-26T16:31:42.533350846Z"
     description: A sophisticated Kubernetes operator that implements a four-layer
       framework architecture for provisioning and managing cloud infrastructure through
       Crossplane compositions.
@@ -2411,7 +2456,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.13.2
-    created: "2026-06-26T16:11:15.071431816Z"
+    created: "2026-06-26T16:31:42.530929916Z"
     description: A sophisticated Kubernetes operator that implements a four-layer
       framework architecture for provisioning and managing cloud infrastructure through
       Crossplane compositions.
@@ -2456,7 +2501,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.13.1
-    created: "2026-06-26T16:11:15.068249786Z"
+    created: "2026-06-26T16:31:42.528541988Z"
     description: A sophisticated Kubernetes operator that implements a four-layer
       framework architecture for provisioning and managing cloud infrastructure through
       Crossplane compositions.
@@ -2501,7 +2546,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.13.0
-    created: "2026-06-26T16:11:15.063999747Z"
+    created: "2026-06-26T16:31:42.522980021Z"
     description: A sophisticated Kubernetes operator that implements a four-layer
       framework architecture for provisioning and managing cloud infrastructure through
       Crossplane compositions.
@@ -2546,7 +2591,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.12.17
-    created: "2026-06-26T16:11:15.033850767Z"
+    created: "2026-06-26T16:31:42.497996719Z"
     description: A sophisticated Kubernetes operator that implements a four-layer
       framework architecture for provisioning and managing cloud infrastructure through
       Crossplane compositions.
@@ -2591,7 +2636,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.12.16
-    created: "2026-06-26T16:11:15.023688472Z"
+    created: "2026-06-26T16:31:42.495248186Z"
     description: A sophisticated Kubernetes operator that implements a four-layer
       framework architecture for provisioning and managing cloud infrastructure through
       Crossplane compositions.
@@ -2636,7 +2681,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.12.15
-    created: "2026-06-26T16:11:15.015829099Z"
+    created: "2026-06-26T16:31:42.491484641Z"
     description: A sophisticated Kubernetes operator that implements a four-layer
       framework architecture for provisioning and managing cloud infrastructure through
       Crossplane compositions.
@@ -2681,7 +2726,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.12.14
-    created: "2026-06-26T16:11:15.012915272Z"
+    created: "2026-06-26T16:31:42.488323203Z"
     description: A sophisticated Kubernetes operator that implements a four-layer
       framework architecture for provisioning and managing cloud infrastructure through
       Crossplane compositions.
@@ -2726,7 +2771,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.12.13
-    created: "2026-06-26T16:11:14.997504729Z"
+    created: "2026-06-26T16:31:42.485714571Z"
     description: A sophisticated Kubernetes operator that implements a four-layer
       framework architecture for provisioning and managing cloud infrastructure through
       Crossplane compositions.
@@ -2771,7 +2816,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.12.12
-    created: "2026-06-26T16:11:14.991257771Z"
+    created: "2026-06-26T16:31:42.483200941Z"
     description: A sophisticated Kubernetes operator that implements a four-layer
       framework architecture for provisioning and managing cloud infrastructure through
       Crossplane compositions.
@@ -2816,7 +2861,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.12.11
-    created: "2026-06-26T16:11:14.983987904Z"
+    created: "2026-06-26T16:31:42.480764012Z"
     description: A sophisticated Kubernetes operator that implements a four-layer
       framework architecture for provisioning and managing cloud infrastructure through
       Crossplane compositions.
@@ -2861,7 +2906,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.12.10
-    created: "2026-06-26T16:11:14.980992376Z"
+    created: "2026-06-26T16:31:42.47728077Z"
     description: A sophisticated Kubernetes operator that implements a four-layer
       framework architecture for provisioning and managing cloud infrastructure through
       Crossplane compositions.
@@ -2906,7 +2951,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.12.9
-    created: "2026-06-26T16:11:15.059768607Z"
+    created: "2026-06-26T16:31:42.519890383Z"
     description: A sophisticated Kubernetes operator that implements a four-layer
       framework architecture for provisioning and managing cloud infrastructure through
       Crossplane compositions.
@@ -2951,7 +2996,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.12.8
-    created: "2026-06-26T16:11:15.057358585Z"
+    created: "2026-06-26T16:31:42.517486454Z"
     description: A sophisticated Kubernetes operator that implements a four-layer
       framework architecture for provisioning and managing cloud infrastructure through
       Crossplane compositions.
@@ -2996,7 +3041,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.12.7
-    created: "2026-06-26T16:11:15.054930962Z"
+    created: "2026-06-26T16:31:42.515056825Z"
     description: A sophisticated Kubernetes operator that implements a four-layer
       framework architecture for provisioning and managing cloud infrastructure through
       Crossplane compositions.
@@ -3041,7 +3086,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.12.6
-    created: "2026-06-26T16:11:15.05253644Z"
+    created: "2026-06-26T16:31:42.512680496Z"
     description: A sophisticated Kubernetes operator that implements a four-layer
       framework architecture for provisioning and managing cloud infrastructure through
       Crossplane compositions.
@@ -3086,7 +3131,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.12.5
-    created: "2026-06-26T16:11:15.048595103Z"
+    created: "2026-06-26T16:31:42.509501358Z"
     description: A sophisticated Kubernetes operator that implements a four-layer
       framework architecture for provisioning and managing cloud infrastructure through
       Crossplane compositions.
@@ -3131,7 +3176,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.12.4
-    created: "2026-06-26T16:11:15.044714167Z"
+    created: "2026-06-26T16:31:42.50547281Z"
     description: A sophisticated Kubernetes operator that implements a four-layer
       framework architecture for provisioning and managing cloud infrastructure through
       Crossplane compositions.
@@ -3176,7 +3221,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.12.3
-    created: "2026-06-26T16:11:15.042237244Z"
+    created: "2026-06-26T16:31:42.502913479Z"
     description: A sophisticated Kubernetes operator that implements a four-layer
       framework architecture for provisioning and managing cloud infrastructure through
       Crossplane compositions.
@@ -3221,7 +3266,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.12.2
-    created: "2026-06-26T16:11:15.039669421Z"
+    created: "2026-06-26T16:31:42.500470049Z"
     description: A sophisticated Kubernetes operator that implements a four-layer
       framework architecture for provisioning and managing cloud infrastructure through
       Crossplane compositions.
@@ -3266,7 +3311,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.12.1
-    created: "2026-06-26T16:11:14.973266404Z"
+    created: "2026-06-26T16:31:42.473240921Z"
     description: A sophisticated Kubernetes operator that implements a four-layer
       framework architecture for provisioning and managing cloud infrastructure through
       Crossplane compositions.
@@ -3311,7 +3356,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.12.0
-    created: "2026-06-26T16:11:14.96312151Z"
+    created: "2026-06-26T16:31:42.470814792Z"
     description: A sophisticated Kubernetes operator that implements a four-layer
       framework architecture for provisioning and managing cloud infrastructure through
       Crossplane compositions.
@@ -3356,7 +3401,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.11.6
-    created: "2026-06-26T16:11:14.958035863Z"
+    created: "2026-06-26T16:31:42.468358662Z"
     description: A sophisticated Kubernetes operator that implements a four-layer
       framework architecture for provisioning and managing cloud infrastructure through
       Crossplane compositions.
@@ -3401,7 +3446,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.11.5
-    created: "2026-06-26T16:11:14.950836896Z"
+    created: "2026-06-26T16:31:42.460872772Z"
     description: A sophisticated Kubernetes operator that implements a four-layer
       framework architecture for provisioning and managing cloud infrastructure through
       Crossplane compositions.
@@ -3446,7 +3491,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.11.4
-    created: "2026-06-26T16:11:14.94806647Z"
+    created: "2026-06-26T16:31:42.458015738Z"
     description: A sophisticated Kubernetes operator that implements a four-layer
       framework architecture for provisioning and managing cloud infrastructure through
       Crossplane compositions.
@@ -3491,7 +3536,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.11.3
-    created: "2026-06-26T16:11:14.938859984Z"
+    created: "2026-06-26T16:31:42.454130891Z"
     description: A sophisticated Kubernetes operator that implements a four-layer
       framework architecture for provisioning and managing cloud infrastructure through
       Crossplane compositions.
@@ -3536,7 +3581,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.11.2
-    created: "2026-06-26T16:11:14.931339615Z"
+    created: "2026-06-26T16:31:42.451119755Z"
     description: A sophisticated Kubernetes operator that implements a four-layer
       framework architecture for provisioning and managing cloud infrastructure through
       Crossplane compositions.
@@ -3581,7 +3626,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.11.1
-    created: "2026-06-26T16:11:14.926327468Z"
+    created: "2026-06-26T16:31:42.448654525Z"
     description: A sophisticated Kubernetes operator that implements a four-layer
       framework architecture for provisioning and managing cloud infrastructure through
       Crossplane compositions.
@@ -3626,7 +3671,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.11.0
-    created: "2026-06-26T16:11:14.919197302Z"
+    created: "2026-06-26T16:31:42.446213995Z"
     description: A sophisticated Kubernetes operator that implements a four-layer
       framework architecture for provisioning and managing cloud infrastructure through
       Crossplane compositions.
@@ -3671,7 +3716,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.10.0
-    created: "2026-06-26T16:11:14.914961663Z"
+    created: "2026-06-26T16:31:42.442363349Z"
     description: A sophisticated Kubernetes operator that implements a four-layer
       framework architecture for provisioning and managing cloud infrastructure through
       Crossplane compositions.
@@ -3716,7 +3761,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.9.0
-    created: "2026-06-26T16:11:15.268452245Z"
+    created: "2026-06-26T16:31:42.744444989Z"
     description: A sophisticated Kubernetes operator that implements a four-layer
       framework architecture for provisioning and managing cloud infrastructure through
       Crossplane compositions.
@@ -3761,7 +3806,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.8.20
-    created: "2026-06-26T16:11:15.243747316Z"
+    created: "2026-06-26T16:31:42.7203988Z"
     description: A sophisticated Kubernetes operator that implements a four-layer
       framework architecture for provisioning and managing cloud infrastructure through
       Crossplane compositions.
@@ -3806,7 +3851,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.8.19
-    created: "2026-06-26T16:11:15.238155864Z"
+    created: "2026-06-26T16:31:42.715522041Z"
     description: A sophisticated Kubernetes operator that implements a four-layer
       framework architecture for provisioning and managing cloud infrastructure through
       Crossplane compositions.
@@ -3851,7 +3896,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.8.18
-    created: "2026-06-26T16:11:15.235768342Z"
+    created: "2026-06-26T16:31:42.71294621Z"
     description: A sophisticated Kubernetes operator that implements a four-layer
       framework architecture for provisioning and managing cloud infrastructure through
       Crossplane compositions.
@@ -3896,7 +3941,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.8.17
-    created: "2026-06-26T16:11:15.232432611Z"
+    created: "2026-06-26T16:31:42.709450368Z"
     description: A sophisticated Kubernetes operator that implements a four-layer
       framework architecture for provisioning and managing cloud infrastructure through
       Crossplane compositions.
@@ -3941,7 +3986,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.8.16
-    created: "2026-06-26T16:11:15.228621775Z"
+    created: "2026-06-26T16:31:42.705877625Z"
     description: A sophisticated Kubernetes operator that implements a four-layer
       framework architecture for provisioning and managing cloud infrastructure through
       Crossplane compositions.
@@ -3986,7 +4031,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.8.15
-    created: "2026-06-26T16:11:15.226099952Z"
+    created: "2026-06-26T16:31:42.703487496Z"
     description: A sophisticated Kubernetes operator that implements a four-layer
       framework architecture for provisioning and managing cloud infrastructure through
       Crossplane compositions.
@@ -4031,7 +4076,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.8.14
-    created: "2026-06-26T16:11:15.223571128Z"
+    created: "2026-06-26T16:31:42.700985066Z"
     description: A sophisticated Kubernetes operator that implements a four-layer
       framework architecture for provisioning and managing cloud infrastructure through
       Crossplane compositions.
@@ -4076,7 +4121,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.8.13
-    created: "2026-06-26T16:11:15.221122706Z"
+    created: "2026-06-26T16:31:42.698568637Z"
     description: A sophisticated Kubernetes operator that implements a four-layer
       framework architecture for provisioning and managing cloud infrastructure through
       Crossplane compositions.
@@ -4121,7 +4166,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.8.12
-    created: "2026-06-26T16:11:15.218252779Z"
+    created: "2026-06-26T16:31:42.695792403Z"
     description: A sophisticated Kubernetes operator that implements a four-layer
       framework architecture for provisioning and managing cloud infrastructure through
       Crossplane compositions.
@@ -4166,7 +4211,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.8.11
-    created: "2026-06-26T16:11:15.214344843Z"
+    created: "2026-06-26T16:31:42.692658465Z"
     description: A sophisticated Kubernetes operator that implements a four-layer
       framework architecture for provisioning and managing cloud infrastructure through
       Crossplane compositions.
@@ -4211,7 +4256,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.8.10
-    created: "2026-06-26T16:11:15.211095812Z"
+    created: "2026-06-26T16:31:42.68892412Z"
     description: A sophisticated Kubernetes operator that implements a four-layer
       framework architecture for provisioning and managing cloud infrastructure through
       Crossplane compositions.
@@ -4256,7 +4301,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.8.9
-    created: "2026-06-26T16:11:15.264447008Z"
+    created: "2026-06-26T16:31:42.741403253Z"
     description: A sophisticated Kubernetes operator that implements a four-layer
       framework architecture for provisioning and managing cloud infrastructure through
       Crossplane compositions.
@@ -4301,7 +4346,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.8.8
-    created: "2026-06-26T16:11:15.260984476Z"
+    created: "2026-06-26T16:31:42.737695708Z"
     description: A sophisticated Kubernetes operator that implements a four-layer
       framework architecture for provisioning and managing cloud infrastructure through
       Crossplane compositions.
@@ -4346,7 +4391,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.8.7
-    created: "2026-06-26T16:11:15.258570153Z"
+    created: "2026-06-26T16:31:42.734849574Z"
     description: A sophisticated Kubernetes operator that implements a four-layer
       framework architecture for provisioning and managing cloud infrastructure through
       Crossplane compositions.
@@ -4391,7 +4436,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.8.6
-    created: "2026-06-26T16:11:15.256133131Z"
+    created: "2026-06-26T16:31:42.732439345Z"
     description: A sophisticated Kubernetes operator that implements a four-layer
       framework architecture for provisioning and managing cloud infrastructure through
       Crossplane compositions.
@@ -4436,7 +4481,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.8.5
-    created: "2026-06-26T16:11:15.253653308Z"
+    created: "2026-06-26T16:31:42.729742412Z"
     description: A sophisticated Kubernetes operator that implements a four-layer
       framework architecture for provisioning and managing cloud infrastructure through
       Crossplane compositions.
@@ -4481,7 +4526,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.8.4
-    created: "2026-06-26T16:11:15.250462078Z"
+    created: "2026-06-26T16:31:42.727384784Z"
     description: A sophisticated Kubernetes operator that implements a four-layer
       framework architecture for provisioning and managing cloud infrastructure through
       Crossplane compositions.
@@ -4526,7 +4571,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.8.3
-    created: "2026-06-26T16:11:15.246746044Z"
+    created: "2026-06-26T16:31:42.72371814Z"
     description: A sophisticated Kubernetes operator that implements a four-layer
       framework architecture for provisioning and managing cloud infrastructure through
       Crossplane compositions.
@@ -4571,7 +4616,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.8.2
-    created: "2026-06-26T16:11:15.240714087Z"
+    created: "2026-06-26T16:31:42.718031871Z"
     description: A sophisticated Kubernetes operator that implements a four-layer
       framework architecture for provisioning and managing cloud infrastructure through
       Crossplane compositions.
@@ -4616,7 +4661,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.8.1
-    created: "2026-06-26T16:11:15.208578989Z"
+    created: "2026-06-26T16:31:42.68644799Z"
     description: A sophisticated Kubernetes operator that implements a four-layer
       framework architecture for provisioning and managing cloud infrastructure through
       Crossplane compositions.
@@ -4661,7 +4706,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.8.0
-    created: "2026-06-26T16:11:15.206128566Z"
+    created: "2026-06-26T16:31:42.684056062Z"
     description: A sophisticated Kubernetes operator that implements a four-layer
       framework architecture for provisioning and managing cloud infrastructure through
       Crossplane compositions.
@@ -4706,7 +4751,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.7.3
-    created: "2026-06-26T16:11:15.203800345Z"
+    created: "2026-06-26T16:31:42.681628732Z"
     description: A sophisticated Kubernetes operator that implements a four-layer
       framework architecture for provisioning and managing cloud infrastructure through
       Crossplane compositions.
@@ -4751,7 +4796,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.7.2
-    created: "2026-06-26T16:11:15.199881908Z"
+    created: "2026-06-26T16:31:42.678205091Z"
     description: A sophisticated Kubernetes operator that implements a four-layer
       framework architecture for provisioning and managing cloud infrastructure through
       Crossplane compositions.
@@ -4796,7 +4841,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.7.1
-    created: "2026-06-26T16:11:15.19683268Z"
+    created: "2026-06-26T16:31:42.674853351Z"
     description: A sophisticated Kubernetes operator that implements a four-layer
       framework architecture for provisioning and managing cloud infrastructure through
       Crossplane compositions.
@@ -4841,7 +4886,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.7.0
-    created: "2026-06-26T16:11:15.194516859Z"
+    created: "2026-06-26T16:31:42.672550123Z"
     description: A sophisticated Kubernetes operator that implements a four-layer
       framework architecture for provisioning and managing cloud infrastructure through
       Crossplane compositions.
@@ -4886,7 +4931,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.6.6
-    created: "2026-06-26T16:11:15.192085236Z"
+    created: "2026-06-26T16:31:42.670049193Z"
     description: A sophisticated Kubernetes operator that implements a four-layer
       framework architecture for provisioning and managing cloud infrastructure through
       Crossplane compositions.
@@ -4931,7 +4976,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.6.5
-    created: "2026-06-26T16:11:15.189765114Z"
+    created: "2026-06-26T16:31:42.667656564Z"
     description: A sophisticated Kubernetes operator that implements a four-layer
       framework architecture for provisioning and managing cloud infrastructure through
       Crossplane compositions.
@@ -4976,7 +5021,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.6.4
-    created: "2026-06-26T16:11:15.186596885Z"
+    created: "2026-06-26T16:31:42.664302324Z"
     description: A sophisticated Kubernetes operator that implements a four-layer
       framework architecture for provisioning and managing cloud infrastructure through
       Crossplane compositions.
@@ -5021,7 +5066,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.6.3
-    created: "2026-06-26T16:11:15.182997452Z"
+    created: "2026-06-26T16:31:42.660585679Z"
     description: A sophisticated Kubernetes operator that implements a four-layer
       framework architecture for provisioning and managing cloud infrastructure through
       Crossplane compositions.
@@ -5066,7 +5111,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.6.2
-    created: "2026-06-26T16:11:15.180165125Z"
+    created: "2026-06-26T16:31:42.65817705Z"
     description: A sophisticated Kubernetes operator that implements a four-layer
       framework architecture for provisioning and managing cloud infrastructure through
       Crossplane compositions.
@@ -5111,7 +5156,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.6.1
-    created: "2026-06-26T16:11:15.177650002Z"
+    created: "2026-06-26T16:31:42.655754921Z"
     description: A sophisticated Kubernetes operator that implements a four-layer
       framework architecture for provisioning and managing cloud infrastructure through
       Crossplane compositions.
@@ -5156,7 +5201,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.6.0
-    created: "2026-06-26T16:11:15.175212179Z"
+    created: "2026-06-26T16:31:42.653321291Z"
     description: A sophisticated Kubernetes operator that implements a four-layer
       framework architecture for provisioning and managing cloud infrastructure through
       Crossplane compositions.
@@ -5201,7 +5246,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.5.17
-    created: "2026-06-26T16:11:15.149140037Z"
+    created: "2026-06-26T16:31:42.626522968Z"
     description: A sophisticated Kubernetes operator that implements a four-layer
       framework architecture for provisioning and managing cloud infrastructure through
       Crossplane compositions.
@@ -5246,7 +5291,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.5.16
-    created: "2026-06-26T16:11:15.146684314Z"
+    created: "2026-06-26T16:31:42.624089339Z"
     description: A sophisticated Kubernetes operator that implements a four-layer
       framework architecture for provisioning and managing cloud infrastructure through
       Crossplane compositions.
@@ -5291,7 +5336,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.5.15
-    created: "2026-06-26T16:11:15.144246692Z"
+    created: "2026-06-26T16:31:42.621410207Z"
     description: A sophisticated Kubernetes operator that implements a four-layer
       framework architecture for provisioning and managing cloud infrastructure through
       Crossplane compositions.
@@ -5336,7 +5381,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.5.14
-    created: "2026-06-26T16:11:15.141396065Z"
+    created: "2026-06-26T16:31:42.61756066Z"
     description: A sophisticated Kubernetes operator that implements a four-layer
       framework architecture for provisioning and managing cloud infrastructure through
       Crossplane compositions.
@@ -5381,7 +5426,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.5.13
-    created: "2026-06-26T16:11:15.137547629Z"
+    created: "2026-06-26T16:31:42.614520924Z"
     description: A sophisticated Kubernetes operator that implements a four-layer
       framework architecture for provisioning and managing cloud infrastructure through
       Crossplane compositions.
@@ -5426,7 +5471,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.5.12
-    created: "2026-06-26T16:11:15.134616302Z"
+    created: "2026-06-26T16:31:42.612142595Z"
     description: A sophisticated Kubernetes operator that implements a four-layer
       framework architecture for provisioning and managing cloud infrastructure through
       Crossplane compositions.
@@ -5471,7 +5516,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.5.11
-    created: "2026-06-26T16:11:15.13226048Z"
+    created: "2026-06-26T16:31:42.609626065Z"
     description: A sophisticated Kubernetes operator that implements a four-layer
       framework architecture for provisioning and managing cloud infrastructure through
       Crossplane compositions.
@@ -5516,7 +5561,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.5.10
-    created: "2026-06-26T16:11:15.129759557Z"
+    created: "2026-06-26T16:31:42.607227736Z"
     description: A sophisticated Kubernetes operator that implements a four-layer
       framework architecture for provisioning and managing cloud infrastructure through
       Crossplane compositions.
@@ -5561,7 +5606,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.5.9
-    created: "2026-06-26T16:11:15.172800257Z"
+    created: "2026-06-26T16:31:42.649237342Z"
     description: A sophisticated Kubernetes operator that implements a four-layer
       framework architecture for provisioning and managing cloud infrastructure through
       Crossplane compositions.
@@ -5606,7 +5651,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.5.8
-    created: "2026-06-26T16:11:15.16879332Z"
+    created: "2026-06-26T16:31:42.646082104Z"
     description: A sophisticated Kubernetes operator that implements a four-layer
       framework architecture for provisioning and managing cloud infrastructure through
       Crossplane compositions.
@@ -5651,7 +5696,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.5.7
-    created: "2026-06-26T16:11:15.16557709Z"
+    created: "2026-06-26T16:31:42.643710775Z"
     description: A sophisticated Kubernetes operator that implements a four-layer
       framework architecture for provisioning and managing cloud infrastructure through
       Crossplane compositions.
@@ -5696,7 +5741,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.5.6
-    created: "2026-06-26T16:11:15.163250768Z"
+    created: "2026-06-26T16:31:42.641237946Z"
     description: A sophisticated Kubernetes operator that implements a four-layer
       framework architecture for provisioning and managing cloud infrastructure through
       Crossplane compositions.
@@ -5741,7 +5786,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.5.5
-    created: "2026-06-26T16:11:15.160757345Z"
+    created: "2026-06-26T16:31:42.638442212Z"
     description: A sophisticated Kubernetes operator that implements a four-layer
       framework architecture for provisioning and managing cloud infrastructure through
       Crossplane compositions.
@@ -5786,7 +5831,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.5.4
-    created: "2026-06-26T16:11:15.158393623Z"
+    created: "2026-06-26T16:31:42.635143072Z"
     description: A sophisticated Kubernetes operator that implements a four-layer
       framework architecture for provisioning and managing cloud infrastructure through
       Crossplane compositions.
@@ -5831,7 +5876,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.5.3
-    created: "2026-06-26T16:11:15.154994891Z"
+    created: "2026-06-26T16:31:42.631448228Z"
     description: A sophisticated Kubernetes operator that implements a four-layer
       framework architecture for provisioning and managing cloud infrastructure through
       Crossplane compositions.
@@ -5876,7 +5921,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.5.2
-    created: "2026-06-26T16:11:15.151457359Z"
+    created: "2026-06-26T16:31:42.629051699Z"
     description: A sophisticated Kubernetes operator that implements a four-layer
       framework architecture for provisioning and managing cloud infrastructure through
       Crossplane compositions.
@@ -5921,7 +5966,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.5.1
-    created: "2026-06-26T16:11:15.127312834Z"
+    created: "2026-06-26T16:31:42.603867295Z"
     description: A sophisticated Kubernetes operator that implements a four-layer
       framework architecture for provisioning and managing cloud infrastructure through
       Crossplane compositions.
@@ -5966,7 +6011,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.5.0
-    created: "2026-06-26T16:11:15.123750801Z"
+    created: "2026-06-26T16:31:42.600050149Z"
     description: A sophisticated Kubernetes operator that implements a four-layer
       framework architecture for provisioning and managing cloud infrastructure through
       Crossplane compositions.
@@ -6011,7 +6056,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.4.1
-    created: "2026-06-26T16:11:15.120169068Z"
+    created: "2026-06-26T16:31:42.597673921Z"
     description: A sophisticated Kubernetes operator that implements a four-layer
       framework architecture for provisioning and managing cloud infrastructure through
       Crossplane compositions.
@@ -6056,7 +6101,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.4.0
-    created: "2026-06-26T16:11:15.117675545Z"
+    created: "2026-06-26T16:31:42.59516759Z"
     description: A sophisticated Kubernetes operator that implements a four-layer
       framework architecture for provisioning and managing cloud infrastructure through
       Crossplane compositions.
@@ -6101,7 +6146,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.3.0
-    created: "2026-06-26T16:11:15.115252622Z"
+    created: "2026-06-26T16:31:42.586574187Z"
     description: A sophisticated Kubernetes operator that implements a four-layer
       framework architecture for provisioning and managing cloud infrastructure through
       Crossplane compositions.
@@ -6146,7 +6191,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.2.6
-    created: "2026-06-26T16:11:15.112903901Z"
+    created: "2026-06-26T16:31:42.580634315Z"
     description: A sophisticated Kubernetes operator that implements a four-layer
       framework architecture for provisioning and managing cloud infrastructure through
       Crossplane compositions.
@@ -6191,7 +6236,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.2.5
-    created: "2026-06-26T16:11:15.109913073Z"
+    created: "2026-06-26T16:31:42.576827369Z"
     description: A sophisticated Kubernetes operator that implements a four-layer
       framework architecture for provisioning and managing cloud infrastructure through
       Crossplane compositions.
@@ -6236,7 +6281,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.2.4
-    created: "2026-06-26T16:11:15.105747234Z"
+    created: "2026-06-26T16:31:42.573753132Z"
     description: A sophisticated Kubernetes operator that implements a four-layer
       framework architecture for provisioning and managing cloud infrastructure through
       Crossplane compositions.
@@ -6281,7 +6326,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.2.3
-    created: "2026-06-26T16:11:15.103220211Z"
+    created: "2026-06-26T16:31:42.56525113Z"
     description: A sophisticated Kubernetes operator that implements a four-layer
       framework architecture for provisioning and managing cloud infrastructure through
       Crossplane compositions.
@@ -6326,7 +6371,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.2.2
-    created: "2026-06-26T16:11:15.100752688Z"
+    created: "2026-06-26T16:31:42.5627989Z"
     description: A sophisticated Kubernetes operator that implements a four-layer
       framework architecture for provisioning and managing cloud infrastructure through
       Crossplane compositions.
@@ -6371,7 +6416,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.2.1
-    created: "2026-06-26T16:11:15.098335065Z"
+    created: "2026-06-26T16:31:42.560447272Z"
     description: A sophisticated Kubernetes operator that implements a four-layer
       framework architecture for provisioning and managing cloud infrastructure through
       Crossplane compositions.
@@ -6416,7 +6461,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.2.0
-    created: "2026-06-26T16:11:15.095296737Z"
+    created: "2026-06-26T16:31:42.557501837Z"
     description: A sophisticated Kubernetes operator that implements a four-layer
       framework architecture for provisioning and managing cloud infrastructure through
       Crossplane compositions.
@@ -6461,7 +6506,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.261
-    created: "2026-06-26T16:11:14.909969816Z"
+    created: "2026-06-26T16:31:42.438867007Z"
     description: A sophisticated Kubernetes operator that implements a four-layer
       framework architecture for provisioning and managing cloud infrastructure through
       Crossplane compositions.
@@ -6504,7 +6549,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.260
-    created: "2026-06-26T16:11:14.899680121Z"
+    created: "2026-06-26T16:31:42.436261176Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -6556,7 +6601,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.259
-    created: "2026-06-26T16:11:14.868887135Z"
+    created: "2026-06-26T16:31:42.421273595Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -6608,7 +6653,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.258
-    created: "2026-06-26T16:11:14.834514015Z"
+    created: "2026-06-26T16:31:42.389839716Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -6660,7 +6705,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.257
-    created: "2026-06-26T16:11:14.806367054Z"
+    created: "2026-06-26T16:31:42.357567727Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -6712,7 +6757,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.256
-    created: "2026-06-26T16:11:14.786344768Z"
+    created: "2026-06-26T16:31:42.315521421Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -6764,7 +6809,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.255
-    created: "2026-06-26T16:11:14.77038762Z"
+    created: "2026-06-26T16:31:42.288486095Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -6816,7 +6861,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.254
-    created: "2026-06-26T16:11:14.755464381Z"
+    created: "2026-06-26T16:31:42.253731376Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -6868,7 +6913,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.253
-    created: "2026-06-26T16:11:14.740757245Z"
+    created: "2026-06-26T16:31:42.229721787Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -6922,7 +6967,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.252
-    created: "2026-06-26T16:11:14.725583304Z"
+    created: "2026-06-26T16:31:42.213589192Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -6976,7 +7021,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.251
-    created: "2026-06-26T16:11:14.710498064Z"
+    created: "2026-06-26T16:31:42.197955304Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -7030,7 +7075,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.250
-    created: "2026-06-26T16:11:14.695161821Z"
+    created: "2026-06-26T16:31:42.181098101Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -7084,7 +7129,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.249
-    created: "2026-06-26T16:11:14.680078681Z"
+    created: "2026-06-26T16:31:42.166429424Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -7138,7 +7183,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.248
-    created: "2026-06-26T16:11:14.665144443Z"
+    created: "2026-06-26T16:31:42.150405731Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -7192,7 +7237,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.247
-    created: "2026-06-26T16:11:14.650052603Z"
+    created: "2026-06-26T16:31:42.133807131Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -7246,7 +7291,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.246
-    created: "2026-06-26T16:11:14.635597668Z"
+    created: "2026-06-26T16:31:42.118620548Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -7300,7 +7345,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.245
-    created: "2026-06-26T16:11:14.621331036Z"
+    created: "2026-06-26T16:31:42.104900382Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -7354,7 +7399,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.244
-    created: "2026-06-26T16:11:14.6067384Z"
+    created: "2026-06-26T16:31:42.09062871Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -7408,7 +7453,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.243
-    created: "2026-06-26T16:11:14.590690551Z"
+    created: "2026-06-26T16:31:42.07478572Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -7462,7 +7507,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.242
-    created: "2026-06-26T16:11:14.572051278Z"
+    created: "2026-06-26T16:31:42.057678513Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -7516,7 +7561,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.241
-    created: "2026-06-26T16:11:14.557011339Z"
+    created: "2026-06-26T16:31:42.04249853Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -7570,7 +7615,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.240
-    created: "2026-06-26T16:11:14.542466604Z"
+    created: "2026-06-26T16:31:42.026029532Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -7624,7 +7669,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.239
-    created: "2026-06-26T16:11:14.528613775Z"
+    created: "2026-06-26T16:31:42.010604246Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -7678,7 +7723,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.238
-    created: "2026-06-26T16:11:14.513284633Z"
+    created: "2026-06-26T16:31:41.99516806Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -7732,7 +7777,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.237
-    created: "2026-06-26T16:11:14.496705979Z"
+    created: "2026-06-26T16:31:41.978202956Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -7786,7 +7831,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.236
-    created: "2026-06-26T16:11:14.482208544Z"
+    created: "2026-06-26T16:31:41.962425865Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -7840,7 +7885,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.235
-    created: "2026-06-26T16:11:14.466060094Z"
+    created: "2026-06-26T16:31:41.945831666Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -7894,7 +7939,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.234
-    created: "2026-06-26T16:11:14.449983345Z"
+    created: "2026-06-26T16:31:41.931601694Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -7948,7 +7993,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.232
-    created: "2026-06-26T16:11:14.435179907Z"
+    created: "2026-06-26T16:31:41.915599901Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -8002,7 +8047,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.231
-    created: "2026-06-26T16:11:14.420952975Z"
+    created: "2026-06-26T16:31:41.891907716Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -8056,7 +8101,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.230
-    created: "2026-06-26T16:11:14.40638144Z"
+    created: "2026-06-26T16:31:41.868513334Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -8110,7 +8155,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.229
-    created: "2026-06-26T16:11:14.388603275Z"
+    created: "2026-06-26T16:31:41.851813433Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -8164,7 +8209,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.228
-    created: "2026-06-26T16:11:14.374251941Z"
+    created: "2026-06-26T16:31:41.834948129Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -8218,7 +8263,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.227
-    created: "2026-06-26T16:11:14.359585205Z"
+    created: "2026-06-26T16:31:41.82091796Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -8272,7 +8317,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.225
-    created: "2026-06-26T16:11:14.345533175Z"
+    created: "2026-06-26T16:31:41.803970056Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -8326,7 +8371,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.223
-    created: "2026-06-26T16:11:14.330304433Z"
+    created: "2026-06-26T16:31:41.789463581Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -8380,7 +8425,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.221
-    created: "2026-06-26T16:11:14.313223875Z"
+    created: "2026-06-26T16:31:41.77525431Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -8434,7 +8479,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.220
-    created: "2026-06-26T16:11:14.297883632Z"
+    created: "2026-06-26T16:31:41.761536945Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -8488,7 +8533,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.219
-    created: "2026-06-26T16:11:14.283933103Z"
+    created: "2026-06-26T16:31:41.746825867Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -8542,7 +8587,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.218
-    created: "2026-06-26T16:11:14.269199666Z"
+    created: "2026-06-26T16:31:41.732060689Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -8596,7 +8641,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.217
-    created: "2026-06-26T16:11:14.253618621Z"
+    created: "2026-06-26T16:31:41.713404465Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -8650,7 +8695,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.216
-    created: "2026-06-26T16:11:14.239600591Z"
+    created: "2026-06-26T16:31:41.696468061Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -8704,7 +8749,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.215
-    created: "2026-06-26T16:11:14.223795344Z"
+    created: "2026-06-26T16:31:41.680286666Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -8758,7 +8803,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.214
-    created: "2026-06-26T16:11:14.208706804Z"
+    created: "2026-06-26T16:31:41.66569989Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -8812,7 +8857,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.213
-    created: "2026-06-26T16:11:14.193269161Z"
+    created: "2026-06-26T16:31:41.648730785Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -8866,7 +8911,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.212
-    created: "2026-06-26T16:11:14.176256903Z"
+    created: "2026-06-26T16:31:41.631387276Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -8920,7 +8965,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.210
-    created: "2026-06-26T16:11:14.162501675Z"
+    created: "2026-06-26T16:31:41.616894802Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -8974,7 +9019,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.209
-    created: "2026-06-26T16:11:14.148641446Z"
+    created: "2026-06-26T16:31:41.601257713Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -9028,7 +9073,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.208
-    created: "2026-06-26T16:11:14.133011501Z"
+    created: "2026-06-26T16:31:41.587554048Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -9082,7 +9127,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.207
-    created: "2026-06-26T16:11:14.11997998Z"
+    created: "2026-06-26T16:31:41.574353389Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -9136,7 +9181,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.206
-    created: "2026-06-26T16:11:14.105702748Z"
+    created: "2026-06-26T16:31:41.561219731Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -9190,7 +9235,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.205
-    created: "2026-06-26T16:11:14.091702518Z"
+    created: "2026-06-26T16:31:41.538518057Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -9244,7 +9289,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.204
-    created: "2026-06-26T16:11:14.076728979Z"
+    created: "2026-06-26T16:31:41.524872893Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -9298,7 +9343,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.203
-    created: "2026-06-26T16:11:14.060792231Z"
+    created: "2026-06-26T16:31:41.510876324Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -9352,7 +9397,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.202
-    created: "2026-06-26T16:11:14.0467609Z"
+    created: "2026-06-26T16:31:41.497007157Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -9406,7 +9451,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.201
-    created: "2026-06-26T16:11:14.032522068Z"
+    created: "2026-06-26T16:31:41.479261543Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -9460,7 +9505,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.200
-    created: "2026-06-26T16:11:14.016777022Z"
+    created: "2026-06-26T16:31:41.466018283Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -9514,7 +9559,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.199
-    created: "2026-06-26T16:11:14.003472998Z"
+    created: "2026-06-26T16:31:41.45244742Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -9568,7 +9613,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.198
-    created: "2026-06-26T16:11:13.990154875Z"
+    created: "2026-06-26T16:31:41.438961057Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -9622,7 +9667,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.197
-    created: "2026-06-26T16:11:13.976975152Z"
+    created: "2026-06-26T16:31:41.425387594Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -9676,7 +9721,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.195
-    created: "2026-06-26T16:11:13.963417826Z"
+    created: "2026-06-26T16:31:41.411367225Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -9730,7 +9775,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.194
-    created: "2026-06-26T16:11:13.9497721Z"
+    created: "2026-06-26T16:31:41.397114553Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -9784,7 +9829,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.193
-    created: "2026-06-26T16:11:13.936536477Z"
+    created: "2026-06-26T16:31:41.383522889Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -9838,7 +9883,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.192
-    created: "2026-06-26T16:11:13.923320354Z"
+    created: "2026-06-26T16:31:41.367070791Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -9892,7 +9937,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.191
-    created: "2026-06-26T16:11:13.909741228Z"
+    created: "2026-06-26T16:31:41.353394226Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -9946,7 +9991,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.190
-    created: "2026-06-26T16:11:13.896800608Z"
+    created: "2026-06-26T16:31:41.340507571Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -10000,7 +10045,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.189
-    created: "2026-06-26T16:11:13.883760387Z"
+    created: "2026-06-26T16:31:41.325059485Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -10054,7 +10099,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.188
-    created: "2026-06-26T16:11:13.869953259Z"
+    created: "2026-06-26T16:31:41.3097033Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -10108,7 +10153,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.187
-    created: "2026-06-26T16:11:13.856750036Z"
+    created: "2026-06-26T16:31:41.298234562Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -10162,7 +10207,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.186
-    created: "2026-06-26T16:11:13.843743915Z"
+    created: "2026-06-26T16:31:41.283939289Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -10216,7 +10261,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.185
-    created: "2026-06-26T16:11:13.830179689Z"
+    created: "2026-06-26T16:31:41.268128999Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -10270,7 +10315,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.184
-    created: "2026-06-26T16:11:13.816450762Z"
+    created: "2026-06-26T16:31:41.250269384Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -10324,7 +10369,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.183
-    created: "2026-06-26T16:11:13.799262502Z"
+    created: "2026-06-26T16:31:41.237088025Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -10378,7 +10423,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.182
-    created: "2026-06-26T16:11:13.783330454Z"
+    created: "2026-06-26T16:31:41.224033867Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -10432,7 +10477,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.181
-    created: "2026-06-26T16:11:13.768657418Z"
+    created: "2026-06-26T16:31:41.211058511Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -10486,7 +10531,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.180
-    created: "2026-06-26T16:11:13.752813571Z"
+    created: "2026-06-26T16:31:41.197906152Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -10540,7 +10585,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.179
-    created: "2026-06-26T16:11:13.740142453Z"
+    created: "2026-06-26T16:31:41.18438279Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -10594,7 +10639,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.178
-    created: "2026-06-26T16:11:13.725916321Z"
+    created: "2026-06-26T16:31:41.1686759Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -10648,7 +10693,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.177
-    created: "2026-06-26T16:11:13.710189975Z"
+    created: "2026-06-26T16:31:41.156580854Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -10702,7 +10747,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.176
-    created: "2026-06-26T16:11:13.697026353Z"
+    created: "2026-06-26T16:31:41.141562074Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -10756,7 +10801,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.175
-    created: "2026-06-26T16:11:13.681853512Z"
+    created: "2026-06-26T16:31:41.126906997Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -10810,7 +10855,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.174
-    created: "2026-06-26T16:11:13.66766458Z"
+    created: "2026-06-26T16:31:41.11472555Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -10864,7 +10909,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.173
-    created: "2026-06-26T16:11:13.653417448Z"
+    created: "2026-06-26T16:31:41.100431278Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -10918,7 +10963,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.172
-    created: "2026-06-26T16:11:13.639783321Z"
+    created: "2026-06-26T16:31:41.086284607Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -10972,7 +11017,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.171
-    created: "2026-06-26T16:11:13.626197695Z"
+    created: "2026-06-26T16:31:41.073176649Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -11026,7 +11071,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.170
-    created: "2026-06-26T16:11:13.613101373Z"
+    created: "2026-06-26T16:31:41.059035479Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -11080,7 +11125,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.169
-    created: "2026-06-26T16:11:13.596900623Z"
+    created: "2026-06-26T16:31:41.044688106Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -11134,7 +11179,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.168
-    created: "2026-06-26T16:11:13.580350469Z"
+    created: "2026-06-26T16:31:41.030529235Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -11188,7 +11233,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.167
-    created: "2026-06-26T16:11:13.566689242Z"
+    created: "2026-06-26T16:31:41.016521167Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -11242,7 +11287,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.166
-    created: "2026-06-26T16:11:13.552520111Z"
+    created: "2026-06-26T16:31:40.999747165Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -11296,7 +11341,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.165
-    created: "2026-06-26T16:11:13.539093386Z"
+    created: "2026-06-26T16:31:40.984525981Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -11350,7 +11395,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.164
-    created: "2026-06-26T16:11:13.524660952Z"
+    created: "2026-06-26T16:31:40.970155708Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -11404,7 +11449,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.163
-    created: "2026-06-26T16:11:13.509883115Z"
+    created: "2026-06-26T16:31:40.952853299Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -11458,7 +11503,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.162
-    created: "2026-06-26T16:11:13.49640609Z"
+    created: "2026-06-26T16:31:40.938038121Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -11512,7 +11557,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.161
-    created: "2026-06-26T16:11:13.482339959Z"
+    created: "2026-06-26T16:31:40.92134772Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -11566,7 +11611,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.160
-    created: "2026-06-26T16:11:13.467268819Z"
+    created: "2026-06-26T16:31:40.908297663Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -11620,7 +11665,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.159
-    created: "2026-06-26T16:11:13.452396181Z"
+    created: "2026-06-26T16:31:40.895186105Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -11674,7 +11719,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.158
-    created: "2026-06-26T16:11:13.438896256Z"
+    created: "2026-06-26T16:31:40.879152611Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -11728,7 +11773,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.157
-    created: "2026-06-26T16:11:13.425763834Z"
+    created: "2026-06-26T16:31:40.864989941Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -11782,7 +11827,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.156
-    created: "2026-06-26T16:11:13.412653212Z"
+    created: "2026-06-26T16:31:40.850199662Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -11836,7 +11881,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.155
-    created: "2026-06-26T16:11:13.399795493Z"
+    created: "2026-06-26T16:31:40.836469397Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -11890,7 +11935,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.154
-    created: "2026-06-26T16:11:13.384885354Z"
+    created: "2026-06-26T16:31:40.821717619Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -11944,7 +11989,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.153
-    created: "2026-06-26T16:11:13.373173245Z"
+    created: "2026-06-26T16:31:40.804864816Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -11998,7 +12043,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.152
-    created: "2026-06-26T16:11:13.35855041Z"
+    created: "2026-06-26T16:31:40.792440966Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -12052,7 +12097,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.151
-    created: "2026-06-26T16:11:13.344881583Z"
+    created: "2026-06-26T16:31:40.77943761Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -12106,7 +12151,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.150
-    created: "2026-06-26T16:11:13.33057055Z"
+    created: "2026-06-26T16:31:40.766038648Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -12160,7 +12205,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.149
-    created: "2026-06-26T16:11:13.316750821Z"
+    created: "2026-06-26T16:31:40.749309747Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -12214,7 +12259,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.148
-    created: "2026-06-26T16:11:13.303267896Z"
+    created: "2026-06-26T16:31:40.728195992Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -12268,7 +12313,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.147
-    created: "2026-06-26T16:11:13.28963397Z"
+    created: "2026-06-26T16:31:40.715657441Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -12322,7 +12367,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.146
-    created: "2026-06-26T16:11:13.27678175Z"
+    created: "2026-06-26T16:31:40.701384769Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -12376,7 +12421,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.145
-    created: "2026-06-26T16:11:13.263935031Z"
+    created: "2026-06-26T16:31:40.687399701Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -12430,7 +12475,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.144
-    created: "2026-06-26T16:11:13.247762981Z"
+    created: "2026-06-26T16:31:40.674389544Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -12484,7 +12529,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.143
-    created: "2026-06-26T16:11:13.232696241Z"
+    created: "2026-06-26T16:31:40.660445676Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -12538,7 +12583,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.142
-    created: "2026-06-26T16:11:13.219438818Z"
+    created: "2026-06-26T16:31:40.647048414Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -12592,7 +12637,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.141
-    created: "2026-06-26T16:11:13.206467197Z"
+    created: "2026-06-26T16:31:40.633886956Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -12646,7 +12691,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.140
-    created: "2026-06-26T16:11:13.19273927Z"
+    created: "2026-06-26T16:31:40.621024501Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -12700,7 +12745,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.139
-    created: "2026-06-26T16:11:13.178950642Z"
+    created: "2026-06-26T16:31:40.608454349Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -12754,7 +12799,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.138
-    created: "2026-06-26T16:11:13.164910111Z"
+    created: "2026-06-26T16:31:40.594713084Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -12808,7 +12853,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.137
-    created: "2026-06-26T16:11:13.149934672Z"
+    created: "2026-06-26T16:31:40.581886029Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -12862,7 +12907,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.136
-    created: "2026-06-26T16:11:13.134292527Z"
+    created: "2026-06-26T16:31:40.568284465Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -12916,7 +12961,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.135
-    created: "2026-06-26T16:11:13.120710201Z"
+    created: "2026-06-26T16:31:40.555839315Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -12970,7 +13015,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.134
-    created: "2026-06-26T16:11:13.106917573Z"
+    created: "2026-06-26T16:31:40.542902159Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -13024,7 +13069,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.133
-    created: "2026-06-26T16:11:13.093552349Z"
+    created: "2026-06-26T16:31:40.528580587Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -13078,7 +13123,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.132
-    created: "2026-06-26T16:11:13.079840821Z"
+    created: "2026-06-26T16:31:40.515477029Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -13132,7 +13177,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.131
-    created: "2026-06-26T16:11:13.058078319Z"
+    created: "2026-06-26T16:31:40.500325346Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -13186,7 +13231,7 @@ entries:
           url: https://github.com/novelcore/kubecore-operator/releases
     apiVersion: v2
     appVersion: 0.1.130
-    created: "2026-06-26T16:11:13.042540475Z"
+    created: "2026-06-26T16:31:40.484531356Z"
     dependencies:
     - condition: crossplane.enabled
       name: crossplane
@@ -13226,7 +13271,7 @@ entries:
   milvus-operator:
   - apiVersion: v2
     appVersion: 1.2.5
-    created: "2026-06-26T16:11:15.283742587Z"
+    created: "2026-06-26T16:31:42.760368281Z"
     dependencies:
     - condition: cert-manager.enabled
       name: cert-manager
@@ -13235,7 +13280,7 @@ entries:
       - cert-manager
       version: 1.5.3
     description: A Helm chart for deploying Milvus Operator
-    digest: a6ba4ab74cfa2d369d413f533011fad463582975ec0ab0847e5580187501ffa4
+    digest: 339f02ebd1ebc1261f500b6ae931f0fa91b6388852a7c067a59f6c8c833e50c3
     home: https://github.com/zilliztech/milvus-operator
     kubeVersion: '>= 1.16.0-0'
     maintainers:
@@ -13263,7 +13308,7 @@ entries:
       tanzuCategory: service
     apiVersion: v2
     appVersion: 7.0.1
-    created: "2026-06-26T16:11:15.287486522Z"
+    created: "2026-06-26T16:31:42.764287328Z"
     dependencies:
     - name: common
       repository: oci://registry-1.docker.io/bitnamicharts
@@ -13345,7 +13390,7 @@ entries:
         url: https://keybase.io/communitycharts/pgp_keys.asc
     apiVersion: v2
     appVersion: 3.1.0
-    created: "2026-06-26T16:11:15.310075132Z"
+    created: "2026-06-26T16:31:42.788593821Z"
     dependencies:
     - condition: postgresql.enabled
       name: postgresql
@@ -13388,9 +13433,9 @@ entries:
   pg-operator:
   - apiVersion: v2
     appVersion: 2.6.0
-    created: "2026-06-26T16:11:15.320932132Z"
+    created: "2026-06-26T16:31:42.799442252Z"
     description: A Helm chart to deploy the Percona Operator for PostgreSQL
-    digest: 87a57208971da00312ffef3bd141eebd630c47a3e462dfdb058ee96729e45aed
+    digest: a1a7c17542462c7a659b50138345309b7935bdefd6863e57e7f9905c4fac51dc
     home: https://docs.percona.com/percona-operator-for-postgresql/2.0/
     keywords:
     - PostgreSQL
@@ -13419,9 +13464,9 @@ entries:
           url: https://github.com/prometheus-community/helm-charts
     apiVersion: v2
     appVersion: 1.9.1
-    created: "2026-06-26T16:11:15.322171944Z"
+    created: "2026-06-26T16:31:42.801538477Z"
     description: A Helm chart for prometheus node-exporter
-    digest: 6b35c72cd253e2b632a9c62ff7580b1575a87b68727a61d78a07db010af987c7
+    digest: 6493caeb1becf6295ec9b511805a26df5163c921173a9b94f4efa49de0be345d
     home: https://github.com/prometheus/node_exporter/
     keywords:
     - node-exporter
@@ -13447,9 +13492,9 @@ entries:
   strimzi-kafka-operator:
   - apiVersion: v2
     appVersion: 0.46.0
-    created: "2026-06-26T16:11:15.328684404Z"
+    created: "2026-06-26T16:31:42.807367648Z"
     description: 'Strimzi: Apache Kafka running on Kubernetes'
-    digest: 1ca0a7e8353997f98ca07a5c967674281f7cb7a45ac8e65a2032169948066fc2
+    digest: 783684ecec501e968be14a93549afe04c15e3478b7bf2e9b4e54eda1aeb2a236
     home: https://strimzi.io/
     icon: https://raw.githubusercontent.com/strimzi/strimzi-kafka-operator/main/documentation/logo/strimzi_logo.png
     keywords:
@@ -13479,14 +13524,14 @@ entries:
   teleport-cluster:
   - apiVersion: v2
     appVersion: 17.5.2
-    created: "2026-06-26T16:11:15.33358195Z"
+    created: "2026-06-26T16:31:42.812153805Z"
     dependencies:
     - alias: operator
       name: teleport-operator
       repository: ""
       version: 17.5.2
     description: Teleport is an access platform for your infrastructure
-    digest: c5bf14f9de53037559938b2fdc8f838c83d5f13e10f6bc05ebd238374e16fa00
+    digest: 76fd3354c3b6ddf469eb30c86c5bf2a7b30993031d147414815c35ca08c655a1
     icon: https://goteleport.com/static/teleport-symbol-bimi.svg
     keywords:
     - Teleport
@@ -13497,10 +13542,10 @@ entries:
   teleport-kube-agent:
   - apiVersion: v2
     appVersion: 17.5.2
-    created: "2026-06-26T16:11:15.335951472Z"
+    created: "2026-06-26T16:31:42.816503958Z"
     description: Teleport provides a secure SSH, Kubernetes, database and application
       remote access solution that doesn't get in the way.
-    digest: 99a3753aa901db1ae04471464fdecffeaf2b61a031600029a32a030b8c73680d
+    digest: 4dc1272a9b81d20e890af47f90baf23045f5297eec0085526eb091bb7175d7c4
     icon: https://goteleport.com/static/teleport-symbol-bimi.svg
     keywords:
     - Teleport
@@ -13518,9 +13563,9 @@ entries:
         corresponding versions\"\n- \"chore(ci): :bug: should fail on test error\"\n"
     apiVersion: v2
     appVersion: v3.3.5
-    created: "2026-06-26T16:11:15.346773872Z"
+    created: "2026-06-26T16:31:42.825622768Z"
     description: A Traefik based Kubernetes ingress controller
-    digest: 1f6a62c745ecd005d4c66614c0a16c1000f04beea1aa314a82a4473abbdd3029
+    digest: 252cb6c0fc1168dc037dbde6cc3ab9748fdb58ce292b1818125bb6e937d5b770
     home: https://traefik.io/
     icon: https://raw.githubusercontent.com/traefik/traefik/v2.3/docs/content/assets/img/traefik.logo.png
     keywords:
@@ -13561,14 +13606,14 @@ entries:
           url: https://docs.victoriametrics.com/changelog
     apiVersion: v2
     appVersion: v1.115.0
-    created: "2026-06-26T16:11:15.349091794Z"
+    created: "2026-06-26T16:31:42.829004708Z"
     dependencies:
     - name: victoria-metrics-common
       repository: https://victoriametrics.github.io/helm-charts
       version: 0.0.*
     description: Victoria Metrics Agent - collects metrics from various sources and
       stores them to VictoriaMetrics
-    digest: 4f0f3dee6ada2bd44d2afcad2e095ebaa730ddd51146a45c3400c63040b382a7
+    digest: 3bf617a35ff640ce86496aec0ba7ed25bd7018a821461eb2de149f72b14bb61f
     home: https://github.com/VictoriaMetrics/helm-charts
     icon: https://avatars.githubusercontent.com/u/43720803?s=200&v=4
     keywords:
@@ -13607,14 +13652,14 @@ entries:
           url: https://docs.victoriametrics.com/changelog
     apiVersion: v2
     appVersion: v1.115.0
-    created: "2026-06-26T16:11:15.352531326Z"
+    created: "2026-06-26T16:31:42.834347773Z"
     dependencies:
     - name: victoria-metrics-common
       repository: https://victoriametrics.github.io/helm-charts
       version: 0.0.*
     description: Victoria Metrics Cluster version - high-performance, cost-effective
       and scalable TSDB, long-term remote storage for Prometheus
-    digest: 54f954c29387ca70b5156aae63c220c8733add07e7e27a8d0732631cc39044df
+    digest: 7c44d203eca6988edbb6132a84b720911ec1bd958962391f2eb7d5e0c49d1cbd
     home: https://github.com/VictoriaMetrics/helm-charts
     icon: https://avatars.githubusercontent.com/u/43720803?s=200&v=4
     keywords:
@@ -13638,4 +13683,4 @@ entries:
     urls:
     - https://novelcore.github.io/charts/victoria-metrics-cluster-0.20.1.tgz
     version: 0.20.1
-generated: "2026-06-26T16:11:12.842291516Z"
+generated: "2026-06-26T16:31:40.280844401Z"
