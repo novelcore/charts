@@ -603,6 +603,14 @@ spec:
         OB = chr(123) + chr(123)
         CB = chr(125) + chr(125)
 
+        def _to_expr_map(d):
+            # Render a Python dict as an Argo expression (OB=...CB) map literal:
+            #   {'a':'1','b':'0'}  (single-quoted keys + string values).
+            # Used to bake a className->value lookup the step resolves at
+            # submit time by indexing with the chosen `<step>-class` param.
+            inner = ','.join("'%s':'%s'" % (k, v) for k, v in sorted(d.items()))
+            return '{' + inner + '}'
+
         kubeline_path = os.environ['KUBELINE_PATH']
         context_path = os.environ['CONTEXT_PATH']
         wft_out = os.environ['WFT_OUT']
@@ -629,8 +637,41 @@ spec:
         lakefs = ctx.get('lakefs', {})
         mlflow = ctx.get('mlflow', {})
         compute = ctx.get('computeClasses', {})
-        cpu_cls = compute.get('cpu', {})
-        gpu_cls = compute.get('gpu', {})
+        # Single source of truth: the FULL KubePool MLComputeClass catalog,
+        # re-derived from the live pool every operator reconcile (drift-aware).
+        # Each entry: {name, tier, machineType, maxNodeCount, diskSizeGb,
+        # description, guestAccelerator?{type,count}}. The KubeApp no longer
+        # selects classes — the submitter picks ONE class PER STEP from this
+        # catalog at run time, and the chosen class's tier decides cpu-vs-gpu.
+        catalog = compute.get('catalog', [])
+        cpu_classes = [c for c in catalog if c.get('tier') == 'cpu']
+        gpu_classes = [c for c in catalog if c.get('tier') == 'gpu']
+        catalog_names = [c.get('name') for c in catalog if c.get('name')]
+
+        def _class_label(c):
+            # Human limits shown in the Argo UI dropdown option + tooltip.
+            bits = [c.get('machineType', '')]
+            ga = c.get('guestAccelerator')
+            if ga:
+                bits.append(f"{ga.get('count', 1)}x{ga.get('type', 'gpu')}")
+            disk = c.get('diskSizeGb')
+            if disk:
+                bits.append(f"{disk}G disk")
+            detail = ' · '.join([b for b in bits if b])
+            return f"{c.get('name')} ({detail})" if detail else c.get('name')
+
+        # className -> tier and className -> gpu count, baked for the per-step
+        # expression-tag lookups (live-validated: Argo resolves a map literal
+        # indexed by a workflow parameter). gpu count is '0' for cpu classes so
+        # a cpu pick requests no accelerator.
+        tier_map = {c['name']: c.get('tier', 'cpu') for c in catalog if c.get('name')}
+        gpu_count_map = {
+            c['name']: str((c.get('guestAccelerator') or {}).get('count', 1) if c.get('tier') == 'gpu' else 0)
+            for c in catalog if c.get('name')
+        }
+        # Description table for the per-step param tooltip (all classes, limits).
+        class_desc_table = ' | '.join(_class_label(c) for c in catalog)
+
         hpc = ctx.get('hpc', {})
         checkpoints = ctx.get('checkpoints', {})
         sa = ctx.get('serviceAccountName', 'argo-workflow')
@@ -642,10 +683,25 @@ spec:
         for p in pipeline_params:
             args_params.append({'name': p['name'], 'value': p.get('default', ''), 'description': p.get('description', '')})
 
-        cpu_class_name = cpu_cls.get('name', f"{pipeline_name}-cpu")
-        gpu_class_name = gpu_cls.get('name', f"{pipeline_name}-gpu")
-        args_params.append({'name': 'cpu-class', 'value': cpu_class_name, 'description': cpu_cls.get('description', 'CPU compute class selector')})
-        args_params.append({'name': 'gpu-class', 'value': gpu_class_name, 'description': gpu_cls.get('description', 'GPU compute class selector')})
+        # One `<step>-class` enum dropdown per step. Options = the WHOLE catalog
+        # (cpu + gpu mixed); picking the class IS picking the tier. Default = the
+        # first class matching the step's declared `compute:` intent in
+        # kubeline.yaml (so an un-touched submit still does the right thing), else
+        # the first catalog class. Only emitted when the pool declares a catalog.
+        step_class_param = {}  # step name -> the param name `<step>-class`
+        if catalog_names:
+            for step in steps:
+                want_gpu = step.get('compute', 'cpu') == 'gpu'
+                pref = gpu_classes if (want_gpu and gpu_classes) else cpu_classes
+                default_cls = (pref[0]['name'] if pref else catalog_names[0])
+                pname = f"{step['name']}-class"
+                step_class_param[step['name']] = pname
+                args_params.append({
+                    'name': pname,
+                    'value': default_cls,
+                    'enum': catalog_names,
+                    'description': f"Compute class for the {step['name']} step. {class_desc_table}",
+                })
 
         for step in steps:
             args_params.append({
@@ -673,13 +729,9 @@ spec:
             {'name': 'lakefs-repo', 'value': lakefs.get('repository', app_name)},
             {'name': 'lakefs-branch', 'value': branch},
         ]
-        args_params += [
-            {'name': 'cpu-step-cpu-limit', 'value': '2'},
-            {'name': 'cpu-step-mem-limit', 'value': '4Gi'},
-            {'name': 'gpu-step-cpu-limit', 'value': '4'},
-            {'name': 'gpu-step-mem-limit', 'value': '28Gi'},
-            {'name': 'gpu-step-gpu-limit', 'value': '1'},
-        ]
+        # (Removed cpu-step-*/gpu-step-* raw limit params: cpu/mem/gpu-count are
+        # now DERIVED from the per-step `<step>-class` pick — the class's
+        # machineType fixes cpu/mem and its guestAccelerator fixes the gpu count.)
 
         templates = []
         dag_tasks = []
@@ -695,36 +747,69 @@ spec:
 
         for step in steps:
             compute_type = step.get('compute', 'cpu')
-            is_gpu = compute_type == 'gpu'
-            class_param = 'gpu-class' if is_gpu else 'cpu-class'
-            tol_key = gpu_cls.get('tolerationKey', 'nvidia.com/gpu') if is_gpu else cpu_cls.get('tolerationKey', 'platform.kubecore.io/burst')
-            tol_val = gpu_cls.get('tolerationValue', '') if is_gpu else cpu_cls.get('tolerationValue', 'true')
-            tol = {'key': tol_key, 'operator': 'Exists' if not tol_val else 'Equal', 'effect': 'NoSchedule'}
-            if tol_val:
-                tol['value'] = tol_val
-            step_tolerations = [tol]
-            if is_gpu:
-                # GKE auto-taints accelerator nodes with nvidia.com/gpu; without
-                # this toleration a gpu-tier step Pends forever on its own pool.
-                step_tolerations.append({'key': 'nvidia.com/gpu', 'operator': 'Exists', 'effect': 'NoSchedule'})
+            # The step's tier is now decided AT SUBMIT TIME by the class the user
+            # picks in `<step>-class`, not baked here. When the pool declares a
+            # catalog we drive everything off that single param; without a catalog
+            # we keep the legacy static behaviour (kubeline `compute:` intent).
+            has_catalog = bool(catalog_names)
+            cls_param = step_class_param.get(step['name'])  # `<step>-class`
+            legacy_gpu = compute_type == 'gpu'
 
-            if step.get('resources'):
-                res = step['resources']
-                requests = res.get('requests', {})
-                limits = res.get('limits', {})
-                if is_gpu:
-                    # MERGE the device into user overrides — gpu tier must always
-                    # request the accelerator; a kubeline resources override is
-                    # for sizing, not for silently dropping the GPU (live render
-                    # had cpu/mem/ephemeral only -> CPU-bound 'GPU' training).
-                    requests.setdefault('nvidia.com/gpu', '1')
-                    limits.setdefault('nvidia.com/gpu', '1')
-            elif is_gpu:
-                requests = {'cpu': '1', 'memory': '10Gi', 'ephemeral-storage': '10Gi', 'nvidia.com/gpu': '1'}
-                limits = {'cpu': '4', 'memory': '28Gi', 'ephemeral-storage': '30Gi', 'nvidia.com/gpu': '1'}
+            if has_catalog and cls_param:
+                # nodeSelector = the picked class name (== nodegroup-type label).
+                node_selector_val = OB + 'workflow.parameters.' + cls_param + CB
+                # gpu count derived from the picked class via a baked map
+                # (live-validated Argo expression indexing). '0' for cpu classes.
+                # OB/CB emit the Argo brace pair; the leading '=' makes it an
+                # expression tag the controller evaluates at submit time.
+                gpu_count_expr = (OB + '=(' + _to_expr_map(gpu_count_map) +
+                                  "[workflow.parameters['" + cls_param + "']])" + CB)
+                tier_label_expr = (OB + '=(' + _to_expr_map(tier_map) +
+                                   "[workflow.parameters['" + cls_param + "']])" + CB)
+                # GPU toleration is ALWAYS present: a toleration with no matching
+                # taint is a harmless no-op on cpu nodes, so the same template
+                # schedules on either tier without a render-time tier decision.
+                step_tolerations = [
+                    {'key': 'platform.kubecore.io/ml-workload', 'operator': 'Exists', 'effect': 'NoSchedule'},
+                    {'key': 'nvidia.com/gpu', 'operator': 'Exists', 'effect': 'NoSchedule'},
+                ]
+                # cpu/mem are the pod's REQUESTS within the chosen node (the class
+                # machineType fixes node capacity); the accelerator count is the
+                # class-derived expression. kubeline `resources:` still overrides
+                # cpu/mem sizing if set.
+                if step.get('resources'):
+                    res = step['resources']
+                    requests = res.get('requests', {})
+                    limits = res.get('limits', {})
+                else:
+                    requests = {'cpu': '1', 'memory': '4Gi', 'ephemeral-storage': '8Gi'}
+                    limits = {'cpu': '4', 'memory': '28Gi', 'ephemeral-storage': '30Gi'}
+                requests['nvidia.com/gpu'] = gpu_count_expr
+                limits['nvidia.com/gpu'] = gpu_count_expr
+                class_label_value = node_selector_val
+                compute_type_label = tier_label_expr
             else:
-                requests = {'cpu': '1', 'memory': '2Gi', 'ephemeral-storage': '1Gi'}
-                limits = {'cpu': '2', 'memory': '4Gi', 'ephemeral-storage': '4Gi'}
+                # ── legacy (no pool catalog): static tier from kubeline ──
+                is_gpu = legacy_gpu
+                node_selector_val = cls_param_legacy = OB + 'workflow.parameters.' + ('gpu-class' if is_gpu else 'cpu-class') + CB
+                step_tolerations = [{'key': 'platform.kubecore.io/ml-workload', 'operator': 'Exists', 'effect': 'NoSchedule'}]
+                if is_gpu:
+                    step_tolerations.append({'key': 'nvidia.com/gpu', 'operator': 'Exists', 'effect': 'NoSchedule'})
+                if step.get('resources'):
+                    res = step['resources']
+                    requests = res.get('requests', {})
+                    limits = res.get('limits', {})
+                    if is_gpu:
+                        requests.setdefault('nvidia.com/gpu', '1')
+                        limits.setdefault('nvidia.com/gpu', '1')
+                elif is_gpu:
+                    requests = {'cpu': '1', 'memory': '10Gi', 'ephemeral-storage': '10Gi', 'nvidia.com/gpu': '1'}
+                    limits = {'cpu': '4', 'memory': '28Gi', 'ephemeral-storage': '30Gi', 'nvidia.com/gpu': '1'}
+                else:
+                    requests = {'cpu': '1', 'memory': '2Gi', 'ephemeral-storage': '1Gi'}
+                    limits = {'cpu': '2', 'memory': '4Gi', 'ephemeral-storage': '4Gi'}
+                class_label_value = node_selector_val
+                compute_type_label = compute_type
 
             container = {
                 'image': OB + 'workflow.parameters.image-' + step['name'] + CB,
@@ -791,11 +876,14 @@ spec:
                         'platform.kubecore.io/project': project_name,
                         'platform.kubecore.io/pipeline': pipeline_name,
                         'platform.kubecore.io/step': step['name'],
+                        # compute-type label = the step's declared kubeline intent
+                        # (a static, DNS-safe value). The ACTUAL tier is the picked
+                        # class's tier; compute-class carries the resolved class name.
                         'platform.kubecore.io/compute-type': compute_type,
-                        'platform.kubecore.io/compute-class': OB + 'workflow.parameters.' + class_param + CB,
+                        'platform.kubecore.io/compute-class': class_label_value,
                     }
                 },
-                'nodeSelector': {'platform.kubecore.io/nodegroup-type': OB + 'workflow.parameters.' + class_param + CB},
+                'nodeSelector': {'platform.kubecore.io/nodegroup-type': node_selector_val},
                 'tolerations': step_tolerations,
                 'serviceAccountName': sa,
                 'container': container,
