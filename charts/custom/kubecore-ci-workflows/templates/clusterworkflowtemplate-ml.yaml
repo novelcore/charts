@@ -821,22 +821,18 @@ spec:
                 # this toleration a gpu-tier step Pends forever on its own pool.
                 step_tolerations.append({'key': 'nvidia.com/gpu', 'operator': 'Exists', 'effect': 'NoSchedule'})
 
-            # Requests come from the submit form: {step}-cpu, {step}-mem, and (gpu
-            # variant only) {step}-gpu. limits == requests for cpu/mem so the step
-            # gets a guaranteed QoS slice it can't burst past on a shared node; the
-            # gpu variant additionally requests/limits the accelerator count.
-            cpu_req = OB + f"workflow.parameters.{sn}-cpu" + CB
-            mem_req = OB + f"workflow.parameters.{sn}-mem" + CB
-            requests = {'cpu': cpu_req, 'memory': mem_req}
-            limits = {'cpu': cpu_req, 'memory': mem_req}
-            if is_gpu:
-                gpu_req = OB + f"workflow.parameters.{sn}-gpu" + CB
-                requests['nvidia.com/gpu'] = gpu_req
-                limits['nvidia.com/gpu'] = gpu_req
+            # container.resources MUST carry CONCRETE quantities — an Argo param
+            # template in a k8s resource field fails quantity validation and breaks
+            # the Argo API ListWorkflowTemplates call (the UI then shows NO templates
+            # at all). So the static defaults below (headroom-sized for the class)
+            # are the parsed value; the per-run submit-form override is applied via
+            # podSpecPatch (below), the only Argo mechanism that parameterizes
+            # non-string fields like resources.
+            sized_req, sized_lim = _sized_requests(cls, is_gpu)
 
             container = {
                 'image': OB + 'workflow.parameters.image-' + sn + CB,
-                'resources': {'requests': requests, 'limits': limits},
+                'resources': {'requests': sized_req, 'limits': sized_lim},
             }
             if step.get('command'):
                 container['command'] = step['command']
@@ -911,6 +907,26 @@ spec:
                     {'name': 'mlflow-svc', 'secret': {'secretName': mlflow_svc_secret, 'optional': True}},
                 ],
             }
+
+            # podSpecPatch overrides the main container's resources from the submit-form
+            # params. This is the ONLY Argo-supported way to parameterize resource
+            # quantities — Argo substitutes the param refs THEN strategic-merge-patches
+            # the pod, so the quantities are concrete by the time k8s validates them.
+            # The container is named "main" in the rendered pod. limits == requests for
+            # cpu/mem (guaranteed QoS); the gpu variant also sets nvidia.com/gpu.
+            cpu_p = OB + f"workflow.parameters.{sn}-cpu" + CB
+            mem_p = OB + f"workflow.parameters.{sn}-mem" + CB
+            gpu_line = []
+            if is_gpu:
+                gpu_p = OB + f"workflow.parameters.{sn}-gpu" + CB
+                gpu_line = [f"      nvidia.com/gpu: \"{gpu_p}\""]
+            patch_lines = (
+                ["containers:", "- name: main", "  resources:", "    requests:",
+                 f"      cpu: \"{cpu_p}\"", f"      memory: \"{mem_p}\""] + gpu_line +
+                ["    limits:",
+                 f"      cpu: \"{cpu_p}\"", f"      memory: \"{mem_p}\""] + gpu_line
+            )
+            tmpl['podSpecPatch'] = "\n".join(patch_lines) + "\n"
 
             inp = step.get('inputs', {}).get('parameters', []) if step.get('inputs') else []
             if inp:
