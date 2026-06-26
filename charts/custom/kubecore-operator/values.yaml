@@ -233,6 +233,19 @@ tokenBroker:
     # pod selector can be narrowed here once sub-provider labels are confirmed stable.
     crossplanePodSelector: {}
 
+    # Onboarding dashboard namespace allowed to call POST /federation/verify/{org}.
+    # Set to `null` to disable the dashboard ingress rule. Note: overriding with
+    # `{}` in a values file does NOT disable it — Helm deep-merges the empty map
+    # into this default, leaving the selector below intact (set per-environment).
+    dashboardNamespaceSelector:
+      kubernetes.io/metadata.name: kubecore-apps-dev
+    # Narrowest L4: restrict the source to the dashboard-API pod by identity, not
+    # the whole namespace. NetworkPolicy is L3/L4 only — it cannot match the HTTP
+    # path, so this pod can still reach other broker routes (e.g. /token/{org}) on
+    # :8080 at L4; HTTP-path scoping would require a service mesh (deferred).
+    dashboardPodSelector:
+      app: kaos-dashboard-api
+
 # [REGISTRY]: Container registry configuration
 registry:
   # Registry URL (e.g., novelcore.azurecr.io)
