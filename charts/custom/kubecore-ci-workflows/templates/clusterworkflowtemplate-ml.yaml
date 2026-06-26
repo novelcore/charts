@@ -655,29 +655,50 @@ spec:
             'm6i.large': (2, 8),   'm6i.xlarge': (4, 16),  'm6i.2xlarge': (8, 32),
             'g4dn.xlarge': (4, 16), 'g4dn.2xlarge': (8, 32), 'g5.xlarge': (4, 16), 'g5.2xlarge': (8, 32),
         }
-        RESERVE_FRACTION = 0.15            # kube/system reserved + eviction + GPU daemonsets
         ARGO_SIDECAR_CPU_M = 100           # the `wait` sidecar on every workflow pod
-        ARGO_SIDECAR_MEM_MI = 128
+        ARGO_SIDECAR_MEM_GI = 0.2          # wait sidecar + small per-pod overhead
+        SAFETY_MARGIN_GI = 1.0             # headroom below allocatable so the pod always fits
+
+        def _gke_mem_reserved_gib(cap_gib):
+            # GKE's memory eviction-reservation curve (the kube-reserved memory that
+            # makes node ALLOCATABLE < capacity). Requesting capacity*(1-flat%) is
+            # WRONG — a flat 15% under-reserves on small nodes and the pod goes
+            # Unschedulable (n2-standard-4 16Gi → ~12.96Gi allocatable, NOT 13.6).
+            # Curve: 25% of first 4Gi + 20% of next 4Gi + 10% of next 8Gi +
+            # 6% of next 112Gi + 2% beyond, plus 100Mi hard-eviction.
+            r = 0.0
+            tiers = [(4, 0.25), (4, 0.20), (8, 0.10), (112, 0.06)]
+            rem = cap_gib
+            for size, frac in tiers:
+                take = min(rem, size)
+                r += take * frac
+                rem -= take
+                if rem <= 0:
+                    break
+            if rem > 0:
+                r += rem * 0.02
+            return r + 0.1  # +100Mi eviction threshold
 
         def _sized_requests(cls, is_gpu):
-            # Returns (requests, limits) sized to fit the class node with headroom.
+            # Returns (requests, limits) sized to fit UNDER the class node's GKE
+            # allocatable (capacity - GKE-reserved - argo sidecar - safety margin),
+            # so a scale-to-0 nodepool actually schedules the pod (and the autoscaler
+            # provisions a node) instead of "Insufficient memory / didn't match".
             mt = (cls or {}).get('machineType', '')
             cap = MACHINE_CAP.get(mt)
             if not cap:
-                # Unknown machine type: safe small request that fits anything.
-                req_cpu, req_mem = (2, 8) if is_gpu else (1, 4)
-                lim_cpu, lim_mem = (4, 12) if is_gpu else (2, 6)
+                req_cpu, req_mem = (2, 6) if is_gpu else (1, 3)
+                lim_cpu, lim_mem = (4, 10) if is_gpu else (2, 5)
             else:
                 cap_cpu, cap_mem = cap
-                # request = capacity*(1-reserve) - argo sidecar, floored at 1 vCPU / 2Gi.
-                avail_cpu = cap_cpu * (1 - RESERVE_FRACTION) - (ARGO_SIDECAR_CPU_M / 1000.0)
-                avail_mem = cap_mem * (1 - RESERVE_FRACTION) - (ARGO_SIDECAR_MEM_MI / 1024.0)
-                req_cpu = max(1, int(avail_cpu))
-                req_mem = max(2, int(avail_mem))
-                # limit = node allocatable-ish (capacity minus reserve only), so the
-                # step can burst into freed reserve but never above the node.
-                lim_cpu = max(req_cpu, int(cap_cpu * (1 - RESERVE_FRACTION)))
-                lim_mem = max(req_mem, int(cap_mem * (1 - RESERVE_FRACTION)))
+                alloc_mem = cap_mem - _gke_mem_reserved_gib(cap_mem)
+                # CPU: GKE reserves only ~70-90m; leave 0.5 vCPU + the argo sidecar.
+                req_cpu = max(1, int(cap_cpu - 0.5 - ARGO_SIDECAR_CPU_M / 1000.0))
+                req_mem = max(2, int(alloc_mem - ARGO_SIDECAR_MEM_GI - SAFETY_MARGIN_GI))
+                # limit can use the full allocatable (burst into the sidecar/margin),
+                # but never above allocatable or the pod gets OOM-evicted at admission.
+                lim_cpu = max(req_cpu, int(cap_cpu - 0.5))
+                lim_mem = max(req_mem, int(alloc_mem - SAFETY_MARGIN_GI))
             requests = {'cpu': str(req_cpu), 'memory': f'{req_mem}Gi', 'ephemeral-storage': '10Gi' if is_gpu else '2Gi'}
             limits = {'cpu': str(lim_cpu), 'memory': f'{lim_mem}Gi', 'ephemeral-storage': '30Gi' if is_gpu else '4Gi'}
             if is_gpu:
@@ -821,13 +842,12 @@ spec:
                 # this toleration a gpu-tier step Pends forever on its own pool.
                 step_tolerations.append({'key': 'nvidia.com/gpu', 'operator': 'Exists', 'effect': 'NoSchedule'})
 
-            # container.resources MUST carry CONCRETE quantities — an Argo param
-            # template in a k8s resource field fails quantity validation and breaks
-            # the Argo API ListWorkflowTemplates call (the UI then shows NO templates
-            # at all). So the static defaults below (headroom-sized for the class)
-            # are the parsed value; the per-run submit-form override is applied via
-            # podSpecPatch (below), the only Argo mechanism that parameterizes
-            # non-string fields like resources.
+            # container.resources MUST carry CONCRETE quantities — an Argo param template in
+            # a k8s resource field fails quantity validation and breaks the Argo API's
+            # ListWorkflowTemplates (the UI then shows NO templates at all). So the
+            # static defaults below (headroom-sized for the class) are the parsed value;
+            # the per-run submit-form override is applied via podSpecPatch (below), the
+            # only Argo mechanism that parameterizes non-string fields like resources.
             sized_req, sized_lim = _sized_requests(cls, is_gpu)
 
             container = {
