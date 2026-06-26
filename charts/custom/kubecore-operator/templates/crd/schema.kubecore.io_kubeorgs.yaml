@@ -205,14 +205,6 @@ spec:
               gcpConfig:
                 description: GCPConfig contains the GCP configuration for the provider
                 properties:
-                  crossplaneServiceAccount:
-                    description: |-
-                      CrossplaneServiceAccount is the email of the GCP service account used by the
-                      Crossplane GCP provider. Optional: when empty the operator derives
-                      "{orgName}-crossplane@{projectId}.iam.gserviceaccount.com"
-                      (see EffectiveGCPCrossplaneServiceAccount). Set explicitly only to override
-                      the onboarding naming convention.
-                    type: string
                   dns:
                     description: |-
                       DNS holds the DNS ownership declaration for this provider.
@@ -249,12 +241,6 @@ spec:
                       When set, enables WIF-authenticated ESO SecretStore for GCP Secret Manager.
                       Not derivable from ProjectID — find it in GCP Console → Project Info.
                     pattern: ^[0-9]+$
-                    type: string
-                  providerConfig:
-                    description: |-
-                      ProviderConfig is the name of the namespaced gcp.m.upbound.io ProviderConfig
-                      the operator creates and wires into all GCP XRs. Optional: when empty the
-                      operator derives "{orgName}-gcp" (see EffectiveGCPProviderConfig).
                     type: string
                   regions:
                     description: Regions is the list of GCP regions where resources
