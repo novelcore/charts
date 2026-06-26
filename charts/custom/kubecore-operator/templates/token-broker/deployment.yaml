@@ -57,7 +57,8 @@ spec:
                   name: {{ .Values.tokenBroker.impersonationSecretName }}
                   key: appClientSecret
             # BROKER_ACTOR_CLIENT_ID: actor service-user client id.
-            # The actor holds Zitadel IAM_ADMIN_IMPERSONATOR at instance level. Non-secret.
+            # The actor holds Zitadel ORG_END_USER_IMPERSONATOR on the platform org (org-scoped
+            # least-privilege; impersonated *-xcloud subjects are co-located there). Non-secret.
             - name: BROKER_ACTOR_CLIENT_ID
               value: {{ .Values.tokenBroker.actorClientId | quote }}
             # BROKER_ACTOR_CLIENT_SECRET: actor service-user secret. SENSITIVE.

@@ -138,8 +138,9 @@ tokenBroker:
   brokerAppClientId: ""
 
   # actorClientId: actor service-user's client-credentials id in Zitadel.
-  # REQUIRED when enabled=true. The actor must hold the Zitadel IAM_ADMIN_IMPERSONATOR
-  # role at the instance level. Non-secret.
+  # REQUIRED when enabled=true. The actor must hold the Zitadel ORG_END_USER_IMPERSONATOR
+  # role on the platform org (org-scoped least-privilege; the per-org *-xcloud subjects are
+  # co-located in the platform org, so cross-org impersonation is never needed). Non-secret.
   # Created by scripts/setup-zitadel-broker-identity.sh (Phase 1, idempotent).
   actorClientId: ""
 
@@ -256,7 +257,7 @@ compositions:
   # OCI image for the kubecore-compositions Configuration package.
   # CI overwrites this with novelcore.azurecr.io/kubecore/kubecore-compositions:vX.Y.Z
   # at release. Required (must be non-empty) when compositions.enabled=true.
-  package: "novelcore.azurecr.io/kubecore/kubecore-compositions:v0.14.4"
+  package: "novelcore.azurecr.io/kubecore/kubecore-compositions:v0.14.5"
   # pullPolicy controls when Crossplane downloads the package.
   # Options: IfNotPresent (default), Always, Never
   pullPolicy: IfNotPresent
