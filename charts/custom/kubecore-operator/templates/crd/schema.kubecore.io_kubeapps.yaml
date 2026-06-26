@@ -245,42 +245,6 @@ spec:
                             type: string
                         type: object
                     type: object
-                  compute:
-                    description: |-
-                      Compute selects ML compute classes from the parent KubePool's catalog
-                      (KubePool.spec.cloudProvider.{aws,gcp}.cluster.compute.mlClasses[]).
-                      Only meaningful when the KubeApp resolves to the ml-pipeline
-                      KubeAppTemplate. Ignored for non-ML KubeApps.
-                    properties:
-                      cpuClass:
-                        description: |-
-                          CPUClass picks a class with tier=cpu. ALL CPU steps default to this
-                          class. If unset, the operator picks the first cpu-tier class on the
-                          KubePool with a soft warning condition.
-                        maxLength: 40
-                        pattern: ^[a-z][a-z0-9-]*[a-z0-9]$
-                        type: string
-                      gpuClass:
-                        description: |-
-                          GPUClass picks a class with tier=gpu. Required only if
-                          Features.GPUStep.Enabled=true. If GPUStep is enabled and GPUClass
-                          is unset OR points to a non-existent class, the operator emits a
-                          Failed condition listing the available class names.
-                        maxLength: 40
-                        pattern: ^[a-z][a-z0-9-]*[a-z0-9]$
-                        type: string
-                      perStepOverrides:
-                        additionalProperties:
-                          type: string
-                        description: |-
-                          PerStepOverrides lets a KubeApp override the default CPUClass for
-                          a specific WorkflowTemplate step (e.g. dataset-loading: cpu-burst
-                          on a pipeline that needs heavy I/O). Step names must match the
-                          composition's DAG: config-validation | dataset-loading |
-                          model-training | model-registration. Unknown step names are
-                          ignored with a warning condition.
-                        type: object
-                    type: object
                   environmentVariables:
                     additionalProperties:
                       additionalProperties:
