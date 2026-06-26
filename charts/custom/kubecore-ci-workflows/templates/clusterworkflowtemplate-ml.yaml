@@ -506,13 +506,18 @@ spec:
         #   snapshot algorithm; better for disk-bound nodes (kept).
         # --insecure / --skip-tls-verify: Zot serves HTTP in-cluster.
         #
-        # The cache repo is a separate path in Zot
-        # ({org}/{app}/__kaniko-cache__) so it doesn't collide with
-        # actual app image tags. Kaniko keys cache entries by Dockerfile
-        # instruction hash, so two apps that happen to have an identical
-        # RUN pip install torch line do NOT share cache (different repo
-        # paths), which avoids cross-tenant cache poisoning.
-        CACHE_REPO="${REGISTRY}/${IMAGE_REPO}/__kaniko-cache__"
+        # The cache repo is a TOP-LEVEL sibling repo ({app}-buildcache), NOT a
+        # nested path under the app repo. A nested path with the old
+        # ({app}/__kaniko-cache__) name silently failed to persist in Zot —
+        # kaniko logged "Pushing layer ... to cache now" but the layer never
+        # landed (manifest 404, repo absent from the catalog), so every build
+        # came up cold and re-ran the full ~3GB CUDA install. A flat top-level
+        # repo name (no nested path, no leading/trailing __) is accepted by
+        # Zot exactly like the app image repo, so the cache actually persists
+        # and subsequent builds cache-hit the heavy RUN layers. The "-buildcache"
+        # suffix keeps it per-app (no cross-tenant cache poisoning) and clear of
+        # the app image tags.
+        CACHE_REPO="${REGISTRY}/${IMAGE_REPO}-buildcache"
         /kaniko/executor \
           --context="/workspace/repo/${STEP_PATH}" \
           --dockerfile="/workspace/repo/${STEP_PATH}/Dockerfile" \
