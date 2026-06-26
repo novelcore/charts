@@ -208,11 +208,10 @@ spec:
                   crossplaneServiceAccount:
                     description: |-
                       CrossplaneServiceAccount is the email of the GCP service account used by the
-                      Crossplane GCP provider. The XGCPProvider composition grants it
-                      roles/iam.serviceAccountAdmin so it can create ServiceAccountIAMMember resources.
-                      Required for GKE pools (Workload Identity bindings).
-                      Format: "name@project-id.iam.gserviceaccount.com"
-                    minLength: 1
+                      Crossplane GCP provider. Optional: when empty the operator derives
+                      "{orgName}-crossplane@{projectId}.iam.gserviceaccount.com"
+                      (see EffectiveGCPCrossplaneServiceAccount). Set explicitly only to override
+                      the onboarding naming convention.
                     type: string
                   dns:
                     description: |-
@@ -252,9 +251,10 @@ spec:
                     pattern: ^[0-9]+$
                     type: string
                   providerConfig:
-                    description: ProviderConfig references the Crossplane GCP ProviderConfig
-                      to use
-                    minLength: 1
+                    description: |-
+                      ProviderConfig is the name of the namespaced gcp.m.upbound.io ProviderConfig
+                      the operator creates and wires into all GCP XRs. Optional: when empty the
+                      operator derives "{orgName}-gcp" (see EffectiveGCPProviderConfig).
                     type: string
                   regions:
                     description: Regions is the list of GCP regions where resources
@@ -264,10 +264,8 @@ spec:
                     minItems: 1
                     type: array
                 required:
-                - crossplaneServiceAccount
                 - primaryRegion
                 - projectId
-                - providerConfig
                 - regions
                 type: object
               githubConfig:
@@ -618,6 +616,20 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
+              gcp:
+                description: |-
+                  GCP holds operator-resolved GCP config values (provider config name,
+                  crossplane service account). Informational. Populated when gcpConfig is set.
+                properties:
+                  crossplaneServiceAccount:
+                    description: CrossplaneServiceAccount is the resolved crossplane
+                      SA email.
+                    type: string
+                  providerConfig:
+                    description: ProviderConfig is the resolved gcp.m.upbound.io ProviderConfig
+                      name.
+                    type: string
+                type: object
               gitHubAppDiscovered:
                 description: |-
                   GitHubAppDiscovered records dedicated GitHub App discovery/verify outcome (derived
