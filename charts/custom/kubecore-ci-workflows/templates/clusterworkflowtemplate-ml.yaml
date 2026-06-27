@@ -813,15 +813,25 @@ spec:
                     task['depends'] = depends_expr
                 if inp_params:
                     # An input wired `from: <dep>` resolves from whichever variant of
-                    # that dep ran; the skipped sibling yields empty, so coalesce.
+                    # that dep ran. The two variants are mutually exclusive via the same
+                    # `when:` on the dep's own gpu param, so SELECT the source by that
+                    # same param — NOT by probing both tasks' outputs. A skipped Argo
+                    # task has NO `.outputs` object at all (not an empty string), so a
+                    # tasks[dep-cpu].outputs... reference on the skipped sibling makes
+                    # the WHOLE Argo expression fail to resolve and Argo emits the raw
+                    # unevaluated template literal — which then breaks the consumer
+                    # (observed: model-registration json.loads "line 1 column 2" when
+                    # the gpu training variant ran and the cpu sibling was skipped).
+                    # Gating the ternary on the dep's gpu param dereferences ONLY the
+                    # variant that actually executed.
                     task_args = []
                     for ip in inp_params:
                         frm = ip.get('from')
                         if not frm:
                             continue
-                        expr = (OB + f"=tasks['{frm}-cpu'].outputs.parameters['{ip['name']}'] != '' ? "
-                                f"tasks['{frm}-cpu'].outputs.parameters['{ip['name']}'] : "
-                                f"tasks['{frm}-gpu'].outputs.parameters['{ip['name']}']" + CB)
+                        expr = (OB + f"=asInt(workflow.parameters['{frm}-gpu']) > 0 ? "
+                                f"tasks['{frm}-gpu'].outputs.parameters['{ip['name']}'] : "
+                                f"tasks['{frm}-cpu'].outputs.parameters['{ip['name']}']" + CB)
                         task_args.append({'name': ip['name'], 'value': expr})
                     if task_args:
                         task['arguments'] = {'parameters': task_args}
