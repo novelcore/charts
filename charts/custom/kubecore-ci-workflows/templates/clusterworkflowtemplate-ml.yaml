@@ -927,6 +927,22 @@ spec:
                 'nodeSelector': {'platform.kubecore.io/nodegroup-type': OB + 'workflow.parameters.' + class_param + CB},
                 'tolerations': step_tolerations,
                 'serviceAccountName': sa,
+                # retryStrategy: a step that hangs or dies (e.g. a transient S3/dataloader
+                # stall during validation, a flaky node) is retried instead of wedging the
+                # whole run forever. OnError retries on infra/non-zero-without-clean-exit;
+                # combined with activeDeadlineSeconds below a hung pod is killed + retried
+                # rather than blocking indefinitely (model-training has no built-in timeout).
+                'retryStrategy': {
+                    'limit': '2',
+                    'retryPolicy': 'OnError',
+                    'backoff': {'duration': '30s', 'factor': '2', 'maxDuration': '5m'},
+                },
+                # activeDeadlineSeconds is a generous ceiling that only catches a genuine
+                # multi-hour wedge (a hung S3/dataloader stall, a stuck node) — NOT normal
+                # training. GPU training can legitimately run long, so 3h; cpu steps are
+                # quick (30m). A wedged pod is killed at the deadline and retryStrategy
+                # then re-runs it, instead of the run hanging forever.
+                'activeDeadlineSeconds': 10800 if is_gpu else 1800,
                 'container': container,
                 'volumes': [
                     {'name': 'mlflow-svc', 'secret': {'secretName': mlflow_svc_secret, 'optional': True}},
