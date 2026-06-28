@@ -636,6 +636,35 @@ spec:
         compute = ctx.get('computeClasses', {})
         cpu_cls = compute.get('cpu', {})
         gpu_cls = compute.get('gpu', {})
+        # all = full catalog of every cpu/gpu class the pool declares; a developer can
+        # pick any of the right tier. Falls back to just the default cpu+gpu pair on
+        # older contexts that don't carry `all`.
+        all_classes = compute.get('all') or [c for c in (cpu_cls, gpu_cls) if c.get('name')]
+        cpu_classes = [c for c in all_classes if c.get('tier') == 'cpu']
+        gpu_classes = [c for c in all_classes if c.get('tier') == 'gpu']
+
+        def _class_line(c):
+            # one human line per class: "name — machineType (accel) — description"
+            bits = [c.get('name', '?')]
+            mt = c.get('machineType', '')
+            ga = c.get('guestAccelerator') or {}
+            accel = (' + %dx %s' % (ga.get('count', 1), ga.get('type', 'gpu'))) if ga else ''
+            if mt:
+                bits.append('%s%s' % (mt, accel))
+            d = c.get('description', '')
+            if d and d != mt:
+                bits.append(d)
+            return ' — '.join(bits)
+
+        def _allowed_desc(tier_classes, tier):
+            # field help text: lists every allowed class of this tier so the developer
+            # knows the valid values (Argo renders this as the ? tooltip).
+            if not tier_classes:
+                return '%s compute class for this pool.' % tier.upper()
+            names = ', '.join(c.get('name', '?') for c in tier_classes)
+            lines = '; '.join(_class_line(c) for c in tier_classes)
+            return ('%s compute class (node pool) this step runs on. Allowed on this pool: %s. [%s]'
+                    % (tier.upper(), names, lines))
         hpc = ctx.get('hpc', {})
         checkpoints = ctx.get('checkpoints', {})
         sa = ctx.get('serviceAccountName', 'argo-workflow')
@@ -715,13 +744,47 @@ spec:
         pipeline_params = kubeline.get('pipeline', {}).get('parameters', [])
 
         args_params = []
+
+        # ── Read-only form doc (PIPELINE-INFO) ──────────────────────────────────────
+        # A first parameter whose value is a human summary of the LIVE pool config +
+        # how the form works. Argo shows it at the top of the submit form; the
+        # developer reads it before filling anything. Its description tells them it is
+        # informational only. (Argo has no native section headers, so a doc param is
+        # the idiomatic way to surface live config + instructions on the form.)
+        _cpu_lines = '\n'.join('  • ' + _class_line(c) for c in cpu_classes) or '  • (none)'
+        _gpu_lines = '\n'.join('  • ' + _class_line(c) for c in gpu_classes) or '  • (none)'
+        pipeline_info = (
+            'HOW TO RUN: defaults below are headroom-sized and runnable as-is — just press Submit.\n'
+            'PER-STEP COMPUTE: set {step}-cpu / {step}-mem / {step}-gpu for each step. '
+            '{step}-gpu > 0 routes that step to a GPU node pool; 0 keeps it on CPU.\n'
+            'COMPUTE CLASSES on this pool (cpu-class / gpu-class pick the node pool):\n'
+            'CPU:\n' + _cpu_lines + '\n'
+            'GPU:\n' + _gpu_lines + '\n'
+            '(This field is informational — leave it unchanged.)'
+        )
+        args_params.append({'name': 'pipeline-info', 'value': pipeline_info,
+                            'description': 'Read-only: live pool compute classes + how to fill this form. Leave unchanged.'})
+
         for p in pipeline_params:
             args_params.append({'name': p['name'], 'value': p.get('default', ''), 'description': p.get('description', '')})
 
         cpu_class_name = cpu_cls.get('name', f"{pipeline_name}-cpu")
         gpu_class_name = gpu_cls.get('name', f"{pipeline_name}-gpu")
-        args_params.append({'name': 'cpu-class', 'value': cpu_class_name, 'description': cpu_cls.get('description', 'CPU compute class selector')})
-        args_params.append({'name': 'gpu-class', 'value': gpu_class_name, 'description': gpu_cls.get('description', 'GPU compute class selector')})
+        # cpu-class / gpu-class: editable, defaulted to the pool's default class, with a
+        # description listing EVERY allowed class of that tier so the developer chooses
+        # rather than blind-types. enum makes Argo render a dropdown when >1 class
+        # exists (Argo ignores a 1-item enum gracefully); only set enum when there is a
+        # real choice so we never lock the field to a single value on single-class pools.
+        cpu_enum = [c['name'] for c in cpu_classes if c.get('name')]
+        gpu_enum = [c['name'] for c in gpu_classes if c.get('name')]
+        cpu_class_param = {'name': 'cpu-class', 'value': cpu_class_name, 'description': _allowed_desc(cpu_classes, 'cpu')}
+        gpu_class_param = {'name': 'gpu-class', 'value': gpu_class_name, 'description': _allowed_desc(gpu_classes, 'gpu')}
+        if len(cpu_enum) > 1:
+            cpu_class_param['enum'] = cpu_enum
+        if len(gpu_enum) > 1:
+            gpu_class_param['enum'] = gpu_enum
+        args_params.append(cpu_class_param)
+        args_params.append(gpu_class_param)
 
         for step in steps:
             args_params.append({
@@ -840,10 +903,13 @@ spec:
 
         def build_step_template(step, is_gpu):
             sn = step['name']
-            # Placement: the cpu variant pins the cpu class, the gpu variant the gpu
-            # class. The class NAME is still a workflow param (cpu-class / gpu-class)
-            # so an admin renaming a class on the KubePool propagates without a
-            # re-render; only WHICH class is baked per variant.
+            # Placement: the cpu variant targets the cpu-class param, the gpu variant the
+            # gpu-class param. The nodeSelector references the EDITABLE workflow param
+            # (cpu-class / gpu-class) — defaulted to the pool's default class, but the
+            # developer can override it on the submit form to any allowed class of that
+            # tier (the field's ? help + enum list the allowed set). So a class edit on
+            # the form actually moves the step; routing cpu-vs-gpu is still driven by the
+            # step's {step}-gpu count (>0 → gpu variant runs, else cpu variant).
             class_param = 'gpu-class' if is_gpu else 'cpu-class'
             cls = gpu_cls if is_gpu else cpu_cls
             tol_key = cls.get('tolerationKey', 'platform.kubecore.io/ml-workload')
