@@ -35,12 +35,6 @@ controllerManager:
       ZITADEL_ENABLED: "true"
       ZITADEL_SECRET_NAME: "zitadel-credentials"
       ZITADEL_SECRET_NAMESPACE: "kubecore-system"
-
-      # ZITADEL_WIF_POOL: Workload Identity Federation pool name used by the GCP
-      # composition's external_account credential. Defaults to "kubecore-zitadel".
-      ZITADEL_WIF_POOL: "kubecore-zitadel"
-      # ZITADEL_WIF_PROVIDER: WIF provider name within the pool. Defaults to "kubecore-zitadel".
-      ZITADEL_WIF_PROVIDER: "kubecore-zitadel"
     resources:
       limits:
         cpu: 500m
@@ -270,7 +264,7 @@ compositions:
   # OCI image for the kubecore-compositions Configuration package.
   # CI overwrites this with novelcore.azurecr.io/kubecore/kubecore-compositions:vX.Y.Z
   # at release. Required (must be non-empty) when compositions.enabled=true.
-  package: "novelcore.azurecr.io/kubecore/kubecore-compositions:v0.14.18"
+  package: "novelcore.azurecr.io/kubecore/kubecore-compositions:v0.14.19"
   # pullPolicy controls when Crossplane downloads the package.
   # Options: IfNotPresent (default), Always, Never
   pullPolicy: IfNotPresent
