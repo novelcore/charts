@@ -35,8 +35,9 @@ spec:
             - /manager
           image: {{ .Values.controllerManager.container.image.repository }}:{{ .Values.controllerManager.container.image.tag | default .Chart.AppVersion }}
           imagePullPolicy: {{ .Values.controllerManager.container.image.pullPolicy | default "IfNotPresent" }}
-          {{- if or .Values.controllerManager.container.env .Values.tokenBroker.enabled }}
           env:
+            - name: SEED_IMAGE
+              value: "{{ .Values.controllerManager.container.image.repository }}:{{ .Values.controllerManager.container.image.tag | default .Chart.AppVersion }}"
             {{- range $key, $value := .Values.controllerManager.container.env }}
             - name: {{ $key }}
               value: {{ $value | quote }}
@@ -45,7 +46,6 @@ spec:
             - name: TOKEN_BROKER_URL
               value: {{ .Values.tokenBroker.baseURL | default (printf "http://kubecore-operator-token-broker.%s.svc.cluster.local:8080" .Release.Namespace) | quote }}
             {{- end }}
-          {{- end }}
           livenessProbe:
             {{- toYaml .Values.controllerManager.container.livenessProbe | nindent 12 }}
           readinessProbe:
