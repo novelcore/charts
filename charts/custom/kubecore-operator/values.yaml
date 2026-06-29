@@ -3,9 +3,11 @@ controllerManager:
   replicas: 1
   container:
     image:
-      # Docker image repository
-      # Example: novelcore.azurecr.io/kubecore/kubecore-operator
-      repository: novelcore.azurecr.io/kubecore/kubecore-operator
+      # Docker image repository. Dev default only — release.yml stamps this from
+      # the REGISTRY_URL/PROJECT_REGISTRY/IMAGE_NAME Actions vars at publish time,
+      # so the registry switch lives in CI config, never a YAML literal.
+      # Example: europe-west1-docker.pkg.dev/kaos-dev-gcp/kaos-images/platform/kubecore-operator
+      repository: "europe-west1-docker.pkg.dev/kaos-dev-gcp/kaos-images/platform/kubecore-operator"
       # Image tag/version. Empty by default so the templates fall back to the
       # chart's appVersion (release.yml stamps Chart.yaml appVersion = release
       # version). One-pin: consumers pin only the chart version; the image tag
@@ -241,37 +243,47 @@ tokenBroker:
       app: kaos-dashboard-api
 
 # [REGISTRY]: Container registry configuration
+# GAR (europe-west1-docker.pkg.dev) is pulled keylessly by the GKE node SA
+# (artifactregistry.reader), so no imagePullSecret is needed: createImagePullSecret
+# is false and imagePullSecretName is empty, which drops imagePullSecrets from the
+# manager + token-broker Deployments and stops registry-secret.yaml from rendering.
 registry:
-  # Registry URL (e.g., novelcore.azurecr.io)
-  url: "novelcore.azurecr.io"
+  # Registry URL (e.g., europe-west1-docker.pkg.dev). Cosmetic — only consumed by
+  # the imagePullSecret helper, which is inert while createImagePullSecret=false.
+  url: "europe-west1-docker.pkg.dev"
   # Registry username (provide via values override)
   username: ""
   # Registry password (provide via values override)
   password: ""
   # Project/namespace within the registry
   project: "kubecore"
-  # Create imagePullSecret for private registry
-  createImagePullSecret: true
-  # Name of the imagePullSecret (will be created in the release namespace)
-  imagePullSecretName: "kubecore-operator-registry-secret"
+  # Create imagePullSecret for private registry. False for GAR keyless pulls.
+  createImagePullSecret: false
+  # Name of the imagePullSecret. Empty for GAR keyless pulls — a non-empty value
+  # attaches imagePullSecrets to the manager + broker pods (independent of who
+  # creates the Secret), which is unnecessary on GAR.
+  imagePullSecretName: ""
 
 # [COMPOSITIONS]: Crossplane Configuration package settings.
 # The compositions ship as an OCI Configuration package versioned ATOMICALLY with
-# the operator. CI stamps the exact ACR ref + version into `package` at publish time;
-# on the v2 branch it holds the 0.0.0-dev placeholder below.
+# the operator. CI stamps the exact registry ref + version into `package` at publish
+# time (from the same REGISTRY_URL/PROJECT_REGISTRY Actions vars as the operator
+# image); on the v2 branch it holds the 0.0.0-dev placeholder below.
 compositions:
   enabled: true
   # OCI image for the kubecore-compositions Configuration package.
-  # CI overwrites this with novelcore.azurecr.io/kubecore/kubecore-compositions:vX.Y.Z
+  # CI overwrites this with <REGISTRY_URL>/<PROJECT_REGISTRY>/kubecore-compositions:vX.Y.Z
   # at release. Required (must be non-empty) when compositions.enabled=true.
-  package: "novelcore.azurecr.io/kubecore/kubecore-compositions:v0.14.21"
+  package: "europe-west1-docker.pkg.dev/kaos-dev-gcp/kaos-images/platform/kubecore-compositions:v0.14.22"
   # pullPolicy controls when Crossplane downloads the package.
   # Options: IfNotPresent (default), Always, Never
   pullPolicy: IfNotPresent
   # packagePullSecrets: Crossplane resolves these in ITS OWN namespace
-  # (crossplane-system), NOT this chart's release namespace. The release-namespace
-  # ACR secret (registry.imagePullSecretName) is for kubelet operator/broker image
-  # pulls only and CANNOT satisfy this. Leave empty; kaos provisions the ACR pull
-  # secret (e.g. "acr-pull") in crossplane-system per the deployment contract.
+  # (crossplane-system), NOT this chart's release namespace, and the Crossplane
+  # package manager fetches the OCI image itself (it does NOT use the kubelet/node
+  # SA), so GAR is NOT pulled keylessly here. crossplane-system needs either a GAR
+  # pull Secret or a Workload-Identity binding granting artifactregistry.reader.
+  # Leave empty here; kaos provisions the pull creds in crossplane-system per the
+  # deployment contract.
   packagePullSecrets: []
-  # - name: acr-pull
+  # - name: gar-pull
