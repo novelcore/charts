@@ -1009,6 +1009,11 @@ spec:
                 description: Features defines which platform features are enabled
                   for this cluster
                 properties:
+                  interconnect:
+                    description: |-
+                      Interconnect enables the Skupper edge interconnect for this cluster.
+                      Absent/nil = disabled (no XInterconnect XR is created). Set to true to provision.
+                    type: boolean
                   kyverno:
                     description: |-
                       Kyverno enables the Kyverno policy engine on this child cluster.

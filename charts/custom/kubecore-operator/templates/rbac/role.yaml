@@ -435,6 +435,7 @@ rules:
   - xgcpobservabilitycosts
   - xgkekubesystems
   - xgkes
+  - xinterconnects
   - xkubenvs
   - xkubesystems
   - xmlsystems
@@ -461,6 +462,7 @@ rules:
   - xgcpnetworks/status
   - xgcpobservabilitycosts/status
   - xgkekubesystems/status
+  - xinterconnects/status
   - xkubenvs/status
   - xkubesystems/status
   - xobservabilities/status
@@ -579,6 +581,24 @@ rules:
   - patch
   - update
   - watch
+- apiGroups:
+  - skupper.io
+  resources:
+  - accessgrants
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - skupper.io
+  resources:
+  - accessgrants/status
+  verbs:
+  - get
 - apiGroups:
   - team.github.m.upbound.io
   resources:
