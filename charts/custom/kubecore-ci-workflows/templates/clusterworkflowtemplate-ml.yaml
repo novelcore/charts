@@ -537,6 +537,10 @@ spec:
           --compressed-caching=false
 
         echo "Pushed ${STEP_NAME}: ${VERSIONED_IMAGE} + ${LATEST_IMAGE}"
+      {{- with .Values.kaniko.resources }}
+      resources:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       volumeMounts:
       - name: build-workspace
         mountPath: /workspace
