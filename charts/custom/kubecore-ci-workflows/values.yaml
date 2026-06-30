@@ -26,6 +26,21 @@ gitops:
 # FROM scratch + the kaniko binary only and has no shell.
 kaniko:
   image: "gcr.io/kaniko-project/executor:v1.23.2-debug"
+  # Resources for the build-push (kaniko) container. Previously unset, so
+  # kaniko ran with no guaranteed CPU and was throttled on a busy node,
+  # making ML image builds slow. Sized to fit the kubecorecpu pool
+  # (n2-standard-8 = 8 vCPU / 32 GiB, ~7.5 vCPU / ~28 GiB allocatable) so a
+  # build pod always lands: requests claim half the box, cpu may burst to 6.
+  # memory limit == request so kaniko can't be OOMKilled mid-snapshot of a
+  # multi-GB ML image; no cpu limit ceiling beyond the burst so cache-cold
+  # CUDA builds aren't CPU-throttled (the pool is min=0 → one build per node).
+  resources:
+    requests:
+      cpu: "4"
+      memory: "12Gi"
+    limits:
+      cpu: "6"
+      memory: "12Gi"
 
 # BuildKit configuration (legacy — only retained for non-ML CWTs that
 # may still reference .Values.buildkit; ml-ci-build no longer uses it).
