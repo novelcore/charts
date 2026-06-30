@@ -1009,11 +1009,6 @@ spec:
                 description: Features defines which platform features are enabled
                   for this cluster
                 properties:
-                  interconnect:
-                    description: |-
-                      Interconnect enables the Skupper edge interconnect for this cluster.
-                      Absent/nil = disabled (no XInterconnect XR is created). Set to true to provision.
-                    type: boolean
                   kyverno:
                     description: |-
                       Kyverno enables the Kyverno policy engine on this child cluster.
@@ -1067,6 +1062,17 @@ spec:
                   zotRegistry:
                     description: |-
                       ZotRegistry enables in-cluster Zot OCI container registry.
+                      Defaults to true when not specified. Set to false to disable.
+                    type: boolean
+                type: object
+              kaosCloud:
+                description: KaosCloud configures KubeCore-managed cloud connectivity
+                  features.
+                properties:
+                  secureConnection:
+                    default: true
+                    description: |-
+                      SecureConnection enables the secure control-plane↔pool interconnect (Skupper edge).
                       Defaults to true when not specified. Set to false to disable.
                     type: boolean
                 type: object
@@ -1897,6 +1903,23 @@ spec:
                   total:
                     description: Total number of resources
                     type: integer
+                type: object
+              secureConnection:
+                description: SecureConnection contains the secure interconnect status
+                  when the feature is enabled.
+                properties:
+                  message:
+                    description: Message carries detail when not Ready (e.g. the unready
+                      composed resource).
+                    type: string
+                  ready:
+                    description: Ready indicates the interconnect (XInterconnect XR)
+                      is Ready.
+                    type: boolean
+                  state:
+                    description: 'State is a human-readable rollup: Pending | Ready
+                      | Degraded | Error | Disabled.'
+                    type: string
                 type: object
               subnets:
                 description: Subnets contains categorized subnet IDs (public/private)
