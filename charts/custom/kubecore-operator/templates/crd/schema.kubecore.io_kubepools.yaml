@@ -1009,6 +1009,11 @@ spec:
                 description: Features defines which platform features are enabled
                   for this cluster
                 properties:
+                  kyverno:
+                    description: |-
+                      Kyverno enables the Kyverno policy engine on this child cluster.
+                      Defaults to true when not specified. Set to false to disable.
+                    type: boolean
                   ml:
                     description: |-
                       ML enables the ML platform tools (MLflow, lakeFS, pricing cache).
