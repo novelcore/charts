@@ -1,0 +1,178 @@
+{{- if .Values.buildkit.daemon.enabled }}
+{{/*
+============================================================================
+buildkitd — persistent in-cluster image builder (replaces kaniko, 2026-07-01)
+============================================================================
+
+WHY A DAEMON (not a per-build rootless pod):
+The previous rootless-BuildKit attempt was reverted to kaniko because, on GKE
+Container-Optimized OS, the *overlayfs* snapshotter's copy-up got stuck in
+"exporting layers" indefinitely for multi-GB PyTorch images. That failure has
+a known root cause and fix:
+
+  - Root cause: COS + overlayfs snapshotter (and, with Container Threat
+    Detection, an EPERM writing the security.csm xattr) stalls/fails the
+    diff+export of large layers. (moby/buildkit#2623, #2365.)
+  - Fix: run the *native* snapshotter (--oci-worker-snapshotter=native). It
+    trades some intra-build dedupe for a plain-copy layer model that exports
+    reliably and fast on COS — the same trade kaniko's flat-tar model made,
+    but inside a modern builder that ALSO gives us: parallel DAG builds,
+    RUN --mount=type=cache (persistent pip/poetry cache), and a real registry
+    cache manifest instead of kaniko's fragile --cache-repo.
+
+Running buildkitd as a long-lived Deployment (rootful, on a PVC) means the
+snapshotter state and local cache are WARM across builds — the per-commit
+build only re-does the small COPY app/ layer. This is the single biggest
+build-latency win and it sidesteps the ephemeral-pod cold-overlay trap
+entirely.
+
+Rootful (runAsUser 0) is deliberate: it needs the real mount/overlay path and
+runs in its own namespace on the build pool; there is no multi-tenant workload
+on this daemon. It is NOT privileged — only SYS_ADMIN + the seccomp unconfined
+profile BuildKit documents.
+*/}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "kubecore-ci-workflows.fullname" . }}-buildkitd
+  namespace: {{ include "kubecore-ci-workflows.namespace" . }}
+  labels:
+    {{- include "kubecore-ci-workflows.labels" . | nindent 4 }}
+    app.kubernetes.io/component: buildkitd
+spec:
+  # Single replica: the local cache/snapshotter is a ReadWriteOnce PVC and a
+  # warm shared cache is the whole point. Concurrency comes from BuildKit's
+  # internal parallel DAG, not from multiple daemons.
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "kubecore-ci-workflows.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: buildkitd
+  template:
+    metadata:
+      labels:
+        {{- include "kubecore-ci-workflows.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: buildkitd
+      annotations:
+        # BuildKit needs these unconfined to run runc + mount inside the pod.
+        container.apparmor.security.beta.kubernetes.io/buildkitd: unconfined
+    spec:
+      # Builds run on the dedicated CPU build pool (scale-from-zero). The
+      # daemon pins one node warm; that node's pd-balanced disk backs the PVC.
+      {{- with .Values.buildkit.daemon.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.buildkit.daemon.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+      - name: buildkitd
+        image: {{ .Values.buildkit.daemon.image | quote }}
+        args:
+        - --addr
+        - unix:///run/buildkit/buildkitd.sock
+        - --addr
+        - tcp://0.0.0.0:1234
+        # NATIVE snapshotter — the COS-overlayfs "exporting layers" hang fix.
+        - --oci-worker-snapshotter=native
+        - --config
+        - /etc/buildkit/buildkitd.toml
+        securityContext:
+          # Rootful + SYS_ADMIN, NOT privileged. Seccomp unconfined is required
+          # for unshare/mount syscalls runc issues during a build.
+          runAsUser: 0
+          seccompProfile:
+            type: Unconfined
+          capabilities:
+            add: ["SYS_ADMIN"]
+        ports:
+        - containerPort: 1234
+          name: grpc
+        readinessProbe:
+          exec:
+            command: ["buildctl", "debug", "workers"]
+          initialDelaySeconds: 5
+          periodSeconds: 30
+        livenessProbe:
+          exec:
+            command: ["buildctl", "debug", "workers"]
+          initialDelaySeconds: 15
+          periodSeconds: 60
+        resources:
+          {{- toYaml .Values.buildkit.daemon.resources | nindent 10 }}
+        volumeMounts:
+        - name: buildkit-cache
+          mountPath: /var/lib/buildkit
+        - name: buildkitd-config
+          mountPath: /etc/buildkit
+          readOnly: true
+      volumes:
+      - name: buildkitd-config
+        configMap:
+          name: {{ include "kubecore-ci-workflows.fullname" . }}-buildkitd-config
+  # Persistent warm cache/snapshotter store — survives daemon restarts so the
+  # heavy torch/CUDA layers never rebuild cold after the first build.
+{{- if .Values.buildkit.daemon.persistence.enabled }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "kubecore-ci-workflows.fullname" . }}-buildkit-cache
+  namespace: {{ include "kubecore-ci-workflows.namespace" . }}
+  labels:
+    {{- include "kubecore-ci-workflows.labels" . | nindent 4 }}
+    app.kubernetes.io/component: buildkitd
+spec:
+  accessModes: ["ReadWriteOnce"]
+  {{- with .Values.buildkit.daemon.persistence.storageClassName }}
+  storageClassName: {{ . }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.buildkit.daemon.persistence.size | default "100Gi" }}
+{{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "kubecore-ci-workflows.fullname" . }}-buildkitd
+  namespace: {{ include "kubecore-ci-workflows.namespace" . }}
+  labels:
+    {{- include "kubecore-ci-workflows.labels" . | nindent 4 }}
+    app.kubernetes.io/component: buildkitd
+spec:
+  selector:
+    {{- include "kubecore-ci-workflows.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: buildkitd
+  ports:
+  - name: grpc
+    port: 1234
+    targetPort: 1234
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "kubecore-ci-workflows.fullname" . }}-buildkitd-config
+  namespace: {{ include "kubecore-ci-workflows.namespace" . }}
+  labels:
+    {{- include "kubecore-ci-workflows.labels" . | nindent 4 }}
+    app.kubernetes.io/component: buildkitd
+data:
+  buildkitd.toml: |
+    # Zot serves plain HTTP in-cluster — mark every configured registry host
+    # insecure/http so buildctl can push images + the registry cache manifest.
+    [worker.oci]
+      snapshotter = "native"
+    [registry."{{ .Values.registry.internalUrl }}"]
+      http = true
+      insecure = true
+    {{- range .Values.buildkit.daemon.insecureRegistries }}
+    [registry."{{ . }}"]
+      http = true
+      insecure = true
+    {{- end }}
+{{- end }}

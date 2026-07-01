@@ -376,14 +376,25 @@ spec:
   # build-push runs in parallel via withParam over the matrix of changed
   # steps. Each pod self-clones into an emptyDir (no shared workspace PVC)
   # so the matrix isn't bottlenecked by ReadWriteOnce multi-attach. The
-  # init container sets up the repo at the right SHA; the main container
-  # is kaniko, which builds and pushes without a daemon, no rootlesskit,
-  # no userns gymnastics — works identically on COS, Ubuntu, EKS, kind.
-  # Switched from rootless BuildKit because BuildKit's overlayfs snapshot
-  # copy-up performs poorly on GKE Container-Optimized OS for multi-GB
-  # images (e.g. PyTorch + ultralytics), getting stuck in "exporting
-  # layers" indefinitely. Kaniko's flat tar-based layer model handles
-  # large images consistently.
+  # clone init container sets up the repo at the right SHA; the main
+  # container is a thin buildctl client that drives the shared buildkitd
+  # Deployment (templates/buildkitd.yaml) over gRPC.
+  #
+  # MODERN BUILD (2026-07-01): replaced kaniko with BuildKit. Kaniko is
+  # archived upstream and its remote cache in Zot was chronically fragile
+  # (silent cache-miss 404s → every build re-ran the ~3GB CUDA install).
+  # BuildKit gives us:
+  #   - a WARM daemon-side cache on a PVC (heavy torch/CUDA layers persist
+  #     across builds; per-commit build only redoes the small COPY app/ layer),
+  #   - RUN --mount=type=cache in the Dockerfiles → the poetry/pip download
+  #     dir persists even when a layer is cache-busted,
+  #   - a real registry cache manifest (type=registry) as a second-level cache
+  #     that survives even daemon/node loss,
+  #   - parallel DAG execution.
+  # The COS "exporting layers" hang that forced the original kaniko revert is
+  # avoided by running buildkitd with the NATIVE snapshotter (see the daemon
+  # manifest). The legacy kaniko path is retained behind
+  # .Values.buildkit.daemon.enabled=false for one release as a safety net.
   - name: build-push
     inputs:
       parameters:
@@ -391,19 +402,16 @@ spec:
       - name: step_path
       - name: image_tag
       - name: new_version
-    # Retry once on transient failures. The dominant historical failure
-    # mode was GCE preemption mid-snapshot on the kubecorecpu pool (now
-    # on-demand, see profiles.go). Keeping a single retry handles other
-    # transient cases — registry 500s, network blips, kubelet evictions.
-    # retryPolicy=OnError (not OnFailure) so we don't retry on legitimate
-    # build failures like a Dockerfile syntax error.
+    # Retry once on transient failures (registry 500s, network blips, kubelet
+    # evictions). retryPolicy=OnError (not OnFailure) so we don't retry on
+    # legitimate build failures like a Dockerfile syntax error.
     retryStrategy:
       limit: "1"
       retryPolicy: OnError
     volumes:
     - name: build-workspace
       emptyDir: {}
-    - name: kaniko-config
+    - name: docker-config
       emptyDir: {}
     initContainers:
     - name: clone
@@ -437,40 +445,40 @@ spec:
       args:
       - |
         set -e
-        # Use build_registry_url (in-cluster service DNS) for kaniko's
-        # docker auth entry — that's the URL kaniko pushes to. Falls
-        # back to registry_url for pre-0.9.7 callers that only pass one.
+        # buildctl reads registry auth from $DOCKER_CONFIG/config.json. Write
+        # the auth entry for the in-cluster Zot URL images are pushed to.
         REGISTRY="{{`{{workflow.parameters.build_registry_url}}`}}"
         if [ -z "$REGISTRY" ]; then REGISTRY="{{`{{workflow.parameters.registry_url}}`}}"; fi
+        if [ -z "$REGISTRY" ]; then REGISTRY="{{ .Values.registry.internalUrl }}"; fi
         REG_USER=$(cat /etc/registry-auth/username)
         REG_PASS=$(cat /etc/registry-auth/password)
         AUTH=$(printf '%s:%s' "${REG_USER}" "${REG_PASS}" | base64 -w0)
-        # Kaniko reads /kaniko/.docker/config.json. Write the auth entry
-        # for the in-cluster Zot URL kaniko pushes to.
-        mkdir -p /kaniko/.docker
-        cat > /kaniko/.docker/config.json <<EOF
+        cat > /workspace/.docker/config.json <<EOF
         {"auths":{"${REGISTRY}":{"auth":"${AUTH}"}}}
         EOF
-        echo "Wrote kaniko docker config for ${REGISTRY}"
+        echo "Wrote buildctl docker config for ${REGISTRY}"
       volumeMounts:
       - name: build-workspace
         mountPath: /workspace
+      - name: docker-config
+        mountPath: /workspace/.docker
       - name: registry-auth
         mountPath: /etc/registry-auth
         readOnly: true
-      - name: kaniko-config
-        mountPath: /kaniko/.docker
     container:
-      image: {{ .Values.kaniko.image | default "gcr.io/kaniko-project/executor:v1.23.2-debug" }}
-      command: ["/busybox/sh", "-c"]
+      image: {{ .Values.buildkit.clientImage | default "moby/buildkit:v0.27.0" }}
+      command: [sh, -c]
+      env:
+      - name: DOCKER_CONFIG
+        value: /workspace/.docker
+      - name: BUILDKIT_HOST
+        value: "tcp://{{ include "kubecore-ci-workflows.fullname" . }}-buildkitd:1234"
       args:
       - |
         set -e
 
-        # Build-side registry: where kaniko pushes layers + cache. Must be
-        # reachable from inside the pod network (in-cluster service DNS).
-        # Falls back to registry_url for pre-0.9.7 callers, then to the
-        # chart's internalUrl value.
+        # Build-side registry: where buildctl pushes the image + registry cache.
+        # Must be reachable from inside the pod network (in-cluster service DNS).
         REGISTRY="{{`{{workflow.parameters.build_registry_url}}`}}"
         if [ -z "$REGISTRY" ]; then REGISTRY="{{`{{workflow.parameters.registry_url}}`}}"; fi
         if [ -z "$REGISTRY" ]; then REGISTRY="{{ .Values.registry.internalUrl }}"; fi
@@ -486,66 +494,47 @@ spec:
         VERSIONED_IMAGE="${REGISTRY}/${IMAGE_REPO}:${STEP_NAME}-${IMAGE_TAG}"
         LATEST_IMAGE="${REGISTRY}/${IMAGE_REPO}:${STEP_NAME}-latest"
 
-        # Each ML step has Dockerfile at <step_path>/Dockerfile and uses
-        # <step_path> as build context — kubeline.yaml's contract.
-        #
-        # Kaniko strategy for fat ML images (#332):
-        # --cache=true + --cache-repo: layer-level remote cache in Zot.
-        #   First build of model-training (PyTorch + CUDA, ~23 GiB) takes
-        #   the full snapshot wall (~50 min on pd-standard). Every
-        #   subsequent build hits cache for the heavy RUN layers and only
-        #   snapshots the small COPY app/ layer → seconds, not minutes.
-        # --cache-copy-layers + --cache-run-layers: cache both layer kinds.
-        # --snapshot-mode=time: mtime-based change detection. Cheaper than
-        #   redo (full re-hash) on the small per-commit delta layer.
-        # --single-snapshot was the previous trap — it forced one
-        #   monolithic post-build snapshot of the *entire* final
-        #   filesystem, defeating layer-level caching entirely. Removed.
-        # --cleanup: drop intermediate layer files after push (kept).
-        # --use-new-run + --compressed-caching=false: lower-memory
-        #   snapshot algorithm; better for disk-bound nodes (kept).
-        # --insecure / --skip-tls-verify: Zot serves HTTP in-cluster.
-        #
-        # The cache repo is a TOP-LEVEL sibling repo ({app}-buildcache), NOT a
-        # nested path under the app repo. A nested path with the old
-        # ({app}/__kaniko-cache__) name silently failed to persist in Zot —
-        # kaniko logged "Pushing layer ... to cache now" but the layer never
-        # landed (manifest 404, repo absent from the catalog), so every build
-        # came up cold and re-ran the full ~3GB CUDA install. A flat top-level
-        # repo name (no nested path, no leading/trailing __) is accepted by
-        # Zot exactly like the app image repo, so the cache actually persists
-        # and subsequent builds cache-hit the heavy RUN layers. The "-buildcache"
-        # suffix keeps it per-app (no cross-tenant cache poisoning) and clear of
-        # the app image tags.
-        CACHE_REPO="${REGISTRY}/${IMAGE_REPO}-buildcache"
-        /kaniko/executor \
-          --context="/workspace/repo/${STEP_PATH}" \
-          --dockerfile="/workspace/repo/${STEP_PATH}/Dockerfile" \
-          --destination="${VERSIONED_IMAGE}" \
-          --destination="${LATEST_IMAGE}" \
-          --build-arg="REGISTRY_URL=${REGISTRY}" \
-          --build-arg="VERSION=${IMAGE_TAG}" \
-          --insecure \
-          --skip-tls-verify \
-          --cache=true \
-          --cache-repo="${CACHE_REPO}" \
-          --cache-copy-layers \
-          --cache-run-layers \
-          --snapshot-mode=time \
-          --cleanup \
-          --use-new-run \
-          --compressed-caching=false
+        # Second-level cache: a per-app, per-step registry cache manifest in Zot.
+        # This is a flat top-level sibling repo (never a nested path — Zot
+        # silently drops nested cache repos, the historical kaniko bug). It
+        # backstops the daemon's warm PVC cache: even after a daemon restart or
+        # node loss, --import-cache repopulates the heavy layers from Zot instead
+        # of rebuilding cold. mode=max exports intermediate layers too, so RUN
+        # layers (not just the final image) are cache-hittable.
+        CACHE_IMAGE="${REGISTRY}/${IMAGE_REPO}-buildcache:${STEP_NAME}"
+
+        echo "Waiting for buildkitd at ${BUILDKIT_HOST}..."
+        for i in $(seq 1 30); do
+          if buildctl debug workers >/dev/null 2>&1; then break; fi
+          echo "  buildkitd not ready yet ($i/30)"; sleep 4
+        done
+
+        echo "Building ${STEP_NAME} from ${STEP_PATH} → ${VERSIONED_IMAGE}"
+        # Push both the versioned tag and :{step}-latest in one export. BuildKit
+        # takes a comma-separated name= list; it must be a single --output token,
+        # so the whole name=... segment is quoted to protect the inner comma.
+        OUTPUT="type=image,\"name=${VERSIONED_IMAGE},${LATEST_IMAGE}\",push=true,registry.insecure=true"
+        buildctl build \
+          --frontend=dockerfile.v0 \
+          --local context="/workspace/repo/${STEP_PATH}" \
+          --local dockerfile="/workspace/repo/${STEP_PATH}" \
+          --opt filename=Dockerfile \
+          --opt build-arg:REGISTRY_URL="${REGISTRY}" \
+          --opt build-arg:VERSION="${IMAGE_TAG}" \
+          --import-cache type=registry,ref="${CACHE_IMAGE}" \
+          --export-cache type=registry,ref="${CACHE_IMAGE}",mode=max,image-manifest=true,oci-mediatypes=true \
+          --output "${OUTPUT}"
 
         echo "Pushed ${STEP_NAME}: ${VERSIONED_IMAGE} + ${LATEST_IMAGE}"
-      {{- with .Values.kaniko.resources }}
+      {{- with .Values.buildkit.daemon.clientResources }}
       resources:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       volumeMounts:
       - name: build-workspace
         mountPath: /workspace
-      - name: kaniko-config
-        mountPath: /kaniko/.docker
+      - name: docker-config
+        mountPath: /workspace/.docker
       - name: registry-auth
         mountPath: /etc/registry-auth
         readOnly: true
