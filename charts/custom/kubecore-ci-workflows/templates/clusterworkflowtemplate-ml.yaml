@@ -125,7 +125,11 @@ spec:
         withParam: "{{`{{steps.detect-steps.outputs.parameters.changed_steps}}`}}"
     - - name: render-wft
         template: render-wft
-        when: "{{`{{steps.detect-steps.outputs.parameters.has_changes}}`}} == true && {{`{{workflow.parameters.pr_merged}}`}} == true && {{`{{workflow.parameters.branch_type}}`}} != chore"
+        # Fire when a step image changed OR kubeline.yaml changed (wft_changed):
+        # kubeline.yaml IS the WFT source, so a kubeline-only change (e.g. a
+        # PARAMS_YAML tweak) must re-render even with has_changes=false. render-wft
+        # rebuilds the WHOLE WFT from kubeline.yaml, so an empty changed_steps is fine.
+        when: "({{`{{steps.detect-steps.outputs.parameters.has_changes}}`}} == true || {{`{{steps.detect-steps.outputs.parameters.wft_changed}}`}} == true) && {{`{{workflow.parameters.pr_merged}}`}} == true && {{`{{workflow.parameters.branch_type}}`}} != chore"
         arguments:
           parameters:
           - name: image_tag
@@ -203,6 +207,9 @@ spec:
       - name: has_changes
         valueFrom:
           path: /tmp/has_changes
+      - name: wft_changed
+        valueFrom:
+          path: /tmp/wft_changed
     container:
       image: alpine/git:latest
       command: [sh, -c]
@@ -226,6 +233,21 @@ spec:
         fi
         echo "Changed files vs HEAD~1:"
         echo "$CHANGED_FILES"
+
+        # kubeline.yaml IS the source of the rendered WorkflowTemplate (step
+        # commands, env/PARAMS_YAML, params, DAG). A change to it that touches no
+        # step *directory* (e.g. a PARAMS_YAML tweak like threading lakefs_repo)
+        # leaves has_changes=false, so without this flag render-wft/patch-images
+        # would be SKIPPED and the live WFT would never pick up the kubeline change
+        # — a silent, confusing drift. Emit wft_changed=true whenever kubeline.yaml
+        # is in the diff (or this is a full build with no parent), and gate
+        # render-wft/patch-images on (has_changes OR wft_changed).
+        if [ -z "$(git rev-parse HEAD~1 2>/dev/null)" ] || echo "$CHANGED_FILES" | grep -qE "^kubeline\.ya?ml$"; then
+          printf "true" > /tmp/wft_changed
+        else
+          printf "false" > /tmp/wft_changed
+        fi
+        echo "wft_changed=$(cat /tmp/wft_changed)"
 
         # #457: a step must be (re)built if EITHER its source changed OR it has
         # no published image yet. detect-steps used to key only on the git diff,
