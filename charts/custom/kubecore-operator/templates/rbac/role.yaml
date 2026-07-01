@@ -141,6 +141,16 @@ rules:
   - update
   - watch
 - apiGroups:
+  - batch
+  resources:
+  - jobs
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - watch
+- apiGroups:
   - cloudplatform.gcp.m.upbound.io
   resources:
   - projectiammembers
@@ -261,8 +271,12 @@ rules:
   resources:
   - externalsecrets
   verbs:
+  - create
+  - delete
   - get
   - list
+  - patch
+  - update
   - watch
 - apiGroups:
   - external-secrets.io
