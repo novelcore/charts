@@ -55,9 +55,6 @@ spec:
       labels:
         {{- include "kubecore-ci-workflows.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: buildkitd
-      annotations:
-        # BuildKit needs these unconfined to run runc + mount inside the pod.
-        container.apparmor.security.beta.kubernetes.io/buildkitd: unconfined
     spec:
       # Builds run on the dedicated CPU build pool (scale-from-zero). The
       # daemon pins one node warm; that node's pd-balanced disk backs the PVC.
@@ -82,10 +79,15 @@ spec:
         - --config
         - /etc/buildkit/buildkitd.toml
         securityContext:
-          # Rootful + SYS_ADMIN, NOT privileged. Seccomp unconfined is required
-          # for unshare/mount syscalls runc issues during a build.
+          # Rootful + SYS_ADMIN, NOT privileged. seccomp + apparmor unconfined
+          # are required for the unshare/mount syscalls runc issues during a
+          # build. appArmorProfile is set here (the k8s 1.30+ field) rather than
+          # via the container.apparmor.security.beta annotation, which is ignored
+          # on gke-dev's k8s 1.35 (beta annotation deprecated/removed).
           runAsUser: 0
           seccompProfile:
+            type: Unconfined
+          appArmorProfile:
             type: Unconfined
           capabilities:
             add: ["SYS_ADMIN"]
@@ -114,6 +116,16 @@ spec:
       - name: buildkitd-config
         configMap:
           name: {{ include "kubecore-ci-workflows.fullname" . }}-buildkitd-config
+      # buildkit-cache volume — binds the warm-cache PVC when persistence is on,
+      # else an emptyDir so the mount always resolves (the Deployment is invalid
+      # if volumeMounts references a name absent from volumes).
+      - name: buildkit-cache
+      {{- if .Values.buildkit.daemon.persistence.enabled }}
+        persistentVolumeClaim:
+          claimName: {{ include "kubecore-ci-workflows.fullname" . }}-buildkit-cache
+      {{- else }}
+        emptyDir: {}
+      {{- end }}
   # Persistent warm cache/snapshotter store — survives daemon restarts so the
   # heavy torch/CUDA layers never rebuild cold after the first build.
 {{- if .Values.buildkit.daemon.persistence.enabled }}
