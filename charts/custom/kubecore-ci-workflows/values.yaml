@@ -42,14 +42,69 @@ kaniko:
       cpu: "6"
       memory: "12Gi"
 
-# BuildKit configuration (legacy — only retained for non-ML CWTs that
-# may still reference .Values.buildkit; ml-ci-build no longer uses it).
+# BuildKit configuration.
+#
+# ml-ci-build now builds step images with BuildKit (modern replacement for
+# kaniko, 2026-07-01). A long-lived buildkitd Deployment owns a warm cache on
+# a PVC; the build-push step is a thin buildctl client that talks to it over
+# gRPC. See templates/buildkitd.yaml for the COS-overlayfs rationale.
 buildkit:
-  image: "moby/buildkit:rootless"
-  # Default Dockerfile path relative to repo root
+  # Default Dockerfile path relative to repo root (non-ML CWTs).
   dockerfilePath: "./Dockerfile"
-  # Default build context relative to repo root
+  # Default build context relative to repo root (non-ML CWTs).
   buildContext: "."
+
+  # buildctl client image used by the build-push step to drive the daemon.
+  clientImage: "moby/buildkit:v0.27.0"
+
+  daemon:
+    # Master switch. When true, the buildkitd Deployment is created and
+    # ml-ci-build uses it. When false, the chart falls back to the legacy
+    # kaniko path (kept for one release as a safety net).
+    enabled: true
+    image: "moby/buildkit:v0.27.0"
+    # Land the daemon on the CPU build pool so its PVC is on the pd-balanced
+    # build disk and it shares a node with (or near) the build-push pods.
+    # Operator/composition overrides this from workflowDefaults.
+    nodeSelector:
+      platform.kubecore.io/nodegroup-type: kubecorecpu
+    tolerations: []
+    # The daemon buffers layer diffs + holds the snapshotter store in memory
+    # during export of multi-GB torch/CUDA layers. Sized for the e2-standard-4
+    # build pool (16 GiB): claim ~half, burst higher, memory limit == a safe
+    # ceiling that still fits with the node's system reservation.
+    resources:
+      requests:
+        cpu: "2"
+        memory: "6Gi"
+      limits:
+        cpu: "4"
+        memory: "10Gi"
+    persistence:
+      # Warm cache/snapshotter store — survives daemon restarts so heavy
+      # torch/CUDA layers never rebuild cold after the first build. This is the
+      # highest-value SSD spend on the platform: it caches layers for EVERY app
+      # and step, so it's on the SSD class (premium-rwo = pd-ssd on GKE) and
+      # sized generously at 200 GiB. SSD budget (~500 GiB regional): 200 (this)
+      # + 2×100 GiB GPU boot + 50 GiB ML boot ≈ 450 GiB peak, ~50 GiB left for
+      # ML-stack data PVCs. Re-check the budget before enlarging further.
+      enabled: true
+      size: "200Gi"
+      storageClassName: "premium-rwo"
+    # Extra insecure/HTTP registry hosts (beyond registry.internalUrl) that
+    # buildctl may push to — e.g. the NodePort form localhost:30500.
+    insecureRegistries:
+      - "localhost:30500"
+    # Resources for the buildctl CLIENT pod (build-push). The client only
+    # streams the build context + logs; the heavy lifting is in the daemon.
+    # Kept modest so many step builds schedule concurrently on the pool.
+    clientResources:
+      requests:
+        cpu: "500m"
+        memory: "1Gi"
+      limits:
+        cpu: "2"
+        memory: "2Gi"
 
 # Workflow configuration
 workflow:
