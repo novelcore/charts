@@ -1009,6 +1009,12 @@ spec:
                 description: Features defines which platform features are enabled
                   for this cluster
                 properties:
+                  costTracking:
+                    default: false
+                    description: |-
+                      CostTracking deploys OpenCost bound to the pool VictoriaMetrics so per-namespace
+                      cost is computed and visible locally. Requires observability. Default false.
+                    type: boolean
                   kyverno:
                     description: |-
                       Kyverno enables the Kyverno policy engine on this child cluster.
@@ -1065,10 +1071,22 @@ spec:
                       Defaults to true when not specified. Set to false to disable.
                     type: boolean
                 type: object
+                x-kubernetes-validations:
+                - message: features.costTracking requires features.observability (OpenCost
+                    reads the pool VictoriaMetrics)
+                  rule: '!(has(self.costTracking) && self.costTracking) || (has(self.observability)
+                    && self.observability)'
               kaosCloud:
                 description: KaosCloud configures KubeCore-managed cloud connectivity
                   features.
                 properties:
+                  costExport:
+                    default: false
+                    description: |-
+                      CostExport pushes locally-computed cost metrics (OpenCost + vmagent) up to the control
+                      plane over the interconnect. Requires features.costTracking and secureConnection.
+                      Defaults to false: client data push is opt-in.
+                    type: boolean
                   secureConnection:
                     default: true
                     description: |-
@@ -1076,6 +1094,11 @@ spec:
                       Defaults to true when not specified. Set to false to disable.
                     type: boolean
                 type: object
+                x-kubernetes-validations:
+                - message: kaosCloud.costExport requires kaosCloud.secureConnection
+                    (the cost push rides the interconnect)
+                  rule: '!(has(self.costExport) && self.costExport) || (!has(self.secureConnection)
+                    || self.secureConnection)'
               kubeOrgRef:
                 description: KubeOrgRef references the KubeOrg that provides AWS configuration
                   and network
@@ -1177,6 +1200,10 @@ spec:
             - message: exactly one cloud provider must be specified
               rule: '(has(self.cloudProvider.aws) ? 1 : 0) + (has(self.cloudProvider.gcp)
                 ? 1 : 0) + (has(self.cloudProvider.azure) ? 1 : 0) == 1'
+            - message: kaosCloud.costExport requires features.costTracking (you can
+                only push cost you compute)
+              rule: '!(has(self.kaosCloud) && has(self.kaosCloud.costExport) && self.kaosCloud.costExport)
+                || (has(self.features) && has(self.features.costTracking) && self.features.costTracking)'
           status:
             description: KubePoolStatus defines the observed state of KubePool
             properties:
@@ -1410,6 +1437,38 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
+              costExport:
+                description: CostExport contains the cost-export (push) pipeline status
+                  when enabled.
+                properties:
+                  message:
+                    description: Message carries detail when not Ready.
+                    type: string
+                  ready:
+                    description: Ready indicates the cost-export (push) pipeline is
+                      Ready.
+                    type: boolean
+                  state:
+                    description: 'State is a rollup: Disabled | Blocked | Provisioning
+                      | Ready.'
+                    type: string
+                type: object
+              costTracking:
+                description: CostTracking contains the local cost-tracking (OpenCost)
+                  status when enabled.
+                properties:
+                  message:
+                    description: Message carries detail when not Ready.
+                    type: string
+                  ready:
+                    description: Ready indicates the local cost-tracking pipeline
+                      (OpenCost) is Ready.
+                    type: boolean
+                  state:
+                    description: 'State is a rollup: Disabled | Blocked | Provisioning
+                      | Ready.'
+                    type: string
+                type: object
               deletionRetryCount:
                 description: DeletionRetryCount tracks retry attempts during deletion
                   phase for timeout/backoff logic
