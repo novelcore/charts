@@ -1080,10 +1080,14 @@ spec:
                 'volumes': [
                     {'name': 'mlflow-svc', 'secret': {'secretName': mlflow_svc_secret, 'optional': True}},
                     # Memory-backed /dev/shm for torch DataLoader workers (see the
-                    # volumeMount comment above). 2Gi is plenty for image batches and
-                    # is bounded so it can't starve the node; counts against the pod's
-                    # memory request implicitly (emptyDir Memory medium).
-                    {'name': 'dshm', 'emptyDir': {'medium': 'Memory', 'sizeLimit': '2Gi'}},
+                    # volumeMount comment above). Sized at 1Gi: the wedge was 64Mi
+                    # being far too small, and 1Gi is 16x that — ample for image
+                    # batches — while NOT dominating the pod's memory budget. An
+                    # emptyDir with medium:Memory counts against the container memory
+                    # LIMIT, so an oversized shm (was 2Gi) silently stole from the
+                    # workload and OOMKilled training on a 4Gi step (live yolo/e2e
+                    # 2026-07-02: model-training exit 137 right after optimizer init).
+                    {'name': 'dshm', 'emptyDir': {'medium': 'Memory', 'sizeLimit': '1Gi'}},
                 ],
             }
 
