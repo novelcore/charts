@@ -408,6 +408,13 @@ spec:
     retryStrategy:
       limit: "1"
       retryPolicy: OnError
+    # Rootless: buildctl-daemonless runs as uid 1000. fsGroup makes the shared
+    # emptyDir volumes (workspace clone + docker config) group-writable so the
+    # non-root build user can read the clone and write the docker auth.
+    securityContext:
+      runAsUser: 1000
+      runAsGroup: 1000
+      fsGroup: 1000
     volumes:
     - name: build-workspace
       emptyDir: {}
@@ -465,20 +472,32 @@ spec:
       - name: registry-auth
         mountPath: /etc/registry-auth
         readOnly: true
+    # Rootless, DAEMONLESS BuildKit (2026-07-01). Each build pod runs its own
+    # ephemeral buildkitd via buildctl-daemonless.sh and exits — no persistent
+    # Deployment to schedule/pin, so it's native to the scale-to-zero build pool
+    # and never wedges the ci-workflows release the way the daemon did. This is
+    # the exact pattern the RC/non-ML CWTs already run in production. runAsUser
+    # 1000 + --oci-worker-no-process-sandbox keep it rootless (Kyverno-safe).
+    #
+    # The COS "exporting layers" hang that historically plagued rootless BuildKit
+    # only bit multi-GB COLD layers. We no longer build those: the app
+    # Dockerfiles use RUN --mount=type=cache so the torch/CUDA wheels download
+    # ONCE and are re-used, and --import/--export-cache type=registry keeps the
+    # heavy layers warm in Zot across builds. The per-commit build is just the
+    # small COPY app/ layer, which exports fine on COS.
     container:
-      image: {{ .Values.buildkit.clientImage | default "moby/buildkit:v0.27.0" }}
+      image: {{ .Values.buildkit.image | default "moby/buildkit:v0.27.0-rootless" }}
       command: [sh, -c]
       env:
       - name: DOCKER_CONFIG
         value: /workspace/.docker
-      - name: BUILDKIT_HOST
-        value: "tcp://{{ include "kubecore-ci-workflows.fullname" . }}-buildkitd:1234"
+      - name: BUILDKITD_FLAGS
+        value: "--oci-worker-no-process-sandbox"
       args:
       - |
         set -e
 
         # Build-side registry: where buildctl pushes the image + registry cache.
-        # Must be reachable from inside the pod network (in-cluster service DNS).
         REGISTRY="{{`{{workflow.parameters.build_registry_url}}`}}"
         if [ -z "$REGISTRY" ]; then REGISTRY="{{`{{workflow.parameters.registry_url}}`}}"; fi
         if [ -z "$REGISTRY" ]; then REGISTRY="{{ .Values.registry.internalUrl }}"; fi
@@ -494,27 +513,19 @@ spec:
         VERSIONED_IMAGE="${REGISTRY}/${IMAGE_REPO}:${STEP_NAME}-${IMAGE_TAG}"
         LATEST_IMAGE="${REGISTRY}/${IMAGE_REPO}:${STEP_NAME}-latest"
 
-        # Second-level cache: a per-app, per-step registry cache manifest in Zot.
-        # This is a flat top-level sibling repo (never a nested path — Zot
-        # silently drops nested cache repos, the historical kaniko bug). It
-        # backstops the daemon's warm PVC cache: even after a daemon restart or
-        # node loss, --import-cache repopulates the heavy layers from Zot instead
-        # of rebuilding cold. mode=max exports intermediate layers too, so RUN
-        # layers (not just the final image) are cache-hittable.
+        # Cross-build layer cache: a per-app, per-step registry cache manifest in
+        # Zot. Flat top-level sibling repo (never a nested path — Zot silently
+        # drops nested cache repos, the historical kaniko bug). --import-cache
+        # repopulates the heavy RUN layers from Zot so a fresh build pod is warm
+        # without any node-local PVC. mode=max caches intermediate layers too.
         CACHE_IMAGE="${REGISTRY}/${IMAGE_REPO}-buildcache:${STEP_NAME}"
-
-        echo "Waiting for buildkitd at ${BUILDKIT_HOST}..."
-        for i in $(seq 1 30); do
-          if buildctl debug workers >/dev/null 2>&1; then break; fi
-          echo "  buildkitd not ready yet ($i/30)"; sleep 4
-        done
 
         echo "Building ${STEP_NAME} from ${STEP_PATH} → ${VERSIONED_IMAGE}"
         # Push both the versioned tag and :{step}-latest in one export. BuildKit
         # takes a comma-separated name= list; it must be a single --output token,
         # so the whole name=... segment is quoted to protect the inner comma.
         OUTPUT="type=image,\"name=${VERSIONED_IMAGE},${LATEST_IMAGE}\",push=true,registry.insecure=true"
-        buildctl build \
+        buildctl-daemonless.sh build \
           --frontend=dockerfile.v0 \
           --local context="/workspace/repo/${STEP_PATH}" \
           --local dockerfile="/workspace/repo/${STEP_PATH}" \
@@ -526,7 +537,7 @@ spec:
           --output "${OUTPUT}"
 
         echo "Pushed ${STEP_NAME}: ${VERSIONED_IMAGE} + ${LATEST_IMAGE}"
-      {{- with .Values.buildkit.daemon.clientResources }}
+      {{- with .Values.buildkit.buildResources }}
       resources:
         {{- toYaml . | nindent 8 }}
       {{- end }}
