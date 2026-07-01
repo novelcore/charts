@@ -1013,6 +1013,15 @@ spec:
             mlflow_svc_secret = mlflow.get('svcSecret', f"{project_name}-mlflow-svc")
             container['volumeMounts'] = [
                 {'name': 'mlflow-svc', 'mountPath': '/etc/mlflow-svc', 'readOnly': True},
+                # /dev/shm — the k8s default is 64Mi, far too small for a torch
+                # DataLoader with workers>0: worker processes pass tensors to the
+                # main process through POSIX shared memory, and 64Mi exhausts
+                # instantly → "unable to allocate shared memory(shm) ... Resource
+                # temporarily unavailable (11)" spam and, worse, a WEDGED trainer
+                # (GPU 0%, no epochs; live yolo/e2e 2026-07-02: hung after MLflow
+                # experiment-create). A memory-backed emptyDir gives a real
+                # /dev/shm; sizeLimit caps it so it can't eat the whole node.
+                {'name': 'dshm', 'mountPath': '/dev/shm'},
             ]
 
             tmpl = {
@@ -1048,6 +1057,11 @@ spec:
                 'container': container,
                 'volumes': [
                     {'name': 'mlflow-svc', 'secret': {'secretName': mlflow_svc_secret, 'optional': True}},
+                    # Memory-backed /dev/shm for torch DataLoader workers (see the
+                    # volumeMount comment above). 2Gi is plenty for image batches and
+                    # is bounded so it can't starve the node; counts against the pod's
+                    # memory request implicitly (emptyDir Memory medium).
+                    {'name': 'dshm', 'emptyDir': {'medium': 'Memory', 'sizeLimit': '2Gi'}},
                 ],
             }
 
