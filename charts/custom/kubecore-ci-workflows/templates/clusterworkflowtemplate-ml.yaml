@@ -616,7 +616,29 @@ spec:
         # (dev/feature/etc) is used only for the kaniko build context and image
         # tag; it does not drive gitops file paths.
         CONTEXT_PATH=$(find /tmp/gitops -path "*/${APP_NAME}/${GITOPS_BRANCH}/pipeline-context.yaml" | head -1)
-        KUBELINE_PATH="/workspace/repo/kubeline.yaml"
+
+        # Clone the APP repo FRESH at the exact commit_sha and read kubeline.yaml
+        # from there — do NOT trust /workspace/repo. The shared workspace PVC that
+        # the clone step checks out is not guaranteed clean by the time render-wft
+        # runs: a retained/racing checkout can leave a STALE kubeline.yaml, and the
+        # render then silently emits a WFT built from the old pipeline definition
+        # (live yolo/e2e 2026-07-02: the lakefs_repo PARAMS_YAML fix was on dev HEAD
+        # and in the built commit, yet the render dropped it because /workspace/repo
+        # held a pre-fix kubeline). A self-contained clone at commit_sha makes the
+        # render deterministic: the WFT always reflects the commit that was built.
+        APP_REPO_URL=$(echo "{{`{{workflow.parameters.repo_url}}`}}" | sed "s|https://|https://x-access-token:${TOKEN}@|")
+        APP_COMMIT="{{`{{workflow.parameters.commit_sha}}`}}"
+        rm -rf /tmp/apprepo
+        git clone --depth=50 --branch "${BRANCH}" "${APP_REPO_URL}" /tmp/apprepo
+        git -C /tmp/apprepo fetch --depth=1 origin "${APP_COMMIT}" || true
+        git -C /tmp/apprepo checkout "${APP_COMMIT}"
+        KUBELINE_PATH="/tmp/apprepo/kubeline.yaml"
+        echo "render-wft: reading kubeline from fresh clone at ${APP_COMMIT}"
+        # Source-commit committer epoch for the monotonic anti-churn guard below;
+        # computed once here (from the fresh clone) and passed into render_wft.py so
+        # it can stamp the WFT annotation directly.
+        SRC_COMMIT_TIME=$(git -C /tmp/apprepo show -s --format=%ct "${APP_COMMIT}" 2>/dev/null || echo 0)
+        echo "render-wft: source-commit epoch ${SRC_COMMIT_TIME}"
 
         if [ -z "$CONTEXT_PATH" ] || [ ! -f "$CONTEXT_PATH" ]; then
           echo "ERROR: pipeline-context.yaml not found anywhere under */${APP_NAME}/${GITOPS_BRANCH}/ in the gitops repo."
@@ -1124,6 +1146,11 @@ spec:
                     'platform.kubecore.io/gpu-nodepool': f"{pipeline_name}-gpu",
                     'platform.kubecore.io/cpu-nodepool': f"{pipeline_name}-cpu",
                     'platform.kubecore.io/generated-by': 'ml-ci-build/render-wft',
+                    # Source-commit epoch for the monotonic anti-churn guard (see the
+                    # render-wft push block). Stamped here in the render itself so the
+                    # annotation is always present and correctly indented (the prior
+                    # sed-injection approach left it empty when yaml.dump reformatted).
+                    'platform.kubecore.io/rendered-from-commit-time': str(os.environ.get('SRC_COMMIT_TIME', '0')),
                 },
                 'labels': {
                     'platform.kubecore.io/project': project_name,
@@ -1147,6 +1174,7 @@ spec:
 
         KUBELINE_PATH="$KUBELINE_PATH" CONTEXT_PATH="$CONTEXT_PATH" WFT_OUT="$WFT_OUT" \
           APP_NAME="$APP_NAME" PROJECT_NAME="$PROJECT_NAME" BRANCH="$BRANCH" \
+          SRC_COMMIT_TIME="$SRC_COMMIT_TIME" \
           python3 /tmp/render_wft.py
 
         cd /tmp/gitops
@@ -1155,27 +1183,18 @@ spec:
         # Two ml-ci-build runs can race to render the WFT (e.g. a merge and a
         # re-trigger). Without ordering, whichever pushes LAST wins — even if it
         # rendered an OLDER commit — silently reverting a newer render's content
-        # (live gke-dev/yolo 2026-07-02: a stale 2f8d77b render clobbered the
-        # dev-HEAD render that carried the lakefs_repo fix). Guard: stamp the
-        # rendered WFT with the SOURCE commit's committer epoch and refuse to
-        # overwrite a WFT that was rendered from a NEWER commit.
-        SRC_COMMIT_TIME=$(cd /workspace/repo && git show -s --format=%ct "{{`{{workflow.parameters.commit_sha}}`}}" 2>/dev/null || echo 0)
+        # (live gke-dev/yolo 2026-07-02: a stale render clobbered the dev-HEAD
+        # render that carried the lakefs_repo fix). Guard: the render stamps the WFT
+        # with the SOURCE commit's committer epoch (SRC_COMMIT_TIME, in the WFT
+        # annotations); refuse to overwrite a WFT rendered from a NEWER commit.
         WFT_FILE="${GITOPS_WORKFLOWS_PATH}/workflow-template.yaml"
         if [ -f "$WFT_FILE" ]; then
-          EXISTING_TIME=$(grep -oE 'platform.kubecore.io/rendered-from-commit-time: "[0-9]+"' "$WFT_FILE" | grep -oE '[0-9]+' | head -1)
+          EXISTING_TIME=$(grep -oE 'rendered-from-commit-time: "?[0-9]+"?' "$WFT_FILE" | grep -oE '[0-9]+' | head -1)
           EXISTING_TIME=${EXISTING_TIME:-0}
           if [ "$SRC_COMMIT_TIME" -lt "$EXISTING_TIME" ]; then
             echo "SKIP render push: this render's source commit (${SRC_COMMIT_TIME}) is OLDER than the WFT already in gitops (${EXISTING_TIME}). Refusing to clobber a newer render."
             exit 0
           fi
-        fi
-        # Stamp the source-commit epoch as a WFT annotation so future renders can
-        # compare (idempotent: replace any prior stamp, else inject under metadata.annotations).
-        if grep -q 'rendered-from-commit-time:' "$WFT_FILE" 2>/dev/null; then
-          sed -i "s|rendered-from-commit-time: \"[0-9]*\"|rendered-from-commit-time: \"${SRC_COMMIT_TIME}\"|" "$WFT_FILE"
-        else
-          # inject under the first annotations: block (WFT metadata.annotations)
-          sed -i "0,/^  annotations:/s||  annotations:\n    platform.kubecore.io/rendered-from-commit-time: \"${SRC_COMMIT_TIME}\"|" "$WFT_FILE"
         fi
 
         # Stage the DISCOVERED path (kubeapps/{app}/{gitops-branch}/...), not a
@@ -1191,7 +1210,7 @@ spec:
           git commit -m "ml-ci(${APP_NAME}): render WFT from kubeline.yaml v2 at ${IMAGE_TAG} (src-commit-time ${SRC_COMMIT_TIME})"
           # Re-check after rebase in case a NEWER render landed while we worked.
           git pull --rebase origin "${GITOPS_BRANCH}"
-          NOW_TIME=$(grep -oE 'rendered-from-commit-time: "[0-9]+"' "$WFT_FILE" | grep -oE '[0-9]+' | head -1)
+          NOW_TIME=$(grep -oE 'rendered-from-commit-time: .?[0-9]+' "$WFT_FILE" | grep -oE '[0-9]+' | head -1)
           if [ "${NOW_TIME:-0}" -gt "$SRC_COMMIT_TIME" ]; then
             echo "SKIP push after rebase: a newer render (${NOW_TIME}) landed concurrently."
             exit 0
