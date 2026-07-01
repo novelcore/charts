@@ -270,17 +270,6 @@ rules:
   - external-secrets.io
   resources:
   - externalsecrets
-  verbs:
-  - create
-  - delete
-  - get
-  - list
-  - patch
-  - update
-  - watch
-- apiGroups:
-  - external-secrets.io
-  resources:
   - pushsecrets
   verbs:
   - create
