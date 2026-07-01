@@ -192,17 +192,6 @@ rules:
   - list
   - watch
 - apiGroups:
-  - dns.gcp.m.upbound.io
-  resources:
-  - recordsets
-  verbs:
-  - create
-  - get
-  - list
-  - patch
-  - update
-  - watch
-- apiGroups:
   - ec2.aws.m.upbound.io
   resources:
   - eips
@@ -272,8 +261,12 @@ rules:
   resources:
   - externalsecrets
   verbs:
+  - create
+  - delete
   - get
   - list
+  - patch
+  - update
   - watch
 - apiGroups:
   - external-secrets.io

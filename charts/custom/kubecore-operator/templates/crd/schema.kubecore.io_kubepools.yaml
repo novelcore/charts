@@ -1425,6 +1425,11 @@ spec:
                     description: StartTime is when deployment started
                     type: string
                 type: object
+              gatewayEndpoint:
+                description: |-
+                  GatewayEndpoint is the reserved ingress LoadBalancer IP for the pool's
+                  Envoy Gateway (always reserved; consumed by EnvoyProxy.loadBalancerIP).
+                type: string
               grafanaOIDC:
                 description: GrafanaOIDC contains the Zitadel OIDC app status for
                   Grafana SSO
@@ -1727,26 +1732,6 @@ spec:
                         description: Version of the tool
                         type: string
                     type: object
-                  externalDns:
-                    description: ExternalDNS tool status
-                    properties:
-                      enabled:
-                        description: Enabled indicates if the tool is enabled
-                        type: boolean
-                      namespace:
-                        description: Namespace where the tool is installed
-                        type: string
-                      status:
-                        description: Status of the tool (Pending, Installing, Ready,
-                          Error)
-                        type: string
-                      url:
-                        description: URL is the access URL for the tool (if applicable)
-                        type: string
-                      version:
-                        description: Version of the tool
-                        type: string
-                    type: object
                   externalSecrets:
                     description: ExternalSecrets tool status
                     properties:
@@ -1857,26 +1842,6 @@ spec:
                     description: SystemStatus is the overall system deployment status
                       (Pending/Deploying/Ready/Error)
                     type: string
-                  traefik:
-                    description: Traefik tool status
-                    properties:
-                      enabled:
-                        description: Enabled indicates if the tool is enabled
-                        type: boolean
-                      namespace:
-                        description: Namespace where the tool is installed
-                        type: string
-                      status:
-                        description: Status of the tool (Pending, Installing, Ready,
-                          Error)
-                        type: string
-                      url:
-                        description: URL is the access URL for the tool (if applicable)
-                        type: string
-                      version:
-                        description: Version of the tool
-                        type: string
-                    type: object
                   zotRegistry:
                     description: ZotRegistry tool status
                     properties:
