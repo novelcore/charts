@@ -909,6 +909,16 @@ spec:
             # variant ran reached Succeeded (the skipped one is always Skipped).
             return f"({dep}-cpu.Succeeded || {dep}-cpu.Skipped) && ({dep}-gpu.Succeeded || {dep}-gpu.Skipped)"
 
+        # Steps that belong to the quantization sub-pipeline: they only make sense
+        # when the run actually asks for quantization (quantization-mode != none).
+        # Without this gate they run on EVERY pipeline — including the default
+        # quantization-mode=none — and a quantization-only failure (e.g. the QAT
+        # image's torchao stack) fails the whole run even though the user never
+        # requested quantization (live yolo/e2e 2026-07-02: qat-finetune ImportError
+        # on convert_pt2e blocked an otherwise-green train→register run on defaults).
+        # Detected by name so a pipeline without these steps is unaffected.
+        QUANTIZATION_STEPS = {'qat-finetune', 'model-quantization'}
+
         templates = []
         dag_tasks = []
         for step in steps:
@@ -916,9 +926,19 @@ spec:
             deps = step.get('dependencies', []) or []
             depends_expr = " && ".join(_gate(d) for d in deps) if deps else ""
             inp_params = step.get('inputs', {}).get('parameters', []) if step.get('inputs') else []
+            is_quant_step = sn in QUANTIZATION_STEPS
             for variant in ('cpu', 'gpu'):
                 when = (OB + f"=asInt(workflow.parameters['{sn}-gpu']) " +
                         ("> 0" if variant == 'gpu' else "== 0") + CB)
+                if is_quant_step:
+                    # AND the compute-router gate with the quantization enable gate:
+                    # the whole {when} evaluates true only when this is the selected
+                    # compute variant AND quantization is turned on. On the default
+                    # (mode=none) both quant variants are Skipped, and the
+                    # Succeeded||Skipped dep-gate lets model-registration proceed.
+                    when = (OB + "=asInt(workflow.parameters['" + sn + "-gpu']) " +
+                            ("> 0" if variant == 'gpu' else "== 0") +
+                            " && workflow.parameters['quantization-mode'] != 'none'" + CB)
                 task = {'name': f"{sn}-{variant}", 'template': f"{sn}-{variant}", 'when': when}
                 if depends_expr:
                     task['depends'] = depends_expr
