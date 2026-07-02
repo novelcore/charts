@@ -97,11 +97,35 @@ jobs:
           path: gh-pages
 
       - name: Copy packages and update index
+        env:
+          # Optional retention: set the repo/Actions variable KEEP_CHART_VERSIONS to a
+          # positive integer (e.g. 5) to keep only the N newest versions of each chart on
+          # every release. Leave it unset/0 to keep all versions (default, non-destructive).
+          KEEP_CHART_VERSIONS: ${{ vars.KEEP_CHART_VERSIONS }}
         run: |
           cp .deploy/*.tgz gh-pages/ || true
           cd gh-pages
+
+          # Optional pruning of old chart versions to prevent the repo from growing
+          # unbounded. Runs before indexing so index.yaml reflects the deletions.
+          if [ -n "${KEEP_CHART_VERSIONS}" ] && [ "${KEEP_CHART_VERSIONS}" -gt 0 ] 2>/dev/null; then
+            echo "Retention enabled: keeping newest ${KEEP_CHART_VERSIONS} version(s) per chart"
+            for name in $(ls *.tgz 2>/dev/null | sed -E 's/-v?[0-9].*//' | sort -u); do
+              ls "${name}"-*.tgz 2>/dev/null | sort -V | head -n -"${KEEP_CHART_VERSIONS}" | while read -r old; do
+                echo "  removing old package: ${old}"
+                rm -f "${old}"
+              done
+            done
+          else
+            echo "Retention disabled (KEEP_CHART_VERSIONS unset/0): keeping all versions"
+          fi
+
+          # Publish the branch as-is: a Helm repo is static .tgz + index.yaml, so skip the
+          # slow legacy Jekyll build that would otherwise run over every package.
+          touch .nojekyll
+
           helm repo index . --url https://novelcore.github.io/charts/
-          
+
       - name: Commit and push to gh-pages
         run: |
           cd gh-pages
