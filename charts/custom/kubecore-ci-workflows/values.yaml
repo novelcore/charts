@@ -91,6 +91,22 @@ serviceAccount:
   name: "ci-build-sa"
   annotations: {}
 
+# GCP Workload Identity for the CI workflow SA (live-compute / ephemeral
+# nodegroups). When set, the chart's workflow ServiceAccount is annotated with
+# iam.gke.io/gcp-service-account so gcloud steps authenticate as the eso-sa via
+# GKE Workload Identity. The eso-sa email is
+# "{org}-gcp-eso-sa@{projectId}.iam.gserviceaccount.com".
+#
+# NOTE: the gcloud lifecycle steps in the RENDERED ML pipeline WFT run as the
+# argo-workflows/operate-workflow-sa KSA (created by the k8smlapp composition and
+# WI-bound to eso-sa by the gcp/system composition). That SA — not this chart's
+# ci-build-sa — is the identity that actually needs the iam.gke.io annotation, so
+# the operator must annotate operate-workflow-sa. This value is provided for
+# completeness (and any gcloud that runs as ci-build-sa); the operator sets it
+# via its ciWorkflows values map.
+gcp:
+  esoServiceAccountEmail: ""
+
 # RBAC for workflow pods
 rbac:
   create: true
