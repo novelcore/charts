@@ -971,6 +971,10 @@ spec:
 
         def build_step_template(step, is_gpu):
             sn = step['name']
+            # Quantization-class steps get a longer activeDeadlineSeconds (see below).
+            # QUANTIZATION_STEPS is module-scope; recompute locally since this helper
+            # is a separate function from the DAG-task loop.
+            is_quant_step = sn in QUANTIZATION_STEPS
             # Placement: the cpu variant targets the cpu-class param, the gpu variant the
             # gpu-class param. The nodeSelector references the EDITABLE workflow param
             # (cpu-class / gpu-class) — defaulted to the pool's default class, but the
@@ -1095,7 +1099,13 @@ spec:
                 # training. GPU training can legitimately run long, so 3h; cpu steps are
                 # quick (30m). A wedged pod is killed at the deadline and retryStrategy
                 # then re-runs it, instead of the run hanging forever.
-                'activeDeadlineSeconds': 10800 if is_gpu else 1800,
+                # EXCEPTION: quantization-class steps (qat-finetune, model-quantization)
+                # run a legitimately long CPU export — PTQ INT8 = ONNX export +
+                # TF SavedModel + onnx2tf conversion + calibration — that blows past the
+                # 30m cpu ceiling (live gke-dev 2026-07-02: model-quantization killed at
+                # exactly 1800s mid-TFLite-conversion, "Max duration limit exceeded").
+                # Give them the 3h ceiling regardless of cpu/gpu.
+                'activeDeadlineSeconds': 10800 if (is_gpu or is_quant_step) else 1800,
                 'container': container,
                 'volumes': [
                     {'name': 'mlflow-svc', 'secret': {'secretName': mlflow_svc_secret, 'optional': True}},
