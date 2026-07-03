@@ -1074,10 +1074,19 @@ spec:
                     flags.append('--node-taints=%s' % taints)
                     create_lines.append('  %s)' % cn)
                     create_lines.append('    if [ -n "$NODE_SA" ]; then SA_FLAG="--service-account=$NODE_SA"; else SA_FLAG=""; fi')
-                    create_lines.append('    gcloud container node-pools create "$POOL" '
+                    # Capture output + exit code so a REAL failure (403 IAM, quota,
+                    # stockout) fails the step loudly — only an "already exists" pool
+                    # (idempotent re-run / concurrent create) is tolerated. The old
+                    # `| grep -v ... || true` swallowed every error → false "Succeeded".
+                    create_lines.append('    if ! OUT=$(gcloud container node-pools create "$POOL" '
                                         '--cluster="$CLUSTER" $LOC --project="$PROJECT" '
-                                        + ' '.join(flags) + ' $SA_FLAG '
-                                        '2>&1 | grep -v "already exists" || true ;;')
+                                        + ' '.join(flags) + ' $SA_FLAG 2>&1); then')
+                    create_lines.append('      if echo "$OUT" | grep -q "already exists"; then')
+                    create_lines.append('        echo "node pool $POOL already exists — continuing"')
+                    create_lines.append('      else')
+                    create_lines.append('        echo "ERROR creating node pool $POOL:"; echo "$OUT"; exit 1')
+                    create_lines.append('      fi')
+                    create_lines.append('    fi ;;')
                 create_lines.append('  *) echo "ERROR: class $CLS not in live catalog"; exit 1 ;;')
                 create_lines.append('esac')
                 if is_quant_step:
