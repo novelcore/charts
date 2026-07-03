@@ -650,7 +650,7 @@ spec:
         echo "gitops pipeline dir discovered: ${GITOPS_WORKFLOWS_PATH}"
 
         cat > /tmp/render_wft.py << 'PYEOF'
-        import sys, yaml, os
+        import sys, yaml, os, json, ssl, urllib.request
 
         # Argo brace delimiters as variables so Helm does not parse them.
         OB = chr(123) + chr(123)
@@ -681,6 +681,18 @@ spec:
         image_repo = ctx.get('imageRepo', f"{project_name}/{app_name}")
         lakefs = ctx.get('lakefs', {})
         mlflow = ctx.get('mlflow', {})
+
+        # ── Live-compute detection (GCP ephemeral-nodegroup model) ──────────────
+        # The operator writes poolContext ONLY when the pool opted into the live
+        # model (features.mlConfig.ephemeralPipelineNodegroups). Its presence — a
+        # non-empty projectId — is the single gate that switches render-wft from the
+        # legacy cluster-shared numeric-request model to the per-step live-catalog +
+        # ephemeral per-pipeline NodePool model. Absent/empty ⇒ the legacy path below
+        # runs byte-for-byte as before, so every existing pool is 100% unchanged.
+        pool_context = ctx.get('poolContext') or {}
+        compute_catalog_ref = ctx.get('computeCatalog') or {}
+        live_compute = bool((pool_context.get('projectId') or '').strip())
+
         compute = ctx.get('computeClasses', {})
         cpu_cls = compute.get('cpu', {})
         gpu_cls = compute.get('gpu', {})
@@ -716,6 +728,607 @@ spec:
         hpc = ctx.get('hpc', {})
         checkpoints = ctx.get('checkpoints', {})
         sa = ctx.get('serviceAccountName', 'argo-workflow')
+
+        # ════════════════════════════════════════════════════════════════════
+        # LIVE-COMPUTE PATH (GCP ephemeral per-pipeline NodePools).
+        #
+        # Active only when poolContext.projectId is set. Reads the pool-scoped LIVE
+        # machine catalog (written by the compute-catalog probe CronWorkflow), emits
+        # a per-step compute-CLASS dropdown + a per-step disk-gb param, sizes each
+        # step to its chosen class's WHOLE node (requests==limits, sole-tenant), and
+        # provisions/destroys a dedicated GKE NodePool per (step, run) around the DAG.
+        # Everything below this block (the legacy cluster-shared numeric-request
+        # model) is UNTOUCHED and runs for every non-live pool.
+        # ════════════════════════════════════════════════════════════════════
+        def _read_live_catalog(cm_name, cm_ns):
+            # Read the compute-catalog ConfigMap straight from the in-cluster API
+            # using the render-wft pod's ServiceAccount token (operate-workflow-sa;
+            # RBAC grants get on configmaps in argo-workflows — see rbac.yaml). No
+            # kubectl binary in python:3.12-alpine, so hit the REST API directly.
+            sa_dir = '/var/run/secrets/kubernetes.io/serviceaccount'
+            with open(sa_dir + '/token') as f:
+                token = f.read().strip()
+            host = os.environ.get('KUBERNETES_SERVICE_HOST', 'kubernetes.default.svc')
+            port = os.environ.get('KUBERNETES_SERVICE_PORT', '443')
+            url = 'https://%s:%s/api/v1/namespaces/%s/configmaps/%s' % (host, port, cm_ns, cm_name)
+            sslctx = ssl.create_default_context(cafile=sa_dir + '/ca.crt')
+            req = urllib.request.Request(url, headers={'Authorization': 'Bearer ' + token})
+            with urllib.request.urlopen(req, context=sslctx, timeout=30) as resp:
+                cm = json.loads(resp.read().decode('utf-8'))
+            data = (cm.get('data') or {}).get('catalog.yaml')
+            if not data:
+                raise RuntimeError("ConfigMap %s/%s has no data['catalog.yaml']" % (cm_ns, cm_name))
+            return yaml.safe_load(data)
+
+        if live_compute:
+            cm_name = compute_catalog_ref.get('configMap') or 'kubecore-ml-compute-catalog'
+            cm_ns = compute_catalog_ref.get('namespace') or 'argo-workflows'
+            try:
+                catalog = _read_live_catalog(cm_name, cm_ns)
+            except Exception as e:
+                # FAIL LOUDLY — a live pool with no catalog means the probe has not
+                # run yet (or lost RBAC). Do NOT silently fall back to the legacy
+                # model: that would emit the wrong submit-form + no ephemeral nodes.
+                print("ERROR: live-compute pool but could not read compute-catalog "
+                      "ConfigMap %s/%s: %s" % (cm_ns, cm_name, e), file=sys.stderr)
+                print("The ml-compute-catalog-probe CronWorkflow must publish the live "
+                      "machine catalog before a pipeline can render. Failing.", file=sys.stderr)
+                sys.exit(1)
+
+            catalog_classes = catalog.get('classes') or []
+            if not catalog_classes:
+                print("ERROR: compute-catalog %s/%s has an empty classes[] — probe "
+                      "produced no machine catalog. Failing." % (cm_ns, cm_name), file=sys.stderr)
+                sys.exit(1)
+
+            by_name = {c['name']: c for c in catalog_classes if c.get('name')}
+            live_cpu = [c for c in catalog_classes if c.get('tier') == 'cpu']
+            live_gpu = [c for c in catalog_classes if c.get('tier') == 'gpu']
+            avail_cpu = [c for c in live_cpu if c.get('available') and not c.get('stockout')]
+            avail_gpu = [c for c in live_gpu if c.get('available') and not c.get('stockout')]
+
+            STOCKOUT_SUFFIX = ' (STOCKOUT)'
+
+            # The gcloud lifecycle steps (create/destroy-nodegroups) MUST run as the
+            # WI-bound KSA operate-workflow-sa — the gcp/system composition binds exactly
+            # argo-workflows/operate-workflow-sa → {org}-gcp-eso-sa (roles/container.developer).
+            # The pipeline SA (ctx.serviceAccountName, default argo-workflow) has no GCP WI,
+            # so it can't run gcloud. Node scheduling for the gcloud pods themselves uses the
+            # CI cpu class (they're short-lived, run on the system/CI pool, not an ML node).
+            GCLOUD_SA = 'operate-workflow-sa'
+            CI_POOL = ctx.get('ciCpuClass', 'kubecorecpu')
+
+            def _enum_value(c):
+                # The enum value the developer picks. Stocked-out classes stay IN the
+                # list (so the form shows the full pool catalog) but their value is
+                # suffixed so the guard step can reject a stocked-out selection.
+                v = c['name']
+                return v + STOCKOUT_SUFFIX if c.get('stockout') else v
+
+            def _enum_values(tier_classes):
+                # available first, stocked-out last — the first available of the tier
+                # is the field default.
+                ok = [_enum_value(c) for c in tier_classes if c.get('available') and not c.get('stockout')]
+                bad = [_enum_value(c) for c in tier_classes if not (c.get('available') and not c.get('stockout'))]
+                return ok + bad
+
+            def _strip_stockout(v):
+                return v[:-len(STOCKOUT_SUFFIX)] if v.endswith(STOCKOUT_SUFFIX) else v
+
+            def _catalog_line(c):
+                # human line for the field help, prefers the probe-supplied label.
+                lbl = c.get('label')
+                if lbl:
+                    return lbl
+                bits = [c.get('name', '?'), c.get('machineType', '')]
+                return ' — '.join(b for b in bits if b)
+
+            def _default_class_name(step):
+                # GPU-ish steps (model-training, or a step that opts into gpu via the
+                # legacy compute:gpu flag / an explicit nvidia.com/gpu request) default
+                # to the first AVAILABLE gpu class; everything else to the first
+                # available cpu class. If a tier has no available class, fall back to
+                # the first class of that tier (still selectable, guard will stop a
+                # stocked-out submit) so the form always has a concrete default.
+                res = (step.get('resources') or {}).get('requests') or {}
+                wants_gpu = str(res.get('nvidia.com/gpu', '')) not in ('', '0') or step.get('compute', 'cpu') == 'gpu'
+                pool = (avail_gpu or live_gpu) if wants_gpu else (avail_cpu or live_cpu)
+                if not pool:
+                    # no class of the wanted tier at all — fall back to any class.
+                    pool = avail_cpu or avail_gpu or live_cpu or live_gpu
+                return _enum_value(pool[0]) if pool else ''
+
+            # margin subtracted from a class's node allocatable so the sole-tenant step
+            # pod still fits alongside the per-node daemonsets (kube-proxy, csi, argo
+            # `wait` sidecar, nvidia device-plugin on gpu). The probe already reports
+            # allocatable = capacity − GKE reservation; this is the extra daemonset
+            # headroom. Keep it small + safe (mirror the legacy SAFETY_MARGIN concept).
+            LIVE_CPU_MARGIN = 0.5      # vCPU left for node daemonsets
+            LIVE_MEM_MARGIN_GI = 0.5   # GiB left for node daemonsets
+
+            def _whole_node_resources(c):
+                # requests==limits == the class node's allocatable minus a small fixed
+                # daemonset margin. Sole-tenant on its own ephemeral node ⇒ requests
+                # ==limits is safe (Guaranteed QoS, whole machine to the step). GPU
+                # classes add nvidia.com/gpu = the class's gpu.count.
+                alloc = c.get('allocatable') or {}
+                cpu_alloc = float(alloc.get('cpu', 1))
+                mem_alloc = float(alloc.get('memoryGiB', 2))
+                cpu = max(1, int(cpu_alloc - LIVE_CPU_MARGIN))
+                mem = max(1, int(round(mem_alloc - LIVE_MEM_MARGIN_GI)))
+                reqs = {'cpu': str(cpu), 'memory': '%dGi' % mem}
+                if c.get('tier') == 'gpu':
+                    gcount = str(((c.get('gpu') or {}).get('count', 1)))
+                    reqs['nvidia.com/gpu'] = gcount
+                return dict(reqs), dict(reqs)
+
+            steps = kubeline.get('steps', [])
+            pipeline_params = kubeline.get('pipeline', {}).get('parameters', [])
+
+            # ephemeral NodePool name for a (step, run): {prefix}{uid8}.
+            # uid8 is a RUN-time truncation of the Argo workflow.uid (concurrent runs
+            # of one app get isolated pools). GKE NodePool names are <=40 chars, so the
+            # literal "pl-{app}-{step}-" prefix is hashed down when it would overflow.
+            # SINGLE source of the prefix — create-nodegroups (the node label) and the
+            # DAG task's pool-name input (the pod's nodeSelector) MUST agree byte-for-
+            # byte, so both derive it from this one helper.
+            import hashlib as _hashlib
+            def _pool_prefix(step_name):
+                p = 'pl-%s-%s-' % (app_name, step_name)
+                if len(p) + 8 > 40:
+                    h = _hashlib.sha1(('%s-%s' % (app_name, step_name)).encode()).hexdigest()[:12]
+                    p = 'pl-%s-' % h
+                return p
+
+            enum_cpu = _enum_values(live_cpu)
+            enum_gpu = _enum_values(live_gpu)
+
+            args_params = []
+
+            # ── Read-only form doc (PIPELINE-INFO), live variant ────────────────
+            _cpu_lines = '\n'.join('  • ' + _catalog_line(c) for c in live_cpu) or '  • (none)'
+            _gpu_lines = '\n'.join('  • ' + _catalog_line(c) for c in live_gpu) or '  • (none)'
+            pipeline_info = (
+                'HOW TO RUN: defaults below are runnable as-is — just press Submit.\n'
+                'PER-STEP COMPUTE: pick a {step}-class for each step. Each step runs on '
+                'its OWN dedicated ephemeral GKE node (the WHOLE machine, sole-tenant) '
+                'created just for this run and destroyed when it ends.\n'
+                'PER-STEP DISK: {step}-disk-gb sizes that node\'s pd-ssd boot/data disk '
+                '(default 100 GiB — raise it for large datasets/checkpoints).\n'
+                'Classes suffixed "(STOCKOUT)" are temporarily unavailable in-region; '
+                'picking one FAILS the run at the guard step.\n'
+                'LIVE CATALOG (region %s):\n'
+                'CPU:\n' % (catalog.get('region', pool_context.get('region', '?'))) + _cpu_lines + '\n'
+                'GPU:\n' + _gpu_lines + '\n'
+                '(This field is informational — leave it unchanged.)'
+            )
+            args_params.append({'name': 'pipeline-info', 'value': pipeline_info,
+                                'description': 'Read-only: live pool machine catalog + how to fill this form. Leave unchanged.'})
+
+            for p in pipeline_params:
+                args_params.append({'name': p['name'], 'value': p.get('default', ''), 'description': p.get('description', '')})
+
+            for step in steps:
+                args_params.append({
+                    'name': f"image-{step['name']}",
+                    'valueFrom': {'configMapKeyRef': {'name': f"{app_name}-pipeline-images", 'key': step['name']}}
+                })
+
+            # ── Per-step class dropdown + disk-gb ───────────────────────────────
+            for step in steps:
+                sn = step['name']
+                default_cls = _default_class_name(step)
+                is_gpu_default = _strip_stockout(default_cls) in {c['name'] for c in live_gpu}
+                enum = enum_gpu if is_gpu_default else enum_cpu
+                # include EVERY class of the tier (available + stocked-out) so the
+                # developer sees the full catalog; guard rejects a stocked-out pick.
+                cls_param = {
+                    'name': f"{sn}-class",
+                    'value': default_cls,
+                    'description': ('Compute class (dedicated ephemeral node) for the %s step. '
+                                    'Allowed: %s. Classes marked (STOCKOUT) are unavailable now.'
+                                    % (sn, ', '.join(_catalog_line(by_name[_strip_stockout(v)])
+                                                     if _strip_stockout(v) in by_name else v for v in enum))),
+                }
+                if len(enum) > 1:
+                    cls_param['enum'] = enum
+                args_params.append(cls_param)
+                args_params.append({
+                    'name': f"{sn}-disk-gb",
+                    'value': '100',
+                    'description': ('pd-ssd disk size (GiB) for the %s step\'s ephemeral node. '
+                                    'Sized for the dataset + checkpoints this step reads/writes; '
+                                    'default 100.' % sn),
+                })
+
+            args_params += [
+                {'name': 'registered-model-name', 'value': f"{app_name}-model"},
+                {'name': 'promote-to', 'value': ''},
+                {'name': 'kubepool-name', 'value': project_name},
+                {'name': 'mlflow-endpoint', 'value': mlflow.get('trackingUri', '')},
+                {'name': 'zitadel-domain', 'value': mlflow.get('oidcDomain', '')},
+                {'name': 'zitadel-mlflow-project-id', 'value': mlflow.get('oidcProjectId', '')},
+                {'name': 'lakefs-endpoint', 'value': lakefs.get('endpoint', '')},
+                {'name': 'lakefs-repo', 'value': lakefs.get('repository', app_name)},
+                {'name': 'lakefs-branch', 'value': branch},
+                # node-service-account: the shared {org}-node SA the ephemeral nodes run
+                # as (workload-identity + registry pull) — matches the cluster's own
+                # pools. The operator populates poolContext.nodeServiceAccount; empty
+                # ⇒ create-nodegroups omits --service-account and gcloud falls back to
+                # the cluster default node SA.
+                {'name': 'node-service-account', 'value': pool_context.get('nodeServiceAccount', '')},
+            ]
+
+            # gcp coordinates surfaced as params so the create/destroy gcloud steps read
+            # them from workflow.parameters (keeps the templates free of render-time
+            # literals that would need re-escaping). location/locationType come straight
+            # from poolContext: the operator resolves the cluster's ACTUAL GKE location
+            # (zonal {region}-c for dev, regional {region} for prod) and the matching
+            # gcloud flag name — do NOT reconstruct from region/zone (zone is empty on
+            # default dev pools).
+            args_params += [
+                {'name': 'gcp-project', 'value': pool_context.get('projectId', '')},
+                {'name': 'gcp-cluster', 'value': pool_context.get('clusterName', '')},
+                {'name': 'gcp-location', 'value': pool_context.get('location', '')},
+                {'name': 'gcp-location-type', 'value': pool_context.get('locationType', 'region')},
+            ]
+
+            QUANTIZATION_STEPS = {'qat-finetune', 'model-quantization'}
+
+            templates = []
+            dag_tasks = []
+
+            # ── create-nodegroups: FIRST task, provisions one ephemeral NodePool per
+            # step sized to that step's chosen class ─────────────────────────────
+            # Runs gcloud as operate-workflow-sa (WI-bound to {org}-gcp-eso-sa which
+            # carries roles/container.developer). Idempotent (tolerates already-exists).
+            create_lines = [
+                'set -eu',
+                'PROJECT="' + OB + "workflow.parameters['gcp-project']" + CB + '"',
+                'CLUSTER="' + OB + "workflow.parameters['gcp-cluster']" + CB + '"',
+                'LOCATION="' + OB + "workflow.parameters['gcp-location']" + CB + '"',
+                'LOCATION_TYPE="' + OB + "workflow.parameters['gcp-location-type']" + CB + '"',
+                'NODE_SA="' + OB + "workflow.parameters['node-service-account']" + CB + '"',
+                'UID8=$(echo "' + OB + 'workflow.uid' + CB + '" | tr -d - | cut -c1-8)',
+                # gcloud auth via the pod's GKE workload identity (the WI-annotated KSA);
+                # google-cloud-sdk picks it up from the metadata server automatically.
+                # --{locationType}={location} = --zone=us-central1-c (zonal dev) or
+                # --region=europe-west1 (regional prod), straight from poolContext.
+                'LOC="--${LOCATION_TYPE}=${LOCATION}"',
+            ]
+            destroy_lines = list(create_lines)  # same header (coords + UID8 + LOC)
+
+            for step in steps:
+                sn = step['name']
+                prefix = _pool_prefix(sn)
+                cls_param_ref = OB + "workflow.parameters['" + sn + "-class']" + CB
+                disk_param_ref = OB + "workflow.parameters['" + sn + "-disk-gb']" + CB
+                is_quant_step = sn in QUANTIZATION_STEPS
+                # A quantization-class step is Skipped on the default (quantization-mode
+                # =none) run, so don't provision (or pay for) its node pool — only create
+                # it when quantization is actually requested. Non-quant steps always run.
+                if is_quant_step:
+                    qmode = OB + "workflow.parameters['quantization-mode']" + CB
+                    create_lines.append('if [ "%s" != "none" ]; then' % qmode)
+                create_lines += [
+                    'POOL="%s${UID8}"' % prefix,
+                    'CLS=$(echo "%s" | sed "s/ (STOCKOUT)//")' % cls_param_ref,
+                    'DISK="%s"' % disk_param_ref,
+                    'echo "create nodepool $POOL for step %s (class $CLS, disk ${DISK}Gi)"' % sn,
+                ]
+                # emit a shell case that maps the chosen class name → gcloud flags, so
+                # the machineType/accelerator/labels/taints are concrete at run time
+                # from the live catalog snapshot baked into the render.
+                create_lines.append('case "$CLS" in')
+                for c in catalog_classes:
+                    cn = c['name']
+                    mt = c.get('machineType', '')
+                    tier = c.get('tier', 'cpu')
+                    flags = ['--machine-type=%s' % mt, '--disk-type=pd-ssd', '--disk-size=${DISK}',
+                             '--num-nodes=1', '--enable-private-nodes']
+                    labels = 'platform.kubecore.io/nodegroup-type=${POOL},platform.kubecore.io/ml-workload=%s' % tier
+                    taints = 'platform.kubecore.io/ml-workload=%s:NoSchedule' % tier
+                    if tier == 'gpu':
+                        g = c.get('gpu') or {}
+                        flags.append('--accelerator=type=%s,count=%d,gpu-driver-version=LATEST'
+                                     % (g.get('type', 'nvidia-tesla-t4'), int(g.get('count', 1))))
+                        taints += ',nvidia.com/gpu=present:NoSchedule'
+                    flags.append('--node-labels=%s' % labels)
+                    flags.append('--node-taints=%s' % taints)
+                    create_lines.append('  %s)' % cn)
+                    create_lines.append('    if [ -n "$NODE_SA" ]; then SA_FLAG="--service-account=$NODE_SA"; else SA_FLAG=""; fi')
+                    create_lines.append('    gcloud container node-pools create "$POOL" '
+                                        '--cluster="$CLUSTER" $LOC --project="$PROJECT" '
+                                        + ' '.join(flags) + ' $SA_FLAG '
+                                        '2>&1 | grep -v "already exists" || true ;;')
+                create_lines.append('  *) echo "ERROR: class $CLS not in live catalog"; exit 1 ;;')
+                create_lines.append('esac')
+                if is_quant_step:
+                    create_lines.append('fi')
+                # destroy is idempotent (tolerates a pool that was never created because
+                # the step was skipped), so it runs unconditionally for every step.
+                destroy_lines += [
+                    'POOL="%s${UID8}"' % prefix,
+                    'echo "destroy nodepool $POOL"',
+                    'gcloud container node-pools delete "$POOL" --cluster="$CLUSTER" '
+                    '$LOC --project="$PROJECT" --quiet 2>&1 | grep -v "was not found" || true',
+                ]
+
+            templates.append({
+                'name': 'create-nodegroups',
+                'metadata': {'labels': {'platform.kubecore.io/pipeline': pipeline_name,
+                                        'platform.kubecore.io/nodepool-lifecycle': 'create'}},
+                'serviceAccountName': GCLOUD_SA,
+                'nodeSelector': {'platform.kubecore.io/nodegroup-type': CI_POOL},
+                'container': {
+                    'image': 'google/cloud-sdk:alpine',
+                    'command': ['sh', '-c'],
+                    'args': ['\n'.join(create_lines) + '\n'],
+                },
+            })
+            templates.append({
+                'name': 'destroy-nodegroups',
+                'metadata': {'labels': {'platform.kubecore.io/pipeline': pipeline_name,
+                                        'platform.kubecore.io/nodepool-lifecycle': 'destroy'}},
+                'serviceAccountName': GCLOUD_SA,
+                'nodeSelector': {'platform.kubecore.io/nodegroup-type': CI_POOL},
+                'container': {
+                    'image': 'google/cloud-sdk:alpine',
+                    'command': ['sh', '-c'],
+                    'args': ['\n'.join(destroy_lines) + '\n'],
+                },
+            })
+
+            # ── stockout guard: FAIL if any chosen {step}-class is stocked out ──
+            guard_lines = ['set -eu', 'BAD=0']
+            for step in steps:
+                sn = step['name']
+                ref = OB + "workflow.parameters['" + sn + "-class']" + CB
+                guard_lines.append('case "%s" in' % ref)
+                guard_lines.append('  *"(STOCKOUT)") echo "step %s picked a stocked-out class: %s"; BAD=1 ;;' % (sn, ref))
+                guard_lines.append('esac')
+            guard_lines.append('if [ "$BAD" != 0 ]; then echo "One or more steps selected a '
+                               'stocked-out compute class. Pick an available class and resubmit."; exit 1; fi')
+            guard_lines.append('echo "compute-class stockout guard passed"')
+            templates.append({
+                'name': 'validate-classes',
+                'serviceAccountName': sa,
+                'nodeSelector': {'platform.kubecore.io/nodegroup-type': CI_POOL},
+                'container': {
+                    'image': 'busybox:1.36',
+                    'command': ['sh', '-c'],
+                    'args': ['\n'.join(guard_lines) + '\n'],
+                },
+            })
+
+            # ── DAG: guard → create-nodegroups → steps → (onExit) destroy ───────
+            dag_tasks.append({'name': 'validate-classes', 'template': 'validate-classes'})
+            dag_tasks.append({'name': 'create-nodegroups', 'template': 'create-nodegroups',
+                              'depends': 'validate-classes'})
+
+            def _gate_live(dep):
+                # "dep ran-or-was-skipped" — a quant-step dependency (qat-finetune,
+                # model-quantization) is Skipped on the default quantization-mode=none
+                # run via its `when`; a plain .Succeeded gate would then Omit every
+                # downstream (e.g. model-registration depends on qat-finetune). Mirror
+                # the legacy Succeeded||Skipped gate so a skipped optional dep never
+                # blocks, while a REAL failure (Failed/Error, not Skipped) still does.
+                return f"({dep}.Succeeded || {dep}.Skipped)"
+
+            for step in steps:
+                sn = step['name']
+                deps = step.get('dependencies', []) or []
+                # every step depends on create-nodegroups (its pool must exist) plus its
+                # kubeline deps. A quant step additionally gates on quantization-mode.
+                dep_clauses = ['create-nodegroups.Succeeded'] + [_gate_live(d) for d in deps]
+                depends_expr = ' && '.join(dep_clauses)
+                inp_params = step.get('inputs', {}).get('parameters', []) if step.get('inputs') else []
+                is_quant_step = sn in QUANTIZATION_STEPS
+                task = {'name': sn, 'template': sn, 'depends': depends_expr}
+                task_params = []
+                # pool-name input: the concrete ephemeral pool for this run+step, built
+                # at run time to EXACTLY match the NodePool create-nodegroups made
+                # (same _pool_prefix + uid8). create-nodegroups computes uid8 as
+                # `echo <workflow.uid> | tr -d - | cut -c1-8`; mirror that transform
+                # with an Argo expression (sprig replace '-'->'' then trunc 8) so the
+                # pod's nodeSelector value is byte-identical to the node label.
+                prefix = _pool_prefix(sn)
+                # sprig funcs are exposed under the sprig.* namespace in Argo expression
+                # templates; replace(old,new,src) then trunc(len,src). Quotes are double
+                # inside the =expr (single-quote OB/CB literals are the Python string).
+                pool_val = (OB + '=' + '"' + prefix + '" + sprig.trunc(8, sprig.replace("-", "", workflow.uid))' + CB)
+                task_params.append({'name': 'pool-name', 'value': pool_val})
+                if is_quant_step:
+                    task['when'] = OB + "workflow.parameters['quantization-mode'] != 'none'" + CB
+                for ip in inp_params:
+                    frm = ip.get('from')
+                    if not frm:
+                        continue
+                    expr = OB + f"tasks['{frm}'].outputs.parameters['{ip['name']}']" + CB
+                    task_params.append({'name': ip['name'], 'value': expr})
+                task['arguments'] = {'parameters': task_params}
+                dag_tasks.append(task)
+
+            templates.append({'name': f"{app_name}-pipeline", 'dag': {'tasks': dag_tasks}})
+
+            def build_live_step_template(step):
+                sn = step['name']
+                is_quant_step = sn in QUANTIZATION_STEPS
+                default_cls_name = _strip_stockout(_default_class_name(step))
+                default_cls = by_name.get(default_cls_name, {})
+                is_gpu_default = default_cls.get('tier') == 'gpu'
+                # concrete resources sized to the DEFAULT class (Argo needs concrete
+                # quantities in container.resources); the per-run whole-node override
+                # for the ACTUAL chosen class is applied via podSpecPatch below.
+                sized_req, sized_lim = _whole_node_resources(default_cls) if default_cls else (
+                    {'cpu': '1', 'memory': '2Gi'}, {'cpu': '1', 'memory': '2Gi'})
+
+                container = {
+                    'image': OB + 'workflow.parameters.image-' + sn + CB,
+                    'resources': {'requests': sized_req, 'limits': sized_lim},
+                }
+                if step.get('command'):
+                    container['command'] = step['command']
+                if step.get('args'):
+                    container['args'] = step['args']
+
+                env_list = [
+                    {'name': 'MLFLOW_TRACKING_URI', 'value': OB + 'workflow.parameters.mlflow-endpoint' + CB},
+                    {'name': 'LAKEFS_ENDPOINT', 'value': OB + 'workflow.parameters.lakefs-endpoint' + CB},
+                    {'name': 'LAKEFS_ACCESS_KEY', 'valueFrom': {'secretKeyRef': {'name': lakefs.get('adminSecret', f"{project_name}-lakefs-admin"), 'key': 'accessKeyId'}}},
+                    {'name': 'LAKEFS_SECRET_KEY', 'valueFrom': {'secretKeyRef': {'name': lakefs.get('adminSecret', f"{project_name}-lakefs-admin"), 'key': 'secretAccessKey'}}},
+                    {'name': 'MLFLOW_TRACKING_AUTH', 'value': 'zitadel'},
+                    {'name': 'ZITADEL_MACHINE_KEY_FILE', 'value': '/etc/mlflow-svc/ZITADEL_MACHINE_KEY'},
+                    {'name': 'ZITADEL_DOMAIN', 'value': OB + 'workflow.parameters.zitadel-domain' + CB},
+                    {'name': 'ZITADEL_MLFLOW_PROJECT_ID', 'value': OB + 'workflow.parameters.zitadel-mlflow-project-id' + CB},
+                ]
+                ckpt_bucket = checkpoints.get('bucket', '')
+                ckpt_prefix = checkpoints.get('prefix', '')
+                if ckpt_bucket:
+                    env_list.append({'name': 'CHECKPOINT_BUCKET', 'value': ckpt_bucket})
+                if ckpt_prefix:
+                    env_list.append({'name': 'CHECKPOINT_PREFIX', 'value': ckpt_prefix})
+                for e in (step.get('env') or []):
+                    env_list.append(e)
+                container['env'] = env_list
+
+                mlflow_svc_secret = mlflow.get('svcSecret', f"{project_name}-mlflow-svc")
+                container['volumeMounts'] = [
+                    {'name': 'mlflow-svc', 'mountPath': '/etc/mlflow-svc', 'readOnly': True},
+                    {'name': 'dshm', 'mountPath': '/dev/shm'},
+                ]
+
+                # tolerations: the ephemeral node is tainted with the step's tier
+                # (platform.kubecore.io/ml-workload) + nvidia.com/gpu for gpu. Tolerate
+                # BOTH tiers so whichever class the developer picks schedules; the
+                # nodeSelector (pool-name) still pins the pod to its own node.
+                step_tolerations = [
+                    {'key': 'platform.kubecore.io/ml-workload', 'operator': 'Exists', 'effect': 'NoSchedule'},
+                    {'key': 'nvidia.com/gpu', 'operator': 'Exists', 'effect': 'NoSchedule'},
+                ]
+
+                tmpl = {
+                    'name': sn,
+                    'inputs': {'parameters': [{'name': 'pool-name'}]},
+                    'metadata': {
+                        'labels': {
+                            'platform.kubecore.io/project': project_name,
+                            'platform.kubecore.io/pipeline': pipeline_name,
+                            'platform.kubecore.io/step': sn,
+                            'platform.kubecore.io/compute-type': 'gpu' if is_gpu_default else 'cpu',
+                            'platform.kubecore.io/compute-class': OB + "workflow.parameters['" + sn + "-class']" + CB,
+                        }
+                    },
+                    'nodeSelector': {'platform.kubecore.io/nodegroup-type': OB + 'inputs.parameters.pool-name' + CB},
+                    'tolerations': step_tolerations,
+                    'serviceAccountName': sa,
+                    'retryStrategy': {
+                        'limit': '2',
+                        'retryPolicy': 'OnError',
+                        'backoff': {'duration': '30s', 'factor': '2', 'maxDuration': '5m'},
+                    },
+                    'activeDeadlineSeconds': 10800 if (is_gpu_default or is_quant_step) else 1800,
+                    'container': container,
+                    'volumes': [
+                        {'name': 'mlflow-svc', 'secret': {'secretName': mlflow_svc_secret, 'optional': True}},
+                        {'name': 'dshm', 'emptyDir': {'medium': 'Memory', 'sizeLimit': '1Gi'}},
+                    ],
+                }
+
+                # podSpecPatch: override the main container to the WHOLE-NODE resources
+                # of the ACTUAL chosen class. container.resources (above) carries the
+                # DEFAULT class's concrete quantities (Argo needs concrete values there);
+                # this patch swaps them for the chosen class at run time. Each class's
+                # whole-node resources are known at RENDER time, so bake a per-class
+                # ternary chain keyed on the {step}-class param value (pools carry a
+                # handful of classes, so the chain is short). This is the same
+                # podSpecPatch mechanism the legacy path uses to parameterize resources.
+                cpu_expr_parts = []
+                mem_expr_parts = []
+                gpu_expr_parts = []
+                for c in catalog_classes:
+                    r, _ = _whole_node_resources(c)
+                    cond = "workflow.parameters['" + sn + "-class'] == '" + c['name'] + "'"
+                    cpu_expr_parts.append((cond, r['cpu']))
+                    mem_expr_parts.append((cond, r['memory']))
+                    gpu_expr_parts.append((cond, r.get('nvidia.com/gpu', '0')))
+                def _ternary(parts, fallback):
+                    expr = "'" + fallback + "'"
+                    for cond, val in reversed(parts):
+                        expr = "(%s ? '%s' : %s)" % (cond, val, expr)
+                    return expr
+                cpu_e = OB + '=' + _ternary(cpu_expr_parts, sized_req['cpu']) + CB
+                mem_e = OB + '=' + _ternary(mem_expr_parts, sized_req['memory']) + CB
+                gpu_e = OB + '=' + _ternary(gpu_expr_parts, '0') + CB
+                patch_lines = [
+                    'containers:', '- name: main', '  resources:', '    requests:',
+                    '      cpu: "%s"' % cpu_e, '      memory: "%s"' % mem_e,
+                    '      nvidia.com/gpu: "%s"' % gpu_e,
+                    '    limits:',
+                    '      cpu: "%s"' % cpu_e, '      memory: "%s"' % mem_e,
+                    '      nvidia.com/gpu: "%s"' % gpu_e,
+                ]
+                tmpl['podSpecPatch'] = '\n'.join(patch_lines) + '\n'
+
+                inp = step.get('inputs', {}).get('parameters', []) if step.get('inputs') else []
+                extra_in = [{'name': p['name']} for p in inp]
+                if extra_in:
+                    tmpl['inputs']['parameters'] += extra_in
+                out = step.get('outputs', {}).get('parameters', []) if step.get('outputs') else []
+                if out:
+                    tmpl['outputs'] = {'parameters': [{'name': p['name'], 'valueFrom': {'path': p['path']}} for p in out]}
+                return tmpl
+
+            for step in steps:
+                templates.append(build_live_step_template(step))
+
+            if hpc.get('enabled'):
+                provider = hpc.get('provider', 'none')
+                templates.append({
+                    'name': 'hpc-burst',
+                    'container': {
+                        'image': 'busybox:1.36',
+                        'command': ['sh', '-c'],
+                        'args': [f'echo "HPC burst placeholder, provider={provider} not yet wired"']
+                    }
+                })
+
+            wft = {
+                'apiVersion': 'argoproj.io/v1alpha1',
+                'kind': 'WorkflowTemplate',
+                'metadata': {
+                    'name': f"{app_name}-pipeline",
+                    'namespace': ml_ns,
+                    'annotations': {
+                        'platform.kubecore.io/cost-tracking': 'enabled',
+                        'platform.kubecore.io/pipeline': pipeline_name,
+                        'platform.kubecore.io/compute-model': 'live-ephemeral-nodegroups',
+                        'platform.kubecore.io/generated-by': 'ml-ci-build/render-wft',
+                        'platform.kubecore.io/rendered-from-commit-time': str(os.environ.get('SRC_COMMIT_TIME', '0')),
+                    },
+                    'labels': {
+                        'platform.kubecore.io/project': project_name,
+                        'platform.kubecore.io/app': app_name,
+                        'platform.kubecore.io/managed-by': 'kubecore-ci',
+                    }
+                },
+                'spec': {
+                    'serviceAccountName': sa,
+                    'entrypoint': f"{app_name}-pipeline",
+                    # onExit destroys every ephemeral NodePool for this run regardless of
+                    # success/failure — the primary teardown (janitor CronWorkflow is the
+                    # backstop for a crashed controller).
+                    'onExit': 'destroy-nodegroups',
+                    'arguments': {'parameters': args_params},
+                    'templates': templates,
+                }
+            }
+
+            os.makedirs(os.path.dirname(wft_out), exist_ok=True)
+            with open(wft_out, 'w') as f:
+                yaml.dump(wft, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
+            print(f"render-wft: wrote LIVE-compute WFT {wft_out}")
+            sys.exit(0)
 
         # ── Headroom-aware step sizing ──────────────────────────────────────
         # A step must NOT request the node's full capacity: the node also runs

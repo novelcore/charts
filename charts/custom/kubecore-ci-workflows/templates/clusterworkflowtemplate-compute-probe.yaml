@@ -1,0 +1,365 @@
+{{/*
+ml-compute-catalog-probe — KubeCore live-compute catalog probe ClusterWorkflowTemplate.
+
+Run on a schedule by the per-KubePool CronWorkflow the kubecore-operator
+(clusteroperators composition) creates when the pool opts into the live
+ephemeral-nodegroup model (features.mlConfig.ephemeralPipelineNodegroups).
+The CronWorkflow runs in the argo-workflows namespace as ServiceAccount
+ml-compute-probe-sa (WI-annotated to impersonate {org}-gcp-eso-sa →
+roles/compute.viewer + roles/container.developer), references this CWT by name
+(templateRef clusterScope: true), and passes:
+
+  project_id, region, catalog_configmap (="kubecore-ml-compute-catalog"),
+  catalog_namespace (="argo-workflows")
+
+What it does:
+  1. gcloud queries the LIVE GCP compute API for the given project + region:
+     machine-types (vCPU/RAM/bundled accelerators), accelerator-types
+     (per-zone availability = the stockout signal), and the region's zones.
+  2. Builds a catalog.yaml with a classes[] list — one entry per ML-relevant
+     machine type (n1/n2/e2-standard CPU, g2/a2/a3 GPU). Each entry carries the
+     synthetic stable name, tier, machineType, cpu/ram, gpu (type/count/vramGiB),
+     GKE-reservation-derived allocatable (what render-wft sizes whole-node
+     requests==limits from), available/stockout/availableZones, and a label.
+  3. Writes/updates the ConfigMap <catalog_configmap> in <catalog_namespace>.
+
+render-wft (clusterworkflowtemplate-ml.yaml, live-compute path) reads this
+ConfigMap to render the per-step compute-class dropdowns. Without a populated
+catalog the live-compute pipeline fails loudly at render — this probe is what
+makes the dropdown data exist.
+
+Standalone maintenance workflow: no git repo, no workspace PVC, no GitHub token,
+no registry auth. The SA + its RBAC (configmaps get/list/create/update/patch in
+argo-workflows) are provided by the operator's clusteroperators composition.
+*/}}
+apiVersion: argoproj.io/v1alpha1
+kind: ClusterWorkflowTemplate
+metadata:
+  name: ml-compute-catalog-probe
+  labels:
+    {{- include "kubecore-ci-workflows.labels" . | nindent 4 }}
+spec:
+  entrypoint: probe
+  ttlStrategy:
+    secondsAfterCompletion: {{ .Values.workflow.ttlStrategy.secondsAfterCompletion }}
+  podGC:
+    strategy: {{ .Values.workflow.podGC.strategy }}
+  arguments:
+    parameters:
+    - name: project_id
+    - name: region
+    - name: catalog_configmap
+      value: "kubecore-ml-compute-catalog"
+    - name: catalog_namespace
+      value: "argo-workflows"
+
+  templates:
+  - name: probe
+    inputs:
+      parameters:
+      - name: project_id
+        value: "{{`{{workflow.parameters.project_id}}`}}"
+      - name: region
+        value: "{{`{{workflow.parameters.region}}`}}"
+      - name: catalog_configmap
+        value: "{{`{{workflow.parameters.catalog_configmap}}`}}"
+      - name: catalog_namespace
+        value: "{{`{{workflow.parameters.catalog_namespace}}`}}"
+    metadata:
+      labels:
+        platform.kubecore.io/compute-model: live-ephemeral-nodegroups
+        platform.kubecore.io/maintenance: compute-catalog-probe
+    container:
+      # google/cloud-sdk:alpine ships both gcloud AND python3 (+ kubectl via the
+      # gcloud components; alpine variant bundles kubectl). gcloud authenticates
+      # automatically off the pod's GKE Workload Identity (the WI-annotated KSA).
+      image: google/cloud-sdk:alpine
+      command: [sh, -c]
+      args:
+      - |
+        set -eu
+
+        PROJECT="{{`{{inputs.parameters.project_id}}`}}"
+        REGION="{{`{{inputs.parameters.region}}`}}"
+        CM_NAME="{{`{{inputs.parameters.catalog_configmap}}`}}"
+        CM_NS="{{`{{inputs.parameters.catalog_namespace}}`}}"
+
+        if [ -z "$PROJECT" ] || [ -z "$REGION" ]; then
+          echo "ERROR: project_id and region are required (got project='$PROJECT' region='$REGION')" >&2
+          exit 1
+        fi
+        echo "probing compute catalog for project=$PROJECT region=$REGION"
+
+        # ── Resolve the zones in the region ────────────────────────────────
+        ZONES=$(gcloud compute zones list \
+          --project="$PROJECT" \
+          --filter="region:( $REGION )" \
+          --format="value(name)")
+        if [ -z "$ZONES" ]; then
+          echo "ERROR: no zones found for region $REGION in project $PROJECT" >&2
+          exit 1
+        fi
+        # comma-joined for the machine-types --zones flag
+        ZONES_CSV=$(echo "$ZONES" | paste -sd, -)
+        echo "zones in $REGION: $ZONES_CSV"
+
+        # ── Machine types across all zones of the region ───────────────────
+        # (guestCpus, memoryMb, accelerators[] for bundled-GPU families a2/a3)
+        gcloud compute machine-types list \
+          --project="$PROJECT" \
+          --zones="$ZONES_CSV" \
+          --format=json > /tmp/machine-types.json
+
+        # ── Accelerator availability per zone (the stockout signal) ────────
+        # An accelerator type ABSENT from a zone = unavailable there. Build a
+        # zone-filter clause "zone:( z1 z2 ... )".
+        ZONE_FILTER="zone:( $(echo "$ZONES" | paste -sd' ' -) )"
+        gcloud compute accelerator-types list \
+          --project="$PROJECT" \
+          --filter="$ZONE_FILTER" \
+          --format=json > /tmp/accelerator-types.json
+
+        echo "machine-types: $(python3 -c 'import json;print(len(json.load(open("/tmp/machine-types.json"))))')"
+        echo "accelerator-types: $(python3 -c 'import json;print(len(json.load(open("/tmp/accelerator-types.json"))))')"
+
+        # ── Build catalog.yaml ─────────────────────────────────────────────
+        REGION="$REGION" python3 /tmp/build_catalog.py \
+          /tmp/machine-types.json \
+          /tmp/accelerator-types.json \
+          > /tmp/catalog.yaml
+        echo "──── catalog.yaml ────"
+        cat /tmp/catalog.yaml
+        echo "──────────────────────"
+
+        # ── Write the ConfigMap (idempotent create-or-update) ──────────────
+        kubectl create configmap "$CM_NAME" \
+          -n "$CM_NS" \
+          --from-file=catalog.yaml=/tmp/catalog.yaml \
+          --dry-run=client -o yaml | kubectl apply -f -
+        echo "published catalog to configmap $CM_NS/$CM_NAME"
+
+      # The catalog builder. Kept out of the shell arg above so the here-doc's
+      # Python is isolated from shell/Helm quoting. Emits YAML by hand (no pip
+      # install at runtime) matching EXACTLY the shape render-wft consumes:
+      #   classes[].{name,tier,machineType,cpu,ram,gpu,allocatable,available,
+      #             stockout,availableZones,label}  +  top-level region.
+      volumeMounts:
+      - name: scripts
+        mountPath: /tmp/build_catalog.py
+        subPath: build_catalog.py
+    volumes:
+    - name: scripts
+      configMap:
+        name: {{ include "kubecore-ci-workflows.fullname" . }}-compute-probe-scripts
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "kubecore-ci-workflows.fullname" . }}-compute-probe-scripts
+  namespace: {{ include "kubecore-ci-workflows.namespace" . }}
+  labels:
+    {{- include "kubecore-ci-workflows.labels" . | nindent 4 }}
+data:
+  build_catalog.py: |
+    #!/usr/bin/env python3
+    """Build the live compute catalog.yaml from gcloud JSON dumps.
+
+    argv[1] = machine-types.json  (gcloud compute machine-types list --format=json)
+    argv[2] = accelerator-types.json (gcloud compute accelerator-types list --format=json)
+    env REGION = the region name (top-level `region:` in the catalog).
+
+    Emits catalog.yaml to stdout. Shape MUST match render-wft's live path
+    (clusterworkflowtemplate-ml.yaml): classes[] with name/tier/machineType/
+    cpu/ram/gpu/allocatable/available/stockout/availableZones/label.
+    """
+    import json, os, sys, re
+
+    machine_types_path = sys.argv[1]
+    accel_types_path = sys.argv[2]
+    region = os.environ.get("REGION", "")
+
+    with open(machine_types_path) as f:
+        machine_types = json.load(f)
+    with open(accel_types_path) as f:
+        accel_types = json.load(f)
+
+    # accelerator type -> set of zones where it is offered. An accelerator absent
+    # from a zone is unavailable there; a GPU machine whose required accelerator
+    # is offered in >=1 region zone is `available`, else stockout.
+    accel_zones = {}
+    for a in accel_types:
+        name = a.get("name")
+        zone_url = a.get("zone", "")
+        zone = zone_url.rsplit("/", 1)[-1] if zone_url else ""
+        if name and zone:
+            accel_zones.setdefault(name, set()).add(zone)
+
+    # Static VRAM (GiB) per accelerator type. Unknown -> 0 (still emitted).
+    VRAM_GIB = {
+        "nvidia-tesla-t4": 16,
+        "nvidia-l4": 24,
+        "nvidia-tesla-v100": 16,
+        "nvidia-tesla-a100": 40,
+        "nvidia-a100-80gb": 80,
+        "nvidia-h100-80gb": 80,
+        "nvidia-h100-mega-80gb": 80,
+    }
+
+    # ML-relevant machine families. CPU: general-purpose standard families.
+    # GPU: g2 (L4), a2 (A100), a3 (H100) which bundle accelerators in the
+    # machine type itself (reported in machineType.accelerators[]).
+    CPU_FAMILY_RE = re.compile(r"^(n2|n1|e2)-standard-\d+$")
+    GPU_FAMILY_RE = re.compile(r"^(g2-standard-\d+|a2-(?:highgpu|ultragpu|megagpu)-\d+g?|a3-(?:highgpu|megagpu|ultragpu)-\d+g?)$")
+
+    def gke_allocatable_memory_gib(capacity_gib):
+        """GKE reserves memory on a tiered curve; allocatable = capacity - reserved
+        - 0.1 GiB (hard eviction threshold). Tiers (fraction reserved):
+          25% of first 4 GiB, 20% of next 4 (4-8), 10% of next 8 (8-16),
+          6% of next 112 (16-128), 2% of anything above 128 GiB.
+        Then subtract ~0.5 GiB daemonset safety margin (task spec)."""
+        reserved = 0.0
+        remaining = capacity_gib
+        for cap, frac in ((4, 0.25), (4, 0.20), (8, 0.10), (112, 0.06)):
+            take = min(remaining, cap)
+            if take <= 0:
+                break
+            reserved += take * frac
+            remaining -= take
+        if remaining > 0:
+            reserved += remaining * 0.02
+        reserved += 0.1  # eviction threshold
+        alloc = capacity_gib - reserved - 0.5  # safety margin
+        return round(max(alloc, 0.0), 2)
+
+    def cpu_allocatable(cores):
+        # CPU allocatable = cores - 0.5 (GKE kube-reserved + daemonset headroom).
+        return round(max(cores - 0.5, 0.0), 2)
+
+    # dedupe machine types by name (they repeat once per zone in the dump); track
+    # which zones each machine type appeared in.
+    mt_by_name = {}
+    mt_zones = {}
+    for mt in machine_types:
+        name = mt.get("name")
+        if not name:
+            continue
+        zone_url = mt.get("zone", "")
+        zone = zone_url.rsplit("/", 1)[-1] if zone_url else ""
+        if zone:
+            mt_zones.setdefault(name, set()).add(zone)
+        mt_by_name.setdefault(name, mt)
+
+    def yaml_escape(s):
+        # Always double-quote scalar strings; escape backslash and quote.
+        s = str(s).replace("\\", "\\\\").replace('"', '\\"')
+        return '"%s"' % s
+
+    classes = []
+
+    for name in sorted(mt_by_name):
+        mt = mt_by_name[name]
+        is_cpu = bool(CPU_FAMILY_RE.match(name))
+        is_gpu = bool(GPU_FAMILY_RE.match(name))
+        if not (is_cpu or is_gpu):
+            continue
+
+        cores = int(mt.get("guestCpus", 0) or 0)
+        mem_mb = int(mt.get("memoryMb", 0) or 0)
+        ram_gib = round(mem_mb / 1024.0)
+        cpu_platform = ""  # not reported by machine-types list; left empty
+
+        # Bundled accelerators come from the machine type's accelerators[] entry
+        # (a2/a3/g2). Each: {guestAcceleratorType, guestAcceleratorCount}.
+        accels = mt.get("accelerators", []) or []
+        accel_type = ""
+        accel_count = 0
+        if accels:
+            accel_type = accels[0].get("guestAcceleratorType", "") or ""
+            accel_count = int(accels[0].get("guestAcceleratorCount", 0) or 0)
+
+        # tier: gpu if the machine bundles an accelerator, else cpu.
+        tier = "gpu" if (is_gpu and accel_type) else ("gpu" if is_gpu else "cpu")
+
+        # availability / stockout.
+        if tier == "gpu" and accel_type:
+            offered_zones = sorted(accel_zones.get(accel_type, set()) & mt_zones.get(name, set(accel_zones.get(accel_type, set()))))
+            # if the machine type itself carries zone info, intersect; else fall
+            # back to the accelerator's zones.
+            if not offered_zones:
+                offered_zones = sorted(accel_zones.get(accel_type, set()))
+            available = len(offered_zones) > 0
+            stockout = not available
+            available_zones = offered_zones
+        else:
+            # CPU classes always available; zones = where the machine type showed.
+            available = True
+            stockout = False
+            available_zones = sorted(mt_zones.get(name, set()))
+
+        # synthetic stable name.
+        if tier == "gpu":
+            vram = VRAM_GIB.get(accel_type, 0)
+            short = accel_type.replace("nvidia-tesla-", "").replace("nvidia-", "")
+            synth = "gpu-%s-%dx-%s" % (short or "accel", accel_count or 1, name)
+        else:
+            vram = 0
+            synth = "cpu-%s" % name
+
+        alloc_cpu = cpu_allocatable(cores)
+        alloc_mem = gke_allocatable_memory_gib(ram_gib)
+
+        # label.
+        label = "%s — %s · %d vCPU · %d GiB RAM" % (synth, name, cores, ram_gib)
+        if tier == "gpu" and accel_type:
+            label += " · %dx%s (%dGB VRAM)" % (accel_count or 1, accel_type, vram)
+        if stockout:
+            label += " (STOCKOUT)"
+
+        cls = {
+            "name": synth,
+            "tier": tier,
+            "machineType": name,
+            "cpu": {"cores": cores, "type": cpu_platform},
+            "ram": {"gib": ram_gib},
+            "allocatable": {"cpu": alloc_cpu, "memoryGiB": alloc_mem},
+            "available": available,
+            "stockout": stockout,
+            "availableZones": available_zones,
+            "label": label,
+        }
+        if tier == "gpu":
+            cls["gpu"] = {"type": accel_type, "count": accel_count or 1, "vramGiB": vram}
+        classes.append(cls)
+
+    # ── Emit YAML by hand (2-space indent, block style) ────────────────────
+    out = []
+    out.append("region: %s" % yaml_escape(region))
+    out.append("classes:")
+    for c in classes:
+        out.append("  - name: %s" % yaml_escape(c["name"]))
+        out.append("    tier: %s" % yaml_escape(c["tier"]))
+        out.append("    machineType: %s" % yaml_escape(c["machineType"]))
+        out.append("    cpu:")
+        out.append("      cores: %d" % c["cpu"]["cores"])
+        out.append("      type: %s" % yaml_escape(c["cpu"]["type"]))
+        out.append("    ram:")
+        out.append("      gib: %d" % c["ram"]["gib"])
+        if "gpu" in c:
+            out.append("    gpu:")
+            out.append("      type: %s" % yaml_escape(c["gpu"]["type"]))
+            out.append("      count: %d" % c["gpu"]["count"])
+            out.append("      vramGiB: %d" % c["gpu"]["vramGiB"])
+        out.append("    allocatable:")
+        out.append("      cpu: %s" % repr(c["allocatable"]["cpu"]))
+        out.append("      memoryGiB: %s" % repr(c["allocatable"]["memoryGiB"]))
+        out.append("    available: %s" % ("true" if c["available"] else "false"))
+        out.append("    stockout: %s" % ("true" if c["stockout"] else "false"))
+        if c["availableZones"]:
+            out.append("    availableZones:")
+            for z in c["availableZones"]:
+                out.append("      - %s" % yaml_escape(z))
+        else:
+            out.append("    availableZones: []")
+        out.append("    label: %s" % yaml_escape(c["label"]))
+
+    sys.stdout.write("\n".join(out) + "\n")

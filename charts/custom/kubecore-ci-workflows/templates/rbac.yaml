@@ -10,6 +10,13 @@ rules:
 - apiGroups: [""]
   resources: ["secrets"]
   verbs: ["get"]
+# render-wft (live-compute path) reads the pool-scoped compute-catalog ConfigMap
+# (kubecore-ml-compute-catalog, written by the ml-compute-catalog-probe
+# CronWorkflow) to render the per-step class dropdowns. The render-wft pod runs
+# as this SA in the argo-workflows namespace, so it needs configmaps:get.
+- apiGroups: [""]
+  resources: ["configmaps"]
+  verbs: ["get", "list"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding

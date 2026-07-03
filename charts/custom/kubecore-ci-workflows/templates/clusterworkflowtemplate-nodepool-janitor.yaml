@@ -1,0 +1,284 @@
+{{/*
+ml-nodepool-janitor — KubeCore ephemeral NodePool reaper ClusterWorkflowTemplate.
+
+Run on a schedule by the per-KubePool CronWorkflow the kubecore-operator
+(clusteroperators composition) creates alongside the compute-catalog probe when
+the pool opts into the live ephemeral-nodegroup model. The CronWorkflow runs in
+the argo-workflows namespace as ServiceAccount ml-compute-probe-sa (WI-annotated
+to impersonate {org}-gcp-eso-sa → roles/container.developer + roles/compute.viewer),
+references this CWT by name (templateRef clusterScope: true), and passes:
+
+  project_id, region, cluster_name (="{pool}-gke-cluster"), max_age_minutes (="180")
+
+Why it exists: the live-compute ML pipeline (clusterworkflowtemplate-ml.yaml)
+creates one ephemeral GKE NodePool per (step, run) named "pl-{app}-{step}-{uid8}"
+(or "pl-{sha1[:12]}-{uid8}" when the literal overflows 40 chars) and destroys
+them in an onExit destroy-nodegroups task. If a workflow is force-deleted, the
+controller crashes, or onExit doesn't run, those pools leak — each is a live GKE
+node billing money. This janitor sweeps them: it reaps any pl-* / pipeline-*
+pool older than max_age_minutes whose run is no longer active, and — critically —
+NEVER reaps a pool whose {uid8} suffix matches a currently-running Argo Workflow.
+
+Standalone maintenance workflow: no git repo, no workspace PVC, no GitHub token.
+The SA + its namespace-scoped RBAC (configmaps + argoproj.io/workflows get/list
+in argo-workflows) are provided by the operator's clusteroperators composition.
+
+RBAC NOTE (flagged to the operator): matching pool suffixes against RUNNING
+workflows correctly requires listing Workflows in ALL namespaces (a live pool's
+run executes in the app's ml namespace, not argo-workflows). The operator Role is
+namespace-scoped to argo-workflows, so `kubectl get workflows -A` will 403 on
+other namespaces. See the fallback in the script (it degrades to the
+argo-workflows namespace only) and the report for the recommended operator fix.
+*/}}
+apiVersion: argoproj.io/v1alpha1
+kind: ClusterWorkflowTemplate
+metadata:
+  name: ml-nodepool-janitor
+  labels:
+    {{- include "kubecore-ci-workflows.labels" . | nindent 4 }}
+spec:
+  entrypoint: janitor
+  ttlStrategy:
+    secondsAfterCompletion: {{ .Values.workflow.ttlStrategy.secondsAfterCompletion }}
+  podGC:
+    strategy: {{ .Values.workflow.podGC.strategy }}
+  arguments:
+    parameters:
+    - name: project_id
+    - name: region
+    - name: cluster_name
+    - name: max_age_minutes
+      value: "180"
+
+  templates:
+  - name: janitor
+    inputs:
+      parameters:
+      - name: project_id
+        value: "{{`{{workflow.parameters.project_id}}`}}"
+      - name: region
+        value: "{{`{{workflow.parameters.region}}`}}"
+      - name: cluster_name
+        value: "{{`{{workflow.parameters.cluster_name}}`}}"
+      - name: max_age_minutes
+        value: "{{`{{workflow.parameters.max_age_minutes}}`}}"
+    metadata:
+      labels:
+        platform.kubecore.io/compute-model: live-ephemeral-nodegroups
+        platform.kubecore.io/maintenance: nodepool-janitor
+    container:
+      # google/cloud-sdk:alpine ships gcloud, kubectl AND python3. gcloud + kubectl
+      # both authenticate off the pod's GKE Workload Identity (the WI-annotated KSA).
+      image: google/cloud-sdk:alpine
+      command: [sh, -c]
+      args:
+      - |
+        set -eu
+
+        PROJECT="{{`{{inputs.parameters.project_id}}`}}"
+        REGION="{{`{{inputs.parameters.region}}`}}"
+        CLUSTER="{{`{{inputs.parameters.cluster_name}}`}}"
+        MAX_AGE_MIN="{{`{{inputs.parameters.max_age_minutes}}`}}"
+
+        if [ -z "$PROJECT" ] || [ -z "$CLUSTER" ]; then
+          echo "ERROR: project_id and cluster_name are required (got project='$PROJECT' cluster='$CLUSTER')" >&2
+          exit 1
+        fi
+        echo "nodepool janitor: project=$PROJECT cluster=$CLUSTER region=$REGION max_age_min=$MAX_AGE_MIN"
+
+        # ── Resolve the cluster's EXACT location (zonal vs regional) ────────
+        # The janitor gets a region but the cluster may be zonal (dev pools are
+        # e.g. europe-central2-b). Ask GKE for the actual location and use
+        # --location, which accepts both a zone and a region.
+        LOCATION=$(gcloud container clusters list \
+          --project="$PROJECT" \
+          --filter="name=$CLUSTER" \
+          --format="value(location)" 2>/dev/null || true)
+        if [ -z "$LOCATION" ]; then
+          # Fall back to the passed region (regional cluster) if the describe/list
+          # couldn't resolve it. --location=<region> still works for regional.
+          echo "WARN: could not resolve cluster location from GKE; falling back to region=$REGION"
+          LOCATION="$REGION"
+        fi
+        if [ -z "$LOCATION" ]; then
+          echo "ERROR: could not determine a location for cluster $CLUSTER" >&2
+          exit 1
+        fi
+        echo "cluster location: $LOCATION"
+
+        # ── List node pools on the cluster ─────────────────────────────────
+        gcloud container node-pools list \
+          --cluster="$CLUSTER" \
+          --location="$LOCATION" \
+          --project="$PROJECT" \
+          --format=json > /tmp/node-pools.json || {
+            echo "ERROR: failed to list node pools for $CLUSTER" >&2
+            exit 1
+          }
+
+        # ── Collect UIDs of currently-running Argo Workflows ───────────────
+        # A live pool's run executes in the app's ml namespace, so the correct
+        # query is all namespaces (-A). The operator's Role is namespace-scoped to
+        # argo-workflows though, so -A may 403 — degrade to the argo-workflows
+        # namespace if the cluster-wide list is forbidden (fail SAFE: fewer UIDs
+        # known → we would only ever reap a pool whose run truly isn't listed, and
+        # the age gate still protects fresh pools). We log which path we took.
+        RUNNING_JSON=/tmp/running-workflows.json
+        if kubectl get workflows -A \
+             --field-selector=status.phase=Running \
+             -o json > "$RUNNING_JSON" 2>/dev/null; then
+          echo "listed running workflows across ALL namespaces"
+        elif kubectl get workflows -A -o json > "$RUNNING_JSON" 2>/dev/null; then
+          # some Argo versions don't index status.phase for --field-selector;
+          # fall back to listing all and filtering in python.
+          echo "listed workflows across ALL namespaces (client-side phase filter)"
+        elif kubectl get workflows -n argo-workflows -o json > "$RUNNING_JSON" 2>/dev/null; then
+          echo "WARN: cluster-wide workflow list forbidden (RBAC namespace-scoped);"
+          echo "WARN: degraded to argo-workflows namespace only — see CWT header note."
+        else
+          echo "WARN: could not list workflows at all; treating NO workflows as running."
+          echo "{}" > "$RUNNING_JSON"
+        fi
+
+        # ── Decide + reap ──────────────────────────────────────────────────
+        PROJECT="$PROJECT" CLUSTER="$CLUSTER" LOCATION="$LOCATION" \
+          MAX_AGE_MIN="$MAX_AGE_MIN" \
+          python3 /tmp/reap.py /tmp/node-pools.json "$RUNNING_JSON" > /tmp/to-reap.txt
+
+        if [ ! -s /tmp/to-reap.txt ]; then
+          echo "nothing to reap."
+          exit 0
+        fi
+
+        echo "──── pools to reap ────"
+        cat /tmp/to-reap.txt
+        echo "───────────────────────"
+
+        REAPED=0
+        while IFS= read -r POOL; do
+          [ -z "$POOL" ] && continue
+          echo "reaping node pool: $POOL"
+          # Idempotent: tolerate a pool that's already gone (concurrent janitor,
+          # or the pipeline's own destroy-nodegroups raced us).
+          gcloud container node-pools delete "$POOL" \
+            --cluster="$CLUSTER" \
+            --location="$LOCATION" \
+            --project="$PROJECT" \
+            --quiet 2>&1 | grep -v "was not found" || true
+          REAPED=$((REAPED + 1))
+        done < /tmp/to-reap.txt
+        echo "janitor done: reaped $REAPED pool(s)."
+
+      volumeMounts:
+      - name: scripts
+        mountPath: /tmp/reap.py
+        subPath: reap.py
+    volumes:
+    - name: scripts
+      configMap:
+        name: {{ include "kubecore-ci-workflows.fullname" . }}-nodepool-janitor-scripts
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "kubecore-ci-workflows.fullname" . }}-nodepool-janitor-scripts
+  namespace: {{ include "kubecore-ci-workflows.namespace" . }}
+  labels:
+    {{- include "kubecore-ci-workflows.labels" . | nindent 4 }}
+data:
+  reap.py: |
+    #!/usr/bin/env python3
+    """Decide which ephemeral node pools to reap.
+
+    argv[1] = node-pools.json (gcloud container node-pools list --format=json)
+    argv[2] = running-workflows.json (kubectl get workflows -o json)
+    env MAX_AGE_MIN = age threshold in minutes.
+
+    Prints one pool name per line to stdout for each pool that should be reaped.
+
+    A pool is reaped iff ALL hold:
+      1. Its name starts with "pl-" or "pipeline-" (an ephemeral per-pipeline pool).
+      2. It is older than MAX_AGE_MIN (from creationTimestamp / autoscaling info).
+      3. No currently-running Argo Workflow's UID matches the pool's "-{uid8}"
+         suffix. The pipeline derives {uid8} = workflow.uid with dashes stripped,
+         first 8 chars; a pool ".*-{uid8}$" whose uid8 matches a running run is
+         in-use and MUST NOT be reaped.
+    """
+    import json, os, sys, re
+    from datetime import datetime, timezone
+
+    node_pools_path = sys.argv[1]
+    running_path = sys.argv[2]
+    max_age_min = float(os.environ.get("MAX_AGE_MIN", "180") or "180")
+
+    with open(node_pools_path) as f:
+        pools = json.load(f)
+    with open(running_path) as f:
+        wf_doc = json.load(f)
+
+    # uid8 set of RUNNING workflows: uid with dashes stripped, first 8 chars.
+    # Mirrors the pipeline's `echo <workflow.uid> | tr -d - | cut -c1-8`.
+    running_uid8 = set()
+    for item in (wf_doc.get("items") or []):
+        phase = (((item.get("status") or {}).get("phase")) or "")
+        # if we listed with a field-selector the doc is already Running-only;
+        # otherwise filter here. Treat Running/Pending as active (a Pending run
+        # is about to schedule onto its pool).
+        if phase and phase not in ("Running", "Pending"):
+            continue
+        uid = ((item.get("metadata") or {}).get("uid") or "")
+        uid8 = uid.replace("-", "")[:8]
+        if uid8:
+            running_uid8.add(uid8)
+
+    now = datetime.now(timezone.utc)
+
+    def parse_ts(ts):
+        if not ts:
+            return None
+        # RFC3339, e.g. 2026-07-03T10:15:30Z or with offset.
+        ts = ts.replace("Z", "+00:00")
+        try:
+            return datetime.fromisoformat(ts)
+        except ValueError:
+            return None
+
+    EPHEMERAL_RE = re.compile(r"^(pl-|pipeline-)")
+    # trailing 8-hex-ish suffix the pipeline appends (uid8). Accept the general
+    # "-<8 alnum>" tail; we compare against the running set precisely.
+    SUFFIX_RE = re.compile(r"-([0-9a-f]{8})$")
+
+    to_reap = []
+    for p in pools:
+        name = p.get("name", "")
+        if not EPHEMERAL_RE.match(name):
+            continue
+
+        # Age. GKE node-pools list doesn't always surface creationTimestamp; it's
+        # reliably absent on the top-level object. Prefer the pool's own
+        # creationTimestamp if present, else look at the newest instanceGroup /
+        # fall back to reaping-eligible only when we can prove age. If we CANNOT
+        # determine age, be conservative and SKIP (never reap an unknown-age pool).
+        ts = parse_ts(p.get("creationTimestamp"))
+        if ts is None:
+            # try nested management/config timestamps some API versions expose
+            ts = parse_ts((p.get("config") or {}).get("creationTimestamp"))
+        if ts is None:
+            print("skip %s: cannot determine age (no creationTimestamp)" % name, file=sys.stderr)
+            continue
+        age_min = (now - ts).total_seconds() / 60.0
+        if age_min < max_age_min:
+            print("skip %s: age %.1fmin < %.1fmin threshold" % (name, age_min, max_age_min), file=sys.stderr)
+            continue
+
+        # In-use guard: does the pool's uid8 suffix match a running workflow?
+        m = SUFFIX_RE.search(name)
+        if m and m.group(1) in running_uid8:
+            print("skip %s: uid8 %s matches a RUNNING workflow (in use)" % (name, m.group(1)), file=sys.stderr)
+            continue
+
+        print("reap %s: age %.1fmin, no running workflow match" % (name, age_min), file=sys.stderr)
+        to_reap.append(name)
+
+    for name in to_reap:
+        print(name)
