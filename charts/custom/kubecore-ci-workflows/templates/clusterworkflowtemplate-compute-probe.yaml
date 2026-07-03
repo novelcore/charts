@@ -339,6 +339,60 @@ data:
             cls["gpu"] = {"type": accel_type, "count": accel_count or 1, "vramGiB": vram}
         classes.append(cls)
 
+    # ── Attached-accelerator GPU classes (n1 + T4/V100/P100/A100) ───────────
+    # T4/V100/P100 and the older A100 attach to n1 machines as a SEPARATE
+    # accelerator — they are NOT bundled into the machine type (unlike g2/a2/a3
+    # handled above). So a region like europe-central2 that only offers T4 would
+    # otherwise emit zero GPU classes. Synthesize one GPU class per attachable
+    # accelerator type found in the region, paired with a sensible n1 host.
+    ATTACHABLE = {
+        "nvidia-tesla-t4": "n1-standard-8",
+        "nvidia-tesla-v100": "n1-standard-8",
+        "nvidia-tesla-p100": "n1-standard-8",
+        "nvidia-tesla-p4": "n1-standard-8",
+        "nvidia-tesla-a100": "a2-highgpu-1g",  # a2 is bundled; skip if already emitted
+    }
+    emitted_names = {c["name"] for c in classes}
+    for accel_type in sorted(accel_zones):
+        host = ATTACHABLE.get(accel_type)
+        if not host:
+            continue  # bundled families (l4/a100-80gb/h100) handled above
+        host_mt = mt_by_name.get(host)
+        if not host_mt:
+            continue  # host machine family not offered in this region
+        # skip if a bundled class already covers this accelerator (e.g. a100 via a2)
+        if any(c.get("gpu", {}).get("type") == accel_type for c in classes):
+            continue
+        cores = int(host_mt.get("guestCpus", 0) or 0)
+        ram_gib = round(int(host_mt.get("memoryMb", 0) or 0) / 1024.0)
+        vram = VRAM_GIB.get(accel_type, 0)
+        count = 1
+        offered_zones = sorted(accel_zones.get(accel_type, set()))
+        available = len(offered_zones) > 0
+        stockout = not available
+        short = accel_type.replace("nvidia-tesla-", "").replace("nvidia-", "")
+        synth = "gpu-%s-%dx-%s" % (short or "accel", count, host)
+        if synth in emitted_names:
+            continue
+        label = "%s — %s · %d vCPU · %d GiB RAM · %dx%s (%dGB VRAM)" % (
+            synth, host, cores, ram_gib, count, accel_type, vram)
+        if stockout:
+            label += " (STOCKOUT)"
+        classes.append({
+            "name": synth,
+            "tier": "gpu",
+            "machineType": host,
+            "cpu": {"cores": cores, "type": ""},
+            "ram": {"gib": ram_gib},
+            "allocatable": {"cpu": cpu_allocatable(cores),
+                            "memoryGiB": gke_allocatable_memory_gib(ram_gib)},
+            "available": available,
+            "stockout": stockout,
+            "availableZones": offered_zones,
+            "label": label,
+            "gpu": {"type": accel_type, "count": count, "vramGiB": vram},
+        })
+
     # ── Emit YAML by hand (2-space indent, block style) ────────────────────
     out = []
     out.append("region: %s" % yaml_escape(region))
