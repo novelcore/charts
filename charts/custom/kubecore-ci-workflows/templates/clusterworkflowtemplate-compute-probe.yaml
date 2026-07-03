@@ -70,14 +70,22 @@ spec:
         platform.kubecore.io/compute-model: live-ephemeral-nodegroups
         platform.kubecore.io/maintenance: compute-catalog-probe
     container:
-      # google/cloud-sdk:alpine ships both gcloud AND python3 (+ kubectl via the
-      # gcloud components; alpine variant bundles kubectl). gcloud authenticates
-      # automatically off the pod's GKE Workload Identity (the WI-annotated KSA).
+      # google/cloud-sdk:alpine ships gcloud + python3 but NOT kubectl (the alpine
+      # variant does not bundle it), so we install it via gcloud components at
+      # start-up. gcloud authenticates automatically off the pod's GKE Workload
+      # Identity (the WI-annotated KSA).
       image: google/cloud-sdk:alpine
       command: [sh, -c]
       args:
       - |
         set -eu
+
+        # kubectl is not in the alpine cloud-sdk image; install it (idempotent).
+        if ! command -v kubectl >/dev/null 2>&1; then
+          gcloud components install kubectl --quiet >/dev/null 2>&1 \
+            || apk add --no-cache kubectl >/dev/null 2>&1 \
+            || { echo "ERROR: could not install kubectl" >&2; exit 1; }
+        fi
 
         PROJECT="{{`{{inputs.parameters.project_id}}`}}"
         REGION="{{`{{inputs.parameters.region}}`}}"
