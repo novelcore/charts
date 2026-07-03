@@ -1206,12 +1206,18 @@ spec:
                 task_params.append({'name': 'class-name',
                                     'value': OB + "workflow.parameters." + sn + "-class" + CB})
                 if is_quant_step:
-                    task['when'] = OB + "workflow.parameters['quantization-mode'] != 'none'" + CB
+                    # when: is an Argo EXPRESSION — needs the =expr form (leading '=');
+                    # bracket subscript is valid inside an expression, unlike simple
+                    # tags which require dot notation.
+                    task['when'] = OB + "=workflow.parameters['quantization-mode'] != 'none'" + CB
                 for ip in inp_params:
                     frm = ip.get('from')
                     if not frm:
                         continue
-                    expr = OB + f"tasks['{frm}'].outputs.parameters['{ip['name']}']" + CB
+                    # task-output ref in a simple-tag value uses dot notation (bracket
+                    # subscript only works inside an =expr). Argo supports dot for
+                    # dependency task outputs.
+                    expr = OB + f"tasks.{frm}.outputs.parameters.{ip['name']}" + CB
                     task_params.append({'name': ip['name'], 'value': expr})
                 task['arguments'] = {'parameters': task_params}
                 dag_tasks.append(task)
