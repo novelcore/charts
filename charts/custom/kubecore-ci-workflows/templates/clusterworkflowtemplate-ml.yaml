@@ -797,6 +797,16 @@ spec:
             # CI cpu class (they're short-lived, run on the system/CI pool, not an ML node).
             GCLOUD_SA = 'operate-workflow-sa'
             CI_POOL = ctx.get('ciCpuClass', 'kubecorecpu')
+            # The CI build pool (kubecorecpu) carries the taint
+            # platform.kubecore.io/ml-workload=cpu:NoSchedule (gke.go builds it so).
+            # The management pods that run there (validate-classes, create/destroy-
+            # nodegroups) MUST tolerate it, or the autoscaler refuses to scale the
+            # pool up for them ("Pod didn't trigger scale-up: untolerated taint") and
+            # they Pend forever. Exists-match tolerates any ml-workload value.
+            CI_POOL_TOLERATIONS = [
+                {'key': 'platform.kubecore.io/ml-workload', 'operator': 'Exists',
+                 'effect': 'NoSchedule'},
+            ]
 
             def _enum_value(c):
                 # The enum value the developer picks. Stocked-out classes stay IN the
@@ -1087,6 +1097,7 @@ spec:
                                         'platform.kubecore.io/nodepool-lifecycle': 'create'}},
                 'serviceAccountName': GCLOUD_SA,
                 'nodeSelector': {'platform.kubecore.io/nodegroup-type': CI_POOL},
+                'tolerations': CI_POOL_TOLERATIONS,
                 'inputs': {'parameters': nodegroup_inputs},
                 'container': {
                     'image': 'google/cloud-sdk:alpine',
@@ -1117,6 +1128,7 @@ spec:
                                         'platform.kubecore.io/nodepool-lifecycle': 'destroy'}},
                 'serviceAccountName': GCLOUD_SA,
                 'nodeSelector': {'platform.kubecore.io/nodegroup-type': CI_POOL},
+                'tolerations': CI_POOL_TOLERATIONS,
                 'inputs': {'parameters': destroy_inputs},
                 'container': {
                     'image': 'google/cloud-sdk:alpine',
@@ -1149,6 +1161,7 @@ spec:
                 'name': 'validate-classes',
                 'serviceAccountName': sa,
                 'nodeSelector': {'platform.kubecore.io/nodegroup-type': CI_POOL},
+                'tolerations': CI_POOL_TOLERATIONS,
                 'inputs': {'parameters': guard_inputs},
                 'container': {
                     'image': 'busybox:1.36',
