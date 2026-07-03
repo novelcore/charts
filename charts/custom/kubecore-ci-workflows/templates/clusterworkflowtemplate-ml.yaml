@@ -997,25 +997,25 @@ spec:
                 nodegroup_inputs.append({'name': step['name'] + '-class'})
                 nodegroup_inputs.append({'name': step['name'] + '-disk-gb'})
             nodegroup_args = [
-                {'name': 'gcp-project', 'value': OB + "workflow.parameters['gcp-project']" + CB},
-                {'name': 'gcp-cluster', 'value': OB + "workflow.parameters['gcp-cluster']" + CB},
-                {'name': 'gcp-location', 'value': OB + "workflow.parameters['gcp-location']" + CB},
-                {'name': 'gcp-location-type', 'value': OB + "workflow.parameters['gcp-location-type']" + CB},
-                {'name': 'node-service-account', 'value': OB + "workflow.parameters['node-service-account']" + CB},
-                {'name': 'quantization-mode', 'value': OB + "workflow.parameters['quantization-mode']" + CB},
+                {'name': 'gcp-project', 'value': OB + "workflow.parameters.gcp-project" + CB},
+                {'name': 'gcp-cluster', 'value': OB + "workflow.parameters.gcp-cluster" + CB},
+                {'name': 'gcp-location', 'value': OB + "workflow.parameters.gcp-location" + CB},
+                {'name': 'gcp-location-type', 'value': OB + "workflow.parameters.gcp-location-type" + CB},
+                {'name': 'node-service-account', 'value': OB + "workflow.parameters.node-service-account" + CB},
+                {'name': 'quantization-mode', 'value': OB + "workflow.parameters.quantization-mode" + CB},
             ]
             for step in steps:
                 nodegroup_args.append({'name': step['name'] + '-class',
-                                       'value': OB + "workflow.parameters['" + step['name'] + "-class']" + CB})
+                                       'value': OB + "workflow.parameters." + step['name'] + "-class" + CB})
                 nodegroup_args.append({'name': step['name'] + '-disk-gb',
-                                       'value': OB + "workflow.parameters['" + step['name'] + "-disk-gb']" + CB})
+                                       'value': OB + "workflow.parameters." + step['name'] + "-disk-gb" + CB})
             create_lines = [
                 'set -eu',
-                'PROJECT="' + OB + "inputs.parameters['gcp-project']" + CB + '"',
-                'CLUSTER="' + OB + "inputs.parameters['gcp-cluster']" + CB + '"',
-                'LOCATION="' + OB + "inputs.parameters['gcp-location']" + CB + '"',
-                'LOCATION_TYPE="' + OB + "inputs.parameters['gcp-location-type']" + CB + '"',
-                'NODE_SA="' + OB + "inputs.parameters['node-service-account']" + CB + '"',
+                'PROJECT="' + OB + "inputs.parameters.gcp-project" + CB + '"',
+                'CLUSTER="' + OB + "inputs.parameters.gcp-cluster" + CB + '"',
+                'LOCATION="' + OB + "inputs.parameters.gcp-location" + CB + '"',
+                'LOCATION_TYPE="' + OB + "inputs.parameters.gcp-location-type" + CB + '"',
+                'NODE_SA="' + OB + "inputs.parameters.node-service-account" + CB + '"',
                 'UID8=$(echo "' + OB + 'workflow.uid' + CB + '" | tr -d - | cut -c1-8)',
                 # gcloud auth via the pod's GKE workload identity (the WI-annotated KSA);
                 # google-cloud-sdk picks it up from the metadata server automatically.
@@ -1028,14 +1028,14 @@ spec:
             for step in steps:
                 sn = step['name']
                 prefix = _pool_prefix(sn)
-                cls_param_ref = OB + "inputs.parameters['" + sn + "-class']" + CB
-                disk_param_ref = OB + "inputs.parameters['" + sn + "-disk-gb']" + CB
+                cls_param_ref = OB + "inputs.parameters." + sn + "-class" + CB
+                disk_param_ref = OB + "inputs.parameters." + sn + "-disk-gb" + CB
                 is_quant_step = sn in QUANTIZATION_STEPS
                 # A quantization-class step is Skipped on the default (quantization-mode
                 # =none) run, so don't provision (or pay for) its node pool — only create
                 # it when quantization is actually requested. Non-quant steps always run.
                 if is_quant_step:
-                    qmode = OB + "inputs.parameters['quantization-mode']" + CB
+                    qmode = OB + "inputs.parameters.quantization-mode" + CB
                     create_lines.append('if [ "%s" != "none" ]; then' % qmode)
                 create_lines += [
                     'POOL="%s${UID8}"' % prefix,
@@ -1099,18 +1099,18 @@ spec:
             # workflow.parameters[...] — the onExit scope CAN resolve those (it runs at
             # workflow level). Only the coords the destroy header needs get defaults.
             destroy_inputs = [
-                {'name': 'gcp-project', 'value': OB + "workflow.parameters['gcp-project']" + CB},
-                {'name': 'gcp-cluster', 'value': OB + "workflow.parameters['gcp-cluster']" + CB},
-                {'name': 'gcp-location', 'value': OB + "workflow.parameters['gcp-location']" + CB},
-                {'name': 'gcp-location-type', 'value': OB + "workflow.parameters['gcp-location-type']" + CB},
-                {'name': 'node-service-account', 'value': OB + "workflow.parameters['node-service-account']" + CB},
-                {'name': 'quantization-mode', 'value': OB + "workflow.parameters['quantization-mode']" + CB},
+                {'name': 'gcp-project', 'value': OB + "workflow.parameters.gcp-project" + CB},
+                {'name': 'gcp-cluster', 'value': OB + "workflow.parameters.gcp-cluster" + CB},
+                {'name': 'gcp-location', 'value': OB + "workflow.parameters.gcp-location" + CB},
+                {'name': 'gcp-location-type', 'value': OB + "workflow.parameters.gcp-location-type" + CB},
+                {'name': 'node-service-account', 'value': OB + "workflow.parameters.node-service-account" + CB},
+                {'name': 'quantization-mode', 'value': OB + "workflow.parameters.quantization-mode" + CB},
             ]
             for step in steps:
                 destroy_inputs.append({'name': step['name'] + '-class',
-                                       'value': OB + "workflow.parameters['" + step['name'] + "-class']" + CB})
+                                       'value': OB + "workflow.parameters." + step['name'] + "-class" + CB})
                 destroy_inputs.append({'name': step['name'] + '-disk-gb',
-                                       'value': OB + "workflow.parameters['" + step['name'] + "-disk-gb']" + CB})
+                                       'value': OB + "workflow.parameters." + step['name'] + "-disk-gb" + CB})
             templates.append({
                 'name': 'destroy-nodegroups',
                 'metadata': {'labels': {'platform.kubecore.io/pipeline': pipeline_name,
@@ -1137,7 +1137,7 @@ spec:
             for step in steps:
                 sn = step['name']
                 guard_inputs.append({'name': sn + '-class'})
-                ref = OB + "inputs.parameters['" + sn + "-class']" + CB
+                ref = OB + "inputs.parameters." + sn + "-class" + CB
                 guard_lines.append('CLS="%s"' % ref)
                 guard_lines.append('case "$CLS" in')
                 guard_lines.append('  *"(STOCKOUT)") echo "step %s picked a stocked-out class: $CLS"; BAD=1 ;;' % sn)
@@ -1161,7 +1161,7 @@ spec:
             # Pass each chosen class into validate-classes as an argument — the DAG
             # task layer CAN resolve workflow.parameters[...] (it is not a template body).
             guard_args = [{'name': s['name'] + '-class',
-                           'value': OB + "workflow.parameters['" + s['name'] + "-class']" + CB}
+                           'value': OB + "workflow.parameters." + s['name'] + "-class" + CB}
                           for s in steps]
             dag_tasks.append({'name': 'validate-classes', 'template': 'validate-classes',
                               'arguments': {'parameters': guard_args}})
@@ -1204,7 +1204,7 @@ spec:
                 # class-name input: the chosen class for the pod's compute-class label
                 # (resolved at the task layer, then passed into the step template).
                 task_params.append({'name': 'class-name',
-                                    'value': OB + "workflow.parameters['" + sn + "-class']" + CB})
+                                    'value': OB + "workflow.parameters." + sn + "-class" + CB})
                 if is_quant_step:
                     task['when'] = OB + "workflow.parameters['quantization-mode'] != 'none'" + CB
                 for ip in inp_params:
