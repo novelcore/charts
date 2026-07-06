@@ -1544,8 +1544,60 @@ spec:
         args_params.append({'name': 'pipeline-info', 'value': pipeline_info,
                             'description': 'Read-only: live pool compute classes + how to fill this form. Leave unchanged.'})
 
+        # ── dataset-ref DROPDOWN (from the lakeFS dataset catalog) ──────────
+        # A dataset = a lakeFS ref (tag/branch) whose ROOT holds a data.yaml. The
+        # ml-dataset-catalog-probe CronWorkflow discovers these and publishes the
+        # kubecore-ml-dataset-catalog ConfigMap; render-wft reads it (via the pod
+        # SA — NO lakeFS creds needed here) and offers the refs as a dropdown. The
+        # picked ref's immutable commit is threaded to the dataset steps as
+        # path_override=s3://{repo}/{sha}/ so a run trains on a frozen snapshot.
+        # Falls back silently to no-dropdown (free-text dataset-path-override still
+        # works) if the catalog ConfigMap is absent — datasets uploaded after the
+        # last probe are reachable via the override escape hatch.
+        dataset_catalog = None
+        try:
+            _dcat = _read_live_catalog('kubecore-ml-dataset-catalog', 'argo-workflows')
+            dataset_catalog = _dcat.get('datasets') or []
+        except Exception:
+            dataset_catalog = []
+        dataset_enum = [d['ref'] for d in dataset_catalog if d.get('ref') and d.get('available')]
+        # ref → immutable-commit path_override, for the DAG to pin the snapshot.
+        dataset_override_by_ref = {d['ref']: d.get('pathOverride', '') for d in dataset_catalog}
+        dataset_label_lines = '\n'.join('  • ' + (d.get('label') or d.get('ref', '?')) for d in dataset_catalog) or '  • (none discovered — use dataset-path-override)'
+
+        _emitted_names = set()
         for p in pipeline_params:
-            args_params.append({'name': p['name'], 'value': p.get('default', ''), 'description': p.get('description', '')})
+            np = {'name': p['name'], 'value': p.get('default', ''), 'description': p.get('description', '')}
+            # preserve a kubeline-declared enum so a static dropdown survives render.
+            if p.get('enum'):
+                np['enum'] = list(p['enum'])
+            # turn dataset-ref into a live dropdown from the catalog (overrides any
+            # kubeline default/enum); the developer picks a real, existing dataset.
+            if p['name'] == 'dataset-ref' and dataset_enum:
+                np['enum'] = dataset_enum
+                if np.get('value') not in dataset_enum:
+                    np['value'] = dataset_enum[0]
+                np['description'] = ('Dataset to train on — a lakeFS ref discovered by the dataset-catalog probe. '
+                                     'Each is an immutable, self-describing dataset (data.yaml at its root).\n'
+                                     + dataset_label_lines)
+            args_params.append(np)
+            _emitted_names.add(p['name'])
+
+        # Resolve the picked dataset-ref → the frozen-commit path_override the
+        # dataset steps consume. If the app declares dataset-ref but NOT an explicit
+        # dataset-path-override, synthesize dataset-path-override as an Argo ternary
+        # mapping each ref to its immutable commit path (from the catalog). A user
+        # who sets dataset-path-override by hand still wins (it's the escape hatch).
+        if dataset_enum and 'dataset-ref' in _emitted_names and 'dataset-path-override' not in _emitted_names:
+            # ternary chain: ref==r1 ? path1 : ref==r2 ? path2 : '' (empty → the
+            # step falls back to {repo}/{ref}/ root via lakefs_branch).
+            expr = "''"
+            for r in reversed(dataset_enum):
+                ov = dataset_override_by_ref.get(r, '')
+                expr = ("workflow.parameters['dataset-ref'] == '" + r + "' ? '" + ov + "' : " + expr)
+            args_params.append({'name': 'dataset-path-override',
+                                 'value': OB + '=' + expr + CB,
+                                 'description': 'Auto-derived from dataset-ref (immutable commit snapshot). Leave as-is.'})
 
         cpu_class_name = cpu_cls.get('name', f"{pipeline_name}-cpu")
         gpu_class_name = gpu_cls.get('name', f"{pipeline_name}-gpu")
