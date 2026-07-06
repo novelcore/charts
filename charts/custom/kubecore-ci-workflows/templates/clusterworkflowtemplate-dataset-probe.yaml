@@ -116,6 +116,15 @@ spec:
         export LAKEFS_ENDPOINT="$ENDPOINT" LAKEFS_REPO="$REPO"
         export LAKEFS_AK="$AK" LAKEFS_SK="$SK"
 
+        # The catalog builder is written inline (heredoc) rather than mounted from
+        # a ConfigMap: this CronWorkflow runs in the ML namespace (where the lakeFS
+        # admin secret lives), NOT in the ci-workflows install namespace, so a
+        # mounted scripts ConfigMap would be cross-namespace and unresolvable.
+        # Inlining keeps the probe namespace-agnostic.
+        cat > /tmp/build_dataset_catalog.py <<'PYEOF'
+{{ .Files.Get "files/build_dataset_catalog.py" | indent 8 }}
+        PYEOF
+
         echo "probing dataset catalog: repo=$REPO endpoint=$ENDPOINT"
         python3 /tmp/build_dataset_catalog.py > /tmp/catalog.yaml
         echo "──── dataset catalog.yaml ────"
@@ -128,16 +137,10 @@ spec:
           --dry-run=client -o yaml | kubectl apply -f -
         echo "published dataset catalog to configmap $CM_NS/$CM_NAME"
       volumeMounts:
-      - name: scripts
-        mountPath: /tmp/build_dataset_catalog.py
-        subPath: build_dataset_catalog.py
       - name: lakefs-creds
         mountPath: /etc/lakefs
         readOnly: true
     volumes:
-    - name: scripts
-      configMap:
-        name: {{ include "kubecore-ci-workflows.fullname" . }}-dataset-probe-scripts
     - name: lakefs-creds
       secret:
         secretName: "{{`{{inputs.parameters.lakefs_secret}}`}}"
@@ -146,145 +149,3 @@ spec:
           path: accessKeyId
         - key: secretAccessKey
           path: secretAccessKey
----
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: {{ include "kubecore-ci-workflows.fullname" . }}-dataset-probe-scripts
-  namespace: {{ include "kubecore-ci-workflows.namespace" . }}
-  labels:
-    {{- include "kubecore-ci-workflows.labels" . | nindent 4 }}
-data:
-  build_dataset_catalog.py: |
-    #!/usr/bin/env python3
-    """Build the lakeFS dataset catalog.yaml.
-
-    Discovers datasets = lakeFS refs (tags preferred, then branches) whose ROOT
-    holds a data.yaml. Resolves each to its immutable commit SHA and reads
-    data.yaml for a label. Emits catalog.yaml to stdout.
-
-    env: LAKEFS_ENDPOINT, LAKEFS_REPO, LAKEFS_AK, LAKEFS_SK
-
-    Shape MUST match render-wft's _read_dataset_catalog:
-      datasets[].{name, ref, refType, commit, repo, pathOverride, label,
-                  available}  +  top-level repo, defaultBranch.
-    """
-    import json, os, sys, base64
-    import urllib.request, urllib.error
-
-    ENDPOINT = os.environ["LAKEFS_ENDPOINT"].rstrip("/")
-    REPO = os.environ["LAKEFS_REPO"]
-    AK = os.environ["LAKEFS_AK"]
-    SK = os.environ["LAKEFS_SK"]
-    AUTH = base64.b64encode(("%s:%s" % (AK, SK)).encode()).decode()
-
-    def api(path):
-        req = urllib.request.Request(
-            "%s/api/v1%s" % (ENDPOINT, path),
-            headers={"Authorization": "Basic %s" % AUTH})
-        try:
-            with urllib.request.urlopen(req, timeout=30) as r:
-                return json.loads(r.read().decode())
-        except urllib.error.HTTPError as e:
-            if e.code == 404:
-                return None
-            raise
-
-    def obj_text(ref, path):
-        # Fetch an object's bytes via the objects API (get, not stat).
-        req = urllib.request.Request(
-            "%s/api/v1/repositories/%s/refs/%s/objects?path=%s" % (ENDPOINT, REPO, ref, path),
-            headers={"Authorization": "Basic %s" % AUTH})
-        try:
-            with urllib.request.urlopen(req, timeout=30) as r:
-                return r.read().decode("utf-8", "replace")
-        except urllib.error.HTTPError:
-            return None
-
-    def has_root_data_yaml(ref):
-        # objects/stat is a cheap existence check for data.yaml at the ref root.
-        r = api("/repositories/%s/refs/%s/objects/stat?path=data.yaml" % (REPO, ref))
-        return r is not None
-
-    def ref_commit(ref):
-        r = api("/repositories/%s/refs/%s/commits?amount=1" % (REPO, ref))
-        if r and r.get("results"):
-            return r["results"][0].get("id", "")
-        return ""
-
-    def parse_label(ref, data_yaml_text):
-        # Extract a friendly label from data.yaml without a yaml lib (alpine-safe):
-        # names, kpt_shape. Fall back to the raw ref name.
-        names = ""
-        kpt = ""
-        if data_yaml_text:
-            for line in data_yaml_text.splitlines():
-                s = line.strip()
-                if s.startswith("kpt_shape"):
-                    kpt = s.split(":", 1)[1].strip() if ":" in s else ""
-                if s and ":" in s and s.split(":", 1)[0].strip().isdigit():
-                    # a "0: spacecraft" class-name line
-                    nm = s.split(":", 1)[1].strip()
-                    names = (names + ", " + nm) if names else nm
-        parts = [ref]
-        if names:
-            parts.append("classes: %s" % names)
-        return " — ".join(parts)
-
-    repo_info = api("/repositories/%s" % REPO) or {}
-    default_branch = repo_info.get("default_branch", "main")
-
-    # Collect refs: tags first (immutable, preferred), then branches. Exclude any
-    # ref name containing '/' (breaks flat S3-gateway prefix addressing).
-    seen = set()
-    refs = []  # (name, refType)
-    tags = api("/repositories/%s/tags?amount=1000" % REPO) or {"results": []}
-    for t in tags.get("results", []):
-        n = t.get("id", "")
-        if n and "/" not in n and n not in seen:
-            refs.append((n, "tag")); seen.add(n)
-    branches = api("/repositories/%s/branches?amount=1000" % REPO) or {"results": []}
-    for b in branches.get("results", []):
-        n = b.get("id", "")
-        if n and "/" not in n and n not in seen:
-            refs.append((n, "branch")); seen.add(n)
-
-    datasets = []
-    for name, rtype in refs:
-        if not has_root_data_yaml(name):
-            continue
-        commit = ref_commit(name)
-        dtext = obj_text(name, "data.yaml")
-        label = parse_label(name, dtext)
-        label += " (%s)" % ("frozen tag" if rtype == "tag" else "branch")
-        datasets.append({
-            "name": name,
-            "ref": name,
-            "refType": rtype,
-            "commit": commit,
-            # Pin the immutable commit so a run trains on a frozen snapshot.
-            "pathOverride": "s3://%s/%s/" % (REPO, commit or name),
-            "label": label,
-            "available": True,
-        })
-
-    def yq(s):
-        s = str(s).replace("\\", "\\\\").replace('"', '\\"')
-        return '"%s"' % s
-
-    out = []
-    out.append("repo: %s" % yq(REPO))
-    out.append("defaultBranch: %s" % yq(default_branch))
-    out.append("datasets:")
-    if not datasets:
-        out.append("  []")
-    for d in datasets:
-        out.append("  - name: %s" % yq(d["name"]))
-        out.append("    ref: %s" % yq(d["ref"]))
-        out.append("    refType: %s" % yq(d["refType"]))
-        out.append("    commit: %s" % yq(d["commit"]))
-        out.append("    repo: %s" % yq(REPO))
-        out.append("    pathOverride: %s" % yq(d["pathOverride"]))
-        out.append("    label: %s" % yq(d["label"]))
-        out.append("    available: true")
-    sys.stdout.write("\n".join(out) + "\n")
