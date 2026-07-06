@@ -10,6 +10,12 @@ metadata:
     "helm.sh/resource-policy": keep
     {{- end }}
     controller-gen.kubebuilder.io/version: v0.18.0
+    graph.kubecore.io/hierarchy-label: kubecore.io/kubeteam
+    graph.kubecore.io/xr-mappings: |
+      - xrKind: XGitHubTeam
+        apiVersion: github.platform.kubecore.io/v1alpha1
+        cardinality: "1:1"
+        description: "GitHub team + RBAC backing the KubeTeam (Team MR + conditional Members MR)"
   name: kubeteams.schema.kubecore.io
 spec:
   group: schema.kubecore.io
@@ -20,286 +26,281 @@ spec:
     singular: kubeteam
   scope: Namespaced
   versions:
-  - additionalPrinterColumns:
-    - jsonPath: .spec.role
-      name: Role
-      type: string
-    - jsonPath: .status.phase
-      name: Phase
-      type: string
-    - jsonPath: .status.memberCount
-      name: Members
-      type: integer
-    - jsonPath: .status.resolvedCount
-      name: Resolved
-      type: integer
-    - jsonPath: .status.githubResolvedCount
-      name: GH-Linked
-      type: integer
-    - jsonPath: .status.githubTeamID
-      name: GH-Team
-      priority: 1
-      type: string
-    - jsonPath: .metadata.creationTimestamp
-      name: Age
-      type: date
-    name: v1beta1
-    schema:
-      openAPIV3Schema:
-        description: |-
-          KubeTeam is the Schema for the kubeteams API.
-          It defines an org-scoped, reusable team of users identified by Zitadel email,
-          with a single role that drives permissions across Zitadel, GitHub, and K8s RBAC (PRD-237).
-        properties:
-          apiVersion:
-            description: |-
-              APIVersion defines the versioned schema of this representation of an object.
-              Servers should convert recognized schemas to the latest internal value, and
-              may reject unrecognized values.
-              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
-            type: string
-          kind:
-            description: |-
-              Kind is a string value representing the REST resource this object represents.
-              Servers may infer this from the endpoint the client submits requests to.
-              Cannot be updated.
-              In CamelCase.
-              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
-            type: string
-          metadata:
-            type: object
-          spec:
-            description: spec defines the desired state of KubeTeam
-            properties:
-              displayName:
-                description: DisplayName is a human-readable label for the team.
-                type: string
-              members:
-                description: |-
-                  Members is the list of team members identified by Zitadel email.
-                  Q-01: no MaxItems by design — rate-limit handling lives in the reconciler, not CRD validation.
-                  Empty teams (zero members) are permitted — they create a GitHub team via XGitHubTeam (CON-01 of PRD-331)
-                  but write no Zitadel grants or K8s RoleBindings. Useful for pre-creating teams before populating membership.
-                items:
+    - additionalPrinterColumns:
+        - jsonPath: .spec.role
+          name: Role
+          type: string
+        - jsonPath: .status.phase
+          name: Phase
+          type: string
+        - jsonPath: .status.memberCount
+          name: Members
+          type: integer
+        - jsonPath: .status.resolvedCount
+          name: Resolved
+          type: integer
+        - jsonPath: .status.githubResolvedCount
+          name: GH-Linked
+          type: integer
+        - jsonPath: .status.githubTeamID
+          name: GH-Team
+          priority: 1
+          type: string
+        - jsonPath: .metadata.creationTimestamp
+          name: Age
+          type: date
+      name: v1beta1
+      schema:
+        openAPIV3Schema:
+          description: |-
+            KubeTeam is the Schema for the kubeteams API.
+            It defines an org-scoped, reusable team of users identified by Zitadel email,
+            with a single role that drives permissions across Zitadel, GitHub, and K8s RBAC (PRD-237).
+          properties:
+            apiVersion:
+              description: |-
+                APIVersion defines the versioned schema of this representation of an object.
+                Servers should convert recognized schemas to the latest internal value, and
+                may reject unrecognized values.
+                More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+              type: string
+            kind:
+              description: |-
+                Kind is a string value representing the REST resource this object represents.
+                Servers may infer this from the endpoint the client submits requests to.
+                Cannot be updated.
+                In CamelCase.
+                More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+              type: string
+            metadata:
+              type: object
+            spec:
+              description: spec defines the desired state of KubeTeam
+              properties:
+                displayName:
+                  description: DisplayName is a human-readable label for the team.
+                  type: string
+                members:
                   description: |-
-                    KubeTeamMember defines a single member of a KubeTeam, identified by their Zitadel email.
-                    Email is the primary lookup key for Zitadel resolution (§3.1).
-                  properties:
-                    email:
-                      description: |-
-                        Email is the Zitadel primary key for this user.
-                        The user must pre-exist in Zitadel before being added to a team (CON-01).
-                      pattern: ^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$
-                      type: string
-                  required:
-                  - email
-                  type: object
-                minItems: 0
-                type: array
-              role:
-                allOf:
-                - enum:
-                  - dev
-                  - ops
-                  - business
-                  - admin
-                - enum:
-                  - dev
-                  - ops
-                  - business
-                  - admin
-                description: |-
-                  Role is the single role assigned to every member of this team.
-                  Each role maps to a fixed permission set across Zitadel, GitHub, and K8s RBAC (D-01).
-                  CON-02, CON-03: single role enum, applied uniformly across all referencing projects/envs (see D-05).
-                type: string
-            required:
-            - members
-            - role
-            type: object
-          status:
-            description: status defines the observed state of KubeTeam
-            properties:
-              conditions:
-                description: |-
-                  Conditions represent the latest available observations of the KubeTeam's state.
-                  The reconciler writes Ready, MembersResolved, and GitHubMembersResolved conditions (F-02, F-09).
-                items:
-                  description: Condition contains details for one aspect of the current
-                    state of this API Resource.
-                  properties:
-                    lastTransitionTime:
-                      description: |-
-                        lastTransitionTime is the last time the condition transitioned from one status to another.
-                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
-                      format: date-time
-                      type: string
-                    message:
-                      description: |-
-                        message is a human readable message indicating details about the transition.
-                        This may be an empty string.
-                      maxLength: 32768
-                      type: string
-                    observedGeneration:
-                      description: |-
-                        observedGeneration represents the .metadata.generation that the condition was set based upon.
-                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
-                        with respect to the current state of the instance.
-                      format: int64
-                      minimum: 0
-                      type: integer
-                    reason:
-                      description: |-
-                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
-                        Producers of specific condition types may define expected values and meanings for this field,
-                        and whether the values are considered a guaranteed API.
-                        The value should be a CamelCase string.
-                        This field may not be empty.
-                      maxLength: 1024
-                      minLength: 1
-                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
-                      type: string
-                    status:
-                      description: status of the condition, one of True, False, Unknown.
-                      enum:
-                      - "True"
-                      - "False"
-                      - Unknown
-                      type: string
-                    type:
-                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
-                      maxLength: 316
-                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
-                      type: string
-                  required:
-                  - lastTransitionTime
-                  - message
-                  - reason
-                  - status
-                  - type
-                  type: object
-                type: array
-                x-kubernetes-list-map-keys:
-                - type
-                x-kubernetes-list-type: map
-              githubResolvedCount:
-                description: |-
-                  GitHubResolvedCount is the number of members with a linked GitHub IDP
-                  account (status.members[].githubLink == "Linked"). Non-gating for Ready
-                  per Q-02; surfaces how many resolved members will be eligible for GitHub
-                  team membership when KubeProject references this team.
-                format: int32
-                type: integer
-              githubTeamID:
-                description: |-
-                  GithubTeamID is the numeric GitHub team ID assigned by GitHub once the
-                  XGitHubTeam composite reaches Ready. Populated by the Reporting phase from
-                  XGitHubTeam.status.teamID (F-04, PRD-331). Once written, the value is
-                  preserved across reconciliations even if the XGitHubTeam is transiently
-                  unhealthy — GitHub team IDs are stable for the life of the team.
-                type: string
-              lastTransitionTime:
-                description: LastTransitionTime records when the status was last updated.
-                format: date-time
-                type: string
-              memberCount:
-                description: |-
-                  MemberCount is the total number of spec.members at last reconciliation.
-                  Used by the Members print column — kubebuilder JSONPath cannot count arrays.
-                format: int32
-                type: integer
-              members:
-                description: |-
-                  Members contains the per-member resolution state produced by the Syncing phase.
-                  KubeProject reconciler reads identities from here instead of calling Zitadel/GitHub (Q-05, AC-12).
-                items:
+                    Members is the list of team members identified by Zitadel email.
+                    Q-01: no MaxItems by design — rate-limit handling lives in the reconciler, not CRD validation.
+                    Empty teams (zero members) are permitted — they create a GitHub team via XGitHubTeam (CON-01 of PRD-331)
+                    but write no Zitadel grants or K8s RoleBindings. Useful for pre-creating teams before populating membership.
+                  items:
+                    description: |-
+                      KubeTeamMember defines a single member of a KubeTeam, identified by their Zitadel email.
+                      Email is the primary lookup key for Zitadel resolution (§3.1).
+                    properties:
+                      email:
+                        description: |-
+                          Email is the Zitadel primary key for this user.
+                          The user must pre-exist in Zitadel before being added to a team (CON-01).
+                        pattern: ^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$
+                        type: string
+                    required:
+                      - email
+                    type: object
+                  minItems: 0
+                  type: array
+                role:
+                  allOf:
+                    - enum:
+                        - dev
+                        - ops
+                        - business
+                        - admin
+                    - enum:
+                        - dev
+                        - ops
+                        - business
+                        - admin
                   description: |-
-                    KubeTeamMemberStatus records the resolution state for a single team member.
-                    Populated by the KubeTeam reconciler during the Syncing phase (F-03).
-                  properties:
-                    email:
-                      description: Email mirrors the spec email for correlation.
-                      type: string
-                    githubLink:
-                      allOf:
-                      - enum:
-                        - Linked
-                        - NotLinked
-                      - enum:
-                        - Linked
-                        - NotLinked
-                      description: |-
-                        GitHubLink indicates whether the Zitadel user has a linked GitHub IDP account (Q-02, AC-11).
-                        NotLinked is not a failure — the member is excluded from GitHub team membership only.
-                      type: string
-                    githubUsername:
-                      description: |-
-                        GitHubUsername is the GitHub username derived from the user's linked Zitadel IDP account.
-                        Cached here by the KubeTeam reconciler so KubeProject avoids additional GitHub API calls (AC-12, Q-05).
-                        Empty when GitHubLink is NotLinked.
-                      type: string
-                    lastResolved:
-                      description: |-
-                        LastResolved is the timestamp when this member's identity was last resolved.
-                        Used by the Reporting phase for freshness tracking.
-                      format: date-time
-                      type: string
-                    message:
-                      description: Message contains a human-readable explanation when
-                        Status is NotFound.
-                      type: string
-                    status:
-                      allOf:
-                      - enum:
-                        - Resolved
-                        - NotFound
-                      - enum:
-                        - Resolved
-                        - NotFound
-                      description: Status is the Zitadel resolution state for this
-                        member.
-                      type: string
-                    zitadelUserId:
-                      description: |-
-                        ZitadelUserID is the resolved Zitadel user ID.
-                        Populated only when Status is Resolved. Used by KubeProject to apply grants (AC-02).
-                      type: string
-                  required:
-                  - email
-                  - status
-                  type: object
-                type: array
-              observedGeneration:
-                description: ObservedGeneration is the most recent generation observed
-                  by the controller.
-                format: int64
-                type: integer
-              phase:
-                description: |-
-                  Phase indicates the current reconciliation phase.
-                  Values: Reconciling | Syncing | Reporting | Ready | Failed (D-02, AC-10).
-                enum:
-                - Reconciling
-                - Syncing
-                - Reporting
-                - Ready
-                - Failed
-                - Deleting
-                type: string
-              reconciliationAttempts:
-                description: ReconciliationAttempts tracks the number of reconciliation
-                  attempts for backoff.
-                type: integer
-              resolvedCount:
-                description: |-
-                  ResolvedCount is the number of members whose Status is Resolved.
-                  Used by the Resolved print column.
-                format: int32
-                type: integer
-            type: object
-        type: object
-    served: true
-    storage: true
-    subresources:
-      status: {}
+                    Role is the single role assigned to every member of this team.
+                    Each role maps to a fixed permission set across Zitadel, GitHub, and K8s RBAC (D-01).
+                    CON-02, CON-03: single role enum, applied uniformly across all referencing projects/envs (see D-05).
+                  type: string
+              required:
+                - members
+                - role
+              type: object
+            status:
+              description: status defines the observed state of KubeTeam
+              properties:
+                conditions:
+                  description: |-
+                    Conditions represent the latest available observations of the KubeTeam's state.
+                    The reconciler writes Ready, MembersResolved, and GitHubMembersResolved conditions (F-02, F-09).
+                  items:
+                    description: Condition contains details for one aspect of the current state of this API Resource.
+                    properties:
+                      lastTransitionTime:
+                        description: |-
+                          lastTransitionTime is the last time the condition transitioned from one status to another.
+                          This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                        format: date-time
+                        type: string
+                      message:
+                        description: |-
+                          message is a human readable message indicating details about the transition.
+                          This may be an empty string.
+                        maxLength: 32768
+                        type: string
+                      observedGeneration:
+                        description: |-
+                          observedGeneration represents the .metadata.generation that the condition was set based upon.
+                          For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                          with respect to the current state of the instance.
+                        format: int64
+                        minimum: 0
+                        type: integer
+                      reason:
+                        description: |-
+                          reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                          Producers of specific condition types may define expected values and meanings for this field,
+                          and whether the values are considered a guaranteed API.
+                          The value should be a CamelCase string.
+                          This field may not be empty.
+                        maxLength: 1024
+                        minLength: 1
+                        pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                        type: string
+                      status:
+                        description: status of the condition, one of True, False, Unknown.
+                        enum:
+                          - "True"
+                          - "False"
+                          - Unknown
+                        type: string
+                      type:
+                        description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                        maxLength: 316
+                        pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                        type: string
+                    required:
+                      - lastTransitionTime
+                      - message
+                      - reason
+                      - status
+                      - type
+                    type: object
+                  type: array
+                  x-kubernetes-list-map-keys:
+                    - type
+                  x-kubernetes-list-type: map
+                githubResolvedCount:
+                  description: |-
+                    GitHubResolvedCount is the number of members with a linked GitHub IDP
+                    account (status.members[].githubLink == "Linked"). Non-gating for Ready
+                    per Q-02; surfaces how many resolved members will be eligible for GitHub
+                    team membership when KubeProject references this team.
+                  format: int32
+                  type: integer
+                githubTeamID:
+                  description: |-
+                    GithubTeamID is the numeric GitHub team ID assigned by GitHub once the
+                    XGitHubTeam composite reaches Ready. Populated by the Reporting phase from
+                    XGitHubTeam.status.teamID (F-04, PRD-331). Once written, the value is
+                    preserved across reconciliations even if the XGitHubTeam is transiently
+                    unhealthy — GitHub team IDs are stable for the life of the team.
+                  type: string
+                lastTransitionTime:
+                  description: LastTransitionTime records when the status was last updated.
+                  format: date-time
+                  type: string
+                memberCount:
+                  description: |-
+                    MemberCount is the total number of spec.members at last reconciliation.
+                    Used by the Members print column — kubebuilder JSONPath cannot count arrays.
+                  format: int32
+                  type: integer
+                members:
+                  description: |-
+                    Members contains the per-member resolution state produced by the Syncing phase.
+                    KubeProject reconciler reads identities from here instead of calling Zitadel/GitHub (Q-05, AC-12).
+                  items:
+                    description: |-
+                      KubeTeamMemberStatus records the resolution state for a single team member.
+                      Populated by the KubeTeam reconciler during the Syncing phase (F-03).
+                    properties:
+                      email:
+                        description: Email mirrors the spec email for correlation.
+                        type: string
+                      githubLink:
+                        allOf:
+                          - enum:
+                              - Linked
+                              - NotLinked
+                          - enum:
+                              - Linked
+                              - NotLinked
+                        description: |-
+                          GitHubLink indicates whether the Zitadel user has a linked GitHub IDP account (Q-02, AC-11).
+                          NotLinked is not a failure — the member is excluded from GitHub team membership only.
+                        type: string
+                      githubUsername:
+                        description: |-
+                          GitHubUsername is the GitHub username derived from the user's linked Zitadel IDP account.
+                          Cached here by the KubeTeam reconciler so KubeProject avoids additional GitHub API calls (AC-12, Q-05).
+                          Empty when GitHubLink is NotLinked.
+                        type: string
+                      lastResolved:
+                        description: |-
+                          LastResolved is the timestamp when this member's identity was last resolved.
+                          Used by the Reporting phase for freshness tracking.
+                        format: date-time
+                        type: string
+                      message:
+                        description: Message contains a human-readable explanation when Status is NotFound.
+                        type: string
+                      status:
+                        allOf:
+                          - enum:
+                              - Resolved
+                              - NotFound
+                          - enum:
+                              - Resolved
+                              - NotFound
+                        description: Status is the Zitadel resolution state for this member.
+                        type: string
+                      zitadelUserId:
+                        description: |-
+                          ZitadelUserID is the resolved Zitadel user ID.
+                          Populated only when Status is Resolved. Used by KubeProject to apply grants (AC-02).
+                        type: string
+                    required:
+                      - email
+                      - status
+                    type: object
+                  type: array
+                observedGeneration:
+                  description: ObservedGeneration is the most recent generation observed by the controller.
+                  format: int64
+                  type: integer
+                phase:
+                  description: |-
+                    Phase indicates the current reconciliation phase.
+                    Values: Reconciling | Syncing | Reporting | Ready | Failed (D-02, AC-10).
+                  enum:
+                    - Reconciling
+                    - Syncing
+                    - Reporting
+                    - Ready
+                    - Failed
+                    - Deleting
+                  type: string
+                reconciliationAttempts:
+                  description: ReconciliationAttempts tracks the number of reconciliation attempts for backoff.
+                  type: integer
+                resolvedCount:
+                  description: |-
+                    ResolvedCount is the number of members whose Status is Resolved.
+                    Used by the Resolved print column.
+                  format: int32
+                  type: integer
+              type: object
+          type: object
+      served: true
+      storage: true
+      subresources:
+        status: {}
 {{- end -}}

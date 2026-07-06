@@ -10,6 +10,53 @@ metadata:
     "helm.sh/resource-policy": keep
     {{- end }}
     controller-gen.kubebuilder.io/version: v0.18.0
+    # graph.kubecore.io annotations merged into config/crd/bases/schema.kubecore.io_kubeorgs.yaml
+    # by hack/inject-graph-annotations.sh (runs as part of `make manifests`).
+    # Consumed by kaos-graph for schema-graph topology. See kaos-graph
+    # docs/superpowers/specs/2026-07-06-dynamic-schema-discovery-design.md.
+    graph.kubecore.io/relationships: |
+      - target: KubePool
+        relationship: creates
+        cardinality: "1:*"
+        description: "KubeOrg creates KubePool resources for infrastructure management"
+      - target: KubeProject
+        relationship: creates
+        cardinality: "1:*"
+        description: "KubeProject resources are namespaced under the KubeOrg namespace"
+      - target: KubeTeam
+        relationship: creates
+        cardinality: "1:*"
+        description: "KubeOrg references org-scoped KubeTeam resources via spec.teams / spec.adminTeam"
+    graph.kubecore.io/hierarchy-label: kubecore.io/kubeorg
+    graph.kubecore.io/xr-mappings: |
+      - xrKind: XAWSProvider
+        apiVersion: aws.provider.platform.kubecore.io/v1alpha1
+        cardinality: "1:1"
+        description: "AWS provider infrastructure for the organization"
+      - xrKind: XGCPProvider
+        apiVersion: gcp.provider.platform.kubecore.io/v1alpha1
+        cardinality: "1:1"
+        description: "GCP provider infrastructure for the organization"
+      - xrKind: XAzureProvider
+        apiVersion: azure.provider.platform.kubecore.io/v1alpha1
+        cardinality: "1:1"
+        description: "Azure provider infrastructure for the organization"
+      - xrKind: XGithubProvider
+        apiVersion: github.platform.kubecore.io/v1alpha1
+        cardinality: "1:1"
+        description: "GitHub provider integration for the organization"
+      - xrKind: XAwsNetwork
+        apiVersion: platform.kubecore.io/v1alpha1
+        cardinality: "1:*"
+        description: "AWS networking infrastructure per region"
+      - xrKind: XGcpNetwork
+        apiVersion: platform.kubecore.io/v1alpha1
+        cardinality: "1:*"
+        description: "GCP networking infrastructure per region"
+      - xrKind: XAzureNetwork
+        apiVersion: platform.kubecore.io/v1alpha1
+        cardinality: "1:*"
+        description: "Azure networking infrastructure per region"
   name: kubeorgs.schema.kubecore.io
 spec:
   group: schema.kubecore.io
@@ -20,932 +67,865 @@ spec:
     singular: kubeorg
   scope: Namespaced
   versions:
-  - additionalPrinterColumns:
-    - jsonPath: .status.phase
-      name: Phase
-      type: string
-    - jsonPath: .metadata.name
-      name: Organization
-      type: string
-    - jsonPath: .status.activeProviders
-      name: Providers
-      type: string
-    - jsonPath: .status.ready
-      name: Ready
-      type: boolean
-    - jsonPath: .metadata.creationTimestamp
-      name: Age
-      type: date
-    name: v1beta1
-    schema:
-      openAPIV3Schema:
-        description: KubeOrg is the Schema for the kubeorgs API
-        properties:
-          apiVersion:
-            description: |-
-              APIVersion defines the versioned schema of this representation of an object.
-              Servers should convert recognized schemas to the latest internal value, and
-              may reject unrecognized values.
-              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
-            type: string
-          kind:
-            description: |-
-              Kind is a string value representing the REST resource this object represents.
-              Servers may infer this from the endpoint the client submits requests to.
-              Cannot be updated.
-              In CamelCase.
-              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
-            type: string
-          metadata:
-            type: object
-          spec:
-            description: spec defines the desired state of KubeOrg
-            properties:
-              adminTeam:
-                description: |-
-                  AdminTeam names the single KubeTeam in this org's namespace that holds the
-                  admin role. Every KubeProject in this org automatically inherits this team in
-                  its effective member set (F-09, CON-04 fan-out pattern), so no per-project ref
-                  is required.
-
-                  Mandatory when spec.identity is set (CON-06): an org with identity enabled MUST
-                  designate an admin team to ensure every project has admin coverage. When identity
-                  is disabled, this field may be left empty.
-
-                  Admission-time enforcement (required-when-identity-enabled, existence check, role
-                  check) is delegated to a Kyverno ClusterPolicy in the runtime layer per CON-08 —
-                  this operator implements no admission webhooks. The reconciler validates on every
-                  reconcile cycle and surfaces Ready=False, Reason=AdminTeamMissing /
-                  AdminTeamNotFound / AdminTeamInvalidRole when the state drifts post-admission
-                  (defense in depth per CON-08).
-
-                  The referenced KubeTeam must exist in the same namespace as this KubeOrg
-                  and must have spec.role: admin. Any other role is a runtime validation failure.
-
-                  Refs: F-08, F-09, CON-06, CON-08, D-05.
-                type: string
-              awsConfig:
-                description: |-
-                  AWSConfig contains the AWS configuration for the provider
-                  When not provided, only GitHub provider will be created
-                properties:
-                  accountId:
-                    description: AccountID is the AWS account ID where resources will
-                      be created
-                    pattern: ^[0-9]{12}$
-                    type: string
-                  dns:
-                    description: |-
-                      DNS holds the DNS ownership declaration for this provider.
-                      Set hosted=true to designate AWS (Route 53) as the org's authoritative DNS zone owner.
-                    properties:
-                      hosted:
-                        default: false
-                        description: |-
-                          Hosted indicates that this cloud provider owns the authoritative DNS zone
-                          for the org domain. When the org has DNS enabled, exactly one provider
-                          config must set this to true.
-                        type: boolean
-                    type: object
-                  primaryRegion:
-                    description: PrimaryRegion is the primary AWS region for resource
-                      creation
-                    minLength: 1
-                    type: string
-                  providerConfig:
-                    description: ProviderConfig references the Crossplane AWS ProviderConfig
-                      to use
-                    minLength: 1
-                    type: string
-                  regions:
-                    description: Regions is the list of AWS regions where resources
-                      will be created
-                    items:
-                      type: string
-                    minItems: 1
-                    type: array
-                  tags:
-                    additionalProperties:
-                      type: string
-                    description: Tags are additional tags to apply to AWS resources
-                    type: object
-                required:
-                - accountId
-                - primaryRegion
-                - providerConfig
-                - regions
-                type: object
-              azureConfig:
-                description: AzureConfig contains the Azure configuration for the
-                  provider
-                properties:
-                  clientId:
-                    description: |-
-                      ClientID is the UAMI (User-Assigned Managed Identity) client UUID used by the
-                      OIDCTokenFile ProviderConfig that the operator creates in the org namespace.
-                      Required when the operator creates the ProviderConfig (D-03/D-07); the reconciler
-                      returns an error if this field is empty at ProviderConfig creation time.
-                    pattern: ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$
-                    type: string
-                  dns:
-                    description: |-
-                      DNS holds the DNS ownership declaration for this provider.
-                      Set hosted=true to designate Azure DNS as the org's authoritative DNS
-                      zone owner. When the org has DNS enabled, exactly one provider config
-                      must set this to true.
-                    properties:
-                      hosted:
-                        default: false
-                        description: |-
-                          Hosted indicates that this cloud provider owns the authoritative DNS zone
-                          for the org domain. When the org has DNS enabled, exactly one provider
-                          config must set this to true.
-                        type: boolean
-                    type: object
-                  primaryRegion:
-                    description: PrimaryRegion is the primary Azure region for resource
-                      creation (e.g., "westeurope")
-                    minLength: 1
-                    type: string
-                  providerConfig:
-                    description: |-
-                      ProviderConfig references the externally-created azure.m.upbound.io
-                      ProviderConfig in the org namespace. Created by
-                      scripts/setup-azure-org-prerequisites.sh (F-AZ-17) before KubeOrg apply.
-                    minLength: 1
-                    type: string
-                  regions:
-                    description: Regions is the list of Azure regions where resources
-                      will be created
-                    items:
-                      type: string
-                    minItems: 1
-                    type: array
-                  subscriptionId:
-                    description: SubscriptionID is the Azure subscription UUID where
-                      resources will be created
-                    pattern: ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$
-                    type: string
-                  tags:
-                    additionalProperties:
-                      type: string
-                    description: Tags are additional tags to apply to Azure resources
-                    type: object
-                  tenantId:
-                    description: TenantID is the Azure AD tenant UUID
-                    pattern: ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$
-                    type: string
-                required:
-                - primaryRegion
-                - providerConfig
-                - regions
-                - subscriptionId
-                - tenantId
-                type: object
-              gcpConfig:
-                description: GCPConfig contains the GCP configuration for the provider
-                properties:
-                  dns:
-                    description: |-
-                      DNS holds the DNS ownership declaration for this provider.
-                      Set hosted=true to designate GCP (Cloud DNS) as the org's authoritative DNS zone owner.
-                    properties:
-                      hosted:
-                        default: false
-                        description: |-
-                          Hosted indicates that this cloud provider owns the authoritative DNS zone
-                          for the org domain. When the org has DNS enabled, exactly one provider
-                          config must set this to true.
-                        type: boolean
-                    type: object
-                  labels:
-                    additionalProperties:
-                      type: string
-                    description: Labels are additional labels to apply to GCP resources
-                    type: object
-                  primaryRegion:
-                    description: PrimaryRegion is the primary GCP region for resource
-                      creation
-                    minLength: 1
-                    type: string
-                  projectId:
-                    description: ProjectID is the GCP project ID where resources will
-                      be created
-                    maxLength: 30
-                    minLength: 6
-                    pattern: ^[a-z][a-z0-9-]*[a-z0-9]$
-                    type: string
-                  projectNumber:
-                    description: |-
-                      ProjectNumber is the numeric GCP project number (e.g. "518719425131").
-                      When set, enables WIF-authenticated ESO SecretStore for GCP Secret Manager.
-                      Not derivable from ProjectID — find it in GCP Console → Project Info.
-                    pattern: ^[0-9]+$
-                    type: string
-                  regions:
-                    description: Regions is the list of GCP regions where resources
-                      will be created
-                    items:
-                      type: string
-                    minItems: 1
-                    type: array
-                required:
-                - primaryRegion
-                - projectId
-                - regions
-                type: object
-              githubConfig:
-                description: |-
-                  GithubConfig contains the GitHub provider configuration
-                  When provided, enables GitHub provider integration
-                properties:
-                  dedicatedApp:
-                    description: |-
-                      DedicatedApp, when set, selects the dedicated GitHub App model: the App
-                      credential is staged in the customer's GCP Secret Manager and pulled into
-                      DedicatedApp.SecretRef by the githubprovider composition; the operator then
-                      derives installationId and verifies contents:write on PlatformRepo.
-                      Absence = the shared cluster-wide GitHub App.
-                    properties:
-                      secretRef:
-                        description: |-
-                          SecretRef names the org-namespace Secret that the githubprovider composition
-                          PRODUCES (keys: appId, privateKey) by pulling the customer-staged GSM secret.
-                          The operator does NOT require this Secret to pre-exist — it appears only
-                          post-federation, once the org GCP SecretStore is live.
-                        properties:
-                          name:
-                            description: Name of the Secret in the same namespace
-                              as the referencing resource.
-                            minLength: 1
-                            type: string
-                        required:
-                        - name
-                        type: object
-                    required:
-                    - secretRef
-                    type: object
-                  installationId:
-                    description: |-
-                      InstallationId is the GitHub App installation ID for this organization.
-                      Shared-app path only — supplied by the caller. On the dedicated-app path
-                      (spec.githubConfig.dedicatedApp set) the operator DERIVES it from the App
-                      private key and this field is ignored.
-                    type: string
-                  platformRepo:
-                    default: platform
-                    description: |-
-                      PlatformRepo names the GitHub repository the dedicated App is granted at
-                      install time, and against which the operator verifies contents:write.
-                    type: string
-                type: object
-              identity:
-                description: |-
-                  Identity configuration for Zitadel integration
-                  When provided, enables Zitadel organization and role management
-                properties:
-                  allowedDomains:
-                    description: |-
-                      AllowedDomains restricts which email domains can join
-                      If empty, any domain is allowed
-                    items:
-                      type: string
-                    type: array
-                  githubIDP:
-                    description: GitHubIDP configures GitHub identity provider for
-                      this organization
-                    properties:
-                      enabled:
-                        default: true
-                        description: |-
-                          Enabled activates the instance-level GitHub IDP for this organization.
-                          Defaults to true; users can link their GitHub accounts but cannot auto-register.
-                        type: boolean
-                    type: object
-                  initialAdmin:
-                    description: InitialAdmin email - will be granted admin role via
-                      project grant
-                    format: email
-                    type: string
-                required:
-                - initialAdmin
-                type: object
-              meluxinaConfig:
-                description: |-
-                  MeluxinaConfig declares this org's MeluXina (LuxProvide HPC) allocation —
-                  the org-tenancy fact (one Slurm account, one SSH key, one S3 gateway per
-                  customer), structurally mirroring awsConfig/gcpConfig. It is NOT a cloud
-                  the platform provisions a cluster in; it is an external HPC endpoint reached
-                  from a GKE KubePool when spec.features.mlConfig.hpc.enabled. Bridge plumbing
-                  (JWT CronJob, provider-helm Release) is delivered by a later PRD; this field
-                  only records the tenancy/credentials. PRD-MELUXINA-IO-001.
-                properties:
-                  account:
-                    description: Account is the Slurm account (e.g. "p200XXX") for
-                      job submission.
-                    minLength: 1
-                    type: string
-                  s3Gateway:
-                    description: |-
-                      S3Gateway is the MeluXina object-storage S3 gateway host (e.g. "s3.lxp.lu")
-                      used to stage datasets/checkpoints. Optional; data delivery strategy is
-                      finalized in the MeluXina PRD.
-                    type: string
-                  slurmEndpoint:
-                    description: SlurmEndpoint is the MeluXina Slurm REST API host
-                      (e.g. "slurm-api.lxp.lu").
-                    minLength: 1
-                    type: string
-                  sshKeySecretRef:
-                    description: |-
-                      SSHKeySecretRef names the Secret in this KubeOrg's namespace holding the
-                      long-lived Ed25519 SSH key used by the management-plane token-rotation job
-                      to mint short-lived Slurm JWTs. The key never leaves KAOS cloud.
-                    properties:
-                      name:
-                        description: Name of the Secret in the same namespace as the
-                          referencing resource.
-                        minLength: 1
-                        type: string
-                    required:
-                    - name
-                    type: object
-                required:
-                - account
-                - slurmEndpoint
-                type: object
-              network:
-                description: |-
-                  Network configuration for VPC provisioning
-                  Defaults to disabled. When enabled, awsConfig is required.
-                properties:
-                  dns:
-                    description: DNS configures DNS zone creation for the network
-                    properties:
-                      delegationMode:
-                        default: byo
-                        description: |-
-                          DelegationMode controls how the org's authoritative zone is delegated so it
-                          resolves publicly (#410):
-                            - "byo" (default): bring-your-own. KubeCore creates the org's authoritative
-                              zone for Domain; delegation is handled externally (the customer/registrar
-                              points NS at the created zone). KubeCore writes no parent NS record.
-                            - "managed": KubeCore additionally writes a delegating NS record for Domain
-                              into the parent zone named by ParentZone, pointing at the created zone's
-                              nameservers. Use when KubeCore owns/manages the parent apex zone.
-                          The Domain itself always comes from the spec (KAOS-generated or customer-brought);
-                          the operator never synthesizes it.
-                        enum:
-                        - byo
-                        - managed
-                        type: string
-                      domain:
-                        description: |-
-                          Domain is the domain name for the hosted zone
-                          Required when DNS is enabled
-                        pattern: ^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)*$
-                        type: string
-                      enabled:
-                        default: false
-                        description: |-
-                          Enabled determines whether DNS zones should be created
-                          Only applied to the primary region network
-                        type: boolean
-                      parentZone:
-                        description: |-
-                          ParentZone is the cloud DNS managed-zone NAME (not the dnsName) of the parent
-                          zone into which the delegating NS record for Domain is written. Required when
-                          DelegationMode is "managed"; must be empty for "byo". The operator addresses
-                          the parent by this name to write the {Domain} NS -> child-nameservers record.
-                        type: string
-                    type: object
-                    x-kubernetes-validations:
-                    - message: parentZone must be set when delegationMode is 'managed',
-                        and must be empty otherwise
-                      rule: '(has(self.delegationMode) && self.delegationMode == ''managed'')
-                        ? (has(self.parentZone) && self.parentZone != '''') : !(has(self.parentZone)
-                        && self.parentZone != '''')'
-                  enabled:
-                    default: false
-                    description: |-
-                      Enabled determines whether network resources should be created
-                      Defaults to false. When enabled, awsConfig must be provided.
-                    type: boolean
-                  multizone:
-                    default: true
-                    description: Multizone determines whether to create multi-AZ networks
-                    type: boolean
-                type: object
-              teams:
-                description: |-
-                  Teams is the list of KubeTeam references granting org-wide access. Every
-                  KubeProject in this org inherits these teams via the KubeProject reconciler's
-                  merge logic (F-05). Project-level overrides are not permitted (CON-04).
-                items:
+    - additionalPrinterColumns:
+        - jsonPath: .status.phase
+          name: Phase
+          type: string
+        - jsonPath: .metadata.name
+          name: Organization
+          type: string
+        - jsonPath: .status.activeProviders
+          name: Providers
+          type: string
+        - jsonPath: .status.ready
+          name: Ready
+          type: boolean
+        - jsonPath: .metadata.creationTimestamp
+          name: Age
+          type: date
+      name: v1beta1
+      schema:
+        openAPIV3Schema:
+          description: KubeOrg is the Schema for the kubeorgs API
+          properties:
+            apiVersion:
+              description: |-
+                APIVersion defines the versioned schema of this representation of an object.
+                Servers should convert recognized schemas to the latest internal value, and
+                may reject unrecognized values.
+                More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+              type: string
+            kind:
+              description: |-
+                Kind is a string value representing the REST resource this object represents.
+                Servers may infer this from the endpoint the client submits requests to.
+                Cannot be updated.
+                In CamelCase.
+                More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+              type: string
+            metadata:
+              type: object
+            spec:
+              description: spec defines the desired state of KubeOrg
+              properties:
+                adminTeam:
                   description: |-
-                    KubeTeamRef references a KubeTeam resource by name within the same KubeOrg namespace.
-                    Only the name is required; role and permissions come from the referenced KubeTeam itself
-                    (CON-03: one role per team; CON-04: org-level teams cannot be overridden at project level).
-                    Env-scoped roles are deferred per D-05 — no per-environment fields here.
+                    AdminTeam names the single KubeTeam in this org's namespace that holds the
+                    admin role. Every KubeProject in this org automatically inherits this team in
+                    its effective member set (F-09, CON-04 fan-out pattern), so no per-project ref
+                    is required.
+
+                    Mandatory when spec.identity is set (CON-06): an org with identity enabled MUST
+                    designate an admin team to ensure every project has admin coverage. When identity
+                    is disabled, this field may be left empty.
+
+                    Admission-time enforcement (required-when-identity-enabled, existence check, role
+                    check) is delegated to a Kyverno ClusterPolicy in the runtime layer per CON-08 —
+                    this operator implements no admission webhooks. The reconciler validates on every
+                    reconcile cycle and surfaces Ready=False, Reason=AdminTeamMissing /
+                    AdminTeamNotFound / AdminTeamInvalidRole when the state drifts post-admission
+                    (defense in depth per CON-08).
+
+                    The referenced KubeTeam must exist in the same namespace as this KubeOrg
+                    and must have spec.role: admin. Any other role is a runtime validation failure.
+
+                    Refs: F-08, F-09, CON-06, CON-08, D-05.
+                  type: string
+                awsConfig:
+                  description: |-
+                    AWSConfig contains the AWS configuration for the provider
+                    When not provided, only GitHub provider will be created
                   properties:
-                    name:
+                    accountId:
+                      description: AccountID is the AWS account ID where resources will be created
+                      pattern: ^[0-9]{12}$
+                      type: string
+                    dns:
                       description: |-
-                        Name of the KubeTeam to reference. Must exist in the same namespace
-                        as the consumer (KubeProject or KubeOrg) — i.e., the KubeOrg namespace.
-                      maxLength: 253
+                        DNS holds the DNS ownership declaration for this provider.
+                        Set hosted=true to designate AWS (Route 53) as the org's authoritative DNS zone owner.
+                      properties:
+                        hosted:
+                          default: false
+                          description: |-
+                            Hosted indicates that this cloud provider owns the authoritative DNS zone
+                            for the org domain. When the org has DNS enabled, exactly one provider
+                            config must set this to true.
+                          type: boolean
+                      type: object
+                    primaryRegion:
+                      description: PrimaryRegion is the primary AWS region for resource creation
                       minLength: 1
-                      pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                      type: string
+                    providerConfig:
+                      description: ProviderConfig references the Crossplane AWS ProviderConfig to use
+                      minLength: 1
+                      type: string
+                    regions:
+                      description: Regions is the list of AWS regions where resources will be created
+                      items:
+                        type: string
+                      minItems: 1
+                      type: array
+                    tags:
+                      additionalProperties:
+                        type: string
+                      description: Tags are additional tags to apply to AWS resources
+                      type: object
+                  required:
+                    - accountId
+                    - primaryRegion
+                    - providerConfig
+                    - regions
+                  type: object
+                azureConfig:
+                  description: AzureConfig contains the Azure configuration for the provider
+                  properties:
+                    clientId:
+                      description: |-
+                        ClientID is the UAMI (User-Assigned Managed Identity) client UUID used by the
+                        OIDCTokenFile ProviderConfig that the operator creates in the org namespace.
+                        Required when the operator creates the ProviderConfig (D-03/D-07); the reconciler
+                        returns an error if this field is empty at ProviderConfig creation time.
+                      pattern: ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$
+                      type: string
+                    dns:
+                      description: |-
+                        DNS holds the DNS ownership declaration for this provider.
+                        Set hosted=true to designate Azure DNS as the org's authoritative DNS
+                        zone owner. When the org has DNS enabled, exactly one provider config
+                        must set this to true.
+                      properties:
+                        hosted:
+                          default: false
+                          description: |-
+                            Hosted indicates that this cloud provider owns the authoritative DNS zone
+                            for the org domain. When the org has DNS enabled, exactly one provider
+                            config must set this to true.
+                          type: boolean
+                      type: object
+                    primaryRegion:
+                      description: PrimaryRegion is the primary Azure region for resource creation (e.g., "westeurope")
+                      minLength: 1
+                      type: string
+                    providerConfig:
+                      description: |-
+                        ProviderConfig references the externally-created azure.m.upbound.io
+                        ProviderConfig in the org namespace. Created by
+                        scripts/setup-azure-org-prerequisites.sh (F-AZ-17) before KubeOrg apply.
+                      minLength: 1
+                      type: string
+                    regions:
+                      description: Regions is the list of Azure regions where resources will be created
+                      items:
+                        type: string
+                      minItems: 1
+                      type: array
+                    subscriptionId:
+                      description: SubscriptionID is the Azure subscription UUID where resources will be created
+                      pattern: ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$
+                      type: string
+                    tags:
+                      additionalProperties:
+                        type: string
+                      description: Tags are additional tags to apply to Azure resources
+                      type: object
+                    tenantId:
+                      description: TenantID is the Azure AD tenant UUID
+                      pattern: ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$
                       type: string
                   required:
-                  - name
+                    - primaryRegion
+                    - providerConfig
+                    - regions
+                    - subscriptionId
+                    - tenantId
                   type: object
-                type: array
-            type: object
-            x-kubernetes-validations:
-            - message: when network.dns.enabled=true, exactly one of awsConfig.dns.hosted,
-                gcpConfig.dns.hosted, or azureConfig.dns.hosted must be true
-              rule: '!(has(self.network) && has(self.network.dns) && self.network.dns.enabled)
-                || (((has(self.awsConfig) && has(self.awsConfig.dns) && self.awsConfig.dns.hosted)
-                ? 1 : 0) + ((has(self.gcpConfig) && has(self.gcpConfig.dns) && self.gcpConfig.dns.hosted)
-                ? 1 : 0) + ((has(self.azureConfig) && has(self.azureConfig.dns) &&
-                self.azureConfig.dns.hosted) ? 1 : 0)) == 1'
-          status:
-            description: status defines the observed state of KubeOrg
-            properties:
-              activeConfiguration:
-                description: ActiveConfiguration contains the active configuration
-                  propagated from the XAWSProvider
-                properties:
-                  childResources:
-                    description: ChildResources contains summary of all child resources
-                      managed by the composition
-                    properties:
-                      resources:
-                        description: Resources contains JSON array of resource metadata
-                        type: string
-                      total:
-                        description: Total number of child resources
-                        type: integer
-                    type: object
-                  iamPolicies:
-                    description: IAMPolicies contains IAM policies created for the
-                      provider
-                    properties:
-                      ecrPolicy:
-                        description: ECRPolicy contains the ARN of the ECR access
-                          policy
-                        type: string
-                      secretsManagerPolicy:
-                        description: SecretsManagerPolicy contains the ARN of the
-                          Secrets Manager access policy
-                        type: string
-                    type: object
-                  iamRoles:
-                    description: IAMRoles contains IAM roles created for the provider
-                    properties:
-                      ecrRole:
-                        description: ECRRole contains the ARN of the ECR credentials
-                          IAM role
-                        type: string
-                      esoRole:
-                        description: ESORole contains the ARN of the External Secrets
-                          Operator IAM role
-                        type: string
-                    type: object
-                  oidcProvider:
-                    description: OIDCProvider contains OIDC provider information for
-                      IRSA
-                    properties:
-                      arn:
-                        description: ARN of the OIDC provider
-                        type: string
-                      url:
-                        description: URL of the OIDC provider
-                        type: string
-                    type: object
-                  ready:
-                    description: Ready indicates if all resources are successfully
-                      provisioned and ready
-                    type: boolean
-                  registries:
-                    description: Registries contains JSON array of ECR registries
-                      created across regions
-                    type: string
-                  secretArn:
-                    description: SecretArn contains the ARN of the Secrets Manager
-                      secret containing registry credentials
-                    type: string
-                type: object
-              activeProviders:
-                description: |-
-                  ActiveProviders is a comma-separated list of active provider keys (e.g., "aws,gcp")
-                  Used for kubectl print column display.
-                type: string
-              conditions:
-                description: Conditions represent the latest available observations
-                  of the KubeOrg's current state
-                items:
-                  description: Condition contains details for one aspect of the current
-                    state of this API Resource.
+                gcpConfig:
+                  description: GCPConfig contains the GCP configuration for the provider
                   properties:
-                    lastTransitionTime:
+                    dns:
                       description: |-
-                        lastTransitionTime is the last time the condition transitioned from one status to another.
-                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                        DNS holds the DNS ownership declaration for this provider.
+                        Set hosted=true to designate GCP (Cloud DNS) as the org's authoritative DNS zone owner.
+                      properties:
+                        hosted:
+                          default: false
+                          description: |-
+                            Hosted indicates that this cloud provider owns the authoritative DNS zone
+                            for the org domain. When the org has DNS enabled, exactly one provider
+                            config must set this to true.
+                          type: boolean
+                      type: object
+                    labels:
+                      additionalProperties:
+                        type: string
+                      description: Labels are additional labels to apply to GCP resources
+                      type: object
+                    primaryRegion:
+                      description: PrimaryRegion is the primary GCP region for resource creation
+                      minLength: 1
+                      type: string
+                    projectId:
+                      description: ProjectID is the GCP project ID where resources will be created
+                      maxLength: 30
+                      minLength: 6
+                      pattern: ^[a-z][a-z0-9-]*[a-z0-9]$
+                      type: string
+                    projectNumber:
+                      description: |-
+                        ProjectNumber is the numeric GCP project number (e.g. "518719425131").
+                        When set, enables WIF-authenticated ESO SecretStore for GCP Secret Manager.
+                        Not derivable from ProjectID — find it in GCP Console → Project Info.
+                      pattern: ^[0-9]+$
+                      type: string
+                    regions:
+                      description: Regions is the list of GCP regions where resources will be created
+                      items:
+                        type: string
+                      minItems: 1
+                      type: array
+                  required:
+                    - primaryRegion
+                    - projectId
+                    - regions
+                  type: object
+                githubConfig:
+                  description: |-
+                    GithubConfig contains the GitHub provider configuration
+                    When provided, enables GitHub provider integration
+                  properties:
+                    dedicatedApp:
+                      description: |-
+                        DedicatedApp, when set, selects the dedicated GitHub App model: the App
+                        credential is staged in the customer's GCP Secret Manager and pulled into
+                        DedicatedApp.SecretRef by the githubprovider composition; the operator then
+                        derives installationId and verifies contents:write on PlatformRepo.
+                        Absence = the shared cluster-wide GitHub App.
+                      properties:
+                        secretRef:
+                          description: |-
+                            SecretRef names the org-namespace Secret that the githubprovider composition
+                            PRODUCES (keys: appId, privateKey) by pulling the customer-staged GSM secret.
+                            The operator does NOT require this Secret to pre-exist — it appears only
+                            post-federation, once the org GCP SecretStore is live.
+                          properties:
+                            name:
+                              description: Name of the Secret in the same namespace as the referencing resource.
+                              minLength: 1
+                              type: string
+                          required:
+                            - name
+                          type: object
+                      required:
+                        - secretRef
+                      type: object
+                    installationId:
+                      description: |-
+                        InstallationId is the GitHub App installation ID for this organization.
+                        Shared-app path only — supplied by the caller. On the dedicated-app path
+                        (spec.githubConfig.dedicatedApp set) the operator DERIVES it from the App
+                        private key and this field is ignored.
+                      type: string
+                    platformRepo:
+                      default: platform
+                      description: |-
+                        PlatformRepo names the GitHub repository the dedicated App is granted at
+                        install time, and against which the operator verifies contents:write.
+                      type: string
+                  type: object
+                identity:
+                  description: |-
+                    Identity configuration for Zitadel integration
+                    When provided, enables Zitadel organization and role management
+                  properties:
+                    allowedDomains:
+                      description: |-
+                        AllowedDomains restricts which email domains can join
+                        If empty, any domain is allowed
+                      items:
+                        type: string
+                      type: array
+                    githubIDP:
+                      description: GitHubIDP configures GitHub identity provider for this organization
+                      properties:
+                        enabled:
+                          default: true
+                          description: |-
+                            Enabled activates the instance-level GitHub IDP for this organization.
+                            Defaults to true; users can link their GitHub accounts but cannot auto-register.
+                          type: boolean
+                      type: object
+                    initialAdmin:
+                      description: InitialAdmin email - will be granted admin role via project grant
+                      format: email
+                      type: string
+                  required:
+                    - initialAdmin
+                  type: object
+                meluxinaConfig:
+                  description: |-
+                    MeluxinaConfig declares this org's MeluXina (LuxProvide HPC) allocation —
+                    the org-tenancy fact (one Slurm account, one SSH key, one S3 gateway per
+                    customer), structurally mirroring awsConfig/gcpConfig. It is NOT a cloud
+                    the platform provisions a cluster in; it is an external HPC endpoint reached
+                    from a GKE KubePool when spec.features.mlConfig.hpc.enabled. Bridge plumbing
+                    (JWT CronJob, provider-helm Release) is delivered by a later PRD; this field
+                    only records the tenancy/credentials. PRD-MELUXINA-IO-001.
+                  properties:
+                    account:
+                      description: Account is the Slurm account (e.g. "p200XXX") for job submission.
+                      minLength: 1
+                      type: string
+                    s3Gateway:
+                      description: |-
+                        S3Gateway is the MeluXina object-storage S3 gateway host (e.g. "s3.lxp.lu")
+                        used to stage datasets/checkpoints. Optional; data delivery strategy is
+                        finalized in the MeluXina PRD.
+                      type: string
+                    slurmEndpoint:
+                      description: SlurmEndpoint is the MeluXina Slurm REST API host (e.g. "slurm-api.lxp.lu").
+                      minLength: 1
+                      type: string
+                    sshKeySecretRef:
+                      description: |-
+                        SSHKeySecretRef names the Secret in this KubeOrg's namespace holding the
+                        long-lived Ed25519 SSH key used by the management-plane token-rotation job
+                        to mint short-lived Slurm JWTs. The key never leaves KAOS cloud.
+                      properties:
+                        name:
+                          description: Name of the Secret in the same namespace as the referencing resource.
+                          minLength: 1
+                          type: string
+                      required:
+                        - name
+                      type: object
+                  required:
+                    - account
+                    - slurmEndpoint
+                  type: object
+                network:
+                  description: |-
+                    Network configuration for VPC provisioning
+                    Defaults to disabled. When enabled, awsConfig is required.
+                  properties:
+                    dns:
+                      description: DNS configures DNS zone creation for the network
+                      properties:
+                        delegationMode:
+                          default: byo
+                          description: |-
+                            DelegationMode controls how the org's authoritative zone is delegated so it
+                            resolves publicly (#410):
+                              - "byo" (default): bring-your-own. KubeCore creates the org's authoritative
+                                zone for Domain; delegation is handled externally (the customer/registrar
+                                points NS at the created zone). KubeCore writes no parent NS record.
+                              - "managed": KubeCore additionally writes a delegating NS record for Domain
+                                into the parent zone named by ParentZone, pointing at the created zone's
+                                nameservers. Use when KubeCore owns/manages the parent apex zone.
+                            The Domain itself always comes from the spec (KAOS-generated or customer-brought);
+                            the operator never synthesizes it.
+                          enum:
+                            - byo
+                            - managed
+                          type: string
+                        domain:
+                          description: |-
+                            Domain is the domain name for the hosted zone
+                            Required when DNS is enabled
+                          pattern: ^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)*$
+                          type: string
+                        enabled:
+                          default: false
+                          description: |-
+                            Enabled determines whether DNS zones should be created
+                            Only applied to the primary region network
+                          type: boolean
+                        parentZone:
+                          description: |-
+                            ParentZone is the cloud DNS managed-zone NAME (not the dnsName) of the parent
+                            zone into which the delegating NS record for Domain is written. Required when
+                            DelegationMode is "managed"; must be empty for "byo". The operator addresses
+                            the parent by this name to write the {Domain} NS -> child-nameservers record.
+                          type: string
+                      type: object
+                      x-kubernetes-validations:
+                        - message: parentZone must be set when delegationMode is 'managed', and must be empty otherwise
+                          rule: '(has(self.delegationMode) && self.delegationMode == ''managed'') ? (has(self.parentZone) && self.parentZone != '''') : !(has(self.parentZone) && self.parentZone != '''')'
+                    enabled:
+                      default: false
+                      description: |-
+                        Enabled determines whether network resources should be created
+                        Defaults to false. When enabled, awsConfig must be provided.
+                      type: boolean
+                    multizone:
+                      default: true
+                      description: Multizone determines whether to create multi-AZ networks
+                      type: boolean
+                  type: object
+                teams:
+                  description: |-
+                    Teams is the list of KubeTeam references granting org-wide access. Every
+                    KubeProject in this org inherits these teams via the KubeProject reconciler's
+                    merge logic (F-05). Project-level overrides are not permitted (CON-04).
+                  items:
+                    description: |-
+                      KubeTeamRef references a KubeTeam resource by name within the same KubeOrg namespace.
+                      Only the name is required; role and permissions come from the referenced KubeTeam itself
+                      (CON-03: one role per team; CON-04: org-level teams cannot be overridden at project level).
+                      Env-scoped roles are deferred per D-05 — no per-environment fields here.
+                    properties:
+                      name:
+                        description: |-
+                          Name of the KubeTeam to reference. Must exist in the same namespace
+                          as the consumer (KubeProject or KubeOrg) — i.e., the KubeOrg namespace.
+                        maxLength: 253
+                        minLength: 1
+                        pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                        type: string
+                    required:
+                      - name
+                    type: object
+                  type: array
+              type: object
+              x-kubernetes-validations:
+                - message: when network.dns.enabled=true, exactly one of awsConfig.dns.hosted, gcpConfig.dns.hosted, or azureConfig.dns.hosted must be true
+                  rule: '!(has(self.network) && has(self.network.dns) && self.network.dns.enabled) || (((has(self.awsConfig) && has(self.awsConfig.dns) && self.awsConfig.dns.hosted) ? 1 : 0) + ((has(self.gcpConfig) && has(self.gcpConfig.dns) && self.gcpConfig.dns.hosted) ? 1 : 0) + ((has(self.azureConfig) && has(self.azureConfig.dns) && self.azureConfig.dns.hosted) ? 1 : 0)) == 1'
+            status:
+              description: status defines the observed state of KubeOrg
+              properties:
+                activeConfiguration:
+                  description: ActiveConfiguration contains the active configuration propagated from the XAWSProvider
+                  properties:
+                    childResources:
+                      description: ChildResources contains summary of all child resources managed by the composition
+                      properties:
+                        resources:
+                          description: Resources contains JSON array of resource metadata
+                          type: string
+                        total:
+                          description: Total number of child resources
+                          type: integer
+                      type: object
+                    iamPolicies:
+                      description: IAMPolicies contains IAM policies created for the provider
+                      properties:
+                        ecrPolicy:
+                          description: ECRPolicy contains the ARN of the ECR access policy
+                          type: string
+                        secretsManagerPolicy:
+                          description: SecretsManagerPolicy contains the ARN of the Secrets Manager access policy
+                          type: string
+                      type: object
+                    iamRoles:
+                      description: IAMRoles contains IAM roles created for the provider
+                      properties:
+                        ecrRole:
+                          description: ECRRole contains the ARN of the ECR credentials IAM role
+                          type: string
+                        esoRole:
+                          description: ESORole contains the ARN of the External Secrets Operator IAM role
+                          type: string
+                      type: object
+                    oidcProvider:
+                      description: OIDCProvider contains OIDC provider information for IRSA
+                      properties:
+                        arn:
+                          description: ARN of the OIDC provider
+                          type: string
+                        url:
+                          description: URL of the OIDC provider
+                          type: string
+                      type: object
+                    ready:
+                      description: Ready indicates if all resources are successfully provisioned and ready
+                      type: boolean
+                    registries:
+                      description: Registries contains JSON array of ECR registries created across regions
+                      type: string
+                    secretArn:
+                      description: SecretArn contains the ARN of the Secrets Manager secret containing registry credentials
+                      type: string
+                  type: object
+                activeProviders:
+                  description: |-
+                    ActiveProviders is a comma-separated list of active provider keys (e.g., "aws,gcp")
+                    Used for kubectl print column display.
+                  type: string
+                conditions:
+                  description: Conditions represent the latest available observations of the KubeOrg's current state
+                  items:
+                    description: Condition contains details for one aspect of the current state of this API Resource.
+                    properties:
+                      lastTransitionTime:
+                        description: |-
+                          lastTransitionTime is the last time the condition transitioned from one status to another.
+                          This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                        format: date-time
+                        type: string
+                      message:
+                        description: |-
+                          message is a human readable message indicating details about the transition.
+                          This may be an empty string.
+                        maxLength: 32768
+                        type: string
+                      observedGeneration:
+                        description: |-
+                          observedGeneration represents the .metadata.generation that the condition was set based upon.
+                          For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                          with respect to the current state of the instance.
+                        format: int64
+                        minimum: 0
+                        type: integer
+                      reason:
+                        description: |-
+                          reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                          Producers of specific condition types may define expected values and meanings for this field,
+                          and whether the values are considered a guaranteed API.
+                          The value should be a CamelCase string.
+                          This field may not be empty.
+                        maxLength: 1024
+                        minLength: 1
+                        pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                        type: string
+                      status:
+                        description: status of the condition, one of True, False, Unknown.
+                        enum:
+                          - "True"
+                          - "False"
+                          - Unknown
+                        type: string
+                      type:
+                        description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                        maxLength: 316
+                        pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                        type: string
+                    required:
+                      - lastTransitionTime
+                      - message
+                      - reason
+                      - status
+                      - type
+                    type: object
+                  type: array
+                  x-kubernetes-list-map-keys:
+                    - type
+                  x-kubernetes-list-type: map
+                gcp:
+                  description: |-
+                    GCP holds operator-resolved GCP config values (provider config name,
+                    crossplane service account). Informational. Populated when gcpConfig is set.
+                  properties:
+                    crossplaneServiceAccount:
+                      description: CrossplaneServiceAccount is the resolved crossplane SA email.
+                      type: string
+                    providerConfig:
+                      description: ProviderConfig is the resolved gcp.m.upbound.io ProviderConfig name.
+                      type: string
+                  type: object
+                gitHubAppDiscovered:
+                  description: |-
+                    GitHubAppDiscovered records dedicated GitHub App discovery/verify outcome (derived
+                    installationId + contents:write). Populated by the Reconciling phase on the dedicated path.
+                  properties:
+                    appId:
+                      type: string
+                    contentsWrite:
+                      type: boolean
+                    installationId:
+                      type: string
+                    verifiedAt:
+                      format: date-time
+                      type: string
+                  type: object
+                identityProvider:
+                  description: IdentityProvider contains Zitadel integration status
+                  properties:
+                    actionConfigured:
+                      description: ActionConfigured indicates if the action and flow triggers are configured
+                      type: boolean
+                    actionId:
+                      description: ActionID is the ID of the "addGroupsClaim" action
+                      type: string
+                    githubIdpEnabled:
+                      description: GitHubIDPEnabled indicates if GitHub IDP is activated for this organization
+                      type: boolean
+                    initialAdminAssigned:
+                      description: InitialAdminAssigned indicates if initial admin was granted access
+                      type: boolean
+                    lastUpdated:
+                      description: LastUpdated is when the status was last updated
                       format: date-time
                       type: string
                     message:
+                      description: Message contains additional status information
+                      type: string
+                    orgProjectId:
                       description: |-
-                        message is a human readable message indicating details about the transition.
-                        This may be an empty string.
-                      maxLength: 32768
+                        OrgProjectID is the organization-specific Zitadel project for RBAC roles
+                        This project is created within the org and contains org-level + project-level roles
                       type: string
-                    observedGeneration:
-                      description: |-
-                        observedGeneration represents the .metadata.generation that the condition was set based upon.
-                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
-                        with respect to the current state of the instance.
-                      format: int64
-                      minimum: 0
-                      type: integer
-                    reason:
-                      description: |-
-                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
-                        Producers of specific condition types may define expected values and meanings for this field,
-                        and whether the values are considered a guaranteed API.
-                        The value should be a CamelCase string.
-                        This field may not be empty.
-                      maxLength: 1024
-                      minLength: 1
-                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                    orgProjectName:
+                      description: OrgProjectName is the name of the organization-specific project
                       type: string
-                    status:
-                      description: status of the condition, one of True, False, Unknown.
-                      enum:
-                      - "True"
-                      - "False"
-                      - Unknown
+                    orgRoles:
+                      description: OrgRoles contains org-level roles created in the org project
+                      items:
+                        description: RoleStatus contains the status of a Zitadel role
+                        properties:
+                          created:
+                            description: Created indicates if the role was successfully created
+                            type: boolean
+                          displayName:
+                            description: DisplayName is the human-readable role name
+                            type: string
+                          name:
+                            description: Name is the role key (e.g., "kubeorg:acme:admin")
+                            type: string
+                        type: object
+                      type: array
+                    orgRolesProjectConfigured:
+                      description: OrgRolesProjectConfigured indicates if projectRoleAssertion is enabled
+                      type: boolean
+                    organizationId:
+                      description: OrganizationID is the Zitadel organization ID
                       type: string
-                    type:
-                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
-                      maxLength: 316
-                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                    organizationName:
+                      description: OrganizationName is the Zitadel organization name
                       type: string
-                  required:
-                  - lastTransitionTime
-                  - message
-                  - reason
-                  - status
-                  - type
+                    projectGrantId:
+                      description: ProjectGrantID is the ID of the project grant from KAOS org to this org
+                      type: string
+                    projectId:
+                      description: ProjectID is the KAOS kaos-app project ID
+                      type: string
+                    ready:
+                      description: Ready indicates if Zitadel organization is fully configured
+                      type: boolean
+                    roles:
+                      description: Roles contains the status of created roles (deprecated - roles are in kaos-app project)
+                      items:
+                        description: RoleStatus contains the status of a Zitadel role
+                        properties:
+                          created:
+                            description: Created indicates if the role was successfully created
+                            type: boolean
+                          displayName:
+                            description: DisplayName is the human-readable role name
+                            type: string
+                          name:
+                            description: Name is the role key (e.g., "kubeorg:acme:admin")
+                            type: string
+                        type: object
+                      type: array
                   type: object
-                type: array
-                x-kubernetes-list-map-keys:
-                - type
-                x-kubernetes-list-type: map
-              gcp:
-                description: |-
-                  GCP holds operator-resolved GCP config values (provider config name,
-                  crossplane service account). Informational. Populated when gcpConfig is set.
-                properties:
-                  crossplaneServiceAccount:
-                    description: CrossplaneServiceAccount is the resolved crossplane
-                      SA email.
-                    type: string
-                  providerConfig:
-                    description: ProviderConfig is the resolved gcp.m.upbound.io ProviderConfig
-                      name.
-                    type: string
-                type: object
-              gitHubAppDiscovered:
-                description: |-
-                  GitHubAppDiscovered records dedicated GitHub App discovery/verify outcome (derived
-                  installationId + contents:write). Populated by the Reconciling phase on the dedicated path.
-                properties:
-                  appId:
-                    type: string
-                  contentsWrite:
-                    type: boolean
-                  installationId:
-                    type: string
-                  verifiedAt:
-                    format: date-time
-                    type: string
-                type: object
-              identityProvider:
-                description: IdentityProvider contains Zitadel integration status
-                properties:
-                  actionConfigured:
-                    description: ActionConfigured indicates if the action and flow
-                      triggers are configured
-                    type: boolean
-                  actionId:
-                    description: ActionID is the ID of the "addGroupsClaim" action
-                    type: string
-                  githubIdpEnabled:
-                    description: GitHubIDPEnabled indicates if GitHub IDP is activated
-                      for this organization
-                    type: boolean
-                  initialAdminAssigned:
-                    description: InitialAdminAssigned indicates if initial admin was
-                      granted access
-                    type: boolean
-                  lastUpdated:
-                    description: LastUpdated is when the status was last updated
-                    format: date-time
-                    type: string
-                  message:
-                    description: Message contains additional status information
-                    type: string
-                  orgProjectId:
-                    description: |-
-                      OrgProjectID is the organization-specific Zitadel project for RBAC roles
-                      This project is created within the org and contains org-level + project-level roles
-                    type: string
-                  orgProjectName:
-                    description: OrgProjectName is the name of the organization-specific
-                      project
-                    type: string
-                  orgRoles:
-                    description: OrgRoles contains org-level roles created in the
-                      org project
-                    items:
-                      description: RoleStatus contains the status of a Zitadel role
-                      properties:
-                        created:
-                          description: Created indicates if the role was successfully
-                            created
-                          type: boolean
-                        displayName:
-                          description: DisplayName is the human-readable role name
-                          type: string
-                        name:
-                          description: Name is the role key (e.g., "kubeorg:acme:admin")
-                          type: string
-                      type: object
-                    type: array
-                  orgRolesProjectConfigured:
-                    description: OrgRolesProjectConfigured indicates if projectRoleAssertion
-                      is enabled
-                    type: boolean
-                  organizationId:
-                    description: OrganizationID is the Zitadel organization ID
-                    type: string
-                  organizationName:
-                    description: OrganizationName is the Zitadel organization name
-                    type: string
-                  projectGrantId:
-                    description: ProjectGrantID is the ID of the project grant from
-                      KAOS org to this org
-                    type: string
-                  projectId:
-                    description: ProjectID is the KAOS kaos-app project ID
-                    type: string
-                  ready:
-                    description: Ready indicates if Zitadel organization is fully
-                      configured
-                    type: boolean
-                  roles:
-                    description: Roles contains the status of created roles (deprecated
-                      - roles are in kaos-app project)
-                    items:
-                      description: RoleStatus contains the status of a Zitadel role
-                      properties:
-                        created:
-                          description: Created indicates if the role was successfully
-                            created
-                          type: boolean
-                        displayName:
-                          description: DisplayName is the human-readable role name
-                          type: string
-                        name:
-                          description: Name is the role key (e.g., "kubeorg:acme:admin")
-                          type: string
-                      type: object
-                    type: array
-                type: object
-              lastTransitionTime:
-                description: LastTransitionTime records when the status was last updated
-                format: date-time
-                type: string
-              networks:
-                description: Networks contains the status of network resources
-                properties:
-                  regional:
-                    description: Regional contains the status of network resources
-                      in each region
-                    items:
-                      description: RegionalNetworkStatus contains the status of network
-                        resources in a specific region
-                      properties:
-                        cloudProvider:
-                          description: |-
-                            CloudProvider identifies which cloud provider owns this network entry
-                            ("aws" | "gcp" | "azure"). Populated by the Azure composition set today;
-                            AWS and GCP entries leave this empty.
-                          type: string
-                        dns:
-                          description: DNS holds zone information when DNS is enabled
-                            on this network.
-                          properties:
-                            domain:
-                              description: Domain is the DNS domain name (e.g. "acme.com").
-                              type: string
-                            nameServers:
-                              description: NameServers are the authoritative nameservers
-                                for the zone.
-                              items:
-                                type: string
-                              type: array
-                            providerKind:
-                              description: 'ProviderKind identifies the DNS provider:
-                                "route53" or "clouddns".'
-                              type: string
-                            state:
-                              description: State is the provider-reported zone state.
-                              type: string
-                            zoneId:
-                              description: |-
-                                ZoneID is the provider-assigned zone identifier (Route53 hostedZoneId
-                                for AWS, Cloud DNS ManagedZone name for GCP).
-                              type: string
-                          type: object
-                        message:
-                          description: Message contains additional status information
-                          type: string
-                        name:
-                          description: Name of the network resource
-                          type: string
-                        nat:
-                          description: |-
-                            NAT holds the status of the NAT Gateway provisioned for this regional network.
-                            Populated from XAwsNetwork.status.natGateway via AWSOrgCompositionSet.ExtractStatus.
-                            Zero value when NAT is not enabled or before XAwsNetwork reaches Ready=True.
-                          properties:
-                            azs:
-                              description: |-
-                                AZs is the list of availability zones with a NAT.
-                                Taken from the network's AZ list; populated before Ready=True.
-                              items:
-                                type: string
-                              type: array
-                            count:
-                              description: Count is the number of NAT Gateways provisioned
-                                (one per AZ when fully provisioned).
-                              type: integer
-                            ids:
-                              description: |-
-                                IDs is the list of AWS NAT Gateway IDs (e.g. ["nat-0a1b2c3d4e5f", ...]), one per active AZ.
-                                IDs[i] aligns positionally with AZs[i]. Empty before all NATs reach Ready=True.
-                              items:
-                                type: string
-                              type: array
-                            ips:
-                              description: |-
-                                IPs is the list of public Elastic IPs allocated to NATs, one per active AZ (positionally aligned with AZs).
-                                Empty before all NATs reach Ready=True.
-                              items:
-                                type: string
-                              type: array
-                            mode:
-                              description: Mode is the NAT Gateway topology mode,
-                                "per-az" (one NAT per AZ in public subnet).
-                              type: string
-                          type: object
-                        region:
-                          description: Region where the network is deployed
-                          type: string
-                        resourceGroup:
-                          description: |-
-                            ResourceGroup is the cloud-specific RG/project container for this network.
-                            Populated for Azure (RG name); empty for AWS/GCP.
-                          type: string
-                        state:
-                          description: State of the network resource
-                          type: string
-                        subnets:
-                          description: |-
-                            Subnets exposes subnet IDs by role for downstream consumers (e.g. KubePool/AKS).
-                            Populated by Azure ExtractStatus. Empty for AWS and GCP, which do not
-                            surface subnet identifiers through RegionalNetworkStatus today.
-                          items:
-                            description: |-
-                              SubnetStatus exposes one subnet by its semantic role.
-                              Used by Azure to surface system + workload subnet IDs for AKS consumption.
-                            properties:
-                              id:
-                                description: ID is the cloud-native subnet identifier
-                                  (full Azure resource ID for Azure).
-                                type: string
-                              role:
-                                description: Role identifies the subnet's purpose
-                                  ("system" | "workload" for Azure).
-                                type: string
-                            required:
-                            - id
-                            - role
-                            type: object
-                          type: array
-                        vpcCIDR:
-                          description: VpcCIDR of the provisioned VPC
-                          type: string
-                        vpcId:
-                          description: VPCId of the provisioned VPC
-                          type: string
-                      type: object
-                    type: array
-                  state:
-                    description: State represents the overall state of network resources
-                    type: string
-                  summary:
-                    description: Summary contains aggregated network statistics
-                    properties:
-                      baseCIDR:
-                        description: BaseCIDR is the base CIDR block for all networks
-                        type: string
-                      failed:
-                        description: Failed number of network resources
-                        type: integer
-                      pending:
-                        description: Pending number of network resources
-                        type: integer
-                      ready:
-                        description: Ready number of network resources
-                        type: integer
-                      total:
-                        description: Total number of network resources
-                        type: integer
-                    type: object
-                type: object
-              observedGeneration:
-                description: ObservedGeneration is the most recent generation observed
-                  by the controller
-                format: int64
-                type: integer
-              phase:
-                description: Phase indicates the current reconciliation phase
-                enum:
-                - Reconciling
-                - Syncing
-                - Reporting
-                - Ready
-                - Failed
-                - Deleting
-                type: string
-              providers:
-                additionalProperties:
-                  description: ResourceReference contains a reference to a Kubernetes
-                    resource
+                lastTransitionTime:
+                  description: LastTransitionTime records when the status was last updated
+                  format: date-time
+                  type: string
+                networks:
+                  description: Networks contains the status of network resources
                   properties:
-                    apiVersion:
-                      description: API version of the resource
+                    regional:
+                      description: Regional contains the status of network resources in each region
+                      items:
+                        description: RegionalNetworkStatus contains the status of network resources in a specific region
+                        properties:
+                          cloudProvider:
+                            description: |-
+                              CloudProvider identifies which cloud provider owns this network entry
+                              ("aws" | "gcp" | "azure"). Populated by the Azure composition set today;
+                              AWS and GCP entries leave this empty.
+                            type: string
+                          dns:
+                            description: DNS holds zone information when DNS is enabled on this network.
+                            properties:
+                              domain:
+                                description: Domain is the DNS domain name (e.g. "acme.com").
+                                type: string
+                              nameServers:
+                                description: NameServers are the authoritative nameservers for the zone.
+                                items:
+                                  type: string
+                                type: array
+                              providerKind:
+                                description: 'ProviderKind identifies the DNS provider: "route53" or "clouddns".'
+                                type: string
+                              state:
+                                description: State is the provider-reported zone state.
+                                type: string
+                              zoneId:
+                                description: |-
+                                  ZoneID is the provider-assigned zone identifier (Route53 hostedZoneId
+                                  for AWS, Cloud DNS ManagedZone name for GCP).
+                                type: string
+                            type: object
+                          message:
+                            description: Message contains additional status information
+                            type: string
+                          name:
+                            description: Name of the network resource
+                            type: string
+                          nat:
+                            description: |-
+                              NAT holds the status of the NAT Gateway provisioned for this regional network.
+                              Populated from XAwsNetwork.status.natGateway via AWSOrgCompositionSet.ExtractStatus.
+                              Zero value when NAT is not enabled or before XAwsNetwork reaches Ready=True.
+                            properties:
+                              azs:
+                                description: |-
+                                  AZs is the list of availability zones with a NAT.
+                                  Taken from the network's AZ list; populated before Ready=True.
+                                items:
+                                  type: string
+                                type: array
+                              count:
+                                description: Count is the number of NAT Gateways provisioned (one per AZ when fully provisioned).
+                                type: integer
+                              ids:
+                                description: |-
+                                  IDs is the list of AWS NAT Gateway IDs (e.g. ["nat-0a1b2c3d4e5f", ...]), one per active AZ.
+                                  IDs[i] aligns positionally with AZs[i]. Empty before all NATs reach Ready=True.
+                                items:
+                                  type: string
+                                type: array
+                              ips:
+                                description: |-
+                                  IPs is the list of public Elastic IPs allocated to NATs, one per active AZ (positionally aligned with AZs).
+                                  Empty before all NATs reach Ready=True.
+                                items:
+                                  type: string
+                                type: array
+                              mode:
+                                description: Mode is the NAT Gateway topology mode, "per-az" (one NAT per AZ in public subnet).
+                                type: string
+                            type: object
+                          region:
+                            description: Region where the network is deployed
+                            type: string
+                          resourceGroup:
+                            description: |-
+                              ResourceGroup is the cloud-specific RG/project container for this network.
+                              Populated for Azure (RG name); empty for AWS/GCP.
+                            type: string
+                          state:
+                            description: State of the network resource
+                            type: string
+                          subnets:
+                            description: |-
+                              Subnets exposes subnet IDs by role for downstream consumers (e.g. KubePool/AKS).
+                              Populated by Azure ExtractStatus. Empty for AWS and GCP, which do not
+                              surface subnet identifiers through RegionalNetworkStatus today.
+                            items:
+                              description: |-
+                                SubnetStatus exposes one subnet by its semantic role.
+                                Used by Azure to surface system + workload subnet IDs for AKS consumption.
+                              properties:
+                                id:
+                                  description: ID is the cloud-native subnet identifier (full Azure resource ID for Azure).
+                                  type: string
+                                role:
+                                  description: Role identifies the subnet's purpose ("system" | "workload" for Azure).
+                                  type: string
+                              required:
+                                - id
+                                - role
+                              type: object
+                            type: array
+                          vpcCIDR:
+                            description: VpcCIDR of the provisioned VPC
+                            type: string
+                          vpcId:
+                            description: VPCId of the provisioned VPC
+                            type: string
+                        type: object
+                      type: array
+                    state:
+                      description: State represents the overall state of network resources
                       type: string
-                    kind:
-                      description: Kind of the resource
-                      type: string
-                    name:
-                      description: Name of the resource
-                      type: string
-                    namespace:
-                      description: Namespace of the resource (if namespaced)
-                      type: string
-                    uid:
-                      description: UID of the resource
-                      type: string
+                    summary:
+                      description: Summary contains aggregated network statistics
+                      properties:
+                        baseCIDR:
+                          description: BaseCIDR is the base CIDR block for all networks
+                          type: string
+                        failed:
+                          description: Failed number of network resources
+                          type: integer
+                        pending:
+                          description: Pending number of network resources
+                          type: integer
+                        ready:
+                          description: Ready number of network resources
+                          type: integer
+                        total:
+                          description: Total number of network resources
+                          type: integer
+                      type: object
                   type: object
-                description: |-
-                  Providers contains references to created provider resources, keyed by provider name
-                  (e.g., "aws", "gcp", "github")
-                type: object
-              ready:
-                description: |-
-                  Ready indicates whether the KubeOrg is fully reconciled and all resources are healthy.
-                  Provider-agnostic: set by the Ready phase regardless of which cloud providers are active.
-                type: boolean
-              reconciliationAttempts:
-                description: ReconciliationAttempts tracks the number of reconciliation
-                  attempts for backoff
-                type: integer
-              zitadelMachineUserId:
-                description: |-
-                  ZitadelMachineUserId is the deterministic id of this org's keyless Zitadel machine
-                  user (the JWT `sub` every cloud-federation trust pins). Published by the Reconciling
-                  phase; consumed by the in-cluster token-broker to impersonate this org (F-14, C1.5-a).
-                type: string
-            type: object
-        required:
-        - spec
-        type: object
-        x-kubernetes-validations:
-        - message: 'metadata.name must be ≤17 characters when spec.azureConfig is
-            set (CON-AZ-01: Azure Key Vault names are derived as {orgName}-{shortHash}
-            and must fit in 24 chars)'
-          rule: '!has(self.spec.azureConfig) || size(self.metadata.name) <= 17'
-        - message: metadata.name must be ≤19 characters when spec.gcpConfig is set
-            (GCP service-account-id limit is 30; longest derived suffix -gcp-eso-sa/-gcp-dns-sa/-crossplane
-            = 11 chars)
-          rule: '!has(self.spec.gcpConfig) || size(self.metadata.name) <= 19'
-    served: true
-    storage: true
-    subresources:
-      status: {}
+                observedGeneration:
+                  description: ObservedGeneration is the most recent generation observed by the controller
+                  format: int64
+                  type: integer
+                phase:
+                  description: Phase indicates the current reconciliation phase
+                  enum:
+                    - Reconciling
+                    - Syncing
+                    - Reporting
+                    - Ready
+                    - Failed
+                    - Deleting
+                  type: string
+                providers:
+                  additionalProperties:
+                    description: ResourceReference contains a reference to a Kubernetes resource
+                    properties:
+                      apiVersion:
+                        description: API version of the resource
+                        type: string
+                      kind:
+                        description: Kind of the resource
+                        type: string
+                      name:
+                        description: Name of the resource
+                        type: string
+                      namespace:
+                        description: Namespace of the resource (if namespaced)
+                        type: string
+                      uid:
+                        description: UID of the resource
+                        type: string
+                    type: object
+                  description: |-
+                    Providers contains references to created provider resources, keyed by provider name
+                    (e.g., "aws", "gcp", "github")
+                  type: object
+                ready:
+                  description: |-
+                    Ready indicates whether the KubeOrg is fully reconciled and all resources are healthy.
+                    Provider-agnostic: set by the Ready phase regardless of which cloud providers are active.
+                  type: boolean
+                reconciliationAttempts:
+                  description: ReconciliationAttempts tracks the number of reconciliation attempts for backoff
+                  type: integer
+                zitadelMachineUserId:
+                  description: |-
+                    ZitadelMachineUserId is the deterministic id of this org's keyless Zitadel machine
+                    user (the JWT `sub` every cloud-federation trust pins). Published by the Reconciling
+                    phase; consumed by the in-cluster token-broker to impersonate this org (F-14, C1.5-a).
+                  type: string
+              type: object
+          required:
+            - spec
+          type: object
+          x-kubernetes-validations:
+            - message: 'metadata.name must be ≤17 characters when spec.azureConfig is set (CON-AZ-01: Azure Key Vault names are derived as {orgName}-{shortHash} and must fit in 24 chars)'
+              rule: '!has(self.spec.azureConfig) || size(self.metadata.name) <= 17'
+            - message: metadata.name must be ≤19 characters when spec.gcpConfig is set (GCP service-account-id limit is 30; longest derived suffix -gcp-eso-sa/-gcp-dns-sa/-crossplane = 11 chars)
+              rule: '!has(self.spec.gcpConfig) || size(self.metadata.name) <= 19'
+      served: true
+      storage: true
+      subresources:
+        status: {}
 {{- end -}}

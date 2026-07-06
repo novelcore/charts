@@ -10,6 +10,27 @@ metadata:
     "helm.sh/resource-policy": keep
     {{- end }}
     controller-gen.kubebuilder.io/version: v0.18.0
+    graph.kubecore.io/relationships: |
+      - target: KubeProject
+        field: spec.kubeProjectRef
+        relationship: references
+        cardinality: "*:1"
+        required: true
+        description: "KubeApp references a KubeProject for project-level configuration"
+    graph.kubecore.io/hierarchy-label: kubecore.io/kubeapp
+    graph.kubecore.io/xr-mappings: |
+      - xrKind: XGitHubApp
+        apiVersion: github.platform.kubecore.io/v1alpha1
+        cardinality: "1:1"
+        description: "GitHub application repository"
+      - xrKind: XK8sApp
+        apiVersion: k8s.platform.kubecore.io/v1alpha1
+        cardinality: "1:1"
+        description: "Kubernetes application deployment (standard)"
+      - xrKind: XK8sMLApp
+        apiVersion: k8s.platform.kubecore.io/v1alpha1
+        cardinality: "1:1"
+        description: "Kubernetes ML-pipeline application (when kubeAppTemplateRef type=ml-pipeline)"
   name: kubeapps.schema.kubecore.io
 spec:
   group: schema.kubecore.io
@@ -20,713 +41,671 @@ spec:
     singular: kubeapp
   scope: Namespaced
   versions:
-  - additionalPrinterColumns:
-    - jsonPath: .status.phase
-      name: Phase
-      type: string
-    - jsonPath: .spec.kubeProjectRef
-      name: Project
-      type: string
-    - jsonPath: .spec.kubeAppTemplateRef
-      name: Template
-      type: string
-    - jsonPath: .spec.profile
-      name: Profile
-      type: string
-    - jsonPath: .status.repositoryUrl
-      name: Repository
-      type: string
-    - jsonPath: .status.applicationStatus.ready
-      name: Ready
-      type: boolean
-    - jsonPath: .metadata.creationTimestamp
-      name: Age
-      type: date
-    name: v1beta1
-    schema:
-      openAPIV3Schema:
-        description: KubeApp is the Schema for the kubeapps API
-        properties:
-          apiVersion:
-            description: |-
-              APIVersion defines the versioned schema of this representation of an object.
-              Servers should convert recognized schemas to the latest internal value, and
-              may reject unrecognized values.
-              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
-            type: string
-          kind:
-            description: |-
-              Kind is a string value representing the REST resource this object represents.
-              Servers may infer this from the endpoint the client submits requests to.
-              Cannot be updated.
-              In CamelCase.
-              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
-            type: string
-          metadata:
-            type: object
-          spec:
-            description: KubeAppSpec defines the desired state of KubeApp
-            properties:
-              description:
-                description: Description provides a description of the application
-                type: string
-              displayName:
-                description: DisplayName is a human-readable name for the application
-                type: string
-              environmentSelector:
-                description: |-
-                  EnvironmentSelector specifies which environments from the KubeProject this app should deploy to.
-                  If not specified or empty, the app will NOT be deployed to any environment.
-                  This is an explicit opt-in model to prevent accidental deployments.
-                properties:
-                  environmentTypes:
-                    description: |-
-                      EnvironmentTypes filters environments by their type (dev, stage, prod).
-                      Multiple environments of the same type can be matched.
-                      Example: ["dev", "stage"] will deploy to all dev and stage environments.
-                    items:
-                      type: string
-                    type: array
-                  exclude:
-                    description: |-
-                      Exclude lists environment names to skip, applied after other selectors.
-                      Useful for "deploy to all dev except dev-experimental" scenarios.
-                      Example: ["dev-experimental"] when combined with environmentTypes: ["dev"]
-                    items:
-                      type: string
-                    type: array
-                  matchLabels:
-                    additionalProperties:
-                      type: string
-                    description: |-
-                      MatchLabels filters environments by labels defined in the KubeProject environment overrides.
-                      All labels must match for an environment to be selected.
-                      Can be combined with EnvironmentTypes or Names for more specific selection.
-                    type: object
-                  names:
-                    description: |-
-                      Names explicitly lists environment names to deploy to.
-                      Takes precedence over EnvironmentTypes - if both are specified, only Names is used.
-                      Example: ["dev", "staging-us", "staging-eu"] will deploy to exactly these environments.
-                    items:
-                      type: string
-                    type: array
-                type: object
-              features:
-                description: |-
-                  Features defines optional feature configurations for the application
-                  All features default to enabled except webhooks
-                properties:
-                  ciCd:
-                    description: CiCd feature configuration
-                    properties:
-                      branchStrategy:
-                        description: BranchStrategy defines branch strategy configuration
-                        properties:
-                          devBranch:
-                            default: dev
-                            description: |-
-                              DevBranch is the integration branch a push to which fires the
-                              in-cluster CI (the Argo Events Sensor's push-dep trigger). Defaults
-                              to "dev" — the gitFlow convention. Set this when the repo's
-                              integration branch is named differently (e.g. "main" for trunk-based
-                              development), otherwise pushes to that branch never trigger a build
-                              (#347). Must be a plain branch name, not a full ref — the operator
-                              prefixes "refs/heads/".
-                            pattern: ^[a-zA-Z0-9._/-]+$
-                            type: string
-                          enabled:
-                            default: true
-                            description: Enabled indicates whether branch strategy
-                              is enabled
-                            type: boolean
-                          type:
-                            default: gitFlow
-                            description: Type specifies the type of branching strategy
-                            enum:
-                            - gitFlow
-                            - trunk
-                            - custom
-                            type: string
-                        type: object
-                      enabled:
-                        default: true
-                        description: Enabled indicates whether CI/CD is enabled
-                        type: boolean
-                    type: object
-                  repository:
-                    description: Repository feature configuration
-                    properties:
-                      enabled:
-                        default: true
-                        description: Enabled indicates whether the feature is enabled
-                        type: boolean
-                    type: object
-                  webhooks:
-                    description: Webhooks feature configuration (always disabled)
-                    properties:
-                      enabled:
-                        default: false
-                        description: Enabled indicates whether webhooks are enabled
-                          (always false)
-                        type: boolean
-                    type: object
-                type: object
-              gitOpsConfig:
-                description: GitOpsConfig defines GitOps workflow configuration
-                properties:
-                  autoMerge:
-                    additionalProperties:
-                      type: boolean
-                    description: AutoMerge per environment
-                    type: object
-                  basePath:
-                    default: kubeapps
-                    description: BasePath for GitOps files in the repository
-                    type: string
-                  branchName:
-                    default: main
-                    description: BranchName for GitOps operations
-                    type: string
-                type: object
-              k8sAppConfig:
-                description: K8sAppConfig defines Kubernetes application-specific
-                  configuration
-                properties:
-                  autoscalingConfig:
-                    description: AutoscalingConfig configuration
-                    properties:
-                      enabled:
-                        additionalProperties:
-                          type: boolean
-                        description: Enabled indicates if autoscaling should be enabled
-                          per environment
-                        type: object
-                    type: object
-                  baseResources:
-                    description: BaseResources configuration
-                    properties:
-                      configMap:
-                        description: ConfigMap configuration
-                        properties:
-                          data:
-                            additionalProperties:
-                              type: string
-                            description: Data for the config map
-                            type: object
-                          enabled:
-                            default: true
-                            description: Enabled indicates if config map should be
-                              created
-                            type: boolean
-                        type: object
-                      secret:
-                        description: Secret configuration
-                        properties:
-                          enabled:
-                            default: true
-                            description: Enabled indicates if secret should be created
-                            type: boolean
-                          type:
-                            default: Opaque
-                            description: Type of the secret
-                            type: string
-                        type: object
-                      serviceAccount:
-                        description: ServiceAccount configuration
-                        properties:
-                          enabled:
-                            default: true
-                            description: Enabled indicates if service account should
-                              be created
-                            type: boolean
-                          name:
-                            description: Name of the service account
-                            type: string
-                        type: object
-                    type: object
-                  environmentVariables:
-                    additionalProperties:
+    - additionalPrinterColumns:
+        - jsonPath: .status.phase
+          name: Phase
+          type: string
+        - jsonPath: .spec.kubeProjectRef
+          name: Project
+          type: string
+        - jsonPath: .spec.kubeAppTemplateRef
+          name: Template
+          type: string
+        - jsonPath: .spec.profile
+          name: Profile
+          type: string
+        - jsonPath: .status.repositoryUrl
+          name: Repository
+          type: string
+        - jsonPath: .status.applicationStatus.ready
+          name: Ready
+          type: boolean
+        - jsonPath: .metadata.creationTimestamp
+          name: Age
+          type: date
+      name: v1beta1
+      schema:
+        openAPIV3Schema:
+          description: KubeApp is the Schema for the kubeapps API
+          properties:
+            apiVersion:
+              description: |-
+                APIVersion defines the versioned schema of this representation of an object.
+                Servers should convert recognized schemas to the latest internal value, and
+                may reject unrecognized values.
+                More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+              type: string
+            kind:
+              description: |-
+                Kind is a string value representing the REST resource this object represents.
+                Servers may infer this from the endpoint the client submits requests to.
+                Cannot be updated.
+                In CamelCase.
+                More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+              type: string
+            metadata:
+              type: object
+            spec:
+              description: KubeAppSpec defines the desired state of KubeApp
+              properties:
+                description:
+                  description: Description provides a description of the application
+                  type: string
+                displayName:
+                  description: DisplayName is a human-readable name for the application
+                  type: string
+                environmentSelector:
+                  description: |-
+                    EnvironmentSelector specifies which environments from the KubeProject this app should deploy to.
+                    If not specified or empty, the app will NOT be deployed to any environment.
+                    This is an explicit opt-in model to prevent accidental deployments.
+                  properties:
+                    environmentTypes:
+                      description: |-
+                        EnvironmentTypes filters environments by their type (dev, stage, prod).
+                        Multiple environments of the same type can be matched.
+                        Example: ["dev", "stage"] will deploy to all dev and stage environments.
+                      items:
+                        type: string
+                      type: array
+                    exclude:
+                      description: |-
+                        Exclude lists environment names to skip, applied after other selectors.
+                        Useful for "deploy to all dev except dev-experimental" scenarios.
+                        Example: ["dev-experimental"] when combined with environmentTypes: ["dev"]
+                      items:
+                        type: string
+                      type: array
+                    matchLabels:
                       additionalProperties:
                         type: string
-                      type: object
-                    description: EnvironmentVariables per environment
-                    type: object
-                  healthCheck:
-                    description: HealthCheck configuration
-                    properties:
-                      initialDelaySeconds:
-                        default: 30
-                        description: InitialDelaySeconds before starting health checks
-                        type: integer
-                      path:
-                        default: /health
-                        description: Path for health check endpoint
-                        type: string
-                      periodSeconds:
-                        default: 10
-                        description: PeriodSeconds between health checks
-                        type: integer
-                    type: object
-                  ingressConfig:
-                    description: IngressConfig configuration
-                    properties:
-                      enabled:
-                        description: Enabled indicates if ingress should be created
-                        type: boolean
-                      pathType:
-                        default: Prefix
-                        description: PathType for ingress paths
-                        enum:
-                        - Prefix
-                        - Exact
-                        - ImplementationSpecific
-                        type: string
-                    type: object
-                type: object
-              kubeAppTemplateRef:
-                description: KubeAppTemplateRef references the XKubeAppTemplate to
-                  use for this application
-                minLength: 1
-                type: string
-              kubeProjectRef:
-                description: KubeProjectRef references the KubeProject that owns this
-                  application
-                minLength: 1
-                type: string
-              profile:
-                default: small
-                description: Profile specifies the resource profile size for the application
-                enum:
-                - small
-                - medium
-                - large
-                type: string
-              sdlcConfig:
-                description: SDLCConfig defines SDLC configuration
-                properties:
-                  promotionsEnabled:
-                    default: true
-                    description: PromotionsEnabled indicates if promotions are enabled
-                    type: boolean
-                type: object
-              visibility:
-                default: private
-                description: Visibility sets the repository visibility (private, public,
-                  internal)
-                enum:
-                - private
-                - public
-                - internal
-                type: string
-            required:
-            - description
-            - displayName
-            - kubeAppTemplateRef
-            - kubeProjectRef
-            type: object
-          status:
-            description: KubeAppStatus defines the observed state of KubeApp
-            properties:
-              applicationStatus:
-                description: ApplicationStatus contains application-specific status
-                  information
-                properties:
-                  ciCd:
-                    description: CiCd contains CI/CD status information
-                    properties:
-                      actionsConfigured:
-                        description: ActionsConfigured indicates whether GitHub Actions
-                          has been configured
-                        type: boolean
-                      branchStrategy:
-                        description: BranchStrategy contains branch strategy status
-                        properties:
-                          branchesCreated:
-                            description: BranchesCreated is a list of branches that
-                              were created
-                            items:
-                              type: string
-                            type: array
-                          implemented:
-                            description: Implemented indicates whether the branch
-                              strategy has been implemented
-                            type: boolean
-                          protectionRulesApplied:
-                            description: ProtectionRulesApplied is a list of branches
-                              with protection rules
-                            items:
-                              type: string
-                            type: array
-                          type:
-                            description: Type of the implemented branch strategy
-                            type: string
-                        type: object
-                      configured:
-                        description: Configured indicates whether CI/CD has been configured
-                        type: boolean
-                    type: object
-                  lastReconciled:
-                    description: LastReconciled records when the application was last
-                      reconciled
-                    format: date-time
-                    type: string
-                  message:
-                    description: Message contains a human-readable message about the
-                      application status
-                    type: string
-                  ready:
-                    description: Ready indicates whether all application components
-                      are ready
-                    type: boolean
-                  repository:
-                    description: Repository contains repository status information
-                    properties:
-                      created:
-                        description: Created indicates whether the repository has
-                          been created
-                        type: boolean
-                      fullName:
-                        description: FullName of the repository (owner/name)
-                        type: string
-                      name:
-                        description: Name of the created repository
-                        type: string
-                      url:
-                        description: Url of the repository
-                        type: string
-                      visibility:
-                        description: Visibility of the repository
-                        type: string
-                    type: object
-                  teams:
-                    description: Teams contains team status information
-                    properties:
-                      configured:
-                        description: Configured indicates whether teams have been
-                          configured
-                        type: boolean
-                      teamCount:
-                        description: TeamCount is the number of teams configured
-                        type: integer
-                      teams:
-                        description: Teams is a list of configured team names
-                        items:
-                          type: string
-                        type: array
-                    type: object
-                type: object
-              conditions:
-                description: Conditions represent the latest available observations
-                  of the KubeApp's current state
-                items:
-                  description: Condition contains details for one aspect of the current
-                    state of this API Resource.
-                  properties:
-                    lastTransitionTime:
                       description: |-
-                        lastTransitionTime is the last time the condition transitioned from one status to another.
-                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                        MatchLabels filters environments by labels defined in the KubeProject environment overrides.
+                        All labels must match for an environment to be selected.
+                        Can be combined with EnvironmentTypes or Names for more specific selection.
+                      type: object
+                    names:
+                      description: |-
+                        Names explicitly lists environment names to deploy to.
+                        Takes precedence over EnvironmentTypes - if both are specified, only Names is used.
+                        Example: ["dev", "staging-us", "staging-eu"] will deploy to exactly these environments.
+                      items:
+                        type: string
+                      type: array
+                  type: object
+                features:
+                  description: |-
+                    Features defines optional feature configurations for the application
+                    All features default to enabled except webhooks
+                  properties:
+                    ciCd:
+                      description: CiCd feature configuration
+                      properties:
+                        branchStrategy:
+                          description: BranchStrategy defines branch strategy configuration
+                          properties:
+                            devBranch:
+                              default: dev
+                              description: |-
+                                DevBranch is the integration branch a push to which fires the
+                                in-cluster CI (the Argo Events Sensor's push-dep trigger). Defaults
+                                to "dev" — the gitFlow convention. Set this when the repo's
+                                integration branch is named differently (e.g. "main" for trunk-based
+                                development), otherwise pushes to that branch never trigger a build
+                                (#347). Must be a plain branch name, not a full ref — the operator
+                                prefixes "refs/heads/".
+                              pattern: ^[a-zA-Z0-9._/-]+$
+                              type: string
+                            enabled:
+                              default: true
+                              description: Enabled indicates whether branch strategy is enabled
+                              type: boolean
+                            type:
+                              default: gitFlow
+                              description: Type specifies the type of branching strategy
+                              enum:
+                                - gitFlow
+                                - trunk
+                                - custom
+                              type: string
+                          type: object
+                        enabled:
+                          default: true
+                          description: Enabled indicates whether CI/CD is enabled
+                          type: boolean
+                      type: object
+                    repository:
+                      description: Repository feature configuration
+                      properties:
+                        enabled:
+                          default: true
+                          description: Enabled indicates whether the feature is enabled
+                          type: boolean
+                      type: object
+                    webhooks:
+                      description: Webhooks feature configuration (always disabled)
+                      properties:
+                        enabled:
+                          default: false
+                          description: Enabled indicates whether webhooks are enabled (always false)
+                          type: boolean
+                      type: object
+                  type: object
+                gitOpsConfig:
+                  description: GitOpsConfig defines GitOps workflow configuration
+                  properties:
+                    autoMerge:
+                      additionalProperties:
+                        type: boolean
+                      description: AutoMerge per environment
+                      type: object
+                    basePath:
+                      default: kubeapps
+                      description: BasePath for GitOps files in the repository
+                      type: string
+                    branchName:
+                      default: main
+                      description: BranchName for GitOps operations
+                      type: string
+                  type: object
+                k8sAppConfig:
+                  description: K8sAppConfig defines Kubernetes application-specific configuration
+                  properties:
+                    autoscalingConfig:
+                      description: AutoscalingConfig configuration
+                      properties:
+                        enabled:
+                          additionalProperties:
+                            type: boolean
+                          description: Enabled indicates if autoscaling should be enabled per environment
+                          type: object
+                      type: object
+                    baseResources:
+                      description: BaseResources configuration
+                      properties:
+                        configMap:
+                          description: ConfigMap configuration
+                          properties:
+                            data:
+                              additionalProperties:
+                                type: string
+                              description: Data for the config map
+                              type: object
+                            enabled:
+                              default: true
+                              description: Enabled indicates if config map should be created
+                              type: boolean
+                          type: object
+                        secret:
+                          description: Secret configuration
+                          properties:
+                            enabled:
+                              default: true
+                              description: Enabled indicates if secret should be created
+                              type: boolean
+                            type:
+                              default: Opaque
+                              description: Type of the secret
+                              type: string
+                          type: object
+                        serviceAccount:
+                          description: ServiceAccount configuration
+                          properties:
+                            enabled:
+                              default: true
+                              description: Enabled indicates if service account should be created
+                              type: boolean
+                            name:
+                              description: Name of the service account
+                              type: string
+                          type: object
+                      type: object
+                    environmentVariables:
+                      additionalProperties:
+                        additionalProperties:
+                          type: string
+                        type: object
+                      description: EnvironmentVariables per environment
+                      type: object
+                    healthCheck:
+                      description: HealthCheck configuration
+                      properties:
+                        initialDelaySeconds:
+                          default: 30
+                          description: InitialDelaySeconds before starting health checks
+                          type: integer
+                        path:
+                          default: /health
+                          description: Path for health check endpoint
+                          type: string
+                        periodSeconds:
+                          default: 10
+                          description: PeriodSeconds between health checks
+                          type: integer
+                      type: object
+                    ingressConfig:
+                      description: IngressConfig configuration
+                      properties:
+                        enabled:
+                          description: Enabled indicates if ingress should be created
+                          type: boolean
+                        pathType:
+                          default: Prefix
+                          description: PathType for ingress paths
+                          enum:
+                            - Prefix
+                            - Exact
+                            - ImplementationSpecific
+                          type: string
+                      type: object
+                  type: object
+                kubeAppTemplateRef:
+                  description: KubeAppTemplateRef references the XKubeAppTemplate to use for this application
+                  minLength: 1
+                  type: string
+                kubeProjectRef:
+                  description: KubeProjectRef references the KubeProject that owns this application
+                  minLength: 1
+                  type: string
+                profile:
+                  default: small
+                  description: Profile specifies the resource profile size for the application
+                  enum:
+                    - small
+                    - medium
+                    - large
+                  type: string
+                sdlcConfig:
+                  description: SDLCConfig defines SDLC configuration
+                  properties:
+                    promotionsEnabled:
+                      default: true
+                      description: PromotionsEnabled indicates if promotions are enabled
+                      type: boolean
+                  type: object
+                visibility:
+                  default: private
+                  description: Visibility sets the repository visibility (private, public, internal)
+                  enum:
+                    - private
+                    - public
+                    - internal
+                  type: string
+              required:
+                - description
+                - displayName
+                - kubeAppTemplateRef
+                - kubeProjectRef
+              type: object
+            status:
+              description: KubeAppStatus defines the observed state of KubeApp
+              properties:
+                applicationStatus:
+                  description: ApplicationStatus contains application-specific status information
+                  properties:
+                    ciCd:
+                      description: CiCd contains CI/CD status information
+                      properties:
+                        actionsConfigured:
+                          description: ActionsConfigured indicates whether GitHub Actions has been configured
+                          type: boolean
+                        branchStrategy:
+                          description: BranchStrategy contains branch strategy status
+                          properties:
+                            branchesCreated:
+                              description: BranchesCreated is a list of branches that were created
+                              items:
+                                type: string
+                              type: array
+                            implemented:
+                              description: Implemented indicates whether the branch strategy has been implemented
+                              type: boolean
+                            protectionRulesApplied:
+                              description: ProtectionRulesApplied is a list of branches with protection rules
+                              items:
+                                type: string
+                              type: array
+                            type:
+                              description: Type of the implemented branch strategy
+                              type: string
+                          type: object
+                        configured:
+                          description: Configured indicates whether CI/CD has been configured
+                          type: boolean
+                      type: object
+                    lastReconciled:
+                      description: LastReconciled records when the application was last reconciled
                       format: date-time
                       type: string
                     message:
-                      description: |-
-                        message is a human readable message indicating details about the transition.
-                        This may be an empty string.
-                      maxLength: 32768
+                      description: Message contains a human-readable message about the application status
                       type: string
-                    observedGeneration:
-                      description: |-
-                        observedGeneration represents the .metadata.generation that the condition was set based upon.
-                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
-                        with respect to the current state of the instance.
-                      format: int64
-                      minimum: 0
-                      type: integer
-                    reason:
-                      description: |-
-                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
-                        Producers of specific condition types may define expected values and meanings for this field,
-                        and whether the values are considered a guaranteed API.
-                        The value should be a CamelCase string.
-                        This field may not be empty.
-                      maxLength: 1024
-                      minLength: 1
-                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
-                      type: string
-                    status:
-                      description: status of the condition, one of True, False, Unknown.
-                      enum:
-                      - "True"
-                      - "False"
-                      - Unknown
-                      type: string
-                    type:
-                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
-                      maxLength: 316
-                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
-                      type: string
-                  required:
-                  - lastTransitionTime
-                  - message
-                  - reason
-                  - status
-                  - type
-                  type: object
-                type: array
-                x-kubernetes-list-map-keys:
-                - type
-                x-kubernetes-list-type: map
-              gitHubProviderConfig:
-                description: GitHubProviderConfig contains the GitHub provider configuration
-                  name
-                type: string
-              gitOpsStatus:
-                description: GitOpsStatus contains GitOps workflow configuration status
-                properties:
-                  basePath:
-                    description: BasePath is the base path for GitOps files in the
-                      repository
-                    type: string
-                  branchName:
-                    description: BranchName is the branch used for GitOps operations
-                    type: string
-                type: object
-              inheritedTeams:
-                description: |-
-                  InheritedTeams mirrors the parent KubeProject's effective team set per CON-04
-                  (KubeApp inherits without overrides). Surfaced for operator debugging — avoids
-                  having to inspect the parent KubeProject separately to see which teams have
-                  repo bindings on this app's repository. Populated by the Reporting phase.
-                items:
-                  description: |-
-                    EffectiveTeamStatus is the resolved per-team status entry surfaced by both
-                    KubeProject.status.effectiveTeams[] and KubeApp.status.inheritedTeams[]
-                    (PRD-331 F-13, Q-03). All three fields are operator-managed.
-
-                    GithubTeamID is empty until the corresponding KubeTeam's XGitHubTeam composite
-                    reaches Ready and the team ID is surfaced via F-04. Empty is a valid transient
-                    state — operators should not treat an empty GithubTeamID as a hard error.
-                  properties:
-                    githubTeamID:
-                      description: |-
-                        GithubTeamID mirrors KubeTeam.status.githubTeamID. Empty when XGitHubTeam
-                        has not yet emitted status.teamID (transient — next reconcile picks it up).
-                      type: string
-                    name:
-                      description: Name is the KubeTeam name (1:1 with the GitHub
-                        team name per CON-01).
-                      type: string
-                    role:
-                      description: 'Role is one of: business, dev, ops, admin (D-01).'
-                      enum:
-                      - business
-                      - dev
-                      - ops
-                      - admin
-                      type: string
-                  required:
-                  - name
-                  - role
-                  type: object
-                type: array
-              lastTransitionTime:
-                description: LastTransitionTime records when the status was last updated
-                format: date-time
-                type: string
-              observedGeneration:
-                description: ObservedGeneration is the most recent generation observed
-                  by the controller
-                format: int64
-                type: integer
-              phase:
-                description: Phase indicates the current reconciliation phase
-                enum:
-                - Reconciling
-                - Syncing
-                - Reporting
-                - Ready
-                - Failed
-                - Deleting
-                type: string
-              promotionStatus:
-                description: PromotionStatus contains GitOps Promoter integration
-                  status
-                properties:
-                  activeCommitStatuses:
-                    description: ActiveCommitStatuses lists global active commit status
-                      gates
-                    items:
-                      description: CommitStatusGate defines a commit status gate key
+                    ready:
+                      description: Ready indicates whether all application components are ready
+                      type: boolean
+                    repository:
+                      description: Repository contains repository status information
                       properties:
-                        key:
-                          description: Key is the commit status gate key
-                          type: string
-                      required:
-                      - key
-                      type: object
-                    type: array
-                  argoCDCommitStatusCreated:
-                    description: ArgoCDCommitStatusCreated indicates whether the ArgoCDCommitStatus
-                      resource was created
-                    type: boolean
-                  enabled:
-                    description: Enabled indicates whether GitOps Promoter is enabled
-                    type: boolean
-                  environments:
-                    description: Environments lists per-environment promotion configuration
-                    items:
-                      description: PromotionEnvironmentStatus contains per-environment
-                        promotion status
-                      properties:
-                        activeCommitStatuses:
-                          description: ActiveCommitStatuses lists per-environment
-                            active commit status gates
-                          items:
-                            description: CommitStatusGate defines a commit status
-                              gate key
-                            properties:
-                              key:
-                                description: Key is the commit status gate key
-                                type: string
-                            required:
-                            - key
-                            type: object
-                          type: array
-                        autoMerge:
-                          description: AutoMerge indicates whether auto-merge is enabled
-                            for this environment
+                        created:
+                          description: Created indicates whether the repository has been created
                           type: boolean
-                        branch:
-                          description: Branch used for promotion
+                        fullName:
+                          description: FullName of the repository (owner/name)
                           type: string
                         name:
-                          description: Name of the environment
+                          description: Name of the created repository
                           type: string
-                        proposedCommitStatuses:
-                          description: ProposedCommitStatuses lists per-environment
-                            proposed commit status gates
+                        url:
+                          description: Url of the repository
+                          type: string
+                        visibility:
+                          description: Visibility of the repository
+                          type: string
+                      type: object
+                    teams:
+                      description: Teams contains team status information
+                      properties:
+                        configured:
+                          description: Configured indicates whether teams have been configured
+                          type: boolean
+                        teamCount:
+                          description: TeamCount is the number of teams configured
+                          type: integer
+                        teams:
+                          description: Teams is a list of configured team names
                           items:
-                            description: CommitStatusGate defines a commit status
-                              gate key
-                            properties:
-                              key:
-                                description: Key is the commit status gate key
-                                type: string
-                            required:
-                            - key
-                            type: object
+                            type: string
                           type: array
                       type: object
-                    type: array
-                  observersReady:
-                    description: ObserversReady indicates whether ArgoCD application
-                      observers are ready
-                    type: boolean
-                  promotionStrategyCreated:
-                    description: PromotionStrategyCreated indicates whether the PromotionStrategy
-                      resource was created
-                    type: boolean
-                  proposedCommitStatuses:
-                    description: ProposedCommitStatuses lists global proposed commit
-                      status gates
-                    items:
-                      description: CommitStatusGate defines a commit status gate key
-                      properties:
-                        key:
-                          description: Key is the commit status gate key
-                          type: string
-                      required:
-                      - key
-                      type: object
-                    type: array
-                type: object
-              reconciliationAttempts:
-                description: ReconciliationAttempts tracks the number of reconciliation
-                  attempts for backoff
-                type: integer
-              repositoryUrl:
-                description: RepositoryUrl contains the URL of the created GitHub
-                  repository
-                type: string
-              selectedEnvironments:
-                description: |-
-                  SelectedEnvironments tracks the environments currently selected by the environmentSelector
-                  This is used to detect environment removals and trigger cleanup
-                items:
-                  type: string
-                type: array
-              templateInfo:
-                description: TemplateInfo contains information about the resolved
-                  template
-                properties:
-                  language:
-                    description: Language of the application
-                    type: string
-                  name:
-                    description: Name of the template
-                    type: string
-                  profile:
-                    description: Profile used for resource allocation
-                    type: string
-                  source:
-                    description: Source repository information
+                  type: object
+                conditions:
+                  description: Conditions represent the latest available observations of the KubeApp's current state
+                  items:
+                    description: Condition contains details for one aspect of the current state of this API Resource.
                     properties:
-                      owner:
-                        description: Owner of the template repository
+                      lastTransitionTime:
+                        description: |-
+                          lastTransitionTime is the last time the condition transitioned from one status to another.
+                          This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                        format: date-time
                         type: string
-                      repository:
-                        description: Repository name of the template
+                      message:
+                        description: |-
+                          message is a human readable message indicating details about the transition.
+                          This may be an empty string.
+                        maxLength: 32768
                         type: string
+                      observedGeneration:
+                        description: |-
+                          observedGeneration represents the .metadata.generation that the condition was set based upon.
+                          For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                          with respect to the current state of the instance.
+                        format: int64
+                        minimum: 0
+                        type: integer
+                      reason:
+                        description: |-
+                          reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                          Producers of specific condition types may define expected values and meanings for this field,
+                          and whether the values are considered a guaranteed API.
+                          The value should be a CamelCase string.
+                          This field may not be empty.
+                        maxLength: 1024
+                        minLength: 1
+                        pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                        type: string
+                      status:
+                        description: status of the condition, one of True, False, Unknown.
+                        enum:
+                          - "True"
+                          - "False"
+                          - Unknown
+                        type: string
+                      type:
+                        description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                        maxLength: 316
+                        pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                        type: string
+                    required:
+                      - lastTransitionTime
+                      - message
+                      - reason
+                      - status
+                      - type
                     type: object
-                  type:
-                    description: Type of the application (e.g., rest, grpc, batch)
+                  type: array
+                  x-kubernetes-list-map-keys:
+                    - type
+                  x-kubernetes-list-type: map
+                gitHubProviderConfig:
+                  description: GitHubProviderConfig contains the GitHub provider configuration name
+                  type: string
+                gitOpsStatus:
+                  description: GitOpsStatus contains GitOps workflow configuration status
+                  properties:
+                    basePath:
+                      description: BasePath is the base path for GitOps files in the repository
+                      type: string
+                    branchName:
+                      description: BranchName is the branch used for GitOps operations
+                      type: string
+                  type: object
+                inheritedTeams:
+                  description: |-
+                    InheritedTeams mirrors the parent KubeProject's effective team set per CON-04
+                    (KubeApp inherits without overrides). Surfaced for operator debugging — avoids
+                    having to inspect the parent KubeProject separately to see which teams have
+                    repo bindings on this app's repository. Populated by the Reporting phase.
+                  items:
+                    description: |-
+                      EffectiveTeamStatus is the resolved per-team status entry surfaced by both
+                      KubeProject.status.effectiveTeams[] and KubeApp.status.inheritedTeams[]
+                      (PRD-331 F-13, Q-03). All three fields are operator-managed.
+
+                      GithubTeamID is empty until the corresponding KubeTeam's XGitHubTeam composite
+                      reaches Ready and the team ID is surfaced via F-04. Empty is a valid transient
+                      state — operators should not treat an empty GithubTeamID as a hard error.
+                    properties:
+                      githubTeamID:
+                        description: |-
+                          GithubTeamID mirrors KubeTeam.status.githubTeamID. Empty when XGitHubTeam
+                          has not yet emitted status.teamID (transient — next reconcile picks it up).
+                        type: string
+                      name:
+                        description: Name is the KubeTeam name (1:1 with the GitHub team name per CON-01).
+                        type: string
+                      role:
+                        description: 'Role is one of: business, dev, ops, admin (D-01).'
+                        enum:
+                          - business
+                          - dev
+                          - ops
+                          - admin
+                        type: string
+                    required:
+                      - name
+                      - role
+                    type: object
+                  type: array
+                lastTransitionTime:
+                  description: LastTransitionTime records when the status was last updated
+                  format: date-time
+                  type: string
+                observedGeneration:
+                  description: ObservedGeneration is the most recent generation observed by the controller
+                  format: int64
+                  type: integer
+                phase:
+                  description: Phase indicates the current reconciliation phase
+                  enum:
+                    - Reconciling
+                    - Syncing
+                    - Reporting
+                    - Ready
+                    - Failed
+                    - Deleting
+                  type: string
+                promotionStatus:
+                  description: PromotionStatus contains GitOps Promoter integration status
+                  properties:
+                    activeCommitStatuses:
+                      description: ActiveCommitStatuses lists global active commit status gates
+                      items:
+                        description: CommitStatusGate defines a commit status gate key
+                        properties:
+                          key:
+                            description: Key is the commit status gate key
+                            type: string
+                        required:
+                          - key
+                        type: object
+                      type: array
+                    argoCDCommitStatusCreated:
+                      description: ArgoCDCommitStatusCreated indicates whether the ArgoCDCommitStatus resource was created
+                      type: boolean
+                    enabled:
+                      description: Enabled indicates whether GitOps Promoter is enabled
+                      type: boolean
+                    environments:
+                      description: Environments lists per-environment promotion configuration
+                      items:
+                        description: PromotionEnvironmentStatus contains per-environment promotion status
+                        properties:
+                          activeCommitStatuses:
+                            description: ActiveCommitStatuses lists per-environment active commit status gates
+                            items:
+                              description: CommitStatusGate defines a commit status gate key
+                              properties:
+                                key:
+                                  description: Key is the commit status gate key
+                                  type: string
+                              required:
+                                - key
+                              type: object
+                            type: array
+                          autoMerge:
+                            description: AutoMerge indicates whether auto-merge is enabled for this environment
+                            type: boolean
+                          branch:
+                            description: Branch used for promotion
+                            type: string
+                          name:
+                            description: Name of the environment
+                            type: string
+                          proposedCommitStatuses:
+                            description: ProposedCommitStatuses lists per-environment proposed commit status gates
+                            items:
+                              description: CommitStatusGate defines a commit status gate key
+                              properties:
+                                key:
+                                  description: Key is the commit status gate key
+                                  type: string
+                              required:
+                                - key
+                              type: object
+                            type: array
+                        type: object
+                      type: array
+                    observersReady:
+                      description: ObserversReady indicates whether ArgoCD application observers are ready
+                      type: boolean
+                    promotionStrategyCreated:
+                      description: PromotionStrategyCreated indicates whether the PromotionStrategy resource was created
+                      type: boolean
+                    proposedCommitStatuses:
+                      description: ProposedCommitStatuses lists global proposed commit status gates
+                      items:
+                        description: CommitStatusGate defines a commit status gate key
+                        properties:
+                          key:
+                            description: Key is the commit status gate key
+                            type: string
+                        required:
+                          - key
+                        type: object
+                      type: array
+                  type: object
+                reconciliationAttempts:
+                  description: ReconciliationAttempts tracks the number of reconciliation attempts for backoff
+                  type: integer
+                repositoryUrl:
+                  description: RepositoryUrl contains the URL of the created GitHub repository
+                  type: string
+                selectedEnvironments:
+                  description: |-
+                    SelectedEnvironments tracks the environments currently selected by the environmentSelector
+                    This is used to detect environment removals and trigger cleanup
+                  items:
                     type: string
-                type: object
-              xGitHubAppRef:
-                description: XGitHubAppRef contains a reference to the created XGitHubApp
-                  resource
-                properties:
-                  apiVersion:
-                    description: API version of the resource
-                    type: string
-                  kind:
-                    description: Kind of the resource
-                    type: string
-                  name:
-                    description: Name of the resource
-                    type: string
-                  namespace:
-                    description: Namespace of the resource (if namespaced)
-                    type: string
-                  uid:
-                    description: UID of the resource
-                    type: string
-                type: object
-              xK8sAppRef:
-                description: XK8sAppRef contains a reference to the created XK8sApp
-                  resource
-                properties:
-                  apiVersion:
-                    description: API version of the resource
-                    type: string
-                  kind:
-                    description: Kind of the resource
-                    type: string
-                  name:
-                    description: Name of the resource
-                    type: string
-                  namespace:
-                    description: Namespace of the resource (if namespaced)
-                    type: string
-                  uid:
-                    description: UID of the resource
-                    type: string
-                type: object
-            type: object
-        type: object
-    served: true
-    storage: true
-    subresources:
-      status: {}
+                  type: array
+                templateInfo:
+                  description: TemplateInfo contains information about the resolved template
+                  properties:
+                    language:
+                      description: Language of the application
+                      type: string
+                    name:
+                      description: Name of the template
+                      type: string
+                    profile:
+                      description: Profile used for resource allocation
+                      type: string
+                    source:
+                      description: Source repository information
+                      properties:
+                        owner:
+                          description: Owner of the template repository
+                          type: string
+                        repository:
+                          description: Repository name of the template
+                          type: string
+                      type: object
+                    type:
+                      description: Type of the application (e.g., rest, grpc, batch)
+                      type: string
+                  type: object
+                xGitHubAppRef:
+                  description: XGitHubAppRef contains a reference to the created XGitHubApp resource
+                  properties:
+                    apiVersion:
+                      description: API version of the resource
+                      type: string
+                    kind:
+                      description: Kind of the resource
+                      type: string
+                    name:
+                      description: Name of the resource
+                      type: string
+                    namespace:
+                      description: Namespace of the resource (if namespaced)
+                      type: string
+                    uid:
+                      description: UID of the resource
+                      type: string
+                  type: object
+                xK8sAppRef:
+                  description: XK8sAppRef contains a reference to the created XK8sApp resource
+                  properties:
+                    apiVersion:
+                      description: API version of the resource
+                      type: string
+                    kind:
+                      description: Kind of the resource
+                      type: string
+                    name:
+                      description: Name of the resource
+                      type: string
+                    namespace:
+                      description: Namespace of the resource (if namespaced)
+                      type: string
+                    uid:
+                      description: UID of the resource
+                      type: string
+                  type: object
+              type: object
+          type: object
+      served: true
+      storage: true
+      subresources:
+        status: {}
 {{- end -}}
