@@ -1,0 +1,290 @@
+{{/*
+ml-dataset-catalog-probe — KubeCore lakeFS dataset catalog probe ClusterWorkflowTemplate.
+
+Mirrors ml-compute-catalog-probe (clusterworkflowtemplate-compute-probe.yaml):
+a scheduled maintenance workflow that discovers the SELECTABLE UNITS the
+submit-form dropdown offers, and publishes them as a ConfigMap that render-wft
+reads (render-wft has NO lakeFS creds — only a github-token — so it cannot probe
+lakeFS at render time; the dropdown data must be pre-published, exactly like the
+compute catalog).
+
+Run on a schedule by a per-project CronWorkflow (created alongside the ML stack)
+in the argo-workflows namespace. It references this CWT by name (templateRef
+clusterScope: true) and passes:
+
+  lakefs_endpoint   (e.g. http://{project}-lakefs.{ns}.svc.cluster.local)
+  lakefs_repo       (e.g. yolo)
+  lakefs_secret     (K8s Secret holding the lakeFS admin key/secret; keys
+                     accessKeyId / secretAccessKey — the {project}-lakefs-admin secret)
+  lakefs_secret_ns  (namespace of that secret; the ML project namespace)
+  catalog_configmap (="kubecore-ml-dataset-catalog")
+  catalog_namespace (="argo-workflows")
+
+What it does:
+  1. Lists the repo's TAGS and BRANCHES via the lakeFS REST API.
+  2. Keeps only refs whose ROOT holds a data.yaml (objects/stat?path=data.yaml) —
+     that is the definition of "a dataset" (self-describing, no out-of-band
+     registry). NO dataset/{version}/ subprefix: lakeFS refs ARE the versioning.
+  3. Resolves each ref to its immutable commit SHA (refs/{ref}/commits?amount=1)
+     so a run pins a frozen snapshot even if the branch later advances.
+  4. Reads each ref's data.yaml for a human label (names, kpt_shape, splits).
+  5. Writes/updates the ConfigMap <catalog_configmap> in <catalog_namespace>
+     with datasets[] — one entry per discovered ref.
+
+render-wft (clusterworkflowtemplate-ml.yaml) reads this ConfigMap to render the
+`dataset-ref` dropdown. Without it the dropdown falls back to the pool's default
+branch, and the dataset-path-override escape hatch still covers any ref uploaded
+after the last probe.
+
+Standalone maintenance workflow: no git repo, no workspace PVC, no GitHub token,
+no registry auth. Needs the lakeFS admin secret (mounted) + RBAC to write the
+ConfigMap in argo-workflows.
+*/}}
+apiVersion: argoproj.io/v1alpha1
+kind: ClusterWorkflowTemplate
+metadata:
+  name: ml-dataset-catalog-probe
+  labels:
+    {{- include "kubecore-ci-workflows.labels" . | nindent 4 }}
+spec:
+  entrypoint: probe
+  ttlStrategy:
+    secondsAfterCompletion: {{ .Values.workflow.ttlStrategy.secondsAfterCompletion }}
+  podGC:
+    strategy: {{ .Values.workflow.podGC.strategy }}
+  arguments:
+    parameters:
+    - name: lakefs_endpoint
+    - name: lakefs_repo
+    - name: lakefs_secret
+      value: "yolo-lakefs-admin"
+    - name: lakefs_secret_ns
+      value: "ml-yolo"
+    - name: catalog_configmap
+      value: "kubecore-ml-dataset-catalog"
+    - name: catalog_namespace
+      value: "argo-workflows"
+
+  templates:
+  - name: probe
+    inputs:
+      parameters:
+      - name: lakefs_endpoint
+        value: "{{`{{workflow.parameters.lakefs_endpoint}}`}}"
+      - name: lakefs_repo
+        value: "{{`{{workflow.parameters.lakefs_repo}}`}}"
+      - name: lakefs_secret
+        value: "{{`{{workflow.parameters.lakefs_secret}}`}}"
+      - name: lakefs_secret_ns
+        value: "{{`{{workflow.parameters.lakefs_secret_ns}}`}}"
+      - name: catalog_configmap
+        value: "{{`{{workflow.parameters.catalog_configmap}}`}}"
+      - name: catalog_namespace
+        value: "{{`{{workflow.parameters.catalog_namespace}}`}}"
+    metadata:
+      labels:
+        platform.kubecore.io/maintenance: dataset-catalog-probe
+    container:
+      # python:3.12-alpine ships python3 + pip; we install kubectl (idempotent).
+      # lakeFS admin creds come from a mounted secret (NOT Workload Identity —
+      # lakeFS auth is its own key/secret pair), read from the mount at runtime.
+      image: python:3.12-alpine
+      command: [sh, -c]
+      args:
+      - |
+        set -eu
+
+        # kubectl (to write the ConfigMap) — install idempotently.
+        if ! command -v kubectl >/dev/null 2>&1; then
+          apk add --no-cache curl kubectl >/dev/null 2>&1 \
+            || { echo "ERROR: could not install kubectl/curl" >&2; exit 1; }
+        fi
+
+        ENDPOINT="{{`{{inputs.parameters.lakefs_endpoint}}`}}"
+        REPO="{{`{{inputs.parameters.lakefs_repo}}`}}"
+        CM_NAME="{{`{{inputs.parameters.catalog_configmap}}`}}"
+        CM_NS="{{`{{inputs.parameters.catalog_namespace}}`}}"
+
+        if [ -z "$ENDPOINT" ] || [ -z "$REPO" ]; then
+          echo "ERROR: lakefs_endpoint and lakefs_repo are required (got endpoint='$ENDPOINT' repo='$REPO')" >&2
+          exit 1
+        fi
+
+        # lakeFS admin creds from the mounted secret.
+        AK=$(cat /etc/lakefs/accessKeyId)
+        SK=$(cat /etc/lakefs/secretAccessKey)
+        export LAKEFS_ENDPOINT="$ENDPOINT" LAKEFS_REPO="$REPO"
+        export LAKEFS_AK="$AK" LAKEFS_SK="$SK"
+
+        echo "probing dataset catalog: repo=$REPO endpoint=$ENDPOINT"
+        python3 /tmp/build_dataset_catalog.py > /tmp/catalog.yaml
+        echo "──── dataset catalog.yaml ────"
+        cat /tmp/catalog.yaml
+        echo "──────────────────────────────"
+
+        kubectl create configmap "$CM_NAME" \
+          -n "$CM_NS" \
+          --from-file=catalog.yaml=/tmp/catalog.yaml \
+          --dry-run=client -o yaml | kubectl apply -f -
+        echo "published dataset catalog to configmap $CM_NS/$CM_NAME"
+      volumeMounts:
+      - name: scripts
+        mountPath: /tmp/build_dataset_catalog.py
+        subPath: build_dataset_catalog.py
+      - name: lakefs-creds
+        mountPath: /etc/lakefs
+        readOnly: true
+    volumes:
+    - name: scripts
+      configMap:
+        name: {{ include "kubecore-ci-workflows.fullname" . }}-dataset-probe-scripts
+    - name: lakefs-creds
+      secret:
+        secretName: "{{`{{inputs.parameters.lakefs_secret}}`}}"
+        items:
+        - key: accessKeyId
+          path: accessKeyId
+        - key: secretAccessKey
+          path: secretAccessKey
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "kubecore-ci-workflows.fullname" . }}-dataset-probe-scripts
+  namespace: {{ include "kubecore-ci-workflows.namespace" . }}
+  labels:
+    {{- include "kubecore-ci-workflows.labels" . | nindent 4 }}
+data:
+  build_dataset_catalog.py: |
+    #!/usr/bin/env python3
+    """Build the lakeFS dataset catalog.yaml.
+
+    Discovers datasets = lakeFS refs (tags preferred, then branches) whose ROOT
+    holds a data.yaml. Resolves each to its immutable commit SHA and reads
+    data.yaml for a label. Emits catalog.yaml to stdout.
+
+    env: LAKEFS_ENDPOINT, LAKEFS_REPO, LAKEFS_AK, LAKEFS_SK
+
+    Shape MUST match render-wft's _read_dataset_catalog:
+      datasets[].{name, ref, refType, commit, repo, pathOverride, label,
+                  available}  +  top-level repo, defaultBranch.
+    """
+    import json, os, sys, base64
+    import urllib.request, urllib.error
+
+    ENDPOINT = os.environ["LAKEFS_ENDPOINT"].rstrip("/")
+    REPO = os.environ["LAKEFS_REPO"]
+    AK = os.environ["LAKEFS_AK"]
+    SK = os.environ["LAKEFS_SK"]
+    AUTH = base64.b64encode(("%s:%s" % (AK, SK)).encode()).decode()
+
+    def api(path):
+        req = urllib.request.Request(
+            "%s/api/v1%s" % (ENDPOINT, path),
+            headers={"Authorization": "Basic %s" % AUTH})
+        try:
+            with urllib.request.urlopen(req, timeout=30) as r:
+                return json.loads(r.read().decode())
+        except urllib.error.HTTPError as e:
+            if e.code == 404:
+                return None
+            raise
+
+    def obj_text(ref, path):
+        # Fetch an object's bytes via the objects API (get, not stat).
+        req = urllib.request.Request(
+            "%s/api/v1/repositories/%s/refs/%s/objects?path=%s" % (ENDPOINT, REPO, ref, path),
+            headers={"Authorization": "Basic %s" % AUTH})
+        try:
+            with urllib.request.urlopen(req, timeout=30) as r:
+                return r.read().decode("utf-8", "replace")
+        except urllib.error.HTTPError:
+            return None
+
+    def has_root_data_yaml(ref):
+        # objects/stat is a cheap existence check for data.yaml at the ref root.
+        r = api("/repositories/%s/refs/%s/objects/stat?path=data.yaml" % (REPO, ref))
+        return r is not None
+
+    def ref_commit(ref):
+        r = api("/repositories/%s/refs/%s/commits?amount=1" % (REPO, ref))
+        if r and r.get("results"):
+            return r["results"][0].get("id", "")
+        return ""
+
+    def parse_label(ref, data_yaml_text):
+        # Extract a friendly label from data.yaml without a yaml lib (alpine-safe):
+        # names, kpt_shape. Fall back to the raw ref name.
+        names = ""
+        kpt = ""
+        if data_yaml_text:
+            for line in data_yaml_text.splitlines():
+                s = line.strip()
+                if s.startswith("kpt_shape"):
+                    kpt = s.split(":", 1)[1].strip() if ":" in s else ""
+                if s and ":" in s and s.split(":", 1)[0].strip().isdigit():
+                    # a "0: spacecraft" class-name line
+                    nm = s.split(":", 1)[1].strip()
+                    names = (names + ", " + nm) if names else nm
+        parts = [ref]
+        if names:
+            parts.append("classes: %s" % names)
+        return " — ".join(parts)
+
+    repo_info = api("/repositories/%s" % REPO) or {}
+    default_branch = repo_info.get("default_branch", "main")
+
+    # Collect refs: tags first (immutable, preferred), then branches. Exclude any
+    # ref name containing '/' (breaks flat S3-gateway prefix addressing).
+    seen = set()
+    refs = []  # (name, refType)
+    tags = api("/repositories/%s/tags?amount=1000" % REPO) or {"results": []}
+    for t in tags.get("results", []):
+        n = t.get("id", "")
+        if n and "/" not in n and n not in seen:
+            refs.append((n, "tag")); seen.add(n)
+    branches = api("/repositories/%s/branches?amount=1000" % REPO) or {"results": []}
+    for b in branches.get("results", []):
+        n = b.get("id", "")
+        if n and "/" not in n and n not in seen:
+            refs.append((n, "branch")); seen.add(n)
+
+    datasets = []
+    for name, rtype in refs:
+        if not has_root_data_yaml(name):
+            continue
+        commit = ref_commit(name)
+        dtext = obj_text(name, "data.yaml")
+        label = parse_label(name, dtext)
+        label += " (%s)" % ("frozen tag" if rtype == "tag" else "branch")
+        datasets.append({
+            "name": name,
+            "ref": name,
+            "refType": rtype,
+            "commit": commit,
+            # Pin the immutable commit so a run trains on a frozen snapshot.
+            "pathOverride": "s3://%s/%s/" % (REPO, commit or name),
+            "label": label,
+            "available": True,
+        })
+
+    def yq(s):
+        s = str(s).replace("\\", "\\\\").replace('"', '\\"')
+        return '"%s"' % s
+
+    out = []
+    out.append("repo: %s" % yq(REPO))
+    out.append("defaultBranch: %s" % yq(default_branch))
+    out.append("datasets:")
+    if not datasets:
+        out.append("  []")
+    for d in datasets:
+        out.append("  - name: %s" % yq(d["name"]))
+        out.append("    ref: %s" % yq(d["ref"]))
+        out.append("    refType: %s" % yq(d["refType"]))
+        out.append("    commit: %s" % yq(d["commit"]))
+        out.append("    repo: %s" % yq(REPO))
+        out.append("    pathOverride: %s" % yq(d["pathOverride"]))
+        out.append("    label: %s" % yq(d["label"]))
+        out.append("    available: true")
+    sys.stdout.write("\n".join(out) + "\n")
