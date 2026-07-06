@@ -760,6 +760,25 @@ spec:
                 raise RuntimeError("ConfigMap %s/%s has no data['catalog.yaml']" % (cm_ns, cm_name))
             return yaml.safe_load(data)
 
+        # Module-scope whole-node sizer usable by BOTH the live (ephemeral) and the
+        # static-class (scale-to-zero) paths. requests==limits == the class's
+        # platform-computed allocatable minus a small daemonset margin (sole-tenant ⇒
+        # Guaranteed QoS, the whole machine to the step). GPU classes add nvidia.com/gpu.
+        WN_CPU_MARGIN = 0.5
+        WN_MEM_MARGIN_GI = 0.5
+
+        def _whole_node_resources(c):
+            alloc = c.get('allocatable') or {}
+            cpu_alloc = float(alloc.get('cpu', 1))
+            mem_alloc = float(alloc.get('memoryGiB', 2))
+            cpu = max(1, int(cpu_alloc - WN_CPU_MARGIN))
+            mem = max(1, int(round(mem_alloc - WN_MEM_MARGIN_GI)))
+            reqs = {'cpu': str(cpu), 'memory': '%dGi' % mem}
+            if c.get('tier') == 'gpu':
+                gcount = str(((c.get('gpu') or c.get('guestAccelerator') or {}).get('count', 1)))
+                reqs['nvidia.com/gpu'] = gcount
+            return dict(reqs), dict(reqs)
+
         if live_compute:
             cm_name = compute_catalog_ref.get('configMap') or 'kubecore-ml-compute-catalog'
             cm_ns = compute_catalog_ref.get('namespace') or 'argo-workflows'
@@ -1530,18 +1549,20 @@ spec:
 
         cpu_class_name = cpu_cls.get('name', f"{pipeline_name}-cpu")
         gpu_class_name = gpu_cls.get('name', f"{pipeline_name}-gpu")
-        # cpu-class / gpu-class: editable, defaulted to the pool's default class, with a
-        # description listing EVERY allowed class of that tier so the developer chooses
-        # rather than blind-types. enum makes Argo render a dropdown when >1 class
-        # exists (Argo ignores a 1-item enum gracefully); only set enum when there is a
-        # real choice so we never lock the field to a single value on single-class pools.
+        # cpu-class / gpu-class: defaulted to the pool's default class, with a
+        # description listing EVERY allowed class of that tier. We ALWAYS attach the
+        # enum (even for a single class) so the Argo submit form renders a DROPDOWN of
+        # the valid pool classes instead of a free-text box — a 1-item enum renders as
+        # a one-choice dropdown, which is the right UX (the user sees the valid value
+        # and can't typo it into a nonexistent pool → Unschedulable). This keeps
+        # gpu-class consistent with cpu-class even on single-GPU-class pools.
         cpu_enum = [c['name'] for c in cpu_classes if c.get('name')]
         gpu_enum = [c['name'] for c in gpu_classes if c.get('name')]
         cpu_class_param = {'name': 'cpu-class', 'value': cpu_class_name, 'description': _allowed_desc(cpu_classes, 'cpu')}
         gpu_class_param = {'name': 'gpu-class', 'value': gpu_class_name, 'description': _allowed_desc(gpu_classes, 'gpu')}
-        if len(cpu_enum) > 1:
+        if cpu_enum:
             cpu_class_param['enum'] = cpu_enum
-        if len(gpu_enum) > 1:
+        if gpu_enum:
             gpu_class_param['enum'] = gpu_enum
         args_params.append(cpu_class_param)
         args_params.append(gpu_class_param)
@@ -1552,39 +1573,38 @@ spec:
                 'valueFrom': {'configMapKeyRef': {'name': f"{app_name}-pipeline-images", 'key': step['name']}}
             })
 
-        # ── Per-step submit-form requests ───────────────────────────────────
-        # The engineer sets each step's compute on the Argo Submit form: how much
-        # cpu, how much memory, and how many GPUs. The GPU count is the router —
-        # >0 sends the step to the pool's gpu class (with the accelerator + GPU
-        # toleration), 0 keeps it on the cpu class. Defaults are headroom-sized
-        # for the relevant class so an untouched form still schedules. A kubeline
-        # `resources.requests` block, if present, seeds the default (so a pipeline
-        # can ship sensible per-step starting values); otherwise the class
-        # headroom default is used.
-        def _form_defaults(step):
-            res = step.get('resources') or {}
-            reqs = res.get('requests') or {}
-            # gpu default: explicit request wins, else 1 if the step opts in via the
-            # legacy compute:gpu flag, else 0 (cpu step).
-            gpu_def = reqs.get('nvidia.com/gpu')
-            if gpu_def is None:
-                gpu_def = '1' if step.get('compute', 'cpu') == 'gpu' else '0'
-            gpu_def = str(gpu_def)
-            is_gpu_default = gpu_def not in ('', '0')
-            sized_req, _ = _sized_requests(gpu_cls if is_gpu_default else cpu_cls, is_gpu_default)
-            cpu_def = str(reqs.get('cpu', sized_req['cpu']))
-            mem_def = str(reqs.get('memory', sized_req['memory']))
-            return cpu_def, mem_def, gpu_def
+        # ── Per-step compute-class DROPDOWN (whole-node, scale-to-zero) ──────
+        # The engineer picks ONE compute class per step from a dropdown of the pool's
+        # classes (each shows specs). The chosen class fully determines the step:
+        #   * which static scale-to-zero pool it runs on (nodeSelector = class name)
+        #   * whether it's a GPU step (class tier) -> adds nvidia.com/gpu + GPU toleration
+        #   * the step's resources -- WHOLE NODE (requests==limits == class.allocatable,
+        #     computed by the platform, sole-tenant Guaranteed QoS). The developer sets
+        #     NO cpu/mem/gpu numbers -- the platform sizes the whole machine.
+        # No ephemeral pools, no gcloud, no extra IAM: the GKE autoscaler brings the
+        # class's pool up 0->1 when the step's pod lands, and scales back to 0 after.
+        def _default_class_for(step):
+            want_gpu = step.get('compute', 'cpu') == 'gpu'
+            r = (step.get('resources') or {}).get('requests') or {}
+            if r.get('nvidia.com/gpu') not in (None, '', '0', 0):
+                want_gpu = True
+            if want_gpu and gpu_cls.get('name'):
+                return gpu_cls['name']
+            return cpu_cls.get('name') or (cpu_classes[0]['name'] if cpu_classes else '')
+
+        _class_enum = [c['name'] for c in all_classes if c.get('name')]
+        _class_help = 'Pool compute classes (WHOLE node each, scale-to-zero):\n' + \
+            '\n'.join('  - ' + _class_line(c) for c in all_classes)
 
         for step in steps:
             sn = step['name']
-            cpu_def, mem_def, gpu_def = _form_defaults(step)
-            args_params.append({'name': f"{sn}-cpu", 'value': cpu_def,
-                                'description': f"CPU request for the {sn} step (e.g. 2, 500m)"})
-            args_params.append({'name': f"{sn}-mem", 'value': mem_def,
-                                'description': f"Memory request for the {sn} step (e.g. 8Gi)"})
-            args_params.append({'name': f"{sn}-gpu", 'value': gpu_def,
-                                'description': f"GPU count for the {sn} step. >0 routes it to the GPU class; 0 = CPU only"})
+            p = {'name': f"{sn}-class", 'value': _default_class_for(step),
+                 'description': (f"Compute class for the {sn} step -- runs on the WHOLE node "
+                                 f"(platform-sized, sole-tenant), on a scale-to-zero pool.\n"
+                                 + _class_help)}
+            if _class_enum:
+                p['enum'] = _class_enum
+            args_params.append(p)
 
         args_params += [
             {'name': 'registered-model-name', 'value': f"{app_name}-model"},
@@ -1631,6 +1651,18 @@ spec:
         # Detected by name so a pipeline without these steps is unaffected.
         QUANTIZATION_STEPS = {'qat-finetune', 'model-quantization'}
 
+        # The GPU-class name set drives the cpu-vs-gpu variant selection: a step runs
+        # its gpu variant when its {step}-class is one of the pool's gpu-tier classes,
+        # else the cpu variant. Built as an Argo expr membership test over the chosen
+        # class param. Exactly one variant runs; the other is Skipped.
+        _gpu_names = [c['name'] for c in gpu_classes if c.get('name')]
+
+        def _is_gpu_expr(sn):
+            if not _gpu_names:
+                return "false"
+            return " || ".join(
+                "workflow.parameters['" + sn + "-class'] == '" + n + "'" for n in _gpu_names)
+
         templates = []
         dag_tasks = []
         for step in steps:
@@ -1639,40 +1671,31 @@ spec:
             depends_expr = " && ".join(_gate(d) for d in deps) if deps else ""
             inp_params = step.get('inputs', {}).get('parameters', []) if step.get('inputs') else []
             is_quant_step = sn in QUANTIZATION_STEPS
+            gpu_expr = _is_gpu_expr(sn)
             for variant in ('cpu', 'gpu'):
-                when = (OB + f"=asInt(workflow.parameters['{sn}-gpu']) " +
-                        ("> 0" if variant == 'gpu' else "== 0") + CB)
+                # gpu variant runs when the chosen class is a gpu class; cpu otherwise.
+                sel = gpu_expr if variant == 'gpu' else "!(" + gpu_expr + ")"
+                when = OB + "=" + sel + CB
                 if is_quant_step:
-                    # AND the compute-router gate with the quantization enable gate:
-                    # the whole {when} evaluates true only when this is the selected
-                    # compute variant AND quantization is turned on. On the default
-                    # (mode=none) both quant variants are Skipped, and the
-                    # Succeeded||Skipped dep-gate lets model-registration proceed.
-                    when = (OB + "=asInt(workflow.parameters['" + sn + "-gpu']) " +
-                            ("> 0" if variant == 'gpu' else "== 0") +
-                            " && workflow.parameters['quantization-mode'] != 'none'" + CB)
+                    # AND the compute-router gate with the quantization enable gate: the
+                    # variant runs only when it's the selected compute AND quantization is on.
+                    when = OB + "=(" + sel + ") && workflow.parameters['quantization-mode'] != 'none'" + CB
                 task = {'name': f"{sn}-{variant}", 'template': f"{sn}-{variant}", 'when': when}
                 if depends_expr:
                     task['depends'] = depends_expr
                 if inp_params:
-                    # An input wired `from: <dep>` resolves from whichever variant of
-                    # that dep ran. The two variants are mutually exclusive via the same
-                    # `when:` on the dep's own gpu param, so SELECT the source by that
-                    # same param — NOT by probing both tasks' outputs. A skipped Argo
-                    # task has NO `.outputs` object at all (not an empty string), so a
-                    # tasks[dep-cpu].outputs... reference on the skipped sibling makes
-                    # the WHOLE Argo expression fail to resolve and Argo emits the raw
-                    # unevaluated template literal — which then breaks the consumer
-                    # (observed: model-registration json.loads "line 1 column 2" when
-                    # the gpu training variant ran and the cpu sibling was skipped).
-                    # Gating the ternary on the dep's gpu param dereferences ONLY the
-                    # variant that actually executed.
+                    # An input wired `from: <dep>` resolves from whichever variant of that
+                    # dep ran. Select the source by the dep's OWN class-is-gpu test (the
+                    # two variants are mutually exclusive on it) — NOT by probing both
+                    # tasks' outputs (a Skipped task has no .outputs object, so referencing
+                    # the skipped sibling makes the whole Argo expr fail to resolve).
                     task_args = []
                     for ip in inp_params:
                         frm = ip.get('from')
                         if not frm:
                             continue
-                        expr = (OB + f"=asInt(workflow.parameters['{frm}-gpu']) > 0 ? "
+                        frm_gpu = _is_gpu_expr(frm)
+                        expr = (OB + "=(" + frm_gpu + ") ? "
                                 f"tasks['{frm}-gpu'].outputs.parameters['{ip['name']}'] : "
                                 f"tasks['{frm}-cpu'].outputs.parameters['{ip['name']}']" + CB)
                         task_args.append({'name': ip['name'], 'value': expr})
@@ -1790,10 +1813,14 @@ spec:
                         'platform.kubecore.io/pipeline': pipeline_name,
                         'platform.kubecore.io/step': sn,
                         'platform.kubecore.io/compute-type': 'gpu' if is_gpu else 'cpu',
-                        'platform.kubecore.io/compute-class': OB + 'workflow.parameters.' + class_param + CB,
+                        # compute-class label + nodeSelector both come from the per-step
+                        # {step}-class DROPDOWN — the developer picks the class, the pod
+                        # lands on that static scale-to-zero pool (nodegroup-type == class
+                        # name), and the autoscaler brings a node up 0->1 for it.
+                        'platform.kubecore.io/compute-class': OB + "workflow.parameters." + sn + "-class" + CB,
                     }
                 },
-                'nodeSelector': {'platform.kubecore.io/nodegroup-type': OB + 'workflow.parameters.' + class_param + CB},
+                'nodeSelector': {'platform.kubecore.io/nodegroup-type': OB + "workflow.parameters." + sn + "-class" + CB},
                 'tolerations': step_tolerations,
                 'serviceAccountName': sa,
                 # retryStrategy: a step that hangs or dies (e.g. a transient S3/dataloader
@@ -1833,23 +1860,44 @@ spec:
                 ],
             }
 
-            # podSpecPatch overrides the main container's resources from the submit-form
-            # params. This is the ONLY Argo-supported way to parameterize resource
-            # quantities — Argo substitutes the param refs THEN strategic-merge-patches
-            # the pod, so the quantities are concrete by the time k8s validates them.
-            # The container is named "main" in the rendered pod. limits == requests for
-            # cpu/mem (guaranteed QoS); the gpu variant also sets nvidia.com/gpu.
-            cpu_p = OB + f"workflow.parameters.{sn}-cpu" + CB
-            mem_p = OB + f"workflow.parameters.{sn}-mem" + CB
+            # podSpecPatch sets the main container to the WHOLE-NODE resources of the
+            # class the developer picked in {step}-class — requests==limits==the class's
+            # platform-computed allocatable (sole-tenant Guaranteed QoS). The developer
+            # sets NO cpu/mem numbers; the platform sizes the whole machine. Because the
+            # class is a runtime param, an Argo ternary selects the right allocatable by
+            # matching {step}-class against each of this tier's class names. podSpecPatch
+            # is the only Argo mechanism that parameterizes non-string resource fields:
+            # Argo substitutes the expr THEN strategic-merge-patches the pod, so k8s sees
+            # concrete quantities. The container is named "main" in the rendered pod.
+            tier_classes = gpu_classes if is_gpu else cpu_classes
+            fallback = _whole_node_resources(cls)[0] if cls.get('allocatable') else {'cpu': '1', 'memory': '2Gi'}
+
+            def _wn_ternary(field):
+                expr = "'" + str(fallback.get(field, '1')) + "'"
+                for c in reversed(tier_classes):
+                    if not c.get('allocatable'):
+                        continue
+                    r, _ = _whole_node_resources(c)
+                    cond = "workflow.parameters['" + sn + "-class'] == '" + c['name'] + "'"
+                    expr = cond + " ? '" + str(r[field]) + "' : " + expr
+                return OB + "=" + expr + CB
+
+            cpu_e = _wn_ternary('cpu')
+            mem_e = _wn_ternary('memory')
             gpu_line = []
             if is_gpu:
-                gpu_p = OB + f"workflow.parameters.{sn}-gpu" + CB
-                gpu_line = [f"      nvidia.com/gpu: \"{gpu_p}\""]
+                gexpr = "'1'"
+                for c in reversed(gpu_classes):
+                    gc = str(((c.get('gpu') or c.get('guestAccelerator') or {}).get('count', 1)))
+                    cond = "workflow.parameters['" + sn + "-class'] == '" + c['name'] + "'"
+                    gexpr = cond + " ? '" + gc + "' : " + gexpr
+                gpu_e = OB + "=" + gexpr + CB
+                gpu_line = [f"      nvidia.com/gpu: \"{gpu_e}\""]
             patch_lines = (
                 ["containers:", "- name: main", "  resources:", "    requests:",
-                 f"      cpu: \"{cpu_p}\"", f"      memory: \"{mem_p}\""] + gpu_line +
+                 f"      cpu: \"{cpu_e}\"", f"      memory: \"{mem_e}\""] + gpu_line +
                 ["    limits:",
-                 f"      cpu: \"{cpu_p}\"", f"      memory: \"{mem_p}\""] + gpu_line
+                 f"      cpu: \"{cpu_e}\"", f"      memory: \"{mem_e}\""] + gpu_line
             )
             tmpl['podSpecPatch'] = "\n".join(patch_lines) + "\n"
 
