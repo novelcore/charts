@@ -2137,6 +2137,56 @@ spec:
           SRC_COMMIT_TIME="$SRC_COMMIT_TIME" \
           python3 /tmp/render_wft.py
 
+        # ── Write .kubecore/dataset-config.yaml into the APP repo ─────────────
+        # The kubecore-dataset CLI (in each app repo) auto-discovers its lakeFS
+        # URL/repo/namespace/probe from this file, so NOTHING is hardcoded per app
+        # — every kubeapp gets its OWN correct values. Sourced from the same
+        # pipeline-context the WFT is rendered from. Idempotent: only commits when
+        # the content changes. Skipped silently if the app repo has no external URL
+        # yet (baseDns absent) so a partially-configured pool never fails the render.
+        DATASET_CFG=$(CONTEXT_PATH="$CONTEXT_PATH" APP_NAME="$APP_NAME" PROJECT_NAME="$PROJECT_NAME" python3 - <<'CFGEOF'
+        import os, yaml
+        ctx = yaml.safe_load(open(os.environ['CONTEXT_PATH'])) or {}
+        lakefs = ctx.get('lakefs', {}) or {}
+        url = lakefs.get('externalUrl', '') or ''
+        if not url:
+            print('')  # no external URL yet — skip
+        else:
+            cfg = {
+                'lakefsUrl': url,
+                'repo': lakefs.get('repository', os.environ['PROJECT_NAME']),
+                'namespace': ctx.get('namespace', 'ml-%s' % os.environ['PROJECT_NAME']),
+                'probeCron': lakefs.get('datasetProbeCron', '%s-dataset-catalog-probe' % os.environ['APP_NAME']),
+            }
+            print('# Per-app dataset config — read by the kubecore-dataset CLI (nothing hardcoded).')
+            print('# Rendered by render-wft from this app pipeline-context. Do not edit by hand.')
+            print(yaml.safe_dump(cfg, default_flow_style=False, sort_keys=True).rstrip())
+        CFGEOF
+        )
+        if [ -n "$DATASET_CFG" ] && [ -d /tmp/apprepo ]; then
+          mkdir -p /tmp/apprepo/.kubecore
+          printf '%s\n' "$DATASET_CFG" > /tmp/apprepo/.kubecore/dataset-config.yaml
+          ( cd /tmp/apprepo
+            git config user.email "ci@kubecore.io" 2>/dev/null || true
+            git config user.name "kubecore-ci" 2>/dev/null || true
+            git checkout -B "${BRANCH}" 2>/dev/null || git checkout "${BRANCH}" 2>/dev/null || true
+            git add .kubecore/dataset-config.yaml
+            if git diff --cached --quiet; then
+              echo "render-wft: .kubecore/dataset-config.yaml already current in app repo"
+            else
+              git commit -m "chore(dataset): sync .kubecore/dataset-config.yaml (lakeFS URL/repo)" >/dev/null 2>&1 || true
+              git pull --rebase origin "${BRANCH}" >/dev/null 2>&1 || true
+              if git push origin "HEAD:${BRANCH}" 2>/dev/null; then
+                echo "render-wft: pushed .kubecore/dataset-config.yaml to the app repo"
+              else
+                echo "render-wft: could not push dataset-config to app repo (non-fatal)"
+              fi
+            fi
+          )
+        else
+          echo "render-wft: skipping dataset-config write (no external lakeFS URL in pipeline-context yet)"
+        fi
+
         cd /tmp/gitops
 
         # ── Monotonic render guard (anti-churn) ──────────────────────────────
