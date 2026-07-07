@@ -17,6 +17,15 @@ rules:
 - apiGroups: [""]
   resources: ["configmaps"]
   verbs: ["get", "list"]
+# The Argo Workflows executor ("wait" sidecar) on EVERY step pod reports its
+# result by creating/patching a workflowtaskresult. Without this the wait sidecar
+# fails with exit 64 ("workflowtaskresults.argoproj.io is forbidden") and the
+# whole build errors at the first step (clone) — so NO images build and no
+# pipeline can run. This is the standard Argo executor RBAC; the SA that runs the
+# CI build workflows must have it.
+- apiGroups: ["argoproj.io"]
+  resources: ["workflowtaskresults"]
+  verbs: ["create", "patch"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
