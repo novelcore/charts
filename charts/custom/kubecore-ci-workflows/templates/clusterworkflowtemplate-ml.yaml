@@ -796,25 +796,27 @@ spec:
             mem_alloc = float((c.get('allocatable') or {}).get('memoryGiB', 8))
             return int(min(SHM_CAP_GI, max(SHM_FLOOR_GI, round(mem_alloc * SHM_FRAC))))
 
-        def _inject_dataset_pathoverride(env_entry, expr):
-            # A step's PARAMS_YAML (a multi-line YAML string env var) contains a
-            # path_override line that references the dataset-path-override workflow
-            # parameter. Replace that bare param ref with `expr` — the runtime-
-            # evaluated "user-override-else-ref-to-commit" ternary — so the dataset
-            # step gets the frozen-commit path WITHOUT exposing an Argo expression
-            # literal in the submit form (which would render as raw text). No-op
-            # when there's no catalog (expr empty) or the entry isn't the
-            # PARAMS_YAML block. Returns a copy. (Argo braces are built from OB/CB
-            # chr(123) at runtime — never written literally, or Helm parses them.)
-            if not expr or not isinstance(env_entry, dict):
+        def _inject_dataset_pathoverride(env_entry, has_catalog):
+            # A step's PARAMS_YAML (a multi-line YAML string env var) references the
+            # dataset-path-override WORKFLOW parameter on its path_override line.
+            # Argo does NOT evaluate an Argo =expression expressions inside an env value (only
+            # simple workflow.parameters.x substitution), so the ref->commit
+            # ternary CANNOT go here. Instead we point path_override at a STEP INPUT
+            # (inputs.parameters.dataset-path-override) whose value the DAG task
+            # supplies as an evaluated an Argo =expression expression (task-argument values ARE
+            # evaluated). This helper just rewrites the env's workflow-param ref to
+            # the input ref. No-op without a catalog (the plain workflow param — an
+            # empty escape-hatch string — is fine). Returns a copy. (Argo braces are
+            # built from OB/CB at runtime, never written literally.)
+            if not has_catalog or not isinstance(env_entry, dict):
                 return env_entry
             val = env_entry.get('value')
-            ref = '"' + OB + 'workflow.parameters.dataset-path-override' + CB + '"'
-            if not isinstance(val, str) or ref not in val:
+            wf_ref = OB + 'workflow.parameters.dataset-path-override' + CB
+            in_ref = OB + 'inputs.parameters.dataset-path-override' + CB
+            if not isinstance(val, str) or wf_ref not in val:
                 return env_entry
             out = dict(env_entry)
-            out['value'] = val.replace('path_override: ' + ref,
-                                       'path_override: "' + expr + '"')
+            out['value'] = val.replace(wf_ref, in_ref)
             return out
 
         def _whole_node_resources(c):
@@ -1353,7 +1355,7 @@ spec:
                 if ckpt_prefix:
                     env_list.append({'name': 'CHECKPOINT_PREFIX', 'value': ckpt_prefix})
                 for e in (step.get('env') or []):
-                    env_list.append(_inject_dataset_pathoverride(e, dataset_pathoverride_expr))
+                    env_list.append(_inject_dataset_pathoverride(e, bool(dataset_pathoverride_expr)))
                 container['env'] = env_list
 
                 mlflow_svc_secret = mlflow.get('svcSecret', f"{project_name}-mlflow-svc")
@@ -1793,13 +1795,19 @@ spec:
                 task = {'name': f"{sn}-{variant}", 'template': f"{sn}-{variant}", 'when': when}
                 if depends_expr:
                     task['depends'] = depends_expr
+                task_args = []
+                # Supply the resolved dataset-path-override to EVERY step (config-
+                # validation has no deps but still needs it). Task-argument values ARE
+                # evaluated by Argo, so the an Argo =expression ref->commit ternary resolves here
+                # and reaches the step via inputs.parameters.dataset-path-override.
+                if dataset_pathoverride_expr:
+                    task_args.append({'name': 'dataset-path-override', 'value': dataset_pathoverride_expr})
                 if inp_params:
                     # An input wired `from: <dep>` resolves from whichever variant of that
                     # dep ran. Select the source by the dep's OWN class-is-gpu test (the
                     # two variants are mutually exclusive on it) — NOT by probing both
                     # tasks' outputs (a Skipped task has no .outputs object, so referencing
                     # the skipped sibling makes the whole Argo expr fail to resolve).
-                    task_args = []
                     for ip in inp_params:
                         frm = ip.get('from')
                         if not frm:
@@ -1809,8 +1817,8 @@ spec:
                                 f"tasks['{frm}-gpu'].outputs.parameters['{ip['name']}'] : "
                                 f"tasks['{frm}-cpu'].outputs.parameters['{ip['name']}']" + CB)
                         task_args.append({'name': ip['name'], 'value': expr})
-                    if task_args:
-                        task['arguments'] = {'parameters': task_args}
+                if task_args:
+                    task['arguments'] = {'parameters': task_args}
                 dag_tasks.append(task)
         templates.append({'name': f"{app_name}-pipeline", 'dag': {'tasks': dag_tasks}})
 
@@ -1897,7 +1905,7 @@ spec:
             if ckpt_prefix:
                 env_list.append({'name': 'CHECKPOINT_PREFIX', 'value': ckpt_prefix})
             for e in (step.get('env') or []):
-                env_list.append(_inject_dataset_pathoverride(e, dataset_pathoverride_expr))
+                env_list.append(_inject_dataset_pathoverride(e, bool(dataset_pathoverride_expr)))
             container['env'] = env_list
 
             # Mount the {project}-mlflow-svc Zitadel machine key as a file so the
@@ -1924,10 +1932,16 @@ spec:
                 # run time (patch-images updates the CM, no WFT re-render needed).
                 # Template inputs are NOT rendered in the submit form, so this keeps
                 # the image plumbing out of the user's view.
-                'inputs': {'parameters': [
-                    {'name': 'image',
-                     'valueFrom': {'configMapKeyRef': {'name': f"{app_name}-pipeline-images", 'key': sn}}},
-                ]},
+                'inputs': {'parameters': (
+                    [{'name': 'image',
+                      'valueFrom': {'configMapKeyRef': {'name': f"{app_name}-pipeline-images", 'key': sn}}}]
+                    # dataset-path-override input: the DAG task supplies its value as an
+                    # evaluated an Argo =expression ref->commit expression (only present with a
+                    # catalog). PARAMS_YAML reads inputs.parameters.dataset-path-override
+                    # (simple substitution), so the frozen-commit path resolves correctly —
+                    # unlike an env-embedded an Argo =expression which Argo would pass through raw.
+                    + ([{'name': 'dataset-path-override', 'default': ''}] if dataset_pathoverride_expr else [])
+                )},
                 'metadata': {
                     'labels': {
                         'platform.kubecore.io/project': project_name,
