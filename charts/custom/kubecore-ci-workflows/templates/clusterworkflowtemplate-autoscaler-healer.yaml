@@ -3,12 +3,15 @@ ml-autoscaler-healer — KubeCore scale-to-zero autoscaler-backoff healer
 ClusterWorkflowTemplate.
 
 Run on a schedule by the per-KubePool CronWorkflow the kubecore-operator
-(clusteroperators composition) creates alongside the compute-catalog probe and
-nodepool janitor when the pool opts into the live-compute model. The
-CronWorkflow runs in the argo-workflows namespace as ServiceAccount
-ml-compute-probe-sa (WI-annotated to impersonate {org}-gcp-eso-sa →
-roles/container.developer), references this CWT by name (templateRef
-clusterScope: true), and passes:
+(clusteroperators composition) creates whenever features.autoscalerHealer is
+on (default true, platform-wide — independent of the ML live-compute opt-in
+that separately gates the compute-catalog probe + nodepool janitor sharing
+this same CronWorkflow namespace). The CronWorkflow runs in the argo-workflows
+namespace as ServiceAccount ml-compute-probe-sa (WI-annotated to impersonate
+{org}-gcp-eso-sa → roles/container.developer; the operator provisions this SA
++ its Workload Identity binding whenever EITHER features.mlComputeProbe or
+features.autoscalerHealer is on, shared — never duplicated when both are),
+references this CWT by name (templateRef clusterScope: true), and passes:
 
   project_id, region, cluster_name (="{pool}-gke-cluster")
 
