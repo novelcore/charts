@@ -121,17 +121,28 @@ spec:
 
         # ── Resolve the cluster's EXACT location (zonal vs regional) ────────
         # Mirrors the nodepool janitor: dev pools are often zonal (e.g.
-        # europe-central2-b) even though a region is passed in.
+        # europe-central2-b) even though a region is passed in. The region
+        # param is NEVER a safe fallback for a zonal cluster — "europe-central2"
+        # is not a valid --location for a cluster that actually lives at the
+        # zone "europe-central2-b", so a silent fallback there produces a
+        # location gcloud will happily accept syntactically but that resolves
+        # to nothing (or the wrong resource), and every subsequent node-pool
+        # call fails. If GKE can't tell us the real location (auth/permission
+        # error, or the cluster genuinely doesn't exist), we fail loudly with
+        # the actual gcloud error instead of guessing — a wrong guess here is
+        # worse than no guess (silent failures on background pool-mutation are
+        # much harder to catch than an ERROR line in this workflow's logs).
+        LOCATION_ERR=/tmp/location-error.txt
         LOCATION=$(gcloud container clusters list \
           --project="$PROJECT" \
           --filter="name=$CLUSTER" \
-          --format="value(location)" 2>/dev/null || true)
+          --format="value(location)" 2>"$LOCATION_ERR")
         if [ -z "$LOCATION" ]; then
-          echo "WARN: could not resolve cluster location from GKE; falling back to region=$REGION"
-          LOCATION="$REGION"
-        fi
-        if [ -z "$LOCATION" ]; then
-          echo "ERROR: could not determine a location for cluster $CLUSTER" >&2
+          echo "ERROR: could not resolve the real location (zone or region) of cluster $CLUSTER from GKE." >&2
+          echo "ERROR: this is NOT safely approximated by the region param ($REGION) — a zonal" >&2
+          echo "ERROR: cluster's location is a zone (e.g. europe-central2-b), not its region." >&2
+          echo "ERROR: underlying gcloud output:" >&2
+          cat "$LOCATION_ERR" >&2
           exit 1
         fi
         echo "cluster location: $LOCATION"
