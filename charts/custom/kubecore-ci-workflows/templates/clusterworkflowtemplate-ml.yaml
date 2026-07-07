@@ -765,23 +765,43 @@ spec:
         # platform-computed allocatable minus a margin (sole-tenant ⇒ Guaranteed
         # QoS, the whole machine to the step). GPU classes add nvidia.com/gpu.
         #
-        # The memory margin must reserve room for THREE things the step pod also
-        # consumes against its own limit, beyond raw model memory:
-        #   • the 1Gi /dev/shm emptyDir (medium:Memory counts against the limit),
-        #   • the Argo `wait` sidecar,
-        #   • torch's transient peak (activations + dataloader workers) above steady.
-        # A 0.5Gi margin OOMKilled model-training at the 24Gi limit on a 30Gi
-        # n1-standard-8 (exit 137, live 2026-07-07). 3.5Gi leaves genuine headroom
-        # (n1-standard-8 → ~21Gi limit) while still handing the step the whole node.
+        # Headroom is PROPORTIONAL to the node so it scales with machine size
+        # instead of being a fixed number tuned for one box. Two proportional
+        # reserves, both charged against the pod's own memory limit:
+        #   • /dev/shm  (dataloader worker shared memory) — see _shm_gib below,
+        #   • memory margin — the shm + the Argo `wait` sidecar + torch's transient
+        #     training peak (activations, worker buffers) above steady state.
+        # A fixed 0.5Gi margin OOMKilled model-training at the 24Gi limit on a 30Gi
+        # n1-standard-8 (exit 137, live 2026-07-07). The margin is now a % of the
+        # node (floored so tiny nodes still get real headroom) and is set larger
+        # than the shm % so the shm always fits inside it. Tune the constants below
+        # (in one place) if heavier runs still pressure memory.
         WN_CPU_MARGIN = 0.5
-        WN_MEM_MARGIN_GI = 3.5
+        WN_MEM_MARGIN_FRAC = 0.14   # reserve ~14% of node memory (covers shm+sidecar+peak)
+        WN_MEM_MARGIN_FLOOR_GI = 2.0
+
+        def _wn_mem_margin_gib(mem_alloc):
+            return max(WN_MEM_MARGIN_FLOOR_GI, mem_alloc * WN_MEM_MARGIN_FRAC)
+
+        # /dev/shm sizeLimit for a whole-node step: ~10% of the class allocatable,
+        # floored 1Gi (below which torch DataLoader workers wedge) and capped 4Gi
+        # (beyond which it's wasteful and eats the margin). Always < the memory
+        # margin % above, so the shm fits under the reserve. T4 25Gi → 2Gi;
+        # a2 340Gi → 4Gi (cap); a small 8Gi node → 1Gi (floor).
+        SHM_FRAC = 0.10
+        SHM_FLOOR_GI = 1
+        SHM_CAP_GI = 4
+
+        def _shm_gib(c):
+            mem_alloc = float((c.get('allocatable') or {}).get('memoryGiB', 8))
+            return int(min(SHM_CAP_GI, max(SHM_FLOOR_GI, round(mem_alloc * SHM_FRAC))))
 
         def _whole_node_resources(c):
             alloc = c.get('allocatable') or {}
             cpu_alloc = float(alloc.get('cpu', 1))
             mem_alloc = float(alloc.get('memoryGiB', 2))
             cpu = max(1, int(cpu_alloc - WN_CPU_MARGIN))
-            mem = max(1, int(round(mem_alloc - WN_MEM_MARGIN_GI)))
+            mem = max(1, int(round(mem_alloc - _wn_mem_margin_gib(mem_alloc))))
             reqs = {'cpu': str(cpu), 'memory': '%dGi' % mem}
             if c.get('tier') == 'gpu':
                 gcount = str(((c.get('gpu') or c.get('guestAccelerator') or {}).get('count', 1)))
@@ -1909,15 +1929,18 @@ spec:
                 'container': container,
                 'volumes': [
                     {'name': 'mlflow-svc', 'secret': {'secretName': mlflow_svc_secret, 'optional': True}},
-                    # Memory-backed /dev/shm for torch DataLoader workers (see the
-                    # volumeMount comment above). Sized at 1Gi: the wedge was 64Mi
-                    # being far too small, and 1Gi is 16x that — ample for image
-                    # batches — while NOT dominating the pod's memory budget. An
-                    # emptyDir with medium:Memory counts against the container memory
-                    # LIMIT, so an oversized shm (was 2Gi) silently stole from the
-                    # workload and OOMKilled training on a 4Gi step (live yolo/e2e
-                    # 2026-07-02: model-training exit 137 right after optimizer init).
-                    {'name': 'dshm', 'emptyDir': {'medium': 'Memory', 'sizeLimit': '1Gi'}},
+                    # Memory-backed /dev/shm for torch DataLoader workers. Worker
+                    # procs pass tensors to the trainer through POSIX shared memory;
+                    # the k8s default 64Mi exhausts instantly (wedged trainer). This
+                    # emptyDir (medium:Memory) counts against the pod's memory LIMIT,
+                    # so it must be big enough for many workers on a heavy batch, yet
+                    # bounded so it can't starve the workload. On the whole-node
+                    # model the step owns the whole machine, so scale shm WITH the
+                    # node: ~10% of the class allocatable, floored 1Gi, capped 4Gi.
+                    # (T4 25Gi → 2Gi; a2 340Gi → 4Gi cap.) The whole-node memory
+                    # margin (WN_MEM_MARGIN_GI=3.5) already reserves room for this
+                    # shm + the sidecar + torch peak below allocatable.
+                    {'name': 'dshm', 'emptyDir': {'medium': 'Memory', 'sizeLimit': '%dGi' % _shm_gib(cls)}},
                 ],
             }
 
