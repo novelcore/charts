@@ -796,6 +796,27 @@ spec:
             mem_alloc = float((c.get('allocatable') or {}).get('memoryGiB', 8))
             return int(min(SHM_CAP_GI, max(SHM_FLOOR_GI, round(mem_alloc * SHM_FRAC))))
 
+        def _inject_dataset_pathoverride(env_entry, expr):
+            # A step's PARAMS_YAML (a multi-line YAML string env var) contains a
+            # path_override line that references the dataset-path-override workflow
+            # parameter. Replace that bare param ref with `expr` — the runtime-
+            # evaluated "user-override-else-ref-to-commit" ternary — so the dataset
+            # step gets the frozen-commit path WITHOUT exposing an Argo expression
+            # literal in the submit form (which would render as raw text). No-op
+            # when there's no catalog (expr empty) or the entry isn't the
+            # PARAMS_YAML block. Returns a copy. (Argo braces are built from OB/CB
+            # chr(123) at runtime — never written literally, or Helm parses them.)
+            if not expr or not isinstance(env_entry, dict):
+                return env_entry
+            val = env_entry.get('value')
+            ref = '"' + OB + 'workflow.parameters.dataset-path-override' + CB + '"'
+            if not isinstance(val, str) or ref not in val:
+                return env_entry
+            out = dict(env_entry)
+            out['value'] = val.replace('path_override: ' + ref,
+                                       'path_override: "' + expr + '"')
+            return out
+
         def _whole_node_resources(c):
             alloc = c.get('allocatable') or {}
             cpu_alloc = float(alloc.get('cpu', 1))
@@ -1332,7 +1353,7 @@ spec:
                 if ckpt_prefix:
                     env_list.append({'name': 'CHECKPOINT_PREFIX', 'value': ckpt_prefix})
                 for e in (step.get('env') or []):
-                    env_list.append(e)
+                    env_list.append(_inject_dataset_pathoverride(e, dataset_pathoverride_expr))
                 container['env'] = env_list
 
                 mlflow_svc_secret = mlflow.get('svcSecret', f"{project_name}-mlflow-svc")
@@ -1612,21 +1633,25 @@ spec:
             args_params.append(np)
             _emitted_names.add(p['name'])
 
-        # Resolve the picked dataset-ref → the frozen-commit path_override the
-        # dataset steps consume. If the app declares dataset-ref but NOT an explicit
-        # dataset-path-override, synthesize dataset-path-override as an Argo ternary
-        # mapping each ref to its immutable commit path (from the catalog). A user
-        # who sets dataset-path-override by hand still wins (it's the escape hatch).
-        if dataset_enum and 'dataset-ref' in _emitted_names and 'dataset-path-override' not in _emitted_names:
-            # ternary chain: ref==r1 ? path1 : ref==r2 ? path2 : '' (empty → the
-            # step falls back to {repo}/{ref}/ root via lakefs_branch).
-            expr = "''"
+        # Resolve the picked dataset-ref -> its frozen-commit path. This must NOT be
+        # a form-param default: the Argo submit form shows a param's value as literal
+        # text, so an Argo expression there renders as raw syntax in the field (ugly
+        # + wrong — and it clobbers dataset-path-override, the manual escape hatch).
+        # Instead we build the ternary here and INJECT it into the dataset steps'
+        # PARAMS_YAML path_override line (a template body, where Argo actually
+        # evaluates the expression at run time). The escape hatch wins when the user
+        # sets it: override-nonempty ? override : ref-to-commit. dataset-path-override
+        # stays an empty free-text field. dataset_pathoverride_expr (empty if no
+        # catalog) is consumed in the step env-copy loop below.
+        dataset_pathoverride_expr = ''
+        if dataset_enum:
+            _ref_ternary = "''"
             for r in reversed(dataset_enum):
                 ov = dataset_override_by_ref.get(r, '')
-                expr = ("workflow.parameters['dataset-ref'] == '" + r + "' ? '" + ov + "' : " + expr)
-            args_params.append({'name': 'dataset-path-override',
-                                 'value': OB + '=' + expr + CB,
-                                 'description': 'Auto-derived from dataset-ref (immutable commit snapshot). Leave as-is.'})
+                _ref_ternary = ("workflow.parameters['dataset-ref'] == '" + r + "' ? '" + ov + "' : " + _ref_ternary)
+            # user override (dataset-path-override) wins; else the ref→commit path.
+            dataset_pathoverride_expr = (OB + "=workflow.parameters['dataset-path-override'] != '' ? "
+                                         "workflow.parameters['dataset-path-override'] : " + _ref_ternary + CB)
 
         cpu_class_name = cpu_cls.get('name', f"{pipeline_name}-cpu")
         gpu_class_name = gpu_cls.get('name', f"{pipeline_name}-gpu")
@@ -1648,11 +1673,15 @@ spec:
         args_params.append(cpu_class_param)
         args_params.append(gpu_class_param)
 
-        for step in steps:
-            args_params.append({
-                'name': f"image-{step['name']}",
-                'valueFrom': {'configMapKeyRef': {'name': f"{app_name}-pipeline-images", 'key': step['name']}}
-            })
+        # NOTE: the per-step container images are NOT declared as workflow
+        # arguments.parameters — Argo renders every arguments.parameter as an
+        # editable field in the submit form, and 6 empty "image-<step>" boxes are
+        # confusing internal plumbing a user must never touch. Instead each step
+        # TEMPLATE declares an `image` input with valueFrom.configMapKeyRef into the
+        # {app}-pipeline-images ConfigMap (see build_step_template). Template inputs
+        # are NOT shown in the submit form, and Argo still resolves the image from
+        # the ConfigMap at run time — so patch-images keeps updating images WITHOUT
+        # a WFT re-render, exactly as before.
 
         # ── Per-step compute-class DROPDOWN (whole-node, scale-to-zero) ──────
         # The engineer picks ONE compute class per step from a dropdown of the pool's
@@ -1820,7 +1849,10 @@ spec:
             sized_req, sized_lim = _sized_requests(cls, is_gpu)
 
             container = {
-                'image': OB + 'workflow.parameters.image-' + sn + CB,
+                # image from the step template's own `image` input (declared below
+                # with valueFrom.configMapKeyRef), NOT a workflow parameter — keeps
+                # the 6 image-<step> boxes out of the submit form.
+                'image': OB + 'inputs.parameters.image' + CB,
                 'resources': {'requests': sized_req, 'limits': sized_lim},
             }
             if step.get('command'):
@@ -1865,7 +1897,7 @@ spec:
             if ckpt_prefix:
                 env_list.append({'name': 'CHECKPOINT_PREFIX', 'value': ckpt_prefix})
             for e in (step.get('env') or []):
-                env_list.append(e)
+                env_list.append(_inject_dataset_pathoverride(e, dataset_pathoverride_expr))
             container['env'] = env_list
 
             # Mount the {project}-mlflow-svc Zitadel machine key as a file so the
@@ -1888,6 +1920,14 @@ spec:
 
             tmpl = {
                 'name': f"{sn}-{'gpu' if is_gpu else 'cpu'}",
+                # `image` input resolved from the {app}-pipeline-images ConfigMap at
+                # run time (patch-images updates the CM, no WFT re-render needed).
+                # Template inputs are NOT rendered in the submit form, so this keeps
+                # the image plumbing out of the user's view.
+                'inputs': {'parameters': [
+                    {'name': 'image',
+                     'valueFrom': {'configMapKeyRef': {'name': f"{app_name}-pipeline-images", 'key': sn}}},
+                ]},
                 'metadata': {
                     'labels': {
                         'platform.kubecore.io/project': project_name,
@@ -1987,7 +2027,10 @@ spec:
 
             inp = step.get('inputs', {}).get('parameters', []) if step.get('inputs') else []
             if inp:
-                tmpl['inputs'] = {'parameters': [{'name': p['name']} for p in inp]}
+                # APPEND the step's data inputs to the existing inputs (which already
+                # carry the `image` valueFrom input) — do NOT overwrite, or the image
+                # input is lost and the container image fails to resolve.
+                tmpl['inputs']['parameters'].extend({'name': p['name']} for p in inp)
             out = step.get('outputs', {}).get('parameters', []) if step.get('outputs') else []
             if out:
                 tmpl['outputs'] = {'parameters': [{'name': p['name'], 'valueFrom': {'path': p['path']}} for p in out]}
