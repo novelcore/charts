@@ -2171,7 +2171,16 @@ spec:
         # yet (baseDns absent) so a partially-configured pool never fails the render.
         DATASET_CFG=$(CONTEXT_PATH="$CONTEXT_PATH" APP_NAME="$APP_NAME" PROJECT_NAME="$PROJECT_NAME" python3 - <<'CFGEOF'
         import os, yaml
-        ctx = yaml.safe_load(open(os.environ['CONTEXT_PATH'])) or {}
+        # pipeline-context.yaml is a ConfigMap; the real context is a YAML STRING
+        # under data['context.yaml'] — unwrap it exactly like the main render does
+        # (render_wft.py: ctx = yaml.safe_load(raw_cm['data']['context.yaml'])).
+        # Reading the ConfigMap top-level finds no 'lakefs' key → the config-write
+        # was silently skipping on EVERY app, so no app ever got its real config.
+        raw = yaml.safe_load(open(os.environ['CONTEXT_PATH'])) or {}
+        if isinstance(raw, dict) and 'data' in raw and 'context.yaml' in (raw.get('data') or {}):
+            ctx = yaml.safe_load(raw['data']['context.yaml']) or {}
+        else:
+            ctx = raw  # already-unwrapped context (defensive)
         lakefs = ctx.get('lakefs', {}) or {}
         url = lakefs.get('externalUrl', '') or ''
         if not url:
