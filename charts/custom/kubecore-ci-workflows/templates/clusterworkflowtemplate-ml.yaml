@@ -109,6 +109,17 @@ spec:
         template: detect-steps
     - - name: version
         template: version
+    # build-push and render-wft run in the SAME step-group (both single-dash =
+    # parallel), because render-wft does NOT depend on build output — it only
+    # consumes version.image_tag + detect-steps.changed_steps (both produced
+    # before this group) and rebuilds the whole WFT from kubeline.yaml. Keeping
+    # render-wft in its own LATER group meant a fresh app's config + Argo form
+    # were gated behind ALL 6 image builds (~14 min each, and they don't all fit
+    # the build pool) — so a brand-new kubeapp couldn't get its real dataset
+    # config or its real submit form until the entire build finished (often
+    # hours, or never under node pressure). Running them in parallel lands the
+    # config + form immediately while the images build alongside. patch-images
+    # (next group) still correctly waits for build-push.
     - - name: build-push
         template: build-push
         when: "{{`{{steps.detect-steps.outputs.parameters.has_changes}}`}} == true"
@@ -123,7 +134,7 @@ spec:
           - name: new_version
             value: "{{`{{steps.version.outputs.parameters.new_version}}`}}"
         withParam: "{{`{{steps.detect-steps.outputs.parameters.changed_steps}}`}}"
-    - - name: render-wft
+      - name: render-wft
         template: render-wft
         # Fire when a step image changed OR kubeline.yaml changed (wft_changed):
         # kubeline.yaml IS the WFT source, so a kubeline-only change (e.g. a
