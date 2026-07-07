@@ -762,10 +762,19 @@ spec:
 
         # Module-scope whole-node sizer usable by BOTH the live (ephemeral) and the
         # static-class (scale-to-zero) paths. requests==limits == the class's
-        # platform-computed allocatable minus a small daemonset margin (sole-tenant ⇒
-        # Guaranteed QoS, the whole machine to the step). GPU classes add nvidia.com/gpu.
+        # platform-computed allocatable minus a margin (sole-tenant ⇒ Guaranteed
+        # QoS, the whole machine to the step). GPU classes add nvidia.com/gpu.
+        #
+        # The memory margin must reserve room for THREE things the step pod also
+        # consumes against its own limit, beyond raw model memory:
+        #   • the 1Gi /dev/shm emptyDir (medium:Memory counts against the limit),
+        #   • the Argo `wait` sidecar,
+        #   • torch's transient peak (activations + dataloader workers) above steady.
+        # A 0.5Gi margin OOMKilled model-training at the 24Gi limit on a 30Gi
+        # n1-standard-8 (exit 137, live 2026-07-07). 3.5Gi leaves genuine headroom
+        # (n1-standard-8 → ~21Gi limit) while still handing the step the whole node.
         WN_CPU_MARGIN = 0.5
-        WN_MEM_MARGIN_GI = 0.5
+        WN_MEM_MARGIN_GI = 3.5
 
         def _whole_node_resources(c):
             alloc = c.get('allocatable') or {}
