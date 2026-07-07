@@ -792,6 +792,17 @@ spec:
         SHM_FLOOR_GI = 1
         SHM_CAP_GI = 4
 
+        def _quant_gate_predicate(sn):
+            # The quantization-enable predicate for a quant step, as an Argo
+            # expression fragment (no braces). model-quantization runs for any
+            # quantization (ptq OR qat) → != 'none'. qat-finetune runs ONLY for
+            # qat → == 'qat'; without this it fired as a no-op during PTQ, pulling
+            # its ~14GB CUDA image (~14 min) and adding a phantom QAT node to the
+            # DAG. quantization-mode=none keeps both quant steps skipped.
+            if sn == 'qat-finetune':
+                return "workflow.parameters['quantization-mode'] == 'qat'"
+            return "workflow.parameters['quantization-mode'] != 'none'"
+
         def _shm_gib(c):
             mem_alloc = float((c.get('allocatable') or {}).get('memoryGiB', 8))
             return int(min(SHM_CAP_GI, max(SHM_FLOOR_GI, round(mem_alloc * SHM_FRAC))))
@@ -1310,8 +1321,9 @@ spec:
                 if is_quant_step:
                     # when: is an Argo EXPRESSION — needs the =expr form (leading '=');
                     # bracket subscript is valid inside an expression, unlike simple
-                    # tags which require dot notation.
-                    task['when'] = OB + "=workflow.parameters['quantization-mode'] != 'none'" + CB
+                    # tags which require dot notation. Per-step gate: qat-finetune
+                    # only on == 'qat'; model-quantization on any != 'none'.
+                    task['when'] = OB + "=" + _quant_gate_predicate(sn) + CB
                 for ip in inp_params:
                     frm = ip.get('from')
                     if not frm:
@@ -1796,9 +1808,11 @@ spec:
                 sel = gpu_expr if variant == 'gpu' else "!(" + gpu_expr + ")"
                 when = OB + "=" + sel + CB
                 if is_quant_step:
-                    # AND the compute-router gate with the quantization enable gate: the
-                    # variant runs only when it's the selected compute AND quantization is on.
-                    when = OB + "=(" + sel + ") && workflow.parameters['quantization-mode'] != 'none'" + CB
+                    # AND the compute-router gate with the per-step quantization-enable
+                    # gate: the variant runs only when it's the selected compute AND the
+                    # step's quant predicate holds (qat-finetune → == 'qat',
+                    # model-quantization → != 'none').
+                    when = OB + "=(" + sel + ") && " + _quant_gate_predicate(sn) + CB
                 task = {'name': f"{sn}-{variant}", 'template': f"{sn}-{variant}", 'when': when}
                 if depends_expr:
                     task['depends'] = depends_expr
