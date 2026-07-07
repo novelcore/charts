@@ -796,27 +796,38 @@ spec:
             mem_alloc = float((c.get('allocatable') or {}).get('memoryGiB', 8))
             return int(min(SHM_CAP_GI, max(SHM_FLOOR_GI, round(mem_alloc * SHM_FRAC))))
 
-        def _inject_dataset_pathoverride(env_entry, has_catalog):
-            # A step's PARAMS_YAML (a multi-line YAML string env var) references the
-            # dataset-path-override WORKFLOW parameter on its path_override line.
-            # Argo does NOT evaluate an Argo =expression expressions inside an env value (only
-            # simple workflow.parameters.x substitution), so the ref->commit
-            # ternary CANNOT go here. Instead we point path_override at a STEP INPUT
-            # (inputs.parameters.dataset-path-override) whose value the DAG task
-            # supplies as an evaluated an Argo =expression expression (task-argument values ARE
-            # evaluated). This helper just rewrites the env's workflow-param ref to
-            # the input ref. No-op without a catalog (the plain workflow param — an
-            # empty escape-hatch string — is fine). Returns a copy. (Argo braces are
-            # built from OB/CB at runtime, never written literally.)
-            if not has_catalog or not isinstance(env_entry, dict):
+        def _rewrite_params_yaml(env_entry, has_catalog):
+            # Rewrites the copied-from-kubeline PARAMS_YAML env var (a multi-line YAML
+            # string) so the submit form carries no internal plumbing:
+            #   (a) dataset-path-override: the ref->commit resolution is an Argo
+            #       expression, which is NOT evaluated inside an env value (only in
+            #       task-arg/when/withParam). So point it at a STEP INPUT that the DAG
+            #       task supplies as an evaluated expression. (only when a catalog exists)
+            #   (b) lakefs-repo / lakefs-endpoint: BAKE the literal render-time values
+            #       (render-wft already knows them from pipeline-context) instead of
+            #       referencing workflow parameters — removes those editable plumbing
+            #       boxes from the form.
+            # Returns a copy; no-op on non-PARAMS_YAML entries. (Argo braces built from
+            # OB/CB at runtime, never literal.)
+            if not isinstance(env_entry, dict):
                 return env_entry
             val = env_entry.get('value')
-            wf_ref = OB + 'workflow.parameters.dataset-path-override' + CB
-            in_ref = OB + 'inputs.parameters.dataset-path-override' + CB
-            if not isinstance(val, str) or wf_ref not in val:
+            if not isinstance(val, str):
+                return env_entry
+            new = val
+            # (b) bake the lakeFS repo + endpoint literals
+            new = new.replace(OB + 'workflow.parameters.lakefs-repo' + CB,
+                              lakefs.get('repository', app_name))
+            new = new.replace(OB + 'workflow.parameters.lakefs-endpoint' + CB,
+                              lakefs.get('endpoint', ''))
+            # (a) point dataset-path-override at the step input (evaluated by the DAG)
+            if has_catalog:
+                new = new.replace(OB + 'workflow.parameters.dataset-path-override' + CB,
+                                  OB + 'inputs.parameters.dataset-path-override' + CB)
+            if new == val:
                 return env_entry
             out = dict(env_entry)
-            out['value'] = val.replace(wf_ref, in_ref)
+            out['value'] = new
             return out
 
         def _whole_node_resources(c):
@@ -1022,16 +1033,14 @@ spec:
                                     'default 100.' % sn),
                 })
 
+            # Platform endpoints/IDs (mlflow/lakefs endpoints, zitadel domain+project
+            # id, kubepool-name, lakefs-repo/-branch) are baked into the step env, NOT
+            # exposed as form params — same as the static path. node-service-account
+            # stays a param: the create-nodegroups gcloud step reads it from
+            # workflow.parameters.
             args_params += [
                 {'name': 'registered-model-name', 'value': f"{app_name}-model"},
                 {'name': 'promote-to', 'value': ''},
-                {'name': 'kubepool-name', 'value': project_name},
-                {'name': 'mlflow-endpoint', 'value': mlflow.get('trackingUri', '')},
-                {'name': 'zitadel-domain', 'value': mlflow.get('oidcDomain', '')},
-                {'name': 'zitadel-mlflow-project-id', 'value': mlflow.get('oidcProjectId', '')},
-                {'name': 'lakefs-endpoint', 'value': lakefs.get('endpoint', '')},
-                {'name': 'lakefs-repo', 'value': lakefs.get('repository', app_name)},
-                {'name': 'lakefs-branch', 'value': branch},
                 # node-service-account: the shared {org}-node SA the ephemeral nodes run
                 # as (workload-identity + registry pull) — matches the cluster's own
                 # pools. The operator populates poolContext.nodeServiceAccount; empty
@@ -1339,14 +1348,17 @@ spec:
                     container['args'] = step['args']
 
                 env_list = [
-                    {'name': 'MLFLOW_TRACKING_URI', 'value': OB + 'workflow.parameters.mlflow-endpoint' + CB},
-                    {'name': 'LAKEFS_ENDPOINT', 'value': OB + 'workflow.parameters.lakefs-endpoint' + CB},
+                    # Platform endpoints/IDs baked as literal render-time values (not
+                    # workflow parameters) — same as the static path — so they never
+                    # appear as editable plumbing boxes in the submit form.
+                    {'name': 'MLFLOW_TRACKING_URI', 'value': mlflow.get('trackingUri', '')},
+                    {'name': 'LAKEFS_ENDPOINT', 'value': lakefs.get('endpoint', '')},
                     {'name': 'LAKEFS_ACCESS_KEY', 'valueFrom': {'secretKeyRef': {'name': lakefs.get('adminSecret', f"{project_name}-lakefs-admin"), 'key': 'accessKeyId'}}},
                     {'name': 'LAKEFS_SECRET_KEY', 'valueFrom': {'secretKeyRef': {'name': lakefs.get('adminSecret', f"{project_name}-lakefs-admin"), 'key': 'secretAccessKey'}}},
                     {'name': 'MLFLOW_TRACKING_AUTH', 'value': 'zitadel'},
                     {'name': 'ZITADEL_MACHINE_KEY_FILE', 'value': '/etc/mlflow-svc/ZITADEL_MACHINE_KEY'},
-                    {'name': 'ZITADEL_DOMAIN', 'value': OB + 'workflow.parameters.zitadel-domain' + CB},
-                    {'name': 'ZITADEL_MLFLOW_PROJECT_ID', 'value': OB + 'workflow.parameters.zitadel-mlflow-project-id' + CB},
+                    {'name': 'ZITADEL_DOMAIN', 'value': mlflow.get('oidcDomain', '')},
+                    {'name': 'ZITADEL_MLFLOW_PROJECT_ID', 'value': str(mlflow.get('oidcProjectId', ''))},
                 ]
                 ckpt_bucket = checkpoints.get('bucket', '')
                 ckpt_prefix = checkpoints.get('prefix', '')
@@ -1355,7 +1367,7 @@ spec:
                 if ckpt_prefix:
                     env_list.append({'name': 'CHECKPOINT_PREFIX', 'value': ckpt_prefix})
                 for e in (step.get('env') or []):
-                    env_list.append(_inject_dataset_pathoverride(e, bool(dataset_pathoverride_expr)))
+                    env_list.append(_rewrite_params_yaml(e, bool(dataset_pathoverride_expr)))
                 container['env'] = env_list
 
                 mlflow_svc_secret = mlflow.get('svcSecret', f"{project_name}-mlflow-svc")
@@ -1718,25 +1730,20 @@ spec:
                 p['enum'] = _class_enum
             args_params.append(p)
 
+        # Only genuine user-facing choices are workflow parameters (form fields):
+        #   registered-model-name — the MLflow model name (sensible default, editable)
+        #   promote-to — optional target stage the user may pick
+        # The platform endpoints/IDs (mlflow/lakefs endpoints, zitadel domain+project
+        # id, kubepool-name, lakefs-repo/-branch) are NOT parameters: they were 6+
+        # editable internal-plumbing boxes in the submit form. Their values are baked
+        # directly into the step env (literal render-time values from pipeline-context)
+        # by the env build above and by _rewrite_params_yaml — same runtime values,
+        # no form clutter. lakefs-branch specifically was DEAD: PARAMS_YAML already
+        # derives the branch from the picked dataset-ref, so the lakefs-branch box
+        # only showed a stale, contradictory value (dev while dataset-ref=main).
         args_params += [
             {'name': 'registered-model-name', 'value': f"{app_name}-model"},
             {'name': 'promote-to', 'value': ''},
-            {'name': 'kubepool-name', 'value': project_name},
-            {'name': 'mlflow-endpoint', 'value': mlflow.get('trackingUri', '')},
-            # Zitadel domain for the pipeline's MLflow bearer-JWT auth provider.
-            # k8smlapp writes mlflow.oidcDomain into pipeline-context from the MLflow
-            # OIDC discovery URL host; empty when MLflow OIDC is disabled (steps then
-            # fall back to no auth header — fine for an unauthenticated MLflow).
-            {'name': 'zitadel-domain', 'value': mlflow.get('oidcDomain', '')},
-            # Zitadel project ID of the MLflow OIDC app. The auth provider requests
-            # urn:zitadel:iam:org:project:id:{id}:aud so the minted token is audienced
-            # to the MLflow app (and carries project roles) — without it the token is
-            # audienced to the machine user's own client with no groups → the plugin
-            # rejects it "Invalid token payload"/401 (yolo-final2, 2026-06-26).
-            {'name': 'zitadel-mlflow-project-id', 'value': mlflow.get('oidcProjectId', '')},
-            {'name': 'lakefs-endpoint', 'value': lakefs.get('endpoint', '')},
-            {'name': 'lakefs-repo', 'value': lakefs.get('repository', app_name)},
-            {'name': 'lakefs-branch', 'value': branch},
         ]
 
         # ── DAG: two variants per step, selected at submit time ─────────────
@@ -1868,9 +1875,15 @@ spec:
             if step.get('args'):
                 container['args'] = step['args']
 
+            # Platform endpoints/IDs are BAKED as literal render-time values here,
+            # NOT referenced as workflow parameters — render-wft already knows them
+            # (from pipeline-context), and exposing them as workflow.parameters put 6
+            # editable internal-plumbing boxes (mlflow/lakefs endpoints, zitadel ids)
+            # in the submit form that a user must never touch. Baking removes them
+            # from the form entirely while keeping the exact same runtime values.
             env_list = [
-                {'name': 'MLFLOW_TRACKING_URI', 'value': OB + 'workflow.parameters.mlflow-endpoint' + CB},
-                {'name': 'LAKEFS_ENDPOINT', 'value': OB + 'workflow.parameters.lakefs-endpoint' + CB},
+                {'name': 'MLFLOW_TRACKING_URI', 'value': mlflow.get('trackingUri', '')},
+                {'name': 'LAKEFS_ENDPOINT', 'value': lakefs.get('endpoint', '')},
                 {'name': 'LAKEFS_ACCESS_KEY', 'valueFrom': {'secretKeyRef': {'name': lakefs.get('adminSecret', f"{project_name}-lakefs-admin"), 'key': 'accessKeyId'}}},
                 {'name': 'LAKEFS_SECRET_KEY', 'valueFrom': {'secretKeyRef': {'name': lakefs.get('adminSecret', f"{project_name}-lakefs-admin"), 'key': 'secretAccessKey'}}},
                 # MLflow auth = OIDC bearer JWT (no basic-auth). The {project}-mlflow-svc
@@ -1883,15 +1896,13 @@ spec:
                 # the plugin DB), which drifted and 401'd.
                 {'name': 'MLFLOW_TRACKING_AUTH', 'value': 'zitadel'},
                 {'name': 'ZITADEL_MACHINE_KEY_FILE', 'value': '/etc/mlflow-svc/ZITADEL_MACHINE_KEY'},
-                # ZITADEL_DOMAIN drives both the token endpoint
-                # (https://{domain}/oauth/v2/token) and the JWT-profile assertion
-                # audience (issuer). zitadel-domain is the render-wft workflow param
-                # the k8smlapp composition derives from the MLflow OIDC discovery URL.
-                {'name': 'ZITADEL_DOMAIN', 'value': OB + 'workflow.parameters.zitadel-domain' + CB},
-                # ZITADEL_MLFLOW_PROJECT_ID → the auth provider adds the project-aud
-                # scope so the token is accepted by the MLflow OIDC app (fixes 401
-                # "Invalid token payload"). Empty when MLflow OIDC is disabled.
-                {'name': 'ZITADEL_MLFLOW_PROJECT_ID', 'value': OB + 'workflow.parameters.zitadel-mlflow-project-id' + CB},
+                # ZITADEL_DOMAIN drives both the token endpoint and the JWT-profile
+                # assertion audience; baked from pipeline-context's mlflow.oidcDomain.
+                {'name': 'ZITADEL_DOMAIN', 'value': mlflow.get('oidcDomain', '')},
+                # ZITADEL_MLFLOW_PROJECT_ID adds the project-aud scope so the minted
+                # token is accepted by the MLflow OIDC app (fixes 401 "Invalid token
+                # payload"). Empty when MLflow OIDC is disabled. Baked from context.
+                {'name': 'ZITADEL_MLFLOW_PROJECT_ID', 'value': str(mlflow.get('oidcProjectId', ''))},
             ]
             # Inject platform-derived checkpoint location when present in context.yaml.
             # checkpoints.bucket = lakeFS repository name; checkpoints.prefix = branch/path
@@ -1905,7 +1916,7 @@ spec:
             if ckpt_prefix:
                 env_list.append({'name': 'CHECKPOINT_PREFIX', 'value': ckpt_prefix})
             for e in (step.get('env') or []):
-                env_list.append(_inject_dataset_pathoverride(e, bool(dataset_pathoverride_expr)))
+                env_list.append(_rewrite_params_yaml(e, bool(dataset_pathoverride_expr)))
             container['env'] = env_list
 
             # Mount the {project}-mlflow-svc Zitadel machine key as a file so the
