@@ -1681,23 +1681,12 @@ spec:
 
         cpu_class_name = cpu_cls.get('name', f"{pipeline_name}-cpu")
         gpu_class_name = gpu_cls.get('name', f"{pipeline_name}-gpu")
-        # cpu-class / gpu-class: defaulted to the pool's default class, with a
-        # description listing EVERY allowed class of that tier. We ALWAYS attach the
-        # enum (even for a single class) so the Argo submit form renders a DROPDOWN of
-        # the valid pool classes instead of a free-text box — a 1-item enum renders as
-        # a one-choice dropdown, which is the right UX (the user sees the valid value
-        # and can't typo it into a nonexistent pool → Unschedulable). This keeps
-        # gpu-class consistent with cpu-class even on single-GPU-class pools.
-        cpu_enum = [c['name'] for c in cpu_classes if c.get('name')]
-        gpu_enum = [c['name'] for c in gpu_classes if c.get('name')]
-        cpu_class_param = {'name': 'cpu-class', 'value': cpu_class_name, 'description': _allowed_desc(cpu_classes, 'cpu')}
-        gpu_class_param = {'name': 'gpu-class', 'value': gpu_class_name, 'description': _allowed_desc(gpu_classes, 'gpu')}
-        if cpu_enum:
-            cpu_class_param['enum'] = cpu_enum
-        if gpu_enum:
-            gpu_class_param['enum'] = gpu_enum
-        args_params.append(cpu_class_param)
-        args_params.append(gpu_class_param)
+        # NOTE: there are deliberately NO global 'cpu-class' / 'gpu-class' form
+        # params. They were dead redundant noise — each is set on the form but
+        # referenced ZERO times in the workflow; the PER-STEP '{step}-class'
+        # dropdowns (below) are the real, only compute selectors and drive every
+        # step's placement. Two global boxes next to six per-step boxes just
+        # confused clients about which one matters. Removed.
 
         # NOTE: the per-step container images are NOT declared as workflow
         # arguments.parameters — Argo renders every arguments.parameter as an
@@ -1729,14 +1718,21 @@ spec:
             return cpu_cls.get('name') or (cpu_classes[0]['name'] if cpu_classes else '')
 
         _class_enum = [c['name'] for c in all_classes if c.get('name')]
-        _class_help = 'Pool compute classes (WHOLE node each, scale-to-zero):\n' + \
-            '\n'.join('  - ' + _class_line(c) for c in all_classes)
+        # Client-facing help: plain language + which class to pick. Lists the
+        # available machines so a user knows what each option is.
+        _class_help = ('Available machines:\n'
+                       + '\n'.join('  - ' + _class_line(c) for c in all_classes)
+                       + '\n\nRule of thumb: pick a GPU class (e.g. gpu-t4) for '
+                         'model-training, qat-finetune and model-quantization; a '
+                         'CPU class (e.g. cpu-standard) is enough for '
+                         'config-validation, dataset-loading and model-registration. '
+                         'The default is already set correctly for this step.')
 
         for step in steps:
             sn = step['name']
             p = {'name': f"{sn}-class", 'value': _default_class_for(step),
-                 'description': (f"Compute class for the {sn} step -- runs on the WHOLE node "
-                                 f"(platform-sized, sole-tenant), on a scale-to-zero pool.\n"
+                 'description': (f"Which machine the '{sn}' step runs on. "
+                                 f"Leave the default unless you need more/less power.\n\n"
                                  + _class_help)}
             if _class_enum:
                 p['enum'] = _class_enum
@@ -1849,14 +1845,10 @@ spec:
             # QUANTIZATION_STEPS is module-scope; recompute locally since this helper
             # is a separate function from the DAG-task loop.
             is_quant_step = sn in QUANTIZATION_STEPS
-            # Placement: the cpu variant targets the cpu-class param, the gpu variant the
-            # gpu-class param. The nodeSelector references the EDITABLE workflow param
-            # (cpu-class / gpu-class) — defaulted to the pool's default class, but the
-            # developer can override it on the submit form to any allowed class of that
-            # tier (the field's ? help + enum list the allowed set). So a class edit on
-            # the form actually moves the step; routing cpu-vs-gpu is still driven by the
-            # step's {step}-gpu count (>0 → gpu variant runs, else cpu variant).
-            class_param = 'gpu-class' if is_gpu else 'cpu-class'
+            # Placement is driven by the PER-STEP '{step}-class' dropdown (its
+            # nodeSelector/podSpecPatch below), NOT any global cpu/gpu-class param.
+            # The tier default (cpu vs gpu class) comes from the step's own gpu
+            # count; the user picks the exact class per step on the form.
             cls = gpu_cls if is_gpu else cpu_cls
             tol_key = cls.get('tolerationKey', 'platform.kubecore.io/ml-workload')
             tol_val = cls.get('tolerationValue', '')
