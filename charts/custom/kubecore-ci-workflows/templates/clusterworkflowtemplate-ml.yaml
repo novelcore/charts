@@ -1708,18 +1708,37 @@ spec:
         #     NO cpu/mem/gpu numbers -- the platform sizes the whole machine.
         # No ephemeral pools, no gcloud, no extra IAM: the GKE autoscaler brings the
         # class's pool up 0->1 when the step's pod lands, and scales back to 0 after.
+        # Steps that ALWAYS need a GPU (used for the GPU-only enum + default below).
+        # QUANTIZATION_STEPS is (re)defined further down in this path too; define it
+        # here so the enum/default logic can reference it.
+        QUANTIZATION_STEPS = {'qat-finetune', 'model-quantization'}
+        _GPU_REQUIRED_STEPS = {'model-training'} | QUANTIZATION_STEPS
+
         def _default_class_for(step):
             want_gpu = step.get('compute', 'cpu') == 'gpu'
             r = (step.get('resources') or {}).get('requests') or {}
             if r.get('nvidia.com/gpu') not in (None, '', '0', 0):
+                want_gpu = True
+            # model-training + the quantization steps ALWAYS need a GPU (they may
+            # not declare it in kubeline because quantization is gated at submit),
+            # so force their default to a GPU class — matching the GPU-only enum.
+            if step.get('name') in _GPU_REQUIRED_STEPS:
                 want_gpu = True
             if want_gpu and gpu_cls.get('name'):
                 return gpu_cls['name']
             return cpu_cls.get('name') or (cpu_classes[0]['name'] if cpu_classes else '')
 
         _class_enum = [c['name'] for c in all_classes if c.get('name')]
-        # Client-facing help: plain language + which class to pick. Lists the
-        # available machines so a user knows what each option is.
+        _gpu_class_enum = [c['name'] for c in gpu_classes if c.get('name')]
+        # GUARDRAIL (form-level): steps that REQUIRE a GPU — training and the two
+        # quantization steps — only expose GPU classes in their dropdown, so a user
+        # cannot pick a CPU class and have the step crash ~14 min in. (A CPU pick
+        # here is a permanent misconfig, unlike a transient stockout which the
+        # autoscaler retries — so we prevent it at the source.) All other steps
+        # keep the full class list. There's also a fast validate-classes guard as a
+        # belt-and-braces safety net (below).
+        _gpu_required_steps = _GPU_REQUIRED_STEPS
+        # Client-facing help: plain language + which class to pick.
         _class_help = ('Available machines:\n'
                        + '\n'.join('  - ' + _class_line(c) for c in all_classes)
                        + '\n\nRule of thumb: pick a GPU class (e.g. gpu-t4) for '
@@ -1730,12 +1749,17 @@ spec:
 
         for step in steps:
             sn = step['name']
+            gpu_required = sn in _gpu_required_steps
+            help_extra = (' This step needs a GPU, so only GPU classes are offered.'
+                          if gpu_required and _gpu_class_enum else '')
             p = {'name': f"{sn}-class", 'value': _default_class_for(step),
                  'description': (f"Which machine the '{sn}' step runs on. "
-                                 f"Leave the default unless you need more/less power.\n\n"
+                                 f"Leave the default unless you need more/less power.{help_extra}\n\n"
                                  + _class_help)}
-            if _class_enum:
-                p['enum'] = _class_enum
+            # GPU-required steps only list GPU classes; everything else lists all.
+            enum = (_gpu_class_enum if (gpu_required and _gpu_class_enum) else _class_enum)
+            if enum:
+                p['enum'] = enum
             args_params.append(p)
 
         # Only genuine user-facing choices are workflow parameters (form fields):
