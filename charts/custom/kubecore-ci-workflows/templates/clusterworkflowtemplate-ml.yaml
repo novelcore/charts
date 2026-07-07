@@ -1729,15 +1729,14 @@ spec:
             return cpu_cls.get('name') or (cpu_classes[0]['name'] if cpu_classes else '')
 
         _class_enum = [c['name'] for c in all_classes if c.get('name')]
-        _gpu_class_enum = [c['name'] for c in gpu_classes if c.get('name')]
-        # GUARDRAIL (form-level): steps that REQUIRE a GPU — training and the two
-        # quantization steps — only expose GPU classes in their dropdown, so a user
-        # cannot pick a CPU class and have the step crash ~14 min in. (A CPU pick
-        # here is a permanent misconfig, unlike a transient stockout which the
-        # autoscaler retries — so we prevent it at the source.) All other steps
-        # keep the full class list. There's also a fast validate-classes guard as a
-        # belt-and-braces safety net (below).
-        _gpu_required_steps = _GPU_REQUIRED_STEPS
+        # DESIGN (team decision 2026-07-07): DYNAMIC with good DEFAULTS, not locked.
+        # Every step's {step}-class dropdown offers ALL classes — we do NOT restrict
+        # GPU-required steps to GPU-only, because we can't know what steps a user may
+        # add, and over-locking removes a legitimate option (Fiotakis: "keep it an
+        # option, dynamic with defaults"). Instead we STEER: model-training and the
+        # quantization steps DEFAULT to a GPU class (via _default_class_for), and the
+        # help text says which class to pick. A user who overrides to CPU on a
+        # GPU-needing step gets a clear failure — that's their explicit choice.
         # Client-facing help: plain language + which class to pick.
         _class_help = ('Available machines:\n'
                        + '\n'.join('  - ' + _class_line(c) for c in all_classes)
@@ -1749,17 +1748,16 @@ spec:
 
         for step in steps:
             sn = step['name']
-            gpu_required = sn in _gpu_required_steps
-            help_extra = (' This step needs a GPU, so only GPU classes are offered.'
-                          if gpu_required and _gpu_class_enum else '')
+            gpu_required = sn in _GPU_REQUIRED_STEPS
+            help_extra = (' This step normally needs a GPU — the default is a GPU class.'
+                          if gpu_required else '')
             p = {'name': f"{sn}-class", 'value': _default_class_for(step),
                  'description': (f"Which machine the '{sn}' step runs on. "
                                  f"Leave the default unless you need more/less power.{help_extra}\n\n"
                                  + _class_help)}
-            # GPU-required steps only list GPU classes; everything else lists all.
-            enum = (_gpu_class_enum if (gpu_required and _gpu_class_enum) else _class_enum)
-            if enum:
-                p['enum'] = enum
+            # All steps offer the full class list (dynamic + defaults, not locked).
+            if _class_enum:
+                p['enum'] = _class_enum
             args_params.append(p)
 
         # Only genuine user-facing choices are workflow parameters (form fields):
