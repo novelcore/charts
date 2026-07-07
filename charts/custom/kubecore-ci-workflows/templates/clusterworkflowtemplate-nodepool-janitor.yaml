@@ -99,18 +99,25 @@ spec:
         # The janitor gets a region but the cluster may be zonal (dev pools are
         # e.g. europe-central2-b). Ask GKE for the actual location and use
         # --location, which accepts both a zone and a region.
+        #
+        # The region param is NEVER a safe fallback for a zonal cluster —
+        # "europe-central2" is not a valid stand-in for the zone
+        # "europe-central2-b" a zonal cluster actually lives at, so silently
+        # falling back to it here produces a location every subsequent
+        # node-pool call then fails against. If GKE can't tell us the real
+        # location (auth/permission error, or the cluster genuinely doesn't
+        # exist), fail loudly with the actual gcloud error instead of guessing.
+        LOCATION_ERR=/tmp/location-error.txt
         LOCATION=$(gcloud container clusters list \
           --project="$PROJECT" \
           --filter="name=$CLUSTER" \
-          --format="value(location)" 2>/dev/null || true)
+          --format="value(location)" 2>"$LOCATION_ERR")
         if [ -z "$LOCATION" ]; then
-          # Fall back to the passed region (regional cluster) if the describe/list
-          # couldn't resolve it. --location=<region> still works for regional.
-          echo "WARN: could not resolve cluster location from GKE; falling back to region=$REGION"
-          LOCATION="$REGION"
-        fi
-        if [ -z "$LOCATION" ]; then
-          echo "ERROR: could not determine a location for cluster $CLUSTER" >&2
+          echo "ERROR: could not resolve the real location (zone or region) of cluster $CLUSTER from GKE." >&2
+          echo "ERROR: this is NOT safely approximated by the region param ($REGION) — a zonal" >&2
+          echo "ERROR: cluster's location is a zone (e.g. europe-central2-b), not its region." >&2
+          echo "ERROR: underlying gcloud output:" >&2
+          cat "$LOCATION_ERR" >&2
           exit 1
         fi
         echo "cluster location: $LOCATION"
