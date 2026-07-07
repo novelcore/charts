@@ -1,0 +1,416 @@
+{{/*
+ml-autoscaler-healer — KubeCore scale-to-zero autoscaler-backoff healer
+ClusterWorkflowTemplate.
+
+Run on a schedule by the per-KubePool CronWorkflow the kubecore-operator
+(clusteroperators composition) creates alongside the compute-catalog probe and
+nodepool janitor when the pool opts into the live-compute model. The
+CronWorkflow runs in the argo-workflows namespace as ServiceAccount
+ml-compute-probe-sa (WI-annotated to impersonate {org}-gcp-eso-sa →
+roles/container.developer), references this CWT by name (templateRef
+clusterScope: true), and passes:
+
+  project_id, region, cluster_name (="{pool}-gke-cluster")
+
+Why it exists: scale-to-zero GKE pools (min=0) — kubecorecpu, gpu-t4,
+cpu-standard — occasionally fail a 0→N scale-up once on a transient GCE
+"quota exceeded"/stockout error. GKE cluster-autoscaler then enters a backoff
+window (~30min) for that node group and refuses to retry EVEN AFTER capacity
+frees up, leaving pods Pending with "NotTriggerScaleUp: ... in backoff after
+failed scale-up" long after the transient condition clears. This blocks CI
+builds and pipelines until the backoff expires on its own.
+
+The fix does NOT pin any pool to a permanent min=1 (that defeats scale-to-zero
+and costs money around the clock). Instead, for each min=0 pool currently at
+0 nodes that the autoscaler reports as in backoff, it momentarily bumps
+--min-nodes=1, waits for one node to go Ready (a SUCCESSFUL scale event, which
+resets the autoscaler's backoff for that node group), then sets --min-nodes
+back to 0. The node lives only minutes; scale-to-zero is preserved.
+
+Detection uses the cluster-autoscaler-status ConfigMap (kube-system) that GKE's
+autoscaler publishes every loop — it lists each node group's backoff state
+(backoff / backoffUntil) directly, which is far more reliable than trying to
+correlate Pending-pod events back to a specific node group.
+
+Guards (never thrash, never bump a healthy pool):
+  - Only pools with configured min=0 are eligible (kubecoreml min=1 and
+    kubecoresys min=2 are stateful pools and are NEVER touched).
+  - Only pools currently at 0 nodes AND reported "backoff" by the
+    autoscaler-status ConfigMap are bumped.
+  - Rate-limited via a per-pool timestamp annotation on the
+    kubecore-autoscaler-healer-state ConfigMap (kube-system): a pool that was
+    healed within the last 15 minutes is skipped even if still in backoff.
+  - If the autoscaler-status ConfigMap can't be read or parsed, or a pool's
+    backoff state is ambiguous, the pool is skipped (fail safe: do nothing).
+
+Standalone maintenance workflow: no git repo, no workspace PVC, no GitHub
+token. The SA + its namespace-scoped RBAC (configmaps + argoproj.io/workflows
+get/list in argo-workflows, workflowtaskresults create/patch) are provided by
+the operator's clusteroperators composition (shared with the compute probe and
+nodepool janitor — no new IAM required).
+*/}}
+apiVersion: argoproj.io/v1alpha1
+kind: ClusterWorkflowTemplate
+metadata:
+  name: ml-autoscaler-healer
+  labels:
+    {{- include "kubecore-ci-workflows.labels" . | nindent 4 }}
+spec:
+  entrypoint: heal
+  ttlStrategy:
+    secondsAfterCompletion: {{ .Values.workflow.ttlStrategy.secondsAfterCompletion }}
+  podGC:
+    strategy: {{ .Values.workflow.podGC.strategy }}
+  arguments:
+    parameters:
+    - name: project_id
+    - name: region
+    - name: cluster_name
+    # Skip a pool that was healed within this many minutes, even if the
+    # autoscaler still reports it in backoff (avoids re-bumping/thrashing).
+    - name: rate_limit_minutes
+      value: "15"
+
+  templates:
+  - name: heal
+    inputs:
+      parameters:
+      - name: project_id
+        value: "{{`{{workflow.parameters.project_id}}`}}"
+      - name: region
+        value: "{{`{{workflow.parameters.region}}`}}"
+      - name: cluster_name
+        value: "{{`{{workflow.parameters.cluster_name}}`}}"
+      - name: rate_limit_minutes
+        value: "{{`{{workflow.parameters.rate_limit_minutes}}`}}"
+    metadata:
+      labels:
+        platform.kubecore.io/compute-model: live-ephemeral-nodegroups
+        platform.kubecore.io/maintenance: autoscaler-healer
+    container:
+      # Same image/bootstrap pattern as the nodepool janitor: google/cloud-sdk:alpine
+      # ships gcloud + python3 but not kubectl on the alpine variant, so install it
+      # at start-up. Both gcloud and kubectl authenticate off the pod's GKE Workload
+      # Identity (the WI-annotated KSA).
+      image: google/cloud-sdk:alpine
+      command: [sh, -c]
+      args:
+      - |
+        set -eu
+
+        # kubectl is not in the alpine cloud-sdk image; install it (idempotent).
+        if ! command -v kubectl >/dev/null 2>&1; then
+          gcloud components install kubectl --quiet >/dev/null 2>&1 \
+            || apk add --no-cache kubectl >/dev/null 2>&1 \
+            || { echo "ERROR: could not install kubectl" >&2; exit 1; }
+        fi
+
+        PROJECT="{{`{{inputs.parameters.project_id}}`}}"
+        REGION="{{`{{inputs.parameters.region}}`}}"
+        CLUSTER="{{`{{inputs.parameters.cluster_name}}`}}"
+        RATE_LIMIT_MIN="{{`{{inputs.parameters.rate_limit_minutes}}`}}"
+
+        if [ -z "$PROJECT" ] || [ -z "$CLUSTER" ]; then
+          echo "ERROR: project_id and cluster_name are required (got project='$PROJECT' cluster='$CLUSTER')" >&2
+          exit 1
+        fi
+        echo "autoscaler healer: project=$PROJECT cluster=$CLUSTER region=$REGION rate_limit_min=$RATE_LIMIT_MIN"
+
+        # ── Resolve the cluster's EXACT location (zonal vs regional) ────────
+        # Mirrors the nodepool janitor: dev pools are often zonal (e.g.
+        # europe-central2-b) even though a region is passed in.
+        LOCATION=$(gcloud container clusters list \
+          --project="$PROJECT" \
+          --filter="name=$CLUSTER" \
+          --format="value(location)" 2>/dev/null || true)
+        if [ -z "$LOCATION" ]; then
+          echo "WARN: could not resolve cluster location from GKE; falling back to region=$REGION"
+          LOCATION="$REGION"
+        fi
+        if [ -z "$LOCATION" ]; then
+          echo "ERROR: could not determine a location for cluster $CLUSTER" >&2
+          exit 1
+        fi
+        echo "cluster location: $LOCATION"
+
+        # ── List node pools + their current min/current node counts ────────
+        gcloud container node-pools list \
+          --cluster="$CLUSTER" \
+          --location="$LOCATION" \
+          --project="$PROJECT" \
+          --format=json > /tmp/node-pools.json || {
+            echo "ERROR: failed to list node pools for $CLUSTER" >&2
+            exit 1
+          }
+
+        # ── Read the autoscaler's own backoff status (authoritative signal) ─
+        # cluster-autoscaler-status is republished by GKE every loop; it lists
+        # each node group's ScaleUp health including whether it's currently
+        # backed off. If we can't read it, we do NOT guess from Pending pods —
+        # we fail safe and heal nothing this run.
+        STATUS_JSON=/tmp/autoscaler-status.json
+        if ! kubectl get configmap cluster-autoscaler-status -n kube-system -o json > "$STATUS_JSON" 2>/dev/null; then
+          echo "WARN: could not read cluster-autoscaler-status ConfigMap; nothing to heal this run (fail safe)."
+          exit 0
+        fi
+
+        # ── Rate-limit state: last-healed timestamp per pool ────────────────
+        # Stored as a small ConfigMap in kube-system so repeated CronWorkflow
+        # runs (and concurrent clusters, if ever) share state. Absent on first
+        # run — treated as "never healed".
+        STATE_JSON=/tmp/healer-state.json
+        kubectl get configmap kubecore-autoscaler-healer-state -n kube-system -o json > "$STATE_JSON" 2>/dev/null \
+          || echo "{}" > "$STATE_JSON"
+
+        # ── Decide which pools to heal ───────────────────────────────────────
+        PROJECT="$PROJECT" CLUSTER="$CLUSTER" LOCATION="$LOCATION" \
+          RATE_LIMIT_MIN="$RATE_LIMIT_MIN" \
+          python3 /tmp/decide.py /tmp/node-pools.json "$STATUS_JSON" "$STATE_JSON" > /tmp/to-heal.txt
+
+        if [ ! -s /tmp/to-heal.txt ]; then
+          echo "nothing to heal."
+          exit 0
+        fi
+
+        echo "──── pools to heal ────"
+        cat /tmp/to-heal.txt
+        echo "────────────────────────"
+
+        HEALED=0
+        while IFS= read -r POOL; do
+          [ -z "$POOL" ] && continue
+          echo "healing node pool: $POOL (bump min-nodes 0->1, wait for Ready, revert to 0)"
+
+          gcloud container clusters update "$CLUSTER" \
+            --node-pool="$POOL" \
+            --location="$LOCATION" \
+            --project="$PROJECT" \
+            --enable-autoscaling \
+            --min-nodes=1 \
+            --max-nodes-unchanged \
+            --quiet || {
+              echo "WARN: failed to bump min-nodes for $POOL; skipping (leaving autoscaler config untouched)" >&2
+              continue
+            }
+
+          # Wait for at least one Ready node in this pool (bounds the bump —
+          # never wait forever for a node that will never come up).
+          READY=0
+          i=0
+          while [ "$i" -lt 30 ]; do
+            COUNT=$(kubectl get nodes -l "cloud.google.com/gke-nodepool=$POOL" \
+              -o jsonpath='{range .items[*]}{.status.conditions[?(@.type=="Ready")].status}{"\n"}{end}' 2>/dev/null \
+              | grep -c '^True$' || true)
+            if [ "$COUNT" -ge 1 ]; then
+              READY=1
+              echo "pool $POOL: node became Ready (attempt $((i + 1)))"
+              break
+            fi
+            i=$((i + 1))
+            sleep 10
+          done
+          [ "$READY" -eq 1 ] || echo "WARN: pool $POOL did not report a Ready node within 5min; reverting min-nodes anyway" >&2
+
+          # Always revert to min=0, whether or not the node came up in time —
+          # scale-to-zero must never be left pinned by this healer.
+          gcloud container clusters update "$CLUSTER" \
+            --node-pool="$POOL" \
+            --location="$LOCATION" \
+            --project="$PROJECT" \
+            --enable-autoscaling \
+            --min-nodes=0 \
+            --max-nodes-unchanged \
+            --quiet || echo "WARN: failed to revert min-nodes to 0 for $POOL — MUST be fixed manually to avoid a stuck min=1 pin" >&2
+
+          HEALED=$((HEALED + 1))
+        done < /tmp/to-heal.txt
+
+        # ── Record last-healed timestamps for the pools we just bumped ──────
+        NOW_ISO=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+        python3 /tmp/record_state.py /tmp/to-heal.txt "$NOW_ISO" "$STATE_JSON" > /tmp/new-state.json
+        kubectl create configmap kubecore-autoscaler-healer-state -n kube-system \
+          --from-file=state.json=/tmp/new-state.json \
+          --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+
+        echo "healer done: healed $HEALED pool(s)."
+
+      volumeMounts:
+      - name: scripts
+        mountPath: /tmp/decide.py
+        subPath: decide.py
+      - name: scripts
+        mountPath: /tmp/record_state.py
+        subPath: record_state.py
+    volumes:
+    - name: scripts
+      configMap:
+        name: {{ include "kubecore-ci-workflows.fullname" . }}-autoscaler-healer-scripts
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "kubecore-ci-workflows.fullname" . }}-autoscaler-healer-scripts
+  namespace: {{ include "kubecore-ci-workflows.namespace" . }}
+  labels:
+    {{- include "kubecore-ci-workflows.labels" . | nindent 4 }}
+data:
+  decide.py: |
+    #!/usr/bin/env python3
+    """Decide which scale-to-zero node pools to heal.
+
+    argv[1] = node-pools.json (gcloud container node-pools list --format=json)
+    argv[2] = autoscaler-status.json (kubectl get configmap cluster-autoscaler-status -o json)
+    argv[3] = healer-state.json (kubectl get configmap kubecore-autoscaler-healer-state -o json, or "{}")
+    env RATE_LIMIT_MIN = minutes since last heal before a pool is eligible again.
+
+    Prints one pool name per line to stdout for each pool that should be healed.
+
+    A pool is healed iff ALL hold:
+      1. Its autoscaling config has min-node-count == 0 (scale-to-zero pool).
+         Stateful pools (kubecoreml min=1, kubecoresys min=2) never match this
+         and are therefore never touched.
+      2. Its current node count is 0 (nothing to fix if a node is already up).
+      3. The cluster-autoscaler-status ConfigMap reports this node group as
+         currently backed off (health/backoff info parsed from the
+         human-readable status blob GKE publishes).
+      4. It was NOT healed within the last RATE_LIMIT_MIN minutes (per the
+         healer-state ConfigMap), to avoid re-bumping/thrashing.
+
+    If the autoscaler-status ConfigMap's content can't be parsed for a given
+    pool, that pool is SKIPPED (fail safe: never bump a pool we can't prove is
+    in backoff).
+    """
+    import json, os, re, sys
+    from datetime import datetime, timedelta, timezone
+
+    node_pools_path = sys.argv[1]
+    status_path = sys.argv[2]
+    state_path = sys.argv[3]
+    rate_limit_min = float(os.environ.get("RATE_LIMIT_MIN", "15") or "15")
+
+    with open(node_pools_path) as f:
+        pools = json.load(f)
+    with open(status_path) as f:
+        status_doc = json.load(f)
+    with open(state_path) as f:
+        state_doc = json.load(f)
+
+    # kube-system's cluster-autoscaler-status ConfigMap carries its payload as a
+    # single human-readable string under data.status. Node groups appear as
+    # blocks like:
+    #   Name:        https://.../instanceGroupManagers/gke-...-kubecorecpu-...
+    #   Health:      Healthy ...
+    #   ScaleUp:     Backoff (...)
+    # We match "in backoff" / "Backoff" case-insensitively per node-group block,
+    # keyed by the node pool name appearing anywhere in that block's Name line.
+    status_text = (status_doc.get("data") or {}).get("status", "") or ""
+    # Split into per-nodegroup blocks on the "Name:" marker (each block starts a
+    # new node group section in the autoscaler's status format).
+    blocks = re.split(r"(?=^Name:\s)", status_text, flags=re.MULTILINE)
+
+    def pool_in_backoff(pool_name):
+        for block in blocks:
+            if pool_name not in block:
+                continue
+            # ScaleUp line examples: "ScaleUp:     Backoff (NotTriggerScaleUp...)"
+            m = re.search(r"^ScaleUp:\s*(.+)$", block, flags=re.MULTILINE)
+            if m and "backoff" in m.group(1).lower():
+                return True
+        return False
+
+    # Rate-limit lookup: state_doc keys are pool names, values are ISO8601
+    # timestamps of the last heal action.
+    healer_state = {}
+    raw_state = (state_doc.get("data") or {}).get("state.json")
+    if raw_state:
+        try:
+            healer_state = json.loads(raw_state)
+        except (json.JSONDecodeError, TypeError):
+            healer_state = {}
+
+    now = datetime.now(timezone.utc)
+
+    def recently_healed(pool_name):
+        ts = healer_state.get(pool_name)
+        if not ts:
+            return False
+        try:
+            last = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+        except ValueError:
+            return False
+        return (now - last) < timedelta(minutes=rate_limit_min)
+
+    to_heal = []
+    for p in pools:
+        name = p.get("name", "")
+        autoscaling = p.get("autoscaling") or {}
+        min_nodes = autoscaling.get("minNodeCount")
+        # Only scale-to-zero pools are ever candidates. Stateful pools
+        # (kubecoreml min=1, kubecoresys min=2) fail this check and are
+        # therefore structurally excluded — no name-based allowlist needed.
+        if min_nodes != 0:
+            print("skip %s: min-node-count=%s (not scale-to-zero)" % (name, min_nodes), file=sys.stderr)
+            continue
+
+        node_count = p.get("initialNodeCount", 0)
+        # gcloud node-pools list reports current size per-zone under
+        # instanceGroupUrls / status; the simplest robust signal available
+        # without an extra API call is initialNodeCount combined with the
+        # autoscaling block, but current live size can drift from that field.
+        # Prefer an explicit currentNodeCount when the API surfaces it; fall
+        # back to initialNodeCount otherwise (both are 0 for an idle
+        # scale-to-zero pool, which is the only case we act on).
+        current = p.get("currentNodeCount", node_count)
+        if current and current > 0:
+            print("skip %s: currentNodeCount=%s (already has nodes)" % (name, current), file=sys.stderr)
+            continue
+
+        if not pool_in_backoff(name):
+            print("skip %s: autoscaler-status does not report backoff" % name, file=sys.stderr)
+            continue
+
+        if recently_healed(name):
+            print("skip %s: healed within the last %.0f minutes (rate-limited)" % (name, rate_limit_min), file=sys.stderr)
+            continue
+
+        print("heal %s: min=0, at 0 nodes, autoscaler reports backoff" % name, file=sys.stderr)
+        to_heal.append(name)
+
+    for name in to_heal:
+        print(name)
+  record_state.py: |
+    #!/usr/bin/env python3
+    """Merge just-healed pool names into the healer-state ConfigMap payload.
+
+    argv[1] = to-heal.txt (one pool name per line, the pools healed this run)
+    argv[2] = ISO8601 timestamp to record for each
+    argv[3] = healer-state.json (kubectl get configmap ... -o json, or "{}")
+
+    Prints the merged state dict as JSON to stdout (to be written back as the
+    ConfigMap's state.json key). Pools not healed this run keep their prior
+    timestamp untouched.
+    """
+    import json, sys
+
+    to_heal_path = sys.argv[1]
+    timestamp = sys.argv[2]
+    state_path = sys.argv[3]
+
+    with open(state_path) as f:
+        state_doc = json.load(f)
+
+    state = {}
+    raw_state = (state_doc.get("data") or {}).get("state.json")
+    if raw_state:
+        try:
+            state = json.loads(raw_state)
+        except (json.JSONDecodeError, TypeError):
+            state = {}
+
+    with open(to_heal_path) as f:
+        for line in f:
+            name = line.strip()
+            if name:
+                state[name] = timestamp
+
+    print(json.dumps(state))
