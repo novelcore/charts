@@ -424,6 +424,9 @@ spec:
       - name: step_path
       - name: image_tag
       - name: new_version
+    metadata:
+      labels:
+        app.kubernetes.io/name: "{{`{{workflow.parameters.app_name}}`}}"
     # Retry once on transient failures. The dominant historical failure
     # mode was GCE preemption mid-snapshot on the kubecorecpu pool (now
     # on-demand, see profiles.go). Keeping a single retry handles other
