@@ -1640,42 +1640,28 @@ spec:
         args_params.append({'name': 'pipeline-info', 'value': pipeline_info,
                             'description': 'Read-only: live pool compute classes + how to fill this form. Leave unchanged.'})
 
-        # ── dataset-ref DROPDOWN (from the lakeFS dataset catalog) ──────────
-        # A dataset = a lakeFS ref (tag/branch) whose ROOT holds a data.yaml. The
-        # ml-dataset-catalog-probe CronWorkflow discovers these and publishes the
-        # kubecore-ml-dataset-catalog ConfigMap; render-wft reads it (via the pod
-        # SA — NO lakeFS creds needed here) and offers the refs as a dropdown. The
-        # picked ref's immutable commit is threaded to the dataset steps as
-        # path_override=s3://{repo}/{sha}/ so a run trains on a frozen snapshot.
-        # Falls back silently to no-dropdown (free-text dataset-path-override still
-        # works) if the catalog ConfigMap is absent — datasets uploaded after the
-        # last probe are reachable via the override escape hatch.
-        dataset_catalog = None
-        try:
-            _dcat = _read_live_catalog('kubecore-ml-dataset-catalog', 'argo-workflows')
-            dataset_catalog = _dcat.get('datasets') or []
-        except Exception:
-            dataset_catalog = []
-        dataset_enum = [d['ref'] for d in dataset_catalog if d.get('ref') and d.get('available')]
-        # ref → immutable-commit path_override, for the DAG to pin the snapshot.
-        dataset_override_by_ref = {d['ref']: d.get('pathOverride', '') for d in dataset_catalog}
-        dataset_label_lines = '\n'.join('  • ' + (d.get('label') or d.get('ref', '?')) for d in dataset_catalog) or '  • (none discovered — use dataset-path-override)'
-
+        # ── dataset-ref: a plain TEXT box (default "main") ──────────────────
+        # A dataset = a lakeFS ref (branch/tag) whose ROOT holds a data.yaml. The
+        # dataset-ref is just the ref NAME the user types — defaults to "main". No
+        # catalog probe, no dropdown, no re-render: the run reads s3://{repo}/{ref}/
+        # directly (the ref's current content). The user can override the exact path
+        # with dataset-path-override. Simpler + always correct: a freshly-uploaded
+        # branch is usable immediately by typing its name — nothing to refresh.
         _emitted_names = set()
         for p in pipeline_params:
             np = {'name': p['name'], 'value': p.get('default', ''), 'description': p.get('description', '')}
             # preserve a kubeline-declared enum so a static dropdown survives render.
             if p.get('enum'):
                 np['enum'] = list(p['enum'])
-            # turn dataset-ref into a live dropdown from the catalog (overrides any
-            # kubeline default/enum); the developer picks a real, existing dataset.
-            if p['name'] == 'dataset-ref' and dataset_enum:
-                np['enum'] = dataset_enum
-                if np.get('value') not in dataset_enum:
-                    np['value'] = dataset_enum[0]
-                np['description'] = ('Dataset to train on — a lakeFS ref discovered by the dataset-catalog probe. '
-                                     'Each is an immutable, self-describing dataset (data.yaml at its root).\n'
-                                     + dataset_label_lines)
+            # dataset-ref is free text, pre-filled with "main" — no enum, no catalog.
+            if p['name'] == 'dataset-ref':
+                np.pop('enum', None)
+                if not np.get('value'):
+                    np['value'] = 'main'
+                np['description'] = ('lakeFS branch/tag to train on (the ref NAME, not a path). '
+                                     'Defaults to "main" — type another branch to train on it. '
+                                     'The run reads s3://{repo}/{ref}/ directly. To point at an exact '
+                                     'path/commit instead, set dataset-path-override.')
             args_params.append(np)
             _emitted_names.add(p['name'])
 
@@ -1683,21 +1669,11 @@ spec:
         # a form-param default: the Argo submit form shows a param's value as literal
         # text, so an Argo expression there renders as raw syntax in the field (ugly
         # + wrong — and it clobbers dataset-path-override, the manual escape hatch).
-        # Instead we build the ternary here and INJECT it into the dataset steps'
-        # PARAMS_YAML path_override line (a template body, where Argo actually
-        # evaluates the expression at run time). The escape hatch wins when the user
-        # sets it: override-nonempty ? override : ref-to-commit. dataset-path-override
-        # stays an empty free-text field. dataset_pathoverride_expr (empty if no
-        # catalog) is consumed in the step env-copy loop below.
-        dataset_pathoverride_expr = ''
-        if dataset_enum:
-            _ref_ternary = "''"
-            for r in reversed(dataset_enum):
-                ov = dataset_override_by_ref.get(r, '')
-                _ref_ternary = ("workflow.parameters['dataset-ref'] == '" + r + "' ? '" + ov + "' : " + _ref_ternary)
-            # user override (dataset-path-override) wins; else the ref→commit path.
-            dataset_pathoverride_expr = (OB + "=workflow.parameters['dataset-path-override'] != '' ? "
-                                         "workflow.parameters['dataset-path-override'] : " + _ref_ternary + CB)
+        # dataset-path-override is the manual escape hatch: if set, it wins; otherwise
+        # empty, and the dataset steps fall back to their native s3://{repo}/{dataset-ref}/
+        # reading (repo + branch=dataset-ref are threaded to the steps directly). No
+        # catalog / frozen-commit pinning — the run trains on the ref's current content.
+        dataset_pathoverride_expr = (OB + "=workflow.parameters['dataset-path-override']" + CB)
 
         cpu_class_name = cpu_cls.get('name', f"{pipeline_name}-cpu")
         gpu_class_name = gpu_cls.get('name', f"{pipeline_name}-gpu")
