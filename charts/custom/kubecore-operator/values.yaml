@@ -44,7 +44,7 @@ controllerManager:
       # GAR registry + version as the operator image, pulled keylessly by the GKE
       # node SA. The v2-branch placeholder below mirrors the operator image path so
       # even an unstamped chart resolves to a keyless-pullable image.
-      MELUXINA_TOKENMINT_IMAGE: "europe-west1-docker.pkg.dev/kaos-dev-gcp/kaos-images/platform/meluxina-tokenmint:0.15.36"
+      MELUXINA_TOKENMINT_IMAGE: "europe-west1-docker.pkg.dev/kaos-dev-gcp/kaos-images/platform/meluxina-tokenmint:0.15.37"
     resources:
       limits:
         cpu: 500m
@@ -282,7 +282,7 @@ compositions:
   # OCI image for the kubecore-compositions Configuration package.
   # CI overwrites this with <REGISTRY_URL>/<PROJECT_REGISTRY>/kubecore-compositions:vX.Y.Z
   # at release. Required (must be non-empty) when compositions.enabled=true.
-  package: "europe-west1-docker.pkg.dev/kaos-dev-gcp/kaos-images/platform/kubecore-compositions:v0.15.36"
+  package: "europe-west1-docker.pkg.dev/kaos-dev-gcp/kaos-images/platform/kubecore-compositions:v0.15.37"
   # pullPolicy controls when Crossplane downloads the package.
   # Options: IfNotPresent (default), Always, Never
   pullPolicy: IfNotPresent
