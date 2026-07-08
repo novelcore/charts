@@ -1433,6 +1433,12 @@ spec:
                     'retryStrategy': {
                         'limit': '2',
                         'retryPolicy': 'OnError',
+                        # Do NOT retry OOMKilled (exit 137): retrying at the same memory
+                        # limit just OOMs again, wasting 3x the GPU time. OOM = "needs more
+                        # memory", a config fix, not a transient error. The expression keeps
+                        # retries for genuine infra errors (node lost, eviction, image-pull)
+                        # but stops immediately on an OOM so the user sees it and raises {step}-mem.
+                        'expression': 'lastRetry.exitCode != "137"',
                         'backoff': {'duration': '30s', 'factor': '2', 'maxDuration': '5m'},
                     },
                     'activeDeadlineSeconds': 10800 if (is_gpu_default or is_quant_step) else 1800,
@@ -2019,6 +2025,11 @@ spec:
                 'retryStrategy': {
                     'limit': '2',
                     'retryPolicy': 'OnError',
+                    # Do NOT retry OOMKilled (exit 137): re-running at the same memory
+                    # limit just OOMs again. OOM means "raise {step}-mem", a config fix,
+                    # not a transient error — fail fast so the user sees it. Genuine infra
+                    # errors (node lost, eviction, image-pull) still retry.
+                    'expression': 'lastRetry.exitCode != "137"',
                     'backoff': {'duration': '30s', 'factor': '2', 'maxDuration': '5m'},
                 },
                 # activeDeadlineSeconds is a generous ceiling that only catches a genuine
