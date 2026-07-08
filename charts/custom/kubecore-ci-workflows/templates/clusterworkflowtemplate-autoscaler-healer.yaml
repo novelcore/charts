@@ -358,10 +358,20 @@ data:
     for p in pools:
         name = p.get("name", "")
         autoscaling = p.get("autoscaling") or {}
-        min_nodes = autoscaling.get("minNodeCount")
-        # Only scale-to-zero pools are ever candidates. Stateful pools
-        # (kubecoreml min=1, kubecoresys min=2) fail this check and are
-        # therefore structurally excluded — no name-based allowlist needed.
+        # A NON-autoscaling pool is never a scale-to-zero candidate.
+        if not autoscaling.get("enabled"):
+            print("skip %s: autoscaling disabled" % name, file=sys.stderr)
+            continue
+        # CRITICAL: GKE OMITS minNodeCount from the API when it is 0 — so an
+        # autoscaling pool with an unset/None minNodeCount IS scale-to-zero
+        # (min=0), which is EXACTLY the pool class this healer exists for
+        # (kubecorecpu, gpu-t4, cpu-standard all report minNodeCount=None).
+        # Treating None as "not scale-to-zero" (the old `min_nodes != 0` bug)
+        # made the healer skip every pool it is meant to protect — it ran green
+        # but healed nothing. Coerce a missing/None min to 0.
+        min_nodes = autoscaling.get("minNodeCount") or 0
+        # Only scale-to-zero pools are candidates. Stateful pools (kubecoreml
+        # min=1, kubecoresys min=2) have an explicit min>0 and are excluded.
         if min_nodes != 0:
             print("skip %s: min-node-count=%s (not scale-to-zero)" % (name, min_nodes), file=sys.stderr)
             continue
