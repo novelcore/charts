@@ -149,9 +149,7 @@ spec:
                                   description: |-
                                     MLClasses is the list of CPU and GPU classes the cluster exposes.
                                     The operator provisions one NodePool per class; idle classes scale
-                                    to zero nodes. On ephemeralPipelineNodegroups pools only the CI build
-                                    pool (kubecorecpu) is provisioned from this list; the rest are advisory
-                                    guardrails.
+                                    to zero nodes.
                                   items:
                                     description: |-
                                       MLComputeClass declares one named compute class in the cluster catalog.
@@ -446,9 +444,7 @@ spec:
                                   description: |-
                                     MLClasses is the list of CPU and GPU classes the cluster exposes.
                                     The operator provisions one NodePool per class; idle classes scale
-                                    to zero nodes. On ephemeralPipelineNodegroups pools only the CI build
-                                    pool (kubecorecpu) is provisioned from this list; the rest are advisory
-                                    guardrails.
+                                    to zero nodes.
                                   items:
                                     description: |-
                                       MLComputeClass declares one named compute class in the cluster catalog.
@@ -1019,21 +1015,6 @@ spec:
                         MLConfig fine-tunes which ML components are provisioned when ML is true.
                         When nil, all default to true (backward compatible). Set to false to skip provisioning a component.
                       properties:
-                        ephemeralPipelineNodegroups:
-                          description: |-
-                            EphemeralPipelineNodegroups opts this pool into the live-discovery compute
-                            model (GCP only): the KubeApp submit form renders per-step compute-CLASS
-                            dropdowns filled from the live GCP machine catalog (specs + stockout) that
-                            a pool-scoped probe CronWorkflow discovers, and each pipeline step runs
-                            sole-tenant (whole-node requests==limits) on a dedicated ephemeral GKE
-                            NodePool created before the run and destroyed after.
-
-                            Absent/false ⇒ the legacy cluster-shared model (admin-curated MLComputeClass
-                            pools + numeric per-step requests). This flag MUST stay false until the
-                            pool's kubecore-ci-workflows chart is a version whose render-wft understands
-                            the {step}-class / {step}-disk-gb params — flipping it against an older
-                            render-wft would break pipeline steps generation. GCP-only: ignored on AWS.
-                          type: boolean
                         hpc:
                           description: |-
                             HPC declares that this pool can burst ML pipeline steps to an external HPC
