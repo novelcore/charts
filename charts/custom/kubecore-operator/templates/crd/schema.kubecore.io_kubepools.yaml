@@ -991,8 +991,7 @@ spec:
                         clears a stale GKE cluster-autoscaler backoff on scale-to-zero node pools
                         (e.g. kubecorecpu) so a transient scale-up failure doesn't leave pods
                         Pending for the full ~30min backoff window. Platform-wide (GCP): applies
-                        to any min=0 pool regardless of the ML live-compute opt-in (MLConfig.
-                        EphemeralPipelineNodegroups). Defaults to true when not specified.
+                        to any min=0 pool. Defaults to true when not specified.
                       type: boolean
                     costTracking:
                       default: false

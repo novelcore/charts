@@ -949,6 +949,12 @@ spec:
                     lakeFSRepository:
                       description: LakeFSRepository is the LakeFS repository name.
                       type: string
+                    lakeFSUrl:
+                      description: |-
+                        LakeFSURL is the public HTTPS URL for LakeFS via oauth2-proxy
+                        (lakefs-{project}.{baseDns}). Only set when the LakeFS OIDC route is
+                        provisioned.
+                      type: string
                     lastReconciled:
                       description: LastReconciled is when the ML stack was last reconciled.
                       format: date-time
@@ -1007,6 +1013,12 @@ spec:
                         Reconciling while this is nil/false so existing projects self-heal into the
                         bearer-JWT pipeline-auth model with no manual reconcile.
                       type: boolean
+                    mlflowUrl:
+                      description: |-
+                        MLflowURL is the public HTTPS URL for MLflow, served through the pool's
+                        Envoy Gateway HTTPRoute (mlflow-{project}.{baseDns}). Only set when the
+                        MLflow OIDC route is provisioned (mlflowOIDC enabled and baseDns known).
+                      type: string
                     namespace:
                       description: |-
                         Namespace is the Kubernetes namespace hosting the ML stack in the client
