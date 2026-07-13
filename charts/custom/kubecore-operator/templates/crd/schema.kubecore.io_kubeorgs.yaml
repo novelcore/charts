@@ -204,6 +204,15 @@ spec:
                             config must set this to true.
                           type: boolean
                       type: object
+                    esoClientId:
+                      description: |-
+                        EsoClientID is the ESO User-Assigned Managed Identity client UUID, created by
+                        Terraform (kaos-io/onboarding azure/) and supplied from its eso_uami_client_id
+                        output. Threaded into XAzureProvider spec.parameters.esoClientId so the composition
+                        emits status.providers.azure.esoUamiClientId without observing the UAMI (which the
+                        Azure provider cannot do by name). Non-derivable random GUID, like ClientID.
+                      pattern: ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$
+                      type: string
                     primaryRegion:
                       description: PrimaryRegion is the primary Azure region for resource creation (e.g., "westeurope")
                       minLength: 1
