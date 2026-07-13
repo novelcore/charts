@@ -2338,8 +2338,17 @@ spec:
         template: hera-enhance-commit
 
   # STEP 1 (TOKENLESS): run the developer's pipeline.py -> raw WFT.
+  # automountServiceAccountToken:false keeps the MAIN container (untrusted client
+  # code) token-free; executor.serviceAccountName still gives Argo's own executor
+  # sidecar an SA token for the pod-patch it needs (required by Argo when
+  # automount is off — the whole point of the split: executor yes, client no).
   - name: hera-render
-    automountServiceAccountToken: false        # no in-cluster API creds either
+    automountServiceAccountToken: false
+    executor:
+      # Locked-down executor SA (workflowtaskresults only, NO secret-reader) —
+      # so even the executor sidecar of this untrusted-code pod can't reach the
+      # GitHub token via the K8s API. Defined in rbac.yaml.
+      serviceAccountName: {{ include "kubecore-ci-workflows.fullname" . }}-hera-render-exec
     securityContext:
       runAsUser: 0
       runAsGroup: 0

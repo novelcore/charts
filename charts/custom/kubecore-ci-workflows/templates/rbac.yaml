@@ -42,4 +42,64 @@ subjects:
 - kind: ServiceAccount
   name: {{ include "kubecore-ci-workflows.serviceAccountName" . }}
   namespace: {{ include "kubecore-ci-workflows.namespace" . }}
+---
+# ── Minimal executor SA for the TOKENLESS Hera render step ────────────────────
+# The hera-render step runs untrusted developer `python pipeline.py` with
+# automountServiceAccountToken:false so the MAIN container gets no token. Argo
+# still requires an executor SA for the "wait" sidecar (workflowtaskresults).
+# The default ci-build-sa can READ SECRETS (secret-reader above) — exposing its
+# token to the executor of an untrusted-code pod would let a malicious
+# pipeline.py reach the GitHub App token via the K8s API. So the executor of the
+# render step uses THIS locked-down SA: workflowtaskresults ONLY, zero secret
+# access. (The GitHub token is never mounted on hera-render regardless; this
+# closes the indirect K8s-API path too.)
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "kubecore-ci-workflows.fullname" . }}-hera-render-exec
+  namespace: {{ include "kubecore-ci-workflows.namespace" . }}
+  labels:
+    {{- include "kubecore-ci-workflows.labels" . | nindent 4 }}
+---
+# K8s 1.24+ no longer auto-creates SA token secrets; Argo's executor mounts one
+# by name (<sa>.service-account-token) when automount is off, so create it.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ include "kubecore-ci-workflows.fullname" . }}-hera-render-exec.service-account-token
+  namespace: {{ include "kubecore-ci-workflows.namespace" . }}
+  labels:
+    {{- include "kubecore-ci-workflows.labels" . | nindent 4 }}
+  annotations:
+    kubernetes.io/service-account.name: {{ include "kubecore-ci-workflows.fullname" . }}-hera-render-exec
+type: kubernetes.io/service-account-token
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "kubecore-ci-workflows.fullname" . }}-hera-render-exec
+  namespace: {{ include "kubecore-ci-workflows.namespace" . }}
+  labels:
+    {{- include "kubecore-ci-workflows.labels" . | nindent 4 }}
+rules:
+# ONLY what the Argo executor sidecar needs. No secrets, no configmaps.
+- apiGroups: ["argoproj.io"]
+  resources: ["workflowtaskresults"]
+  verbs: ["create", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "kubecore-ci-workflows.fullname" . }}-hera-render-exec
+  namespace: {{ include "kubecore-ci-workflows.namespace" . }}
+  labels:
+    {{- include "kubecore-ci-workflows.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "kubecore-ci-workflows.fullname" . }}-hera-render-exec
+subjects:
+- kind: ServiceAccount
+  name: {{ include "kubecore-ci-workflows.fullname" . }}-hera-render-exec
+  namespace: {{ include "kubecore-ci-workflows.namespace" . }}
 {{- end }}
