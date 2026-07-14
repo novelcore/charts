@@ -2348,7 +2348,7 @@ spec:
       # Locked-down executor SA (workflowtaskresults only, NO secret-reader) —
       # so even the executor sidecar of this untrusted-code pod can't reach the
       # GitHub token via the K8s API. Defined in rbac.yaml.
-      serviceAccountName: {{ include "kubecore-ci-workflows.fullname" . }}-hera-render-exec
+      serviceAccountName: hera-render-exec
     securityContext:
       runAsUser: 0
       runAsGroup: 0
