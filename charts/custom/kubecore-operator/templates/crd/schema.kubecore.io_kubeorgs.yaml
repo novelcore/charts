@@ -162,7 +162,9 @@ spec:
                       minLength: 1
                       type: string
                     regions:
-                      description: Regions is the list of AWS regions where resources will be created
+                      description: |-
+                        Regions is the list of AWS regions where resources will be created.
+                        Defaults to [primaryRegion] when omitted.
                       items:
                         type: string
                       minItems: 1
@@ -176,7 +178,6 @@ spec:
                     - accountId
                     - primaryRegion
                     - providerConfig
-                    - regions
                   type: object
                 azureConfig:
                   description: AzureConfig contains the Azure configuration for the provider
@@ -218,7 +219,9 @@ spec:
                       minLength: 1
                       type: string
                     regions:
-                      description: Regions is the list of Azure regions where resources will be created
+                      description: |-
+                        Regions is the list of Azure regions where resources will be created.
+                        Defaults to [primaryRegion] when omitted.
                       items:
                         type: string
                       minItems: 1
@@ -238,7 +241,6 @@ spec:
                       type: string
                   required:
                     - primaryRegion
-                    - regions
                     - subscriptionId
                     - tenantId
                   type: object
@@ -281,7 +283,9 @@ spec:
                       pattern: ^[0-9]+$
                       type: string
                     regions:
-                      description: Regions is the list of GCP regions where resources will be created
+                      description: |-
+                        Regions is the list of GCP regions where resources will be created.
+                        Defaults to [primaryRegion] when omitted.
                       items:
                         type: string
                       minItems: 1
@@ -289,7 +293,6 @@ spec:
                   required:
                     - primaryRegion
                     - projectId
-                    - regions
                   type: object
                 githubConfig:
                   description: |-
