@@ -414,9 +414,13 @@ spec:
                     - slurmEndpoint
                   type: object
                 network:
+                  default:
+                    enabled: false
                   description: |-
                     Network configuration for VPC provisioning
-                    Defaults to disabled. When enabled, awsConfig is required.
+                    Defaults to disabled: omitting this block is equivalent to enabled=false.
+                    Networks can be enabled later by updating the KubeOrg. When enabled, at
+                    least one cloud provider config (awsConfig/gcpConfig/azureConfig) must be set.
                   properties:
                     dns:
                       description: DNS configures DNS zone creation for the network
@@ -465,7 +469,8 @@ spec:
                       default: false
                       description: |-
                         Enabled determines whether network resources should be created
-                        Defaults to false. When enabled, awsConfig must be provided.
+                        Defaults to false. When enabled, networks are provisioned per region for
+                        each active cloud provider config.
                       type: boolean
                     multizone:
                       default: true
