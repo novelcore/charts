@@ -217,13 +217,6 @@ spec:
                       description: PrimaryRegion is the primary Azure region for resource creation (e.g., "westeurope")
                       minLength: 1
                       type: string
-                    providerConfig:
-                      description: |-
-                        ProviderConfig references the externally-created azure.m.upbound.io
-                        ProviderConfig in the org namespace. Created by
-                        scripts/setup-azure-org-prerequisites.sh (F-AZ-17) before KubeOrg apply.
-                      minLength: 1
-                      type: string
                     regions:
                       description: Regions is the list of Azure regions where resources will be created
                       items:
@@ -245,7 +238,6 @@ spec:
                       type: string
                   required:
                     - primaryRegion
-                    - providerConfig
                     - regions
                     - subscriptionId
                     - tenantId
