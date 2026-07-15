@@ -2510,8 +2510,20 @@ spec:
           echo "hera-enhance-commit: rendered WFT already current — nothing to commit"
         else
           git commit -m "ml-ci(${APP_NAME}): render WFT from pipeline.py (Hera+Hydra)"
-          git pull --rebase origin "${GITOPS_BRANCH}" >/dev/null 2>&1 || true
-          git push
+          # Many apps' CI push to the SAME gitops repo concurrently (one run per
+          # app on a shared-branch push). A single push races and one loses
+          # (non-fast-forward) — the bug that failed hera-enhance-commit. Retry
+          # fetch+rebase+push: each app only edits its OWN {app}/{branch}/ files,
+          # so the rebase never conflicts — it replays our commit on the latest.
+          pushed=0
+          for attempt in 1 2 3 4 5; do
+            git fetch origin "${GITOPS_BRANCH}" >/dev/null 2>&1 || true
+            git rebase "origin/${GITOPS_BRANCH}" >/dev/null 2>&1 || { git rebase --abort >/dev/null 2>&1 || true; }
+            if git push origin "HEAD:${GITOPS_BRANCH}" 2>/dev/null; then pushed=1; break; fi
+            echo "hera-enhance-commit: push attempt ${attempt} lost the race — retrying"
+            sleep $(( attempt * 2 ))
+          done
+          [ "$pushed" = "1" ] || { echo "hera-enhance-commit: ERROR — could not push after retries"; exit 1; }
           echo "hera-enhance-commit: pushed rendered WFT to ${ORG}/${GITOPS_REPO}@${GITOPS_BRANCH}"
         fi
       volumeMounts:
@@ -2594,8 +2606,20 @@ spec:
           exit 0
         fi
         git commit -m "ml-ci(${APP_NAME}): bump step images to ${IMAGE_TAG} in pipeline-images ConfigMap"
-        git pull --rebase origin "${GITOPS_BRANCH}"
-        git push
+        # Concurrent apps push to the SAME gitops repo (one CI run per app on a
+        # shared-branch push). A single push races and one loses (non-fast-
+        # forward). Retry fetch+rebase+push: each app only edits its OWN
+        # {app}/{branch}/pipeline-images.yaml, so a rebase across apps never
+        # conflicts — it just replays our one commit on top of the latest remote.
+        pushed=0
+        for attempt in 1 2 3 4 5; do
+          git fetch origin "${GITOPS_BRANCH}" >/dev/null 2>&1 || true
+          git rebase "origin/${GITOPS_BRANCH}" >/dev/null 2>&1 || { git rebase --abort >/dev/null 2>&1 || true; }
+          if git push origin "HEAD:${GITOPS_BRANCH}" 2>/dev/null; then pushed=1; break; fi
+          echo "patch-images: push attempt ${attempt} lost the race — retrying"
+          sleep $(( attempt * 2 ))
+        done
+        [ "$pushed" = "1" ] || { echo "patch-images: ERROR — could not push after retries"; exit 1; }
         echo "Pushed image-tag update to ${ORG}/${GITOPS_REPO}@${GITOPS_BRANCH}"
       volumeMounts:
       - name: github-token
