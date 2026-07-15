@@ -141,7 +141,7 @@ spec:
         # change (e.g. a PARAMS_YAML tweak) must re-render even with
         # has_changes=false. render-wft rebuilds the WHOLE WFT from kubeline.yaml,
         # so an empty changed_steps is fine.
-        when: "{{`{{steps.detect-steps.outputs.parameters.frontend}}`}} == kubeline && ({{`{{steps.detect-steps.outputs.parameters.has_changes}}`}} == true || {{`{{steps.detect-steps.outputs.parameters.wft_changed}}`}} == true) && {{`{{workflow.parameters.pr_merged}}`}} == true && {{`{{workflow.parameters.branch_type}}`}} != chore"
+        when: "{{`{{steps.detect-steps.outputs.parameters.frontend}}`}} == kubeline && ({{`{{steps.detect-steps.outputs.parameters.has_changes}}`}} == true || {{`{{steps.detect-steps.outputs.parameters.wft_changed}}`}} == true) && {{`{{workflow.parameters.branch_type}}`}} != chore"
         arguments:
           parameters:
           - name: image_tag
@@ -152,14 +152,14 @@ spec:
         template: render-hera
         # HERA frontend only. Renders pipeline.py -> enhances -> gates -> commits.
         # Same firing rule as render-wft (WFT source = pipeline.py + config/ + kubecore/).
-        when: "{{`{{steps.detect-steps.outputs.parameters.frontend}}`}} == hera && ({{`{{steps.detect-steps.outputs.parameters.has_changes}}`}} == true || {{`{{steps.detect-steps.outputs.parameters.wft_changed}}`}} == true) && {{`{{workflow.parameters.pr_merged}}`}} == true && {{`{{workflow.parameters.branch_type}}`}} != chore"
+        when: "{{`{{steps.detect-steps.outputs.parameters.frontend}}`}} == hera && ({{`{{steps.detect-steps.outputs.parameters.has_changes}}`}} == true || {{`{{steps.detect-steps.outputs.parameters.wft_changed}}`}} == true) && {{`{{workflow.parameters.branch_type}}`}} != chore"
         arguments:
           parameters:
           - name: changed_steps
             value: "{{`{{steps.detect-steps.outputs.parameters.changed_steps}}`}}"
     - - name: patch-images
         template: patch-images
-        when: "{{`{{steps.detect-steps.outputs.parameters.has_changes}}`}} == true && {{`{{workflow.parameters.pr_merged}}`}} == true && {{`{{workflow.parameters.branch_type}}`}} != chore"
+        when: "{{`{{steps.detect-steps.outputs.parameters.has_changes}}`}} == true && {{`{{workflow.parameters.branch_type}}`}} != chore"
         arguments:
           parameters:
           - name: image_tag
