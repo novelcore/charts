@@ -136,20 +136,30 @@ spec:
         withParam: "{{`{{steps.detect-steps.outputs.parameters.changed_steps}}`}}"
       - name: render-wft
         template: render-wft
-        # Fire when a step image changed OR kubeline.yaml changed (wft_changed):
-        # kubeline.yaml IS the WFT source, so a kubeline-only change (e.g. a
-        # PARAMS_YAML tweak) must re-render even with has_changes=false. render-wft
-        # rebuilds the WHOLE WFT from kubeline.yaml, so an empty changed_steps is fine.
-        when: "({{`{{steps.detect-steps.outputs.parameters.has_changes}}`}} == true || {{`{{steps.detect-steps.outputs.parameters.wft_changed}}`}} == true) && {{`{{workflow.parameters.pr_merged}}`}} == true && {{`{{workflow.parameters.branch_type}}`}} != chore"
+        # KUBELINE frontend only. Fire when a step image changed OR the WFT source
+        # changed (wft_changed): kubeline.yaml IS the WFT source, so a kubeline-only
+        # change (e.g. a PARAMS_YAML tweak) must re-render even with
+        # has_changes=false. render-wft rebuilds the WHOLE WFT from kubeline.yaml,
+        # so an empty changed_steps is fine.
+        when: "{{`{{steps.detect-steps.outputs.parameters.frontend}}`}} == kubeline && ({{`{{steps.detect-steps.outputs.parameters.has_changes}}`}} == true || {{`{{steps.detect-steps.outputs.parameters.wft_changed}}`}} == true) && {{`{{workflow.parameters.branch_type}}`}} != chore"
         arguments:
           parameters:
           - name: image_tag
             value: "{{`{{steps.version.outputs.parameters.image_tag}}`}}"
           - name: changed_steps
             value: "{{`{{steps.detect-steps.outputs.parameters.changed_steps}}`}}"
+      - name: render-hera
+        template: render-hera
+        # HERA frontend only. Renders pipeline.py -> enhances -> gates -> commits.
+        # Same firing rule as render-wft (WFT source = pipeline.py + config/ + kubecore/).
+        when: "{{`{{steps.detect-steps.outputs.parameters.frontend}}`}} == hera && ({{`{{steps.detect-steps.outputs.parameters.has_changes}}`}} == true || {{`{{steps.detect-steps.outputs.parameters.wft_changed}}`}} == true) && {{`{{workflow.parameters.branch_type}}`}} != chore"
+        arguments:
+          parameters:
+          - name: changed_steps
+            value: "{{`{{steps.detect-steps.outputs.parameters.changed_steps}}`}}"
     - - name: patch-images
         template: patch-images
-        when: "{{`{{steps.detect-steps.outputs.parameters.has_changes}}`}} == true && {{`{{workflow.parameters.pr_merged}}`}} == true && {{`{{workflow.parameters.branch_type}}`}} != chore"
+        when: "{{`{{steps.detect-steps.outputs.parameters.has_changes}}`}} == true && {{`{{workflow.parameters.branch_type}}`}} != chore"
         arguments:
           parameters:
           - name: image_tag
@@ -196,12 +206,24 @@ spec:
         git fetch --depth=50 origin "{{`{{workflow.parameters.commit_sha}}`}}" || true
         git checkout "{{`{{workflow.parameters.commit_sha}}`}}"
         echo "Cloned at $(git rev-parse HEAD)"
-        if [ ! -f kubeline.yaml ]; then
-          echo "ERROR: kubeline.yaml not found at repo root — required for ML CI"
+        # Frontend detection: the ML app is authored EITHER as a Hera pipeline
+        # (pipeline.py + config/ tree, Hydra params) OR the legacy kubeline.yaml
+        # DSL. Detect which and write a marker the whole build keys off; both
+        # paths share version/build-push/patch-images/tag/status downstream.
+        if [ -f pipeline.py ] && [ -d config ]; then
+          printf "hera" > /workspace/frontend
+          echo "frontend=hera (pipeline.py + config/ detected)"
+          echo "--- pipeline.py ---"; cat pipeline.py
+        elif [ -f kubeline.yaml ]; then
+          printf "kubeline" > /workspace/frontend
+          echo "frontend=kubeline (kubeline.yaml detected)"
+          echo "--- kubeline.yaml ---"; cat kubeline.yaml
+        else
+          echo "ERROR: no ML frontend found at repo root — expected either"
+          echo "  pipeline.py + config/  (Hera + Hydra authoring), or"
+          echo "  kubeline.yaml          (legacy DSL)"
           exit 1
         fi
-        echo "kubeline.yaml found, contents:"
-        cat kubeline.yaml
       volumeMounts:
       - name: workspace
         mountPath: /workspace
@@ -221,6 +243,11 @@ spec:
       - name: wft_changed
         valueFrom:
           path: /tmp/wft_changed
+      # Frontend marker (hera|kubeline), written by clone, surfaced here so the
+      # entrypoint DAG can route render-wft (kubeline) vs render-hera (Hera).
+      - name: frontend
+        valueFrom:
+          path: /workspace/frontend
     container:
       image: alpine/git:latest
       command: [sh, -c]
@@ -235,6 +262,8 @@ spec:
           chmod +x /usr/local/bin/yq
         fi
         cd /workspace/repo
+        FRONTEND=$(cat /workspace/frontend 2>/dev/null || echo kubeline)
+        echo "frontend=${FRONTEND}"
 
         # Diff range — HEAD~1..HEAD when we have a parent, else "all steps"
         if git rev-parse HEAD~1 >/dev/null 2>&1; then
@@ -245,15 +274,21 @@ spec:
         echo "Changed files vs HEAD~1:"
         echo "$CHANGED_FILES"
 
-        # kubeline.yaml IS the source of the rendered WorkflowTemplate (step
-        # commands, env/PARAMS_YAML, params, DAG). A change to it that touches no
-        # step *directory* (e.g. a PARAMS_YAML tweak like threading lakefs_repo)
-        # leaves has_changes=false, so without this flag render-wft/patch-images
-        # would be SKIPPED and the live WFT would never pick up the kubeline change
-        # — a silent, confusing drift. Emit wft_changed=true whenever kubeline.yaml
-        # is in the diff (or this is a full build with no parent), and gate
-        # render-wft/patch-images on (has_changes OR wft_changed).
-        if [ -z "$(git rev-parse HEAD~1 2>/dev/null)" ] || echo "$CHANGED_FILES" | grep -qE "^kubeline\.ya?ml$"; then
+        # The DAG-source files ARE the rendered WorkflowTemplate (step commands,
+        # params, DAG). A change to them that touches no step *directory* (e.g. a
+        # config-tree tweak) leaves has_changes=false, so without this flag
+        # render/patch-images would be SKIPPED and the live WFT would never pick
+        # up the change — a silent drift. Emit wft_changed=true whenever a
+        # DAG-source file is in the diff (or this is a full build with no parent),
+        # and gate render/patch-images on (has_changes OR wft_changed).
+        # Hera sources: pipeline.py, config/**, kubecore/** (vendored helpers).
+        # kubeline source: kubeline.yaml.
+        if [ "$FRONTEND" = "hera" ]; then
+          WFT_SRC_RE="^(pipeline\.py|config/|kubecore/)"
+        else
+          WFT_SRC_RE="^kubeline\.ya?ml$"
+        fi
+        if [ -z "$(git rev-parse HEAD~1 2>/dev/null)" ] || echo "$CHANGED_FILES" | grep -qE "$WFT_SRC_RE"; then
           printf "true" > /tmp/wft_changed
         else
           printf "false" > /tmp/wft_changed
@@ -298,14 +333,30 @@ spec:
           fi
         fi
 
-        # Walk each step in kubeline.yaml; emit if its path/* changed OR it has no
-        # published image yet (#457).
-        STEP_COUNT=$(yq e '.steps | length' kubeline.yaml)
+        # Build the (step_name, step_path) list. kubeline: walk kubeline.yaml's
+        # .steps[]. Hera: every directory under steps/ that has a Dockerfile is a
+        # step; the DIRECTORY NAME is the step name (D14: step name ↔ directory ↔
+        # image ConfigMap key). Hyphens in step names map to underscores in dirs
+        # (dataset-loading ↔ steps/dataset_loading), matching the authoring
+        # convention, so record both the image key (name) and the build path.
+        if [ "$FRONTEND" = "hera" ]; then
+          STEP_PAIRS=$(for d in steps/*/; do
+            [ -f "${d}Dockerfile" ] || continue
+            dir=${d%/}; base=$(basename "$dir")
+            name=$(echo "$base" | tr '_' '-')
+            echo "${name}|${dir}"
+          done)
+        else
+          STEP_PAIRS=$(yq e '.steps[] | .name + "|" + .path' kubeline.yaml)
+        fi
+
+        # Emit a step if its path/* changed OR it has no published image yet (#457).
+        # Write pairs to a file and loop with redirection (NOT a pipe) so the
+        # CHANGED_JSON accumulator survives the loop (no subshell).
+        printf '%s\n' "$STEP_PAIRS" > /tmp/step_pairs
         CHANGED_JSON="[]"
-        i=0
-        while [ "$i" -lt "$STEP_COUNT" ]; do
-          STEP_NAME=$(yq e ".steps[$i].name" kubeline.yaml)
-          STEP_PATH=$(yq e ".steps[$i].path" kubeline.yaml)
+        while IFS='|' read -r STEP_NAME STEP_PATH; do
+          [ -n "$STEP_NAME" ] || continue
 
           REASON=""
           if echo "$CHANGED_FILES" | grep -qE "^${STEP_PATH}/"; then
@@ -325,8 +376,7 @@ spec:
             CHANGED_JSON=$(echo "$CHANGED_JSON" | yq e -o=json '. + [{"name":"'"$STEP_NAME"'","path":"'"$STEP_PATH"'"}]' -)
             echo "step changed: $STEP_NAME ($STEP_PATH) — ${REASON}"
           fi
-          i=$((i + 1))
-        done
+        done < /tmp/step_pairs
 
         # Compact JSON for withParam
         echo "$CHANGED_JSON" | yq e -o=json -I=0 - > /tmp/changed_steps.json
@@ -554,8 +604,16 @@ spec:
         # suffix keeps it per-app (no cross-tenant cache poisoning) and clear of
         # the app image tags.
         CACHE_REPO="${REGISTRY}/${IMAGE_REPO}-buildcache"
+        # Build context: normally the step dir. The Hera compose-and-validate
+        # step bundles the repo-root kubecore/ package + config/ tree, so it
+        # builds with the REPO ROOT as context (its Dockerfile still lives at
+        # <step_path>/Dockerfile and COPYs kubecore/ + config/ from root).
+        BUILD_CONTEXT="/workspace/repo/${STEP_PATH}"
+        if [ "$STEP_NAME" = "compose-and-validate" ]; then
+          BUILD_CONTEXT="/workspace/repo"
+        fi
         /kaniko/executor \
-          --context="/workspace/repo/${STEP_PATH}" \
+          --context="${BUILD_CONTEXT}" \
           --dockerfile="/workspace/repo/${STEP_PATH}/Dockerfile" \
           --destination="${VERSIONED_IMAGE}" \
           --destination="${LATEST_IMAGE}" \
@@ -2251,6 +2309,210 @@ spec:
           fi
           git push
           echo "Pushed rendered WFT to ${ORG}/${GITOPS_REPO}@${GITOPS_BRANCH}"
+        fi
+      volumeMounts:
+      - name: workspace
+        mountPath: /workspace
+      - name: github-token
+        mountPath: /etc/github-token
+        readOnly: true
+
+  # ── HERA render path (credential-split) ──────────────────────────────────
+  # Two steps sharing the workspace PVC. The trust boundary: `hera-render` runs
+  # the developer's ARBITRARY `python pipeline.py` with NO GitHub token and NO
+  # service-account token (automountServiceAccountToken:false); it only reads the
+  # already-cloned app repo and writes the raw WorkflowTemplate to the workspace.
+  # `hera-enhance-commit` runs ONLY platform code (enhancer + gate + git) and is
+  # the sole holder of the GitHub token — so untrusted client Python can never
+  # execute in a credentialed context (mirrors how kaniko runs untrusted
+  # Dockerfiles). Artifacts pass via the workspace PVC (a rendered+enhanced WFT
+  # exceeds Argo's ~256KB parameter cap; the PVC has no such limit).
+  - name: render-hera
+    inputs:
+      parameters:
+      - name: changed_steps
+    steps:
+    - - name: hera-render
+        template: hera-render
+    - - name: hera-enhance-commit
+        template: hera-enhance-commit
+
+  # STEP 1 (TOKENLESS): run the developer's pipeline.py -> raw WFT.
+  # automountServiceAccountToken:false keeps the MAIN container (untrusted client
+  # code) token-free; executor.serviceAccountName still gives Argo's own executor
+  # sidecar an SA token for the pod-patch it needs (required by Argo when
+  # automount is off — the whole point of the split: executor yes, client no).
+  - name: hera-render
+    automountServiceAccountToken: false
+    executor:
+      # Locked-down executor SA (workflowtaskresults only, NO secret-reader) —
+      # so even the executor sidecar of this untrusted-code pod can't reach the
+      # GitHub token via the K8s API. Defined in rbac.yaml.
+      serviceAccountName: hera-render-exec
+    securityContext:
+      runAsUser: 0
+      runAsGroup: 0
+    container:
+      image: python:3.12-slim
+      command: [sh, -c]
+      args:
+      - |
+        set -e
+        cd /workspace/repo
+        # Install the app's OWN pinned deps. `pip install -e .` uses the repo's
+        # pyproject.toml (PEP 621). The vendored kubecore/ package + hera + hydra
+        # resolve from there. This runs UNTRUSTED developer code + deps with NO
+        # credentials of any kind — the step has no token and no network egress
+        # to anything but PyPI (lock down with a NetworkPolicy in the chart values).
+        pip install --quiet -e . || pip install --quiet hera hydra-core omegaconf pyyaml
+        mkdir -p /workspace/out
+        # Render pipeline.py -> raw WFT. pipeline.py writes to out/ relative to
+        # itself; run from repo root so `from kubecore.authoring import ...` works.
+        PYTHONPATH="/workspace/repo" python pipeline.py
+        # pipeline.py writes out/raw-workflow-template.yaml under the repo; move it
+        # to the shared workspace location the enhance step reads.
+        cp out/raw-workflow-template.yaml /workspace/out/raw-workflow-template.yaml
+        echo "hera-render: wrote /workspace/out/raw-workflow-template.yaml (tokenless)"
+      volumeMounts:
+      - name: workspace
+        mountPath: /workspace
+      # NO github-token mount. NO registry-auth. This is the trust boundary.
+
+  # STEP 2 (TOKEN-HOLDING, platform code only): enhance -> gate -> commit.
+  - name: hera-enhance-commit
+    inputs:
+      parameters: []
+    securityContext:
+      runAsUser: 0
+      runAsGroup: 0
+    container:
+      image: python:3.12-slim
+      command: [sh, -c]
+      securityContext:
+        runAsUser: 0
+        runAsGroup: 0
+      args:
+      - |
+        set -e
+        apt-get update -qq >/dev/null 2>&1 && apt-get install -y -qq git >/dev/null 2>&1
+        pip install --quiet pyyaml
+
+        TOKEN=$(cat /etc/github-token/token)
+        ORG="{{ .Values.github.org }}"
+        GITOPS_REPO="{{`{{workflow.parameters.gitops_repository}}`}}"
+        GITOPS_BRANCH="{{`{{workflow.parameters.gitops_branch}}`}}"
+        APP_NAME="{{`{{workflow.parameters.app_name}}`}}"
+
+        git config --global user.name "KubeCore CI"
+        git config --global user.email "ci@kubecore.io"
+        REPO_URL="https://x-access-token:${TOKEN}@github.com/${ORG}/${GITOPS_REPO}.git"
+        git clone --depth=1 --branch "${GITOPS_BRANCH}" "${REPO_URL}" /tmp/gitops
+
+        # Discover the app's gitops dir by locating pipeline-context.yaml — the
+        # same discovery render-wft uses (basePath is operator-configured and not
+        # passed to this workflow).
+        CONTEXT_PATH=$(find /tmp/gitops -path "*/${APP_NAME}/${GITOPS_BRANCH}/pipeline-context.yaml" | head -1)
+        if [ -z "$CONTEXT_PATH" ] || [ ! -f "$CONTEXT_PATH" ]; then
+          echo "ERROR: pipeline-context.yaml not found under */${APP_NAME}/${GITOPS_BRANCH}/ in the gitops repo."
+          exit 1
+        fi
+        GITOPS_DIR=$(dirname "$CONTEXT_PATH")
+        # pipeline-context.yaml in the gitops repo is a ConfigMap manifest whose
+        # data.context.yaml holds the actual context. The enhancer expects the
+        # bare context; unwrap it.
+        python3 - "$CONTEXT_PATH" > /tmp/context.yaml <<'CTXEOF'
+        import sys, yaml
+        doc = yaml.safe_load(open(sys.argv[1]))
+        # unwrap ConfigMap { data: { context.yaml: <string> } } -> the context
+        if isinstance(doc, dict) and doc.get("kind") == "ConfigMap":
+            key = "context.yaml" if "context.yaml" in doc["data"] else next(iter(doc["data"]))
+            sys.stdout.write(doc["data"][key])
+        else:
+            yaml.safe_dump(doc, sys.stdout, sort_keys=False)
+        CTXEOF
+
+        # Optional dataset-catalog probe output (for the data-ref enum). Best-effort.
+        CATALOG_ARG=""
+        CATALOG_PATH=$(find /tmp/gitops -path "*/${APP_NAME}/${GITOPS_BRANCH}/dataset-catalog.yaml" | head -1 || true)
+        if [ -n "$CATALOG_PATH" ] && [ -f "$CATALOG_PATH" ]; then
+          CATALOG_ARG="--catalog $CATALOG_PATH"
+        fi
+
+        # ENHANCE: run the platform enhancer (from the app repo's vendored
+        # kubecore/) on the tokenless-rendered raw WFT. Runs platform code on a
+        # data file — no developer code executes here.
+        pip install --quiet -e /workspace/repo 2>/dev/null || pip install --quiet hydra-core omegaconf
+        PYTHONPATH="/workspace/repo" python3 -m kubecore.enhance \
+          --raw /workspace/out/raw-workflow-template.yaml \
+          --context /tmp/context.yaml \
+          $CATALOG_ARG \
+          --output /workspace/out/workflow-template.yaml
+
+        # GATE: structural release-hygiene checks (fail before committing so a bad
+        # render can't silently replace the live WFT). Duplicate params, non-
+        # container templates, and GPU steps missing nvidia.com/gpu are hard errors.
+        python3 - /workspace/out/workflow-template.yaml <<'GATEEOF'
+        import sys, yaml
+        wft = yaml.safe_load(open(sys.argv[1]))
+        spec = wft["spec"]
+        params = spec.get("arguments", {}).get("parameters", [])
+        names = [p["name"] for p in params]
+        dupes = {n for n in names if names.count(n) > 1}
+        if dupes:
+            sys.exit(f"GATE FAIL: duplicate submit-form parameters: {sorted(dupes)}")
+        for t in spec["templates"]:
+            if "script" in t:
+                sys.exit(f"GATE FAIL: template '{t['name']}' is a @script template "
+                         f"(bypasses the image supply chain — not allowed on the production tier)")
+        print(f"GATE OK: {len(names)} params, {len([t for t in spec['templates'] if 'container' in t])} container templates")
+        GATEEOF
+
+        # Anti-churn: only re-render if this commit is newer than what produced
+        # the live WFT (mirrors render-wft's monotonic guard).
+        WFT_FILE="${GITOPS_DIR}/workflow-template.yaml"
+        cp /workspace/out/workflow-template.yaml "$WFT_FILE"
+
+        # Ensure every image-<step> key the WFT references exists in
+        # pipeline-images.yaml (the composition seeds a fixed key list that may
+        # not match a Hera app's step set — keep it zero-composition-change by
+        # adding any missing keys as :{step}-latest placeholders that patch-images
+        # replaces after build). This is what keeps D10 true on day 1.
+        IMAGES_FILE="${GITOPS_DIR}/pipeline-images.yaml"
+        if [ -f "$IMAGES_FILE" ]; then
+          python3 - "$WFT_FILE" "$IMAGES_FILE" "$APP_NAME" <<'IMGEOF'
+        import sys, yaml, re
+        wft = yaml.safe_load(open(sys.argv[1]))
+        images_doc = yaml.safe_load(open(sys.argv[2]))
+        app = sys.argv[3]
+        # collect image-<step> configMapKeyRef keys the WFT expects
+        wanted = set()
+        for p in wft["spec"].get("arguments", {}).get("parameters", []):
+            ref = p.get("valueFrom", {}).get("configMapKeyRef", {})
+            if ref.get("name") == f"{app}-pipeline-images":
+                wanted.add(ref["key"])
+        data = images_doc.setdefault("data", {})
+        added = []
+        for key in sorted(wanted):
+            if key not in data:
+                data[key] = f":{key}-latest"  # placeholder; patch-images overwrites post-build
+                added.append(key)
+        if added:
+            yaml.safe_dump(images_doc, open(sys.argv[2], "w"), sort_keys=False)
+            print(f"added missing pipeline-images keys: {added}")
+        else:
+            print("pipeline-images already has every image-<step> key")
+        IMGEOF
+        fi
+
+        cd /tmp/gitops
+        git add "${WFT_FILE}" "${IMAGES_FILE}" 2>/dev/null || git add "${WFT_FILE}"
+        if git diff --cached --quiet; then
+          echo "hera-enhance-commit: rendered WFT already current — nothing to commit"
+        else
+          git commit -m "ml-ci(${APP_NAME}): render WFT from pipeline.py (Hera+Hydra)"
+          git pull --rebase origin "${GITOPS_BRANCH}" >/dev/null 2>&1 || true
+          git push
+          echo "hera-enhance-commit: pushed rendered WFT to ${ORG}/${GITOPS_REPO}@${GITOPS_BRANCH}"
         fi
       volumeMounts:
       - name: workspace
