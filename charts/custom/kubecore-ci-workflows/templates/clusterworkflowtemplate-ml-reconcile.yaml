@@ -32,6 +32,16 @@ metadata:
 spec:
   serviceAccountName: {{ include "kubecore-ci-workflows.serviceAccountName" . }}
   entrypoint: ml-ci-reconcile
+  # Same scheduling as ml-ci-build (.Values.nodeSelector/.tolerations): the CI
+  # pool is tainted, so without these the reconciler's pods have nowhere to land.
+  {{- with .Values.nodeSelector }}
+  nodeSelector:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with .Values.tolerations }}
+  tolerations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
   ttlStrategy:
     secondsAfterCompletion: {{ .Values.workflow.ttlStrategy.secondsAfterCompletion }}
   podGC:
@@ -101,11 +111,21 @@ spec:
       args:
       - |
         set -eu
-        # Fail LOUDLY if the tools are missing rather than silently treating an
+        # kubectl is NOT in the alpine cloud-sdk image; install it (idempotent).
+        # Same pattern the autoscaler-healer uses on this same image — the one
+        # kubectl-on-cloud-sdk recipe already proven to work in this cluster.
+        if ! command -v kubectl >/dev/null 2>&1; then
+          gcloud components install kubectl --quiet >/dev/null 2>&1 \
+            || apk add --no-cache kubectl >/dev/null 2>&1 \
+            || { echo "FATAL: could not install kubectl" >&2; exit 1; }
+        fi
+        command -v jq >/dev/null 2>&1 || apk add --no-cache jq >/dev/null 2>&1 || true
+        # Fail LOUDLY if a tool is still missing rather than silently treating an
         # unreadable baseline as drift — that is what turned a missing binary
-        # into a storm instead of a red workflow.
-        command -v kubectl >/dev/null || { echo "FATAL: kubectl missing from this image"; exit 1; }
-        command -v curl    >/dev/null || { echo "FATAL: curl missing from this image"; exit 1; }
+        # into a build storm instead of a red workflow (live 2026-07-16).
+        for t in kubectl curl jq; do
+          command -v "$t" >/dev/null || { echo "FATAL: $t missing from this image"; exit 1; }
+        done
         TOKEN=$(cat /etc/github-token/token)
         APP="{{`{{workflow.parameters.app_name}}`}}"
         PROJECT="{{`{{workflow.parameters.project_name}}`}}"
