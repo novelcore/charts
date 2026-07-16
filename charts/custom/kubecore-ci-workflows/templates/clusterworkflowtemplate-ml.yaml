@@ -2521,8 +2521,19 @@ spec:
           echo "hera-enhance-commit: rendered WFT already current — nothing to commit"
         else
           git commit -m "ml-ci(${APP_NAME}): render WFT from pipeline.py (Hera+Hydra)"
-          git pull --rebase origin "${GITOPS_BRANCH}" >/dev/null 2>&1 || true
-          git push
+          # Retry rebase+push: the gitops branch has many concurrent writers
+          # (every app's CI in the project, plus Crossplane's RepositoryFile
+          # MRs). A single push loses the race whenever another commit lands
+          # first and dies "non-fast-forward" — dropping this app's render on
+          # the floor with a red build. Rebase and retry a few times instead.
+          pushed=""
+          for attempt in 1 2 3 4 5; do
+            if git push 2>&1; then pushed=yes; break; fi
+            echo "hera-enhance-commit: push rejected (attempt ${attempt}) — rebasing onto the latest ${GITOPS_BRANCH}"
+            sleep $((attempt * 3))
+            git pull --rebase origin "${GITOPS_BRANCH}" || { echo "hera-enhance-commit: rebase failed"; break; }
+          done
+          [ -n "$pushed" ] || { echo "hera-enhance-commit: could not push after 5 attempts"; exit 1; }
           echo "hera-enhance-commit: pushed rendered WFT to ${ORG}/${GITOPS_REPO}@${GITOPS_BRANCH}"
         fi
       volumeMounts:
@@ -2605,8 +2616,20 @@ spec:
           exit 0
         fi
         git commit -m "ml-ci(${APP_NAME}): bump step images to ${IMAGE_TAG} in pipeline-images ConfigMap"
-        git pull --rebase origin "${GITOPS_BRANCH}"
-        git push
+        # Retry rebase+push: the gitops branch has many concurrent writers, so a
+        # single push dies "non-fast-forward" whenever another commit lands
+        # first — leaving this app's pipeline-images ConfigMap pinned to a STALE
+        # image tag while its build reported green (observed live 2026-07-16:
+        # hera-yolo's patch-images lost the race and exited 1, so its rebuilt
+        # compose image was never wired in). Rebase and retry instead.
+        pushed=""
+        for attempt in 1 2 3 4 5; do
+          if git push 2>&1; then pushed=yes; break; fi
+          echo "patch-images: push rejected (attempt ${attempt}) — rebasing onto the latest ${GITOPS_BRANCH}"
+          sleep $((attempt * 3))
+          git pull --rebase origin "${GITOPS_BRANCH}" || { echo "patch-images: rebase failed"; break; }
+        done
+        [ -n "$pushed" ] || { echo "patch-images: could not push after 5 attempts"; exit 1; }
         echo "Pushed image-tag update to ${ORG}/${GITOPS_REPO}@${GITOPS_BRANCH}"
       volumeMounts:
       - name: github-token
