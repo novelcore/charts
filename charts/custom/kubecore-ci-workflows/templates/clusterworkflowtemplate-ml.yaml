@@ -296,7 +296,20 @@ spec:
         else
           WFT_SRC_RE="^kubeline\.ya?ml$"
         fi
-        if [ -z "$(git rev-parse HEAD~1 2>/dev/null)" ] || echo "$CHANGED_FILES" | grep -qE "$WFT_SRC_RE"; then
+        # A reconcile-submitted build ALSO renders. wft_changed is derived from a
+        # git diff of the APP repo, but the WFT's other input — pipeline-context
+        # (compute classes, endpoints) — lives in the GITOPS repo and is written
+        # by Crossplane from the operator. A platform-data change therefore never
+        # appears in CHANGED_FILES, so a corrected class catalog (e.g. an
+        # unschedulable 27Gi budget fixed to 26Gi) would sit in pipeline-context
+        # and NEVER reach the live WFT until a developer happened to push
+        # (observed live 2026-07-16: two apps kept rendering 27Gi long after the
+        # operator had self-healed their context). Rendering on reconcile makes
+        # the CI backstop close that gap too: the render is deterministic, and
+        # the commit step no-ops when the output is unchanged.
+        if [ -z "$(git rev-parse HEAD~1 2>/dev/null)" ] \
+           || [ "{{`{{workflow.parameters.event_type}}`}}" = "reconcile" ] \
+           || echo "$CHANGED_FILES" | grep -qE "$WFT_SRC_RE"; then
           printf "true" > /tmp/wft_changed
         else
           printf "false" > /tmp/wft_changed
