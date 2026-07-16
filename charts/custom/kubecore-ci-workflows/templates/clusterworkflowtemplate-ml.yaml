@@ -159,7 +159,15 @@ spec:
             value: "{{`{{steps.detect-steps.outputs.parameters.changed_steps}}`}}"
     - - name: patch-images
         template: patch-images
-        when: "{{`{{steps.detect-steps.outputs.parameters.has_changes}}`}} == true && {{`{{workflow.parameters.branch_type}}`}} != chore"
+        # Also runs on a reconcile-submitted build even when nothing changed:
+        # patch-images is what records last-built-sha, and the CI reconciler
+        # (#459) polls HEAD against it. Gated on has_changes alone, a commit that
+        # legitimately builds nothing (docs, a README) would never update the
+        # baseline — so the reconciler would resubmit the same no-op build every
+        # 3 minutes forever (live 2026-07-16: 12 builds in ~12 min across 3
+        # apps). The step is a no-op when no image tag changed: it exits early on
+        # "No changes to commit".
+        when: "({{`{{steps.detect-steps.outputs.parameters.has_changes}}`}} == true || {{`{{workflow.parameters.event_type}}`}} == reconcile) && {{`{{workflow.parameters.branch_type}}`}} != chore"
         arguments:
           parameters:
           - name: image_tag
