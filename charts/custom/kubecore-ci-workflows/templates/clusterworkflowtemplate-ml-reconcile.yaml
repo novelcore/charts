@@ -200,11 +200,23 @@ spec:
           GOT=$(kubectl get workflowtemplate "${APP}-pipeline" -n "${ML_NS}" -o json 2>/dev/null \
                 | jq -r '[.spec.arguments.parameters[] | select(.name|endswith("-mem")) | .value] | first // empty' \
                 | tr -dc '0-9')
-          if [ -n "$WANT" ] && [ -n "$GOT" ] && [ "$WANT" != "$GOT" ]; then
+          # Say WHY we could not compare. Silently skipping is how this check
+          # disabled itself: the SA could not read the WFT, GOT was empty, the
+          # comparison never ran, and two apps kept an unschedulable 27Gi while
+          # every poll reported a confident "up to date" (live 2026-07-16).
+          if [ -z "$WANT" ]; then
+            echo "reconcile: WARN cannot parse the context's cpu budget — context-drift check SKIPPED"
+          elif [ -z "$GOT" ]; then
+            echo "reconcile: WARN cannot read ${ML_NS}/${APP}-pipeline (RBAC? absent?) — context-drift check SKIPPED"
+          elif [ "$WANT" != "$GOT" ]; then
             printf 'true' > /tmp/needs_build
             echo "reconcile: CONTEXT DRIFT — platform says ${WANT}Gi but the live WFT renders ${GOT}Gi; re-rendering"
             exit 0
+          else
+            echo "reconcile: context in sync (${WANT}Gi)"
           fi
+        else
+          echo "reconcile: WARN no ${ML_NS}/${APP}-pipeline-context — context-drift check SKIPPED"
         fi
 
         printf 'false' > /tmp/needs_build
