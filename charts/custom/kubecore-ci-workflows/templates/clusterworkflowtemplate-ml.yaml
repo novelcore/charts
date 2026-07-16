@@ -361,6 +361,17 @@ spec:
           REASON=""
           if echo "$CHANGED_FILES" | grep -qE "^${STEP_PATH}/"; then
             REASON="source changed"
+          elif [ "$FRONTEND" = "hera" ] && [ "$STEP_NAME" = "compose-and-validate" ] \
+               && echo "$CHANGED_FILES" | grep -qE "^(config/|kubecore/)"; then
+            # compose-and-validate is built with the repo ROOT as context and
+            # BAKES `config/` + `kubecore/` into its image (see its Dockerfile),
+            # so its build inputs live OUTSIDE steps/compose_and_validate/.
+            # Without this, adding a config section left the compose image stale
+            # and every run died on the reads= gate ("a step declares
+            # reads=['evaluation'] but the composed config has no 'evaluation'
+            # section") — the tree in the image predated the section. Live
+            # 2026-07-15.
+            REASON="config/ or kubecore/ changed (baked into this image)"
           elif [ "$UNBUILT_STEPS" = "__ALL__" ]; then
             REASON="no pipeline-images (first build)"
           elif [ -n "${IMAGES_PATH:-}" ]; then
