@@ -173,13 +173,42 @@ spec:
         echo "reconcile: ${ML_NS}/${APP}-pipeline-images head=${HEAD_SHA} last-built=${LAST:-<none>}"
         printf '%s' "$HEAD_SHA" > /tmp/head_sha
 
-        if [ "$LAST" = "$HEAD_SHA" ]; then
-          printf 'false' > /tmp/needs_build
-          echo "reconcile: up to date — no build needed"
-        else
+        if [ "$LAST" != "$HEAD_SHA" ]; then
           printf 'true' > /tmp/needs_build
-          echo "reconcile: DRIFT — a push was never built (dropped webhook?); submitting ml-ci-build"
+          echo "reconcile: COMMIT DRIFT — a push was never built (dropped webhook?); submitting ml-ci-build"
+          exit 0
         fi
+
+        # The commit is built — but the WFT has a SECOND input the commit says
+        # nothing about: pipeline-context (compute classes, endpoints), written
+        # by Crossplane from the operator into the ML namespace. When the
+        # operator corrects a class budget, the context changes with NO commit,
+        # so a commit-only check says "up to date" and the live WFT keeps
+        # rendering the old value forever (live 2026-07-16: two apps kept an
+        # UNSCHEDULABLE 27Gi for hours after the operator had self-healed their
+        # context to 26Gi — only the app I pushed to by hand was correct).
+        #
+        # Compare the context's default cpu class + its whole-node budget against
+        # what the live WFT actually renders. A mismatch means the WFT predates
+        # the current platform data -> rebuild to re-render it. This is
+        # self-limiting: once re-rendered the two agree and it goes quiet.
+        CTX=$(kubectl get configmap "${APP}-pipeline-context" -n "${ML_NS}" \
+          -o jsonpath='{.data.context\.yaml}' 2>/dev/null || true)
+        if [ -n "$CTX" ]; then
+          WANT=$(echo "$CTX" | sed -n '/^computeClasses:/,/^[a-z]/p' | sed -n '/^  cpu:/,/^  [a-z]/p' \
+                 | grep -E '^      memoryGiB:' | head -1 | tr -dc '0-9')
+          GOT=$(kubectl get workflowtemplate "${APP}-pipeline" -n "${ML_NS}" -o json 2>/dev/null \
+                | jq -r '[.spec.arguments.parameters[] | select(.name|endswith("-mem")) | .value] | first // empty' \
+                | tr -dc '0-9')
+          if [ -n "$WANT" ] && [ -n "$GOT" ] && [ "$WANT" != "$GOT" ]; then
+            printf 'true' > /tmp/needs_build
+            echo "reconcile: CONTEXT DRIFT — platform says ${WANT}Gi but the live WFT renders ${GOT}Gi; re-rendering"
+            exit 0
+          fi
+        fi
+
+        printf 'false' > /tmp/needs_build
+        echo "reconcile: up to date — commit built and the WFT matches the platform context"
       volumeMounts:
       - name: github-token
         mountPath: /etc/github-token
