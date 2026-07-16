@@ -2608,6 +2608,20 @@ spec:
           i=$((i + 1))
         done
 
+        # last-built-sha: the commit this build was for. The per-app CI
+        # reconciler CronWorkflow (ml-ci-reconcile) compares it against the
+        # repo's HEAD to detect a push that never got built — a dropped webhook
+        # (#459). The k8smlapp composition has always DOCUMENTED this key, but
+        # nothing wrote it, so the reconciler had no baseline to compare against.
+        # Per-step image tags cannot substitute: a step only rebuilds when its
+        # own directory changes, so each carries its OWN sha and none of them
+        # tracks HEAD.
+        COMMIT_SHA="{{`{{workflow.parameters.commit_sha}}`}}"
+        if [ -n "${COMMIT_SHA}" ]; then
+          echo "Recording last-built-sha = ${COMMIT_SHA}"
+          yq e -i ".data.\"last-built-sha\" = \"${COMMIT_SHA}\"" "${IMAGES_PATH}"
+        fi
+
         git config user.name "KubeCore CI"
         git config user.email "ci@kubecore.io"
         git add "${IMAGES_PATH}"
