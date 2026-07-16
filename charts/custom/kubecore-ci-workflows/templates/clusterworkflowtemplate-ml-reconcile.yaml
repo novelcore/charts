@@ -91,12 +91,21 @@ spec:
         valueFrom:
           path: /tmp/head_sha
     container:
-      image: alpine/git:latest
+      # google/cloud-sdk:alpine — the chart's existing image for steps that need
+      # kubectl (see clusterworkflowtemplate-autoscaler-healer). alpine/git has
+      # NO kubectl: the baseline read silently produced "" on every poll, so
+      # needs_build was ALWAYS true and this backstop became a build storm
+      # (live 2026-07-16, 39 builds). curl + jq are already in this image.
+      image: google/cloud-sdk:alpine
       command: [sh, -c]
       args:
       - |
         set -eu
-        apk add --no-cache curl jq >/dev/null 2>&1 || true
+        # Fail LOUDLY if the tools are missing rather than silently treating an
+        # unreadable baseline as drift — that is what turned a missing binary
+        # into a storm instead of a red workflow.
+        command -v kubectl >/dev/null || { echo "FATAL: kubectl missing from this image"; exit 1; }
+        command -v curl    >/dev/null || { echo "FATAL: curl missing from this image"; exit 1; }
         TOKEN=$(cat /etc/github-token/token)
         APP="{{`{{workflow.parameters.app_name}}`}}"
         PROJECT="{{`{{workflow.parameters.project_name}}`}}"
@@ -131,8 +140,16 @@ spec:
         # resubmits a build every 3 minutes — a storm, not a backstop.
         ML_NS="{{`{{workflow.parameters.ml_namespace}}`}}"
         [ -n "$ML_NS" ] || ML_NS="ml-${PROJECT}"
-        LAST=$(kubectl get configmap "${APP}-pipeline-images" -n "${ML_NS}" \
-          -o jsonpath='{.data.last-built-sha}' 2>/dev/null || true)
+        # Distinguish "no baseline recorded yet" (a real first-run) from "the
+        # read failed" (RBAC/API blip). Treating a FAILED read as no-baseline is
+        # what storms: it looks like drift on every poll.
+        if ! CM=$(kubectl get configmap "${APP}-pipeline-images" -n "${ML_NS}" -o json 2>&1); then
+          echo "reconcile: cannot read ${ML_NS}/${APP}-pipeline-images — skipping this poll: ${CM}"
+          printf 'false' > /tmp/needs_build
+          printf '' > /tmp/head_sha
+          exit 0
+        fi
+        LAST=$(echo "$CM" | jq -r '.data["last-built-sha"] // empty')
         echo "reconcile: ${ML_NS}/${APP}-pipeline-images head=${HEAD_SHA} last-built=${LAST:-<none>}"
         printf '%s' "$HEAD_SHA" > /tmp/head_sha
 
