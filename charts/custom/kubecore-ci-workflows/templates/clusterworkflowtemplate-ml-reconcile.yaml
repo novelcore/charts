@@ -46,6 +46,11 @@ spec:
     - name: branch
       value: dev
     - name: ci_namespace
+    # ml_namespace: where {app}-pipeline-images (and last-built-sha) actually
+    # lives. Empty => derive ml-{project}, the composition's default, so a
+    # CronWorkflow rendered before this param existed still works.
+    - name: ml_namespace
+      value: ""
     - name: image_repository
       value: ""
     - name: registry_url
@@ -121,9 +126,14 @@ spec:
           exit 0
         fi
 
-        LAST=$(kubectl get configmap "${APP}-pipeline-images" -n "${NS}" \
+        # The images ConfigMap lives in the ML namespace (ml-{project}), NOT the
+        # CI namespace. Reading the wrong one finds no baseline every time and
+        # resubmits a build every 3 minutes — a storm, not a backstop.
+        ML_NS="{{`{{workflow.parameters.ml_namespace}}`}}"
+        [ -n "$ML_NS" ] || ML_NS="ml-${PROJECT}"
+        LAST=$(kubectl get configmap "${APP}-pipeline-images" -n "${ML_NS}" \
           -o jsonpath='{.data.last-built-sha}' 2>/dev/null || true)
-        echo "reconcile: head=${HEAD_SHA} last-built=${LAST:-<none>}"
+        echo "reconcile: ${ML_NS}/${APP}-pipeline-images head=${HEAD_SHA} last-built=${LAST:-<none>}"
         printf '%s' "$HEAD_SHA" > /tmp/head_sha
 
         if [ "$LAST" = "$HEAD_SHA" ]; then
