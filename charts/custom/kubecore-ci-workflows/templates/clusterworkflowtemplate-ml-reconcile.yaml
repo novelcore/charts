@@ -1,0 +1,191 @@
+{{/*
+ml-ci-reconcile — the level-triggered CI backstop (#459).
+
+The k8smlapp composition creates a per-app CronWorkflow ({app}-ci-reconciler,
+every 3 min, concurrencyPolicy: Forbid) that invokes THIS template. Until it
+existed, every one of those CronWorkflows referenced a missing
+ClusterWorkflowTemplate and therefore NEVER FIRED (lastScheduledTime unset on
+every app, verified live 2026-07-16) — so the backstop the composition documents
+("a dropped push webhook now costs <= 3 min; no build is ever permanently lost")
+did not exist at all.
+
+What it does — pure level-triggering, no edge required:
+
+  1. Read the app repo's current HEAD SHA on the dev branch (GitHub API).
+  2. Read last-built-sha from the {app}-pipeline-images ConfigMap (the value
+     ml-ci-build's patch-images step records after a successful build).
+  3. If they differ, submit ml-ci-build for that SHA. If they match, exit — a
+     no-op poll costs one API call.
+
+That makes the CI self-healing for the two failure modes that otherwise need a
+human: a dropped/failed webhook delivery, and a build that never ran because the
+event was lost. It is deliberately NOT a re-render trigger for platform-context
+changes — those flow operator -> XR -> composition -> ConfigMap, and the WFT
+picks them up on the next build this reconciler submits.
+*/}}
+apiVersion: argoproj.io/v1alpha1
+kind: ClusterWorkflowTemplate
+metadata:
+  name: ml-ci-reconcile
+  labels:
+    {{- include "kubecore-ci-workflows.labels" . | nindent 4 }}
+spec:
+  serviceAccountName: {{ include "kubecore-ci-workflows.serviceAccountName" . }}
+  entrypoint: ml-ci-reconcile
+  ttlStrategy:
+    secondsAfterCompletion: {{ .Values.workflow.ttlStrategy.secondsAfterCompletion }}
+  podGC:
+    strategy: {{ .Values.workflow.podGC.strategy }}
+
+  arguments:
+    parameters:
+    - name: app_name
+    - name: project_name
+    - name: repo_url
+      value: ""
+    - name: branch
+      value: dev
+    - name: ci_namespace
+    - name: image_repository
+      value: ""
+    - name: registry_url
+      value: ""
+    - name: build_registry_url
+      value: ""
+    - name: gitops_repository
+    - name: gitops_branch
+      value: main
+    - name: workflow_template_path
+
+  volumes:
+  - name: github-token
+    secret:
+      secretName: {{ .Values.github.tokenSecretName }}
+
+  templates:
+  - name: ml-ci-reconcile
+    steps:
+    - - name: check-drift
+        template: check-drift
+    - - name: submit-build
+        template: submit-build
+        # Only when HEAD differs from the last SHA we actually built.
+        when: "{{`{{steps.check-drift.outputs.parameters.needs_build}}`}} == true"
+        arguments:
+          parameters:
+          - name: commit_sha
+            value: "{{`{{steps.check-drift.outputs.parameters.head_sha}}`}}"
+
+  - name: check-drift
+    outputs:
+      parameters:
+      - name: needs_build
+        valueFrom:
+          path: /tmp/needs_build
+      - name: head_sha
+        valueFrom:
+          path: /tmp/head_sha
+    container:
+      image: alpine/git:latest
+      command: [sh, -c]
+      args:
+      - |
+        set -eu
+        apk add --no-cache curl jq >/dev/null 2>&1 || true
+        TOKEN=$(cat /etc/github-token/token)
+        APP="{{`{{workflow.parameters.app_name}}`}}"
+        PROJECT="{{`{{workflow.parameters.project_name}}`}}"
+        BRANCH="{{`{{workflow.parameters.branch}}`}}"
+        NS="{{`{{workflow.parameters.ci_namespace}}`}}"
+
+        # The app's source repo is named the way the githubapp composition names
+        # it: {project}-{app}. repo_url is empty on the CronWorkflow (the webhook
+        # path fills it from the event payload), so derive owner/repo here.
+        ORG=$(echo "{{`{{workflow.parameters.gitops_repository}}`}}" | cut -d/ -f1)
+        case "{{`{{workflow.parameters.repo_url}}`}}" in
+          https://*)
+            SLUG=$(echo "{{`{{workflow.parameters.repo_url}}`}}" | sed -E 's|https://github.com/||; s|\.git$||') ;;
+          *)
+            SLUG="novelcore/${PROJECT}-${APP}" ;;
+        esac
+        echo "reconcile: polling ${SLUG}@${BRANCH}"
+
+        HEAD_SHA=$(curl -sf -H "Authorization: Bearer ${TOKEN}" \
+          -H "Accept: application/vnd.github+json" \
+          "https://api.github.com/repos/${SLUG}/commits/${BRANCH}" | jq -r '.sha // empty')
+        if [ -z "$HEAD_SHA" ]; then
+          # A transient API failure must NOT look like drift and storm builds.
+          echo "reconcile: could not read HEAD for ${SLUG}@${BRANCH} — skipping this poll"
+          printf 'false' > /tmp/needs_build
+          printf '' > /tmp/head_sha
+          exit 0
+        fi
+
+        LAST=$(kubectl get configmap "${APP}-pipeline-images" -n "${NS}" \
+          -o jsonpath='{.data.last-built-sha}' 2>/dev/null || true)
+        echo "reconcile: head=${HEAD_SHA} last-built=${LAST:-<none>}"
+        printf '%s' "$HEAD_SHA" > /tmp/head_sha
+
+        if [ "$LAST" = "$HEAD_SHA" ]; then
+          printf 'false' > /tmp/needs_build
+          echo "reconcile: up to date — no build needed"
+        else
+          printf 'true' > /tmp/needs_build
+          echo "reconcile: DRIFT — a push was never built (dropped webhook?); submitting ml-ci-build"
+        fi
+      volumeMounts:
+      - name: github-token
+        mountPath: /etc/github-token
+        readOnly: true
+
+  - name: submit-build
+    inputs:
+      parameters:
+      - name: commit_sha
+    resource:
+      action: create
+      manifest: |
+        apiVersion: argoproj.io/v1alpha1
+        kind: Workflow
+        metadata:
+          generateName: ml-ci-build-reconciled-
+          namespace: {{`{{workflow.parameters.ci_namespace}}`}}
+          labels:
+            platform.kubecore.io/app: {{`{{workflow.parameters.app_name}}`}}
+            platform.kubecore.io/submitted-by: ml-ci-reconcile
+        spec:
+          workflowTemplateRef:
+            name: ml-ci-build
+            clusterScope: true
+          arguments:
+            parameters:
+            - name: repo_url
+              value: "https://github.com/novelcore/{{`{{workflow.parameters.project_name}}`}}-{{`{{workflow.parameters.app_name}}`}}.git"
+            - name: commit_sha
+              value: "{{`{{inputs.parameters.commit_sha}}`}}"
+            - name: branch
+              value: "refs/heads/{{`{{workflow.parameters.branch}}`}}"
+            - name: target_branch
+              value: "{{`{{workflow.parameters.branch}}`}}"
+            - name: branch_type
+              value: "feature"
+            - name: app_name
+              value: "{{`{{workflow.parameters.app_name}}`}}"
+            - name: project_name
+              value: "{{`{{workflow.parameters.project_name}}`}}"
+            - name: pr_merged
+              value: "true"
+            - name: event_type
+              value: "reconcile"
+            - name: image_repository
+              value: "{{`{{workflow.parameters.image_repository}}`}}"
+            - name: registry_url
+              value: "{{`{{workflow.parameters.registry_url}}`}}"
+            - name: build_registry_url
+              value: "{{`{{workflow.parameters.build_registry_url}}`}}"
+            - name: gitops_repository
+              value: "{{`{{workflow.parameters.gitops_repository}}`}}"
+            - name: gitops_branch
+              value: "{{`{{workflow.parameters.gitops_branch}}`}}"
+            - name: workflow_template_path
+              value: "{{`{{workflow.parameters.workflow_template_path}}`}}"
