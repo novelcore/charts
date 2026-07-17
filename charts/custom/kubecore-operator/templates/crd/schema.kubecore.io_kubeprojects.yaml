@@ -117,6 +117,22 @@ spec:
                   items:
                     description: ProjectEnvironment defines a single environment within a project
                     properties:
+                      environmentType:
+                        allOf:
+                          - enum:
+                              - dev
+                              - stage
+                              - prod
+                          - enum:
+                              - dev
+                              - stage
+                              - prod
+                        description: |-
+                          EnvironmentType classifies the environment (dev/stage/prod). It is the
+                          authoritative source for the priority-uniqueness validator and the status
+                          writer; it replaces the value that was previously read from the KubePool
+                          environment template (PRD-KUBENV-001 S-1/A2, D-01).
+                        type: string
                       kubePool:
                         description: KubePool references the KubePool resource to use for this environment
                         minLength: 1
@@ -126,10 +142,100 @@ spec:
                         minLength: 1
                         pattern: ^[a-z0-9][a-z0-9-]*[a-z0-9]$
                         type: string
+                      nodeGroup:
+                        description: |-
+                          NodeGroup carries the complete, cloud-neutral dedicated node-group
+                          definition for this environment. Its presence selects the dedicated-node-group
+                          compute model (PRD-KUBENV-001 D-06): the XKubEnv composition provisions one
+                          exclusive, tainted+labeled node group with this config. When nil, no dedicated
+                          node group is provisioned. The node-group spec is owned entirely by KubeProject
+                          (D-01); there is no KubePool template fallback.
+                        properties:
+                          capacityType:
+                            default: on-demand
+                            description: |-
+                              CapacityType selects on-demand vs interruptible capacity. It maps to
+                              SPOT (AWS), preemptible/spot (GCP), or Spot priority (Azure).
+                            enum:
+                              - on-demand
+                              - spot
+                            type: string
+                          diskSizeGB:
+                            description: DiskSizeGB is the per-node boot/root disk size in GB.
+                            minimum: 10
+                            type: integer
+                          labels:
+                            additionalProperties:
+                              type: string
+                            description: |-
+                              Labels are user-supplied node labels. They are merged with the required
+                              cost-attribution labels (PRD-KUBENV-001 C-03) by the composition; cost
+                              labels win on key conflict.
+                            type: object
+                          machineType:
+                            description: |-
+                              MachineType is the instance/machine type for the node group. It is
+                              interpreted per cloud: GCP machine type (e.g. "e2-standard-4"), EC2
+                              instance type, or Azure VM size.
+                            minLength: 1
+                            type: string
+                          scaling:
+                            description: |-
+                              Scaling defines the node group's autoscaling bounds (min/max) and the
+                              initial desired node count.
+                            properties:
+                              desired:
+                                description: Desired is the initial desired number of nodes.
+                                minimum: 0
+                                type: integer
+                              max:
+                                description: Max is the maximum number of nodes.
+                                minimum: 1
+                                type: integer
+                              min:
+                                description: Min is the minimum number of nodes.
+                                minimum: 0
+                                type: integer
+                            required:
+                              - desired
+                              - max
+                              - min
+                            type: object
+                          taints:
+                            description: |-
+                              Taints are user-supplied taints applied to the node group. The
+                              env-exclusivity taint is added automatically by the composition and does
+                              not need to be declared here.
+                            items:
+                              description: |-
+                                Taint is a cloud-neutral Kubernetes node taint applied to a dedicated
+                                environment node group.
+                              properties:
+                                effect:
+                                  description: |-
+                                    Effect is the taint effect. Composition sets translate this to the
+                                    cloud-native enum (e.g. GKE NO_SCHEDULE) as needed.
+                                  type: string
+                                key:
+                                  description: Key is the taint key.
+                                  type: string
+                                value:
+                                  description: Value is the taint value.
+                                  type: string
+                              required:
+                                - effect
+                                - key
+                              type: object
+                            type: array
+                        required:
+                          - diskSizeGB
+                          - machineType
+                          - scaling
+                        type: object
                       overrides:
                         description: |-
-                          Overrides allow minimal customization of the template configuration
-                          Platform teams can restrict which overrides are allowed
+                          Overrides allow minimal customization of the environment configuration.
+                          Platform teams can restrict which overrides are allowed.
                         properties:
                           costControls:
                             description: CostControls overrides for cost management
@@ -197,23 +303,54 @@ spec:
                         type: object
                       priority:
                         description: |-
-                          Priority defines the deployment order within environments of the same type.
-                          The environmentType (dev/stage/prod) is determined by the referenced template in the KubePool.
-                          Lower priority numbers indicate higher priority (deployed first).
-                          Priority must be unique within environments that reference templates of the same environmentType.
-                          For example, if two environments both reference templates with environmentType=dev,
-                          they cannot have the same priority value.
+                          Priority defines the deployment order within environments of the same
+                          environmentType. Lower priority numbers indicate higher priority (deployed
+                          first). Priority must be unique within environments of the same
+                          environmentType.
                         minimum: 1
                         type: integer
-                      template:
-                        description: Template references the environment template from the KubePool
-                        minLength: 1
-                        type: string
+                      resources:
+                        description: |-
+                          Resources carries per-environment resource governance (quota + limits),
+                          cloud-neutral (PRD-KUBENV-001 S-1). It maps directly to the ResourceQuota and
+                          LimitRange the XKubEnv composition renders into the environment namespace.
+                        properties:
+                          limits:
+                            description: |-
+                              Limits maps to the environment namespace's LimitRange default /
+                              defaultRequest values.
+                            properties:
+                              defaultCPU:
+                                type: string
+                              defaultMemory:
+                                type: string
+                              defaultRequestCPU:
+                                type: string
+                              defaultRequestMemory:
+                                type: string
+                            type: object
+                          quota:
+                            description: |-
+                              Quota maps to the environment namespace's ResourceQuota. Omitting keys
+                              omits the corresponding quota entry.
+                            properties:
+                              limitsCPU:
+                                type: string
+                              limitsMemory:
+                                type: string
+                              pods:
+                                type: string
+                              requestsCPU:
+                                type: string
+                              requestsMemory:
+                                type: string
+                            type: object
+                        type: object
                     required:
+                      - environmentType
                       - kubePool
                       - name
                       - priority
-                      - template
                     type: object
                   type: array
                 githubConfiguration:
@@ -701,7 +838,7 @@ spec:
                           e.g., "sandbox.snoopy.wow-dev.kaos.io.kubecore.eu"
                         type: string
                       environmentType:
-                        description: EnvironmentType shows the resolved environment type from the template
+                        description: EnvironmentType shows the environment type declared on the ProjectEnvironment
                         type: string
                       kubePool:
                         description: KubePool used for this environment
@@ -726,7 +863,9 @@ spec:
                             description: ID of the node group
                             type: string
                           instanceType:
-                            description: InstanceType is the EC2 instance type used for nodes
+                            description: |-
+                              InstanceType is the cloud instance/machine type used for nodes
+                              (EC2 instance type, GCP machine type, or Azure VM size).
                             type: string
                           nodeCount:
                             description: NodeCount is the current number of nodes in the group
@@ -776,9 +915,6 @@ spec:
                         type: object
                       state:
                         description: State represents the current state of the environment
-                        type: string
-                      template:
-                        description: Template used for this environment
                         type: string
                       xKubEnvRef:
                         description: XKubEnvRef contains a reference to the created XKubEnv resource
