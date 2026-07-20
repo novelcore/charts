@@ -88,6 +88,272 @@ spec:
             spec:
               description: KubeAppSpec defines the desired state of KubeApp
               properties:
+                dedicatedEnvironment:
+                  description: |-
+                    DedicatedEnvironment provisions an app-exclusive namespace + dedicated node
+                    group per targeted environment (PRD-KUBENV-001 Part A, D-05), instead of sharing
+                    the project environment's namespace and node group. When set, the operator creates
+                    one XKubEnv named {project}-{app}-{env} for each environment this app is selected
+                    into via environmentSelector. Pool and cloud are derived from each targeted
+                    ProjectEnvironment's kubePool (no kubePool field here). Requires at least one
+                    selected environment.
+                  properties:
+                    nodeGroup:
+                      description: |-
+                        NodeGroup is the default dedicated node-group definition applied to EVERY
+                        environment this app is selected into, unless overridden per environment in Overrides.
+                      properties:
+                        capacityType:
+                          default: on-demand
+                          description: |-
+                            CapacityType selects on-demand vs interruptible capacity. It maps to
+                            SPOT (AWS), preemptible/spot (GCP), or Spot priority (Azure).
+                          enum:
+                            - on-demand
+                            - spot
+                          type: string
+                        diskSizeGB:
+                          description: DiskSizeGB is the per-node boot/root disk size in GB.
+                          minimum: 10
+                          type: integer
+                        labels:
+                          additionalProperties:
+                            type: string
+                          description: |-
+                            Labels are user-supplied node labels. They are merged with the required
+                            cost-attribution labels (PRD-KUBENV-001 C-03) by the composition; cost
+                            labels win on key conflict.
+                          type: object
+                        machineType:
+                          description: |-
+                            MachineType is the instance/machine type for the node group. It is
+                            interpreted per cloud: GCP machine type (e.g. "e2-standard-4"), EC2
+                            instance type, or Azure VM size.
+                          minLength: 1
+                          type: string
+                        scaling:
+                          description: |-
+                            Scaling defines the node group's autoscaling bounds (min/max) and the
+                            initial desired node count.
+                          properties:
+                            desired:
+                              description: Desired is the initial desired number of nodes.
+                              minimum: 0
+                              type: integer
+                            max:
+                              description: Max is the maximum number of nodes.
+                              minimum: 1
+                              type: integer
+                            min:
+                              description: Min is the minimum number of nodes.
+                              minimum: 0
+                              type: integer
+                          required:
+                            - desired
+                            - max
+                            - min
+                          type: object
+                        taints:
+                          description: |-
+                            Taints are user-supplied taints applied to the node group. The
+                            env-exclusivity taint is added automatically by the composition and does
+                            not need to be declared here.
+                          items:
+                            description: |-
+                              Taint is a cloud-neutral Kubernetes node taint applied to a dedicated
+                              environment node group.
+                            properties:
+                              effect:
+                                description: |-
+                                  Effect is the taint effect. Composition sets translate this to the
+                                  cloud-native enum (e.g. GKE NO_SCHEDULE) as needed.
+                                type: string
+                              key:
+                                description: Key is the taint key.
+                                type: string
+                              value:
+                                description: Value is the taint value.
+                                type: string
+                            required:
+                              - effect
+                              - key
+                            type: object
+                          type: array
+                      required:
+                        - diskSizeGB
+                        - machineType
+                        - scaling
+                      type: object
+                    overrides:
+                      additionalProperties:
+                        description: |-
+                          DedicatedEnvironmentOverride overrides the default dedicatedEnvironment node group
+                          and/or resources for a single named environment. A set field fully replaces the
+                          corresponding default for that environment.
+                        properties:
+                          nodeGroup:
+                            description: NodeGroup, when set, fully replaces the default node group for this environment.
+                            properties:
+                              capacityType:
+                                default: on-demand
+                                description: |-
+                                  CapacityType selects on-demand vs interruptible capacity. It maps to
+                                  SPOT (AWS), preemptible/spot (GCP), or Spot priority (Azure).
+                                enum:
+                                  - on-demand
+                                  - spot
+                                type: string
+                              diskSizeGB:
+                                description: DiskSizeGB is the per-node boot/root disk size in GB.
+                                minimum: 10
+                                type: integer
+                              labels:
+                                additionalProperties:
+                                  type: string
+                                description: |-
+                                  Labels are user-supplied node labels. They are merged with the required
+                                  cost-attribution labels (PRD-KUBENV-001 C-03) by the composition; cost
+                                  labels win on key conflict.
+                                type: object
+                              machineType:
+                                description: |-
+                                  MachineType is the instance/machine type for the node group. It is
+                                  interpreted per cloud: GCP machine type (e.g. "e2-standard-4"), EC2
+                                  instance type, or Azure VM size.
+                                minLength: 1
+                                type: string
+                              scaling:
+                                description: |-
+                                  Scaling defines the node group's autoscaling bounds (min/max) and the
+                                  initial desired node count.
+                                properties:
+                                  desired:
+                                    description: Desired is the initial desired number of nodes.
+                                    minimum: 0
+                                    type: integer
+                                  max:
+                                    description: Max is the maximum number of nodes.
+                                    minimum: 1
+                                    type: integer
+                                  min:
+                                    description: Min is the minimum number of nodes.
+                                    minimum: 0
+                                    type: integer
+                                required:
+                                  - desired
+                                  - max
+                                  - min
+                                type: object
+                              taints:
+                                description: |-
+                                  Taints are user-supplied taints applied to the node group. The
+                                  env-exclusivity taint is added automatically by the composition and does
+                                  not need to be declared here.
+                                items:
+                                  description: |-
+                                    Taint is a cloud-neutral Kubernetes node taint applied to a dedicated
+                                    environment node group.
+                                  properties:
+                                    effect:
+                                      description: |-
+                                        Effect is the taint effect. Composition sets translate this to the
+                                        cloud-native enum (e.g. GKE NO_SCHEDULE) as needed.
+                                      type: string
+                                    key:
+                                      description: Key is the taint key.
+                                      type: string
+                                    value:
+                                      description: Value is the taint value.
+                                      type: string
+                                  required:
+                                    - effect
+                                    - key
+                                  type: object
+                                type: array
+                            required:
+                              - diskSizeGB
+                              - machineType
+                              - scaling
+                            type: object
+                          resources:
+                            description: Resources, when set, fully replaces the default resources for this environment.
+                            properties:
+                              limits:
+                                description: |-
+                                  Limits maps to the environment namespace's LimitRange default /
+                                  defaultRequest values.
+                                properties:
+                                  defaultCPU:
+                                    type: string
+                                  defaultMemory:
+                                    type: string
+                                  defaultRequestCPU:
+                                    type: string
+                                  defaultRequestMemory:
+                                    type: string
+                                type: object
+                              quota:
+                                description: |-
+                                  Quota maps to the environment namespace's ResourceQuota. Omitting keys
+                                  omits the corresponding quota entry.
+                                properties:
+                                  limitsCPU:
+                                    type: string
+                                  limitsMemory:
+                                    type: string
+                                  pods:
+                                    type: string
+                                  requestsCPU:
+                                    type: string
+                                  requestsMemory:
+                                    type: string
+                                type: object
+                            type: object
+                        type: object
+                      description: |-
+                        Overrides maps an environment name to a per-environment override of the default
+                        nodeGroup and/or resources. A key that does not match a targeted environment name
+                        has no effect.
+                      type: object
+                    resources:
+                      description: |-
+                        Resources is the default per-environment resource governance (quota + limits)
+                        applied to every targeted environment unless overridden.
+                      properties:
+                        limits:
+                          description: |-
+                            Limits maps to the environment namespace's LimitRange default /
+                            defaultRequest values.
+                          properties:
+                            defaultCPU:
+                              type: string
+                            defaultMemory:
+                              type: string
+                            defaultRequestCPU:
+                              type: string
+                            defaultRequestMemory:
+                              type: string
+                          type: object
+                        quota:
+                          description: |-
+                            Quota maps to the environment namespace's ResourceQuota. Omitting keys
+                            omits the corresponding quota entry.
+                          properties:
+                            limitsCPU:
+                              type: string
+                            limitsMemory:
+                              type: string
+                            pods:
+                              type: string
+                            requestsCPU:
+                              type: string
+                            requestsMemory:
+                              type: string
+                          type: object
+                      type: object
+                  required:
+                    - nodeGroup
+                  type: object
                 description:
                   description: Description provides a description of the application
                   type: string
