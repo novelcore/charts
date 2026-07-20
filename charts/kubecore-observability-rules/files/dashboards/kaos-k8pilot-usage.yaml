@@ -1,0 +1,300 @@
+{{- $Values := (.helm).Values | default .Values }}
+{{- $defaultDatasource := ($Values.defaultDashboards).defaultDatasource | default "prometheus" }}
+# KAOS K8Pilot — Usage, Cost & Write Funnel.
+#
+# Fed by the k8pilot metering backbone (PRD #107, F-05): kaos_llm_tokens,
+# kaos_llm_cost_usd, kaos_operations, kaos_agent_writes. Scraped by vmagent via the
+# app's prometheus.io/scrape annotations (no ServiceMonitor needed). The write funnel
+# (proposed→succeeded) is the tier-policy signal: success rate, abandonment, and the
+# top reasons a write failed.
+condition: true
+editable: false
+graphTooltip: 1
+panels:
+# ---------------------------------------------------------------- Cost & Tokens
+- collapsed: false
+  gridPos: {h: 1, w: 24, x: 0, "y": 0}
+  id: 1
+  panels: []
+  title: LLM Cost & Tokens
+  type: row
+- datasource: {type: prometheus, uid: $datasource}
+  description: Total LLM spend over the selected range.
+  fieldConfig:
+    defaults:
+      unit: currencyUSD
+      color: {mode: thresholds}
+      thresholds: {mode: absolute, steps: [{color: green, value: null}]}
+  gridPos: {h: 6, w: 6, x: 0, "y": 1}
+  id: 2
+  options: {reduceOptions: {calcs: [lastNotNull]}, colorMode: value, graphMode: area, textMode: auto}
+  targets:
+  - datasource: {type: prometheus, uid: $datasource}
+    expr: sum(increase(kaos_llm_cost_usd_total{organization=~"$organization"}[$__range]))
+    refId: A
+  title: LLM Cost (range)
+  type: stat
+- datasource: {type: prometheus, uid: $datasource}
+  description: Total tokens (input + output) over the selected range.
+  fieldConfig:
+    defaults:
+      unit: short
+      color: {mode: thresholds}
+      thresholds: {mode: absolute, steps: [{color: blue, value: null}]}
+  gridPos: {h: 6, w: 6, x: 6, "y": 1}
+  id: 3
+  options: {reduceOptions: {calcs: [lastNotNull]}, colorMode: value, graphMode: area, textMode: auto}
+  targets:
+  - datasource: {type: prometheus, uid: $datasource}
+    expr: sum(increase(kaos_llm_tokens_total{organization=~"$organization"}[$__range]))
+    refId: A
+  title: Tokens (range)
+  type: stat
+- datasource: {type: prometheus, uid: $datasource}
+  description: LLM cost per day, per organization — the raw material for setting tier thresholds.
+  fieldConfig:
+    defaults:
+      unit: currencyUSD
+      custom: {drawStyle: bars, fillOpacity: 60, stacking: {mode: normal}}
+  gridPos: {h: 6, w: 12, x: 12, "y": 1}
+  id: 4
+  options: {legend: {showLegend: true, displayMode: table, placement: right, calcs: [sum]}, tooltip: {mode: multi}}
+  targets:
+  - datasource: {type: prometheus, uid: $datasource}
+    expr: sum by (organization) (increase(kaos_llm_cost_usd_total{organization=~"$organization"}[1d]))
+    legendFormat: '{{`{{`}} organization {{`}}`}}'
+    refId: A
+  title: Cost per day, by organization
+  type: timeseries
+- datasource: {type: prometheus, uid: $datasource}
+  description: Token throughput split by input vs output.
+  fieldConfig:
+    defaults:
+      unit: short
+      custom: {drawStyle: line, fillOpacity: 10, showPoints: never}
+  gridPos: {h: 7, w: 12, x: 0, "y": 7}
+  id: 5
+  options: {legend: {showLegend: true, displayMode: list, placement: bottom}, tooltip: {mode: multi}}
+  targets:
+  - datasource: {type: prometheus, uid: $datasource}
+    expr: sum by (type) (rate(kaos_llm_tokens_total{organization=~"$organization"}[5m]))
+    legendFormat: '{{`{{`}} type {{`}}`}}'
+    refId: A
+  title: Token rate (input / output)
+  type: timeseries
+- datasource: {type: prometheus, uid: $datasource}
+  description: Cache read vs write tokens are a direct cost lever (cache reads are far cheaper).
+  fieldConfig:
+    defaults:
+      unit: reqps
+      custom: {drawStyle: line, fillOpacity: 10, showPoints: never}
+  gridPos: {h: 7, w: 12, x: 12, "y": 7}
+  id: 6
+  options: {legend: {showLegend: true, displayMode: list, placement: bottom}, tooltip: {mode: multi}}
+  targets:
+  - datasource: {type: prometheus, uid: $datasource}
+    expr: sum(rate(kaos_operations_total{action="llm_call",organization=~"$organization"}[5m]))
+    legendFormat: llm calls/s
+    refId: A
+  title: LLM call rate
+  type: timeseries
+# ------------------------------------------------------------------ Operations
+- collapsed: false
+  gridPos: {h: 1, w: 24, x: 0, "y": 14}
+  id: 10
+  panels: []
+  title: Platform Operations
+  type: row
+- datasource: {type: prometheus, uid: $datasource}
+  description: Read / create / update / delete rates. Writes (create/update/delete) are the tier-gated actions.
+  fieldConfig:
+    defaults:
+      unit: ops
+      custom: {drawStyle: line, fillOpacity: 10, showPoints: never, stacking: {mode: normal}}
+  gridPos: {h: 8, w: 12, x: 0, "y": 15}
+  id: 11
+  options: {legend: {showLegend: true, displayMode: table, placement: right, calcs: [sum]}, tooltip: {mode: multi}}
+  targets:
+  - datasource: {type: prometheus, uid: $datasource}
+    expr: sum by (action) (rate(kaos_operations_total{action!="llm_call",organization=~"$organization"}[5m]))
+    legendFormat: '{{`{{`}} action {{`}}`}}'
+    refId: A
+  title: Operations by action
+  type: timeseries
+- datasource: {type: prometheus, uid: $datasource}
+  description: Which resource types drive activity over the range.
+  fieldConfig:
+    defaults: {unit: short}
+  gridPos: {h: 8, w: 12, x: 12, "y": 15}
+  id: 12
+  options: {legend: {showLegend: true, displayMode: table, placement: right, values: [value]}, pieType: donut, reduceOptions: {calcs: [lastNotNull]}}
+  targets:
+  - datasource: {type: prometheus, uid: $datasource}
+    expr: sum by (resource_type) (increase(kaos_operations_total{action!="llm_call",resource_type!="-",organization=~"$organization"}[$__range]))
+    legendFormat: '{{`{{`}} resource_type {{`}}`}}'
+    refId: A
+  title: Operations by resource type
+  type: piechart
+# --------------------------------------------------------------- Write Funnel
+- collapsed: false
+  gridPos: {h: 1, w: 24, x: 0, "y": 23}
+  id: 20
+  panels: []
+  title: Write Funnel (propose → confirm → execute)
+  type: row
+- datasource: {type: prometheus, uid: $datasource}
+  description: Confirmed writes that landed, over proposed writes. Low = users start writes but don't complete them.
+  fieldConfig:
+    defaults:
+      unit: percentunit
+      min: 0
+      max: 1
+      color: {mode: thresholds}
+      thresholds: {mode: absolute, steps: [{color: red, value: null}, {color: orange, value: 0.6}, {color: green, value: 0.85}]}
+  gridPos: {h: 6, w: 6, x: 0, "y": 24}
+  id: 21
+  options: {reduceOptions: {calcs: [lastNotNull]}, colorMode: value, graphMode: none, textMode: auto}
+  targets:
+  - datasource: {type: prometheus, uid: $datasource}
+    expr: sum(increase(kaos_agent_writes_total{outcome="succeeded",organization=~"$organization"}[$__range])) / clamp_min(sum(increase(kaos_agent_writes_total{outcome="proposed",organization=~"$organization"}[$__range])), 1)
+    refId: A
+  title: Write success rate
+  type: stat
+- datasource: {type: prometheus, uid: $datasource}
+  description: Proposed writes the user cancelled or let expire, over all proposed. The drop-off signal.
+  fieldConfig:
+    defaults:
+      unit: percentunit
+      min: 0
+      max: 1
+      color: {mode: thresholds}
+      thresholds: {mode: absolute, steps: [{color: green, value: null}, {color: orange, value: 0.2}, {color: red, value: 0.4}]}
+  gridPos: {h: 6, w: 6, x: 6, "y": 24}
+  id: 22
+  options: {reduceOptions: {calcs: [lastNotNull]}, colorMode: value, graphMode: none, textMode: auto}
+  targets:
+  - datasource: {type: prometheus, uid: $datasource}
+    expr: sum(increase(kaos_agent_writes_total{outcome=~"cancelled|expired",organization=~"$organization"}[$__range])) / clamp_min(sum(increase(kaos_agent_writes_total{outcome="proposed",organization=~"$organization"}[$__range])), 1)
+    refId: A
+  title: Abandonment rate
+  type: stat
+- datasource: {type: prometheus, uid: $datasource}
+  description: Writes that were confirmed and attempted but failed to land.
+  fieldConfig:
+    defaults:
+      unit: short
+      color: {mode: fixed, fixedColor: orange}
+  gridPos: {h: 6, w: 6, x: 12, "y": 24}
+  id: 23
+  options: {reduceOptions: {calcs: [lastNotNull]}, colorMode: value, graphMode: area, textMode: auto}
+  targets:
+  - datasource: {type: prometheus, uid: $datasource}
+    expr: sum(increase(kaos_agent_writes_total{outcome="failed",organization=~"$organization"}[$__range]))
+    refId: A
+  title: Failed writes (range)
+  type: stat
+- datasource: {type: prometheus, uid: $datasource}
+  description: Total writes staged for confirmation over the range (funnel entry point).
+  fieldConfig:
+    defaults:
+      unit: short
+      color: {mode: thresholds}
+      thresholds: {mode: absolute, steps: [{color: blue, value: null}]}
+  gridPos: {h: 6, w: 6, x: 18, "y": 24}
+  id: 24
+  options: {reduceOptions: {calcs: [lastNotNull]}, colorMode: value, graphMode: area, textMode: auto}
+  targets:
+  - datasource: {type: prometheus, uid: $datasource}
+    expr: sum(increase(kaos_agent_writes_total{outcome="proposed",organization=~"$organization"}[$__range]))
+    refId: A
+  title: Proposed writes (range)
+  type: stat
+- datasource: {type: prometheus, uid: $datasource}
+  description: Every funnel outcome over time — proposed, succeeded, failed, cancelled, expired.
+  fieldConfig:
+    defaults:
+      unit: short
+      custom: {drawStyle: bars, fillOpacity: 70, stacking: {mode: normal}}
+    # Semantic, fixed colours per outcome (else Grafana colours by series order).
+    overrides:
+    - matcher: {id: byName, options: succeeded}
+      properties: [{id: color, value: {mode: fixed, fixedColor: green}}]
+    - matcher: {id: byName, options: proposed}
+      properties: [{id: color, value: {mode: fixed, fixedColor: blue}}]
+    - matcher: {id: byName, options: failed}
+      properties: [{id: color, value: {mode: fixed, fixedColor: orange}}]
+    - matcher: {id: byName, options: cancelled}
+      properties: [{id: color, value: {mode: fixed, fixedColor: yellow}}]
+    - matcher: {id: byName, options: expired}
+      properties: [{id: color, value: {mode: fixed, fixedColor: '#8e8e8e'}}]
+  gridPos: {h: 8, w: 12, x: 0, "y": 30}
+  id: 25
+  options: {legend: {showLegend: true, displayMode: table, placement: right, calcs: [sum]}, tooltip: {mode: multi}}
+  targets:
+  - datasource: {type: prometheus, uid: $datasource}
+    expr: sum by (outcome) (increase(kaos_agent_writes_total{organization=~"$organization"}[1h]))
+    legendFormat: '{{`{{`}} outcome {{`}}`}}'
+    refId: A
+  title: Writes by outcome (per hour)
+  type: timeseries
+- datasource: {type: prometheus, uid: $datasource}
+  description: Why confirmed writes failed — validation, CRD rejection, GitOps error, conflict, deletion blocked, execution error.
+  fieldConfig:
+    defaults: {unit: short, custom: {align: auto, filterable: true}}
+  gridPos: {h: 8, w: 12, x: 12, "y": 30}
+  id: 26
+  options: {showHeader: true, sortBy: [{displayName: Value, desc: true}]}
+  targets:
+  - datasource: {type: prometheus, uid: $datasource}
+    expr: sum by (reason, resource_type) (increase(kaos_agent_writes_total{outcome="failed",organization=~"$organization"}[$__range]))
+    format: table
+    instant: true
+    refId: A
+  title: Top failure reasons
+  type: table
+templating:
+  list:
+  - current: {selected: false, text: "", value: ""}
+    description: null
+    error: null
+    hide: 0
+    includeAll: false
+    label: Datasource
+    multi: false
+    name: datasource
+    options: []
+    query: prometheus
+    queryValue: ""
+    refresh: 1
+    regex: ""
+    skipUrlSync: false
+    type: datasource
+  - allValue: .*
+    current: {selected: true, text: All, value: $__all}
+    datasource: {type: prometheus, uid: $datasource}
+    definition: label_values(kaos_operations_total, organization)
+    description: null
+    error: null
+    hide: 0
+    includeAll: true
+    label: Organization
+    multi: true
+    name: organization
+    options: []
+    query:
+      query: 'label_values(kaos_operations_total, organization)'
+      refId: org-variable-query
+    refresh: 2
+    regex: ""
+    skipUrlSync: false
+    sort: 1
+    type: query
+time:
+  from: now-7d
+  to: now
+timepicker:
+  refresh_intervals: [30s, 1m, 5m, 15m, 30m, 1h, 2h, 1d]
+timezone: utc
+title: KAOS K8Pilot — Usage, Cost & Write Funnel
+uid: kaos-k8pilot-usage
+version: 1

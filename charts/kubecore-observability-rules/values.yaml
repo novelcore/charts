@@ -9,23 +9,23 @@ global:
 defaultRules:
   # Master switch to enable/disable all rules
   create: true
-  
+
   # Cluster and environment configuration
   clusterLabel: "cluster"  # Overrides global.clusterLabel if set
   clusterName: ""  # Injected from composition
   environment: ""  # Injected from composition
   namespace: ""  # Optional namespace filter
-  
+
   # Labels used for grouping results of queries
   additionalGroupByLabels: []
-  
+
   # Common properties for VMRule groups
   group:
     spec:
       # Optional HTTP URL parameters added to each rule request
       params: {}
       interval: "1m"
-  
+
   # Common properties for all VMRules
   rule:
     spec:
@@ -33,7 +33,7 @@ defaultRules:
       labels: {}
       # Additional annotations for all VMRules
       annotations: {}
-  
+
   # Common properties for VMRules alerts
   alerting:
     spec:
@@ -41,7 +41,7 @@ defaultRules:
       labels: {}
       # Additional annotations for VMRule alerts
       annotations: {}
-  
+
   # Common properties for VMRules recording rules
   recording:
     spec:
@@ -49,7 +49,7 @@ defaultRules:
       labels: {}
       # Additional annotations for VMRule recording rules
       annotations: {}
-  
+
   # Per-rule properties (exact rule name matching)
   rules: {}
     # Example:
@@ -59,7 +59,7 @@ defaultRules:
     #     for: 15m
     #     labels:
     #       severity: critical
-  
+
   # Per-group configuration
   groups:
     kubernetes-nodes:
@@ -79,10 +79,10 @@ defaultRules:
     kubernetes-certificates:
       create: true
       rules: {}
-  
+
   # Runbook URL prefix for default rules
   runbookUrl: https://runbooks.prometheus-operator.dev/runbooks
-  
+
   # Labels for default rules
   labels: {}
   # Annotations for default rules
@@ -92,35 +92,38 @@ defaultRules:
 defaultDashboards:
   # Master switch to enable/disable all dashboards
   enabled: true
-  
+
   # Default timezone for dashboards
   defaultTimezone: "utc"
-  
+
   # Default datasource type
   defaultDatasource: "prometheus"
-  
+
   # Cluster label configuration
   clusterLabel: "cluster"  # Overrides global.clusterLabel if set
   clusterName: ""  # Injected from composition
-  
+
   # Multi-cluster support
   multicluster: false
-  
+
   # Grafana instance selector
   instanceSelector:
     matchLabels:
       app: grafana
-  
+
   # Folder reference (optional)
   folderRef: ""
-  
+
   # Labels for dashboard resources
   labels: {}
   # Annotations for dashboard resources
   annotations: {}
-  
+
   # Per-dashboard configuration
   dashboards:
+    kaos-k8pilot-usage:
+      enabled: true
+      folderRef: ""
     victoriametrics-single-node:
       enabled: true
       folderRef: ""
@@ -148,4 +151,3 @@ defaultDashboards:
     node-exporter:
       enabled: true
       folderRef: ""
-
