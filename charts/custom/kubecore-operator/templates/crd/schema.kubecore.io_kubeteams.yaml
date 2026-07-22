@@ -195,14 +195,6 @@ spec:
                     team membership when KubeProject references this team.
                   format: int32
                   type: integer
-                githubTeamID:
-                  description: |-
-                    GithubTeamID is the numeric GitHub team ID assigned by GitHub once the
-                    XGitHubTeam composite reaches Ready. Populated by the Reporting phase from
-                    XGitHubTeam.status.teamID (F-04, PRD-331). Once written, the value is
-                    preserved across reconciliations even if the XGitHubTeam is transiently
-                    unhealthy — GitHub team IDs are stable for the life of the team.
-                  type: string
                 lastTransitionTime:
                   description: LastTransitionTime records when the status was last updated.
                   format: date-time
@@ -216,7 +208,22 @@ spec:
                 members:
                   description: |-
                     Members contains the per-member resolution state produced by the Syncing phase.
-                    KubeProject reconciler reads identities from here instead of calling Zitadel/GitHub (Q-05, AC-12).
+                    RETAINED (not moved to Outputs) despite being a §3.2 MOVE candidate: it is an
+                    own-CR cross-phase bootstrap field — the Syncing phase (syncing.go
+                    buildPriorStatusIndex) reads back THIS field's prior-reconcile value to
+                    preserve rows across a transient Zitadel error, and the Reconciling phase
+                    (reconciling.go) reads it to seed the XGitHubTeam XR before Syncing
+                    resolves fresh data on the same pass. Outputs.ResolvedMembers (the
+                    Status=="Resolved" filtered projection) is the sanctioned cross-CR
+                    contract — data consumers (KubeProject's resolveEffectiveTeams,
+                    KubeApp's reporting.go) go through parentref.GetKubeTeamOutputs, not this
+                    field. One known straggler: kubeproject/reconciler.go's
+                    kubeTeamAffectsKubeProject WATCH PREDICATE reads this field directly
+                    (predicate.Funcs cannot call client.Get, so it cannot use parentref — same
+                    class of exception as kubeapp/reconciler.go's kubeProjectBecameReady
+                    predicate); this is event-filtering machinery, not data consumption, and
+                    is baselined in the kubeproject package's crossstatusreads allowance.
+                    Track 1e MOVE-pass deviation.
                   items:
                     description: |-
                       KubeTeamMemberStatus records the resolution state for a single team member.
@@ -276,6 +283,92 @@ spec:
                   description: ObservedGeneration is the most recent generation observed by the controller.
                   format: int64
                   type: integer
+                outputs:
+                  description: |-
+                    Outputs is the deliberate cross-controller contract of this KubeTeam
+                    (remediation plan r2 §2.2). Consumers access it ONLY through
+                    parentref.GetKubeTeamOutputs, which gates on Ready + observedGeneration.
+                    Everything else in this status struct is observational and MUST NOT be
+                    read by other controllers (enforced repo-wide by the crossstatusreads
+                    analyzer).
+                  properties:
+                    githubTeamId:
+                      description: |-
+                        GithubTeamID is the numeric GitHub team ID assigned by GitHub once the
+                        XGitHubTeam composite reaches Ready, populated by the Reporting phase from
+                        XGitHubTeam.status.teamID (F-04, PRD-331). Track 1e MOVE: this is now the
+                        SOLE location — the former top-level status.githubTeamID field is deleted
+                        (it had zero readers repo-wide beyond this same producer). Once written,
+                        the value is preserved across reconciliations even if the XGitHubTeam is
+                        transiently unhealthy — GitHub team IDs are stable for the life of the team.
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        Stamped by the SAME producer write that fills the rest of this struct,
+                        from resource.GetGeneration() read at render time. NEVER defaulted or
+                        filled by status_updater (design decision 3).
+                      format: int64
+                      type: integer
+                    resolvedMembers:
+                      description: |-
+                        Only Resolved members appear (consumers' Status=="Resolved" filter moves
+                        into the producer).
+                      items:
+                        description: |-
+                          KubeTeamMemberStatus records the resolution state for a single team member.
+                          Populated by the KubeTeam reconciler during the Syncing phase (F-03).
+                        properties:
+                          email:
+                            description: Email mirrors the spec email for correlation.
+                            type: string
+                          githubLink:
+                            allOf:
+                              - enum:
+                                  - Linked
+                                  - NotLinked
+                              - enum:
+                                  - Linked
+                                  - NotLinked
+                            description: |-
+                              GitHubLink indicates whether the Zitadel user has a linked GitHub IDP account (Q-02, AC-11).
+                              NotLinked is not a failure — the member is excluded from GitHub team membership only.
+                            type: string
+                          githubUsername:
+                            description: |-
+                              GitHubUsername is the GitHub username derived from the user's linked Zitadel IDP account.
+                              Cached here by the KubeTeam reconciler so KubeProject avoids additional GitHub API calls (AC-12, Q-05).
+                              Empty when GitHubLink is NotLinked.
+                            type: string
+                          lastResolved:
+                            description: |-
+                              LastResolved is the timestamp when this member's identity was last resolved.
+                              Used by the Reporting phase for freshness tracking.
+                            format: date-time
+                            type: string
+                          message:
+                            description: Message contains a human-readable explanation when Status is NotFound.
+                            type: string
+                          status:
+                            allOf:
+                              - enum:
+                                  - Resolved
+                                  - NotFound
+                              - enum:
+                                  - Resolved
+                                  - NotFound
+                            description: Status is the Zitadel resolution state for this member.
+                            type: string
+                          zitadelUserId:
+                            description: |-
+                              ZitadelUserID is the resolved Zitadel user ID.
+                              Populated only when Status is Resolved. Used by KubeProject to apply grants (AC-02).
+                            type: string
+                        required:
+                          - email
+                          - status
+                        type: object
+                      type: array
+                  type: object
                 phase:
                   description: |-
                     Phase indicates the current reconciliation phase.
@@ -290,6 +383,14 @@ spec:
                   type: string
                 reconciliationAttempts:
                   description: ReconciliationAttempts tracks the number of reconciliation attempts for backoff.
+                  type: integer
+                renderedGeneration:
+                  description: |-
+                    RenderedGeneration is the generation whose spec the last completed
+                    Reconciling pass rendered into child XRs. Internal bookkeeping for the
+                    observedGeneration attestation on the Ready transition (plan §3.1); NOT
+                    an output — no other controller may read it.
+                  format: int64
                   type: integer
                 resolvedCount:
                   description: |-

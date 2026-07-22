@@ -894,6 +894,14 @@ spec:
                 reconciliationAttempts:
                   description: ReconciliationAttempts tracks the number of reconciliation attempts for backoff
                   type: integer
+                renderedGeneration:
+                  description: |-
+                    RenderedGeneration is the generation whose spec the last completed
+                    Reconciling pass rendered into child XRs. Internal bookkeeping for the
+                    observedGeneration attestation on the Ready transition (plan §3.1); NOT
+                    an output — no other controller may read it.
+                  format: int64
+                  type: integer
                 repositoryUrl:
                   description: RepositoryUrl contains the URL of the created GitHub repository
                   type: string
@@ -970,6 +978,9 @@ spec:
                   type: object
               type: object
           type: object
+          x-kubernetes-validations:
+            - message: metadata.name must not contain '--' (reserved separator for dedicated-environment XKubEnv naming {project}-{app}--{env}, V-14)
+              rule: '!self.metadata.name.contains(''--'')'
       served: true
       storage: true
       subresources:

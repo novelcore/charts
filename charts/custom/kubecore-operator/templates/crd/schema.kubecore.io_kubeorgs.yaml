@@ -632,23 +632,19 @@ spec:
                       description: ProviderConfig is the resolved gcp.m.upbound.io ProviderConfig name.
                       type: string
                   type: object
-                gitHubAppDiscovered:
-                  description: |-
-                    GitHubAppDiscovered records dedicated GitHub App discovery/verify outcome (derived
-                    installationId + contents:write). Populated by the Reconciling phase on the dedicated path.
-                  properties:
-                    appId:
-                      type: string
-                    contentsWrite:
-                      type: boolean
-                    installationId:
-                      type: string
-                    verifiedAt:
-                      format: date-time
-                      type: string
-                  type: object
                 identityProvider:
-                  description: IdentityProvider contains Zitadel integration status
+                  description: |-
+                    IdentityProvider contains Zitadel integration status. RETAINED (not moved to
+                    Outputs) despite being a §3.2 MOVE candidate: it is a multi-pass Zitadel
+                    provisioning state machine — the Syncing phase (syncing.go) and
+                    org_team_grants.go/deleting.go read back THIS field's own prior-reconcile
+                    value across many incremental steps (org create -> IDP wiring -> roles ->
+                    project grant) that all complete before the Reporting phase (the only
+                    producer of Outputs) ever runs. Outputs.IdentityProvider is filled from
+                    this field once Reporting runs (see reporting.go extractIdentityProviderStatus),
+                    so the contract copy still exists; only the own-CR bootstrap copy survives
+                    here. Track 1e MOVE-pass deviation (rule: own-CR reader that cannot be
+                    cleanly migrated stays retained-observational).
                   properties:
                     actionConfigured:
                       description: ActionConfigured indicates if the action and flow triggers are configured
@@ -732,150 +728,280 @@ spec:
                   description: LastTransitionTime records when the status was last updated
                   format: date-time
                   type: string
-                networks:
-                  description: Networks contains the status of network resources
-                  properties:
-                    regional:
-                      description: Regional contains the status of network resources in each region
-                      items:
-                        description: RegionalNetworkStatus contains the status of network resources in a specific region
-                        properties:
-                          cloudProvider:
-                            description: |-
-                              CloudProvider identifies which cloud provider owns this network entry
-                              ("aws" | "gcp" | "azure"). Populated by the Azure composition set today;
-                              AWS and GCP entries leave this empty.
-                            type: string
-                          dns:
-                            description: DNS holds zone information when DNS is enabled on this network.
-                            properties:
-                              domain:
-                                description: Domain is the DNS domain name (e.g. "acme.com").
-                                type: string
-                              nameServers:
-                                description: NameServers are the authoritative nameservers for the zone.
-                                items:
-                                  type: string
-                                type: array
-                              providerKind:
-                                description: 'ProviderKind identifies the DNS provider: "route53" or "clouddns".'
-                                type: string
-                              state:
-                                description: State is the provider-reported zone state.
-                                type: string
-                              zoneId:
-                                description: |-
-                                  ZoneID is the provider-assigned zone identifier (Route53 hostedZoneId
-                                  for AWS, Cloud DNS ManagedZone name for GCP).
-                                type: string
-                            type: object
-                          message:
-                            description: Message contains additional status information
-                            type: string
-                          name:
-                            description: Name of the network resource
-                            type: string
-                          nat:
-                            description: |-
-                              NAT holds the status of the NAT Gateway provisioned for this regional network.
-                              Populated from XAwsNetwork.status.natGateway via AWSOrgCompositionSet.ExtractStatus.
-                              Zero value when NAT is not enabled or before XAwsNetwork reaches Ready=True.
-                            properties:
-                              azs:
-                                description: |-
-                                  AZs is the list of availability zones with a NAT.
-                                  Taken from the network's AZ list; populated before Ready=True.
-                                items:
-                                  type: string
-                                type: array
-                              count:
-                                description: Count is the number of NAT Gateways provisioned (one per AZ when fully provisioned).
-                                type: integer
-                              ids:
-                                description: |-
-                                  IDs is the list of AWS NAT Gateway IDs (e.g. ["nat-0a1b2c3d4e5f", ...]), one per active AZ.
-                                  IDs[i] aligns positionally with AZs[i]. Empty before all NATs reach Ready=True.
-                                items:
-                                  type: string
-                                type: array
-                              ips:
-                                description: |-
-                                  IPs is the list of public Elastic IPs allocated to NATs, one per active AZ (positionally aligned with AZs).
-                                  Empty before all NATs reach Ready=True.
-                                items:
-                                  type: string
-                                type: array
-                              mode:
-                                description: Mode is the NAT Gateway topology mode, "per-az" (one NAT per AZ in public subnet).
-                                type: string
-                            type: object
-                          region:
-                            description: Region where the network is deployed
-                            type: string
-                          resourceGroup:
-                            description: |-
-                              ResourceGroup is the cloud-specific RG/project container for this network.
-                              Populated for Azure (RG name); empty for AWS/GCP.
-                            type: string
-                          state:
-                            description: State of the network resource
-                            type: string
-                          subnets:
-                            description: |-
-                              Subnets exposes subnet IDs by role for downstream consumers (e.g. KubePool/AKS).
-                              Populated by Azure ExtractStatus. Empty for AWS and GCP, which do not
-                              surface subnet identifiers through RegionalNetworkStatus today.
-                            items:
-                              description: |-
-                                SubnetStatus exposes one subnet by its semantic role.
-                                Used by Azure to surface system + workload subnet IDs for AKS consumption.
-                              properties:
-                                id:
-                                  description: ID is the cloud-native subnet identifier (full Azure resource ID for Azure).
-                                  type: string
-                                role:
-                                  description: Role identifies the subnet's purpose ("system" | "workload" for Azure).
-                                  type: string
-                              required:
-                                - id
-                                - role
-                              type: object
-                            type: array
-                          vpcCIDR:
-                            description: VpcCIDR of the provisioned VPC
-                            type: string
-                          vpcId:
-                            description: VPCId of the provisioned VPC
-                            type: string
-                        type: object
-                      type: array
-                    state:
-                      description: State represents the overall state of network resources
-                      type: string
-                    summary:
-                      description: Summary contains aggregated network statistics
-                      properties:
-                        baseCIDR:
-                          description: BaseCIDR is the base CIDR block for all networks
-                          type: string
-                        failed:
-                          description: Failed number of network resources
-                          type: integer
-                        pending:
-                          description: Pending number of network resources
-                          type: integer
-                        ready:
-                          description: Ready number of network resources
-                          type: integer
-                        total:
-                          description: Total number of network resources
-                          type: integer
-                      type: object
-                  type: object
                 observedGeneration:
                   description: ObservedGeneration is the most recent generation observed by the controller
                   format: int64
                   type: integer
+                outputs:
+                  description: |-
+                    Outputs is the deliberate cross-controller contract of this KubeOrg
+                    (remediation plan r2 §2.2). Consumers access it ONLY through
+                    parentref.GetKubeOrgOutputs, which gates on Ready + observedGeneration.
+                    Everything else in this status struct is observational and MUST NOT be
+                    read by other controllers (enforced repo-wide by the crossstatusreads
+                    analyzer).
+                  properties:
+                    gitHubAppDiscovered:
+                      description: |-
+                        GitHubAppDiscovered: consumed by kaos-gitops-gateway (onboarding.go:247-254,
+                        :313-319; resolver.go:195-221) — a cross-boundary consumer the r1 inventory
+                        missed. Moving it into outputs makes the gateway a first-class contract
+                        consumer instead of a silent scraper.
+                      properties:
+                        appId:
+                          type: string
+                        contentsWrite:
+                          type: boolean
+                        installationId:
+                          type: string
+                        verifiedAt:
+                          format: date-time
+                          type: string
+                      type: object
+                    identityProvider:
+                      description: Required for Ready.
+                      properties:
+                        actionConfigured:
+                          description: ActionConfigured indicates if the action and flow triggers are configured
+                          type: boolean
+                        actionId:
+                          description: ActionID is the ID of the "addGroupsClaim" action
+                          type: string
+                        githubIdpEnabled:
+                          description: GitHubIDPEnabled indicates if GitHub IDP is activated for this organization
+                          type: boolean
+                        initialAdminAssigned:
+                          description: InitialAdminAssigned indicates if initial admin was granted access
+                          type: boolean
+                        lastUpdated:
+                          description: LastUpdated is when the status was last updated
+                          format: date-time
+                          type: string
+                        message:
+                          description: Message contains additional status information
+                          type: string
+                        orgProjectId:
+                          description: |-
+                            OrgProjectID is the organization-specific Zitadel project for RBAC roles
+                            This project is created within the org and contains org-level + project-level roles
+                          type: string
+                        orgProjectName:
+                          description: OrgProjectName is the name of the organization-specific project
+                          type: string
+                        orgRoles:
+                          description: OrgRoles contains org-level roles created in the org project
+                          items:
+                            description: RoleStatus contains the status of a Zitadel role
+                            properties:
+                              created:
+                                description: Created indicates if the role was successfully created
+                                type: boolean
+                              displayName:
+                                description: DisplayName is the human-readable role name
+                                type: string
+                              name:
+                                description: Name is the role key (e.g., "kubeorg:acme:admin")
+                                type: string
+                            type: object
+                          type: array
+                        orgRolesProjectConfigured:
+                          description: OrgRolesProjectConfigured indicates if projectRoleAssertion is enabled
+                          type: boolean
+                        organizationId:
+                          description: OrganizationID is the Zitadel organization ID
+                          type: string
+                        organizationName:
+                          description: OrganizationName is the Zitadel organization name
+                          type: string
+                        projectGrantId:
+                          description: ProjectGrantID is the ID of the project grant from KAOS org to this org
+                          type: string
+                        projectId:
+                          description: ProjectID is the KAOS kaos-app project ID
+                          type: string
+                        ready:
+                          description: Ready indicates if Zitadel organization is fully configured
+                          type: boolean
+                        roles:
+                          description: Roles contains the status of created roles (deprecated - roles are in kaos-app project)
+                          items:
+                            description: RoleStatus contains the status of a Zitadel role
+                            properties:
+                              created:
+                                description: Created indicates if the role was successfully created
+                                type: boolean
+                              displayName:
+                                description: DisplayName is the human-readable role name
+                                type: string
+                              name:
+                                description: Name is the role key (e.g., "kubeorg:acme:admin")
+                                type: string
+                            type: object
+                          type: array
+                      type: object
+                    networks:
+                      description: |-
+                        Per-region DNS delegation data. Regional entries may be individually pending;
+                        consumers (kubepool system_params aws:235/gcp:152) select by region and treat
+                        a missing region as NotReady, not as absent-by-design.
+                      properties:
+                        regional:
+                          description: Regional contains the status of network resources in each region
+                          items:
+                            description: RegionalNetworkStatus contains the status of network resources in a specific region
+                            properties:
+                              cloudProvider:
+                                description: |-
+                                  CloudProvider identifies which cloud provider owns this network entry
+                                  ("aws" | "gcp" | "azure"). Populated by the Azure composition set today;
+                                  AWS and GCP entries leave this empty.
+                                type: string
+                              dns:
+                                description: DNS holds zone information when DNS is enabled on this network.
+                                properties:
+                                  domain:
+                                    description: Domain is the DNS domain name (e.g. "acme.com").
+                                    type: string
+                                  nameServers:
+                                    description: NameServers are the authoritative nameservers for the zone.
+                                    items:
+                                      type: string
+                                    type: array
+                                  providerKind:
+                                    description: 'ProviderKind identifies the DNS provider: "route53" or "clouddns".'
+                                    type: string
+                                  state:
+                                    description: State is the provider-reported zone state.
+                                    type: string
+                                  zoneId:
+                                    description: |-
+                                      ZoneID is the provider-assigned zone identifier (Route53 hostedZoneId
+                                      for AWS, Cloud DNS ManagedZone name for GCP).
+                                    type: string
+                                type: object
+                              message:
+                                description: Message contains additional status information
+                                type: string
+                              name:
+                                description: Name of the network resource
+                                type: string
+                              nat:
+                                description: |-
+                                  NAT holds the status of the NAT Gateway provisioned for this regional network.
+                                  Populated from XAwsNetwork.status.natGateway via AWSOrgCompositionSet.ExtractStatus.
+                                  Zero value when NAT is not enabled or before XAwsNetwork reaches Ready=True.
+                                properties:
+                                  azs:
+                                    description: |-
+                                      AZs is the list of availability zones with a NAT.
+                                      Taken from the network's AZ list; populated before Ready=True.
+                                    items:
+                                      type: string
+                                    type: array
+                                  count:
+                                    description: Count is the number of NAT Gateways provisioned (one per AZ when fully provisioned).
+                                    type: integer
+                                  ids:
+                                    description: |-
+                                      IDs is the list of AWS NAT Gateway IDs (e.g. ["nat-0a1b2c3d4e5f", ...]), one per active AZ.
+                                      IDs[i] aligns positionally with AZs[i]. Empty before all NATs reach Ready=True.
+                                    items:
+                                      type: string
+                                    type: array
+                                  ips:
+                                    description: |-
+                                      IPs is the list of public Elastic IPs allocated to NATs, one per active AZ (positionally aligned with AZs).
+                                      Empty before all NATs reach Ready=True.
+                                    items:
+                                      type: string
+                                    type: array
+                                  mode:
+                                    description: Mode is the NAT Gateway topology mode, "per-az" (one NAT per AZ in public subnet).
+                                    type: string
+                                type: object
+                              region:
+                                description: Region where the network is deployed
+                                type: string
+                              resourceGroup:
+                                description: |-
+                                  ResourceGroup is the cloud-specific RG/project container for this network.
+                                  Populated for Azure (RG name); empty for AWS/GCP.
+                                type: string
+                              state:
+                                description: State of the network resource
+                                type: string
+                              subnets:
+                                description: |-
+                                  Subnets exposes subnet IDs by role for downstream consumers (e.g. KubePool/AKS).
+                                  Populated by Azure ExtractStatus. Empty for AWS and GCP, which do not
+                                  surface subnet identifiers through RegionalNetworkStatus today.
+                                items:
+                                  description: |-
+                                    SubnetStatus exposes one subnet by its semantic role.
+                                    Used by Azure to surface system + workload subnet IDs for AKS consumption.
+                                  properties:
+                                    id:
+                                      description: ID is the cloud-native subnet identifier (full Azure resource ID for Azure).
+                                      type: string
+                                    role:
+                                      description: Role identifies the subnet's purpose ("system" | "workload" for Azure).
+                                      type: string
+                                  required:
+                                    - id
+                                    - role
+                                  type: object
+                                type: array
+                              vpcCIDR:
+                                description: VpcCIDR of the provisioned VPC
+                                type: string
+                              vpcId:
+                                description: VPCId of the provisioned VPC
+                                type: string
+                            type: object
+                          type: array
+                        state:
+                          description: State represents the overall state of network resources
+                          type: string
+                        summary:
+                          description: Summary contains aggregated network statistics
+                          properties:
+                            baseCIDR:
+                              description: BaseCIDR is the base CIDR block for all networks
+                              type: string
+                            failed:
+                              description: Failed number of network resources
+                              type: integer
+                            pending:
+                              description: Pending number of network resources
+                              type: integer
+                            ready:
+                              description: Ready number of network resources
+                              type: integer
+                            total:
+                              description: Total number of network resources
+                              type: integer
+                          type: object
+                      type: object
+                    observedGeneration:
+                      description: |-
+                        Stamped by the SAME producer write that fills the rest of this struct
+                        (the Reporting-phase rendering pass), from resource.GetGeneration() read at
+                        render time. NEVER defaulted or filled by status_updater (design decision 3).
+                      format: int64
+                      type: integer
+                    zitadelMachineUserId:
+                      description: |-
+                        ZitadelMachineUserID is the deterministic id of this org's keyless Zitadel
+                        machine user (the JWT `sub` every cloud-federation trust pins); broker +
+                        Terraform zitadel_sub parity consumer. Track 1e MOVE: this is now the SOLE
+                        location (the former top-level status.zitadelMachineUserId field is
+                        deleted). Filled by the Reconciling phase via a read-modify-write on this
+                        same Outputs pointer (reconciling.go) so the value survives the several
+                        reconciles that elapse before the Reporting phase rebuilds the rest of
+                        Outputs; Reporting's buildOutputs preserves it (never overwrites with an
+                        empty value).
+                      type: string
+                  type: object
                 phase:
                   description: Phase indicates the current reconciliation phase
                   enum:
@@ -918,12 +1044,14 @@ spec:
                 reconciliationAttempts:
                   description: ReconciliationAttempts tracks the number of reconciliation attempts for backoff
                   type: integer
-                zitadelMachineUserId:
+                renderedGeneration:
                   description: |-
-                    ZitadelMachineUserId is the deterministic id of this org's keyless Zitadel machine
-                    user (the JWT `sub` every cloud-federation trust pins). Published by the Reconciling
-                    phase; consumed by the in-cluster token-broker to impersonate this org (F-14, C1.5-a).
-                  type: string
+                    RenderedGeneration is the generation whose spec the last completed
+                    Reconciling pass rendered into child XRs. Internal bookkeeping for the
+                    observedGeneration attestation on the Ready transition (plan §3.1); NOT
+                    an output — no other controller may read it.
+                  format: int64
+                  type: integer
               type: object
           required:
             - spec

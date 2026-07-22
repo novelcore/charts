@@ -139,9 +139,13 @@ spec:
                         type: string
                       name:
                         description: Name of the environment (e.g., "dev", "staging", "prod")
+                        maxLength: 63
                         minLength: 1
                         pattern: ^[a-z0-9][a-z0-9-]*[a-z0-9]$
                         type: string
+                        x-kubernetes-validations:
+                          - message: environment name must not contain '--' (reserved separator for dedicated-environment XKubEnv naming {project}-{app}--{env}, V-14)
+                            rule: '!self.contains(''--'')'
                       nodeGroup:
                         description: |-
                           NodeGroup carries the complete, cloud-neutral dedicated node-group
@@ -352,6 +356,7 @@ spec:
                       - name
                       - priority
                     type: object
+                  maxItems: 20
                   type: array
                 githubConfiguration:
                   description: GitHubConfiguration for the project
@@ -1027,6 +1032,19 @@ spec:
                   description: |-
                     MLStack tracks the per-project ML stack (XProjectMLStack) status.
                     Populated only when spec.ml.enabled is true (PRD #240, F-07).
+                    RETAINED (not moved to Outputs) despite being a §3.2 MOVE candidate: this
+                    struct is used as an own-CR, cross-function IN-MEMORY STAGING area across
+                    the entire OIDC provisioning pipeline (reconciling_oidc.go — ensureMLStackOIDC
+                    and its helpers read/write this field many times within one Execute pass
+                    before persistMLOIDCStatus's single conflict-safe write), and the Ready
+                    phase's needsMLOIDCProvisioning bootstrap-gates on the persisted value from
+                    a PRIOR reconcile to decide whether to re-enter Reconciling — deleting this
+                    field would require refactoring that entire pipeline's scratch-state pattern,
+                    which is out of scope for a MOVE pass on a live, duplicate-Zitadel-app-creation
+                    -sensitive path. Outputs.MLStack is still fully populated (both by
+                    persistMLOIDCStatus's OIDC subset and reporting_ml.go's richer XR-derived
+                    fields — Track 1e MOVE-pass fix closed a producer desync where only the
+                    OIDC subset ever reached Outputs). Track 1e MOVE-pass deviation.
                   properties:
                     features:
                       description: Features records which ML stack components are enabled.
@@ -1200,6 +1218,281 @@ spec:
                   description: ObservedGeneration is the most recent generation observed by the controller
                   format: int64
                   type: integer
+                outputs:
+                  description: |-
+                    Outputs is the deliberate cross-controller contract of this KubeProject
+                    (remediation plan r2 §2.2). Consumers access it ONLY through
+                    parentref.GetKubeProjectOutputs, which gates on Ready + observedGeneration.
+                    Everything else in this status struct is observational and MUST NOT be
+                    read by other controllers (enforced repo-wide by the crossstatusreads
+                    analyzer).
+                  properties:
+                    environments:
+                      description: |-
+                        Environments the project publishes for apps to deploy into. Entries are
+                        added only when the backing XKubEnv passed the fresh-Ready check (r1 §3.4),
+                        so presence == DEPLOYABLE. This list is a same-function projection of the
+                        observational status.environments[] list — see the dual-list invariant below.
+                      items:
+                        description: |-
+                          EnvironmentOutput is the published, deployable-only projection of one
+                          project environment. See KubeProjectOutputs.Environments for the dual-list
+                          invariant with the observational status.environments[] list.
+                        properties:
+                          baseDns:
+                            type: string
+                          environmentType:
+                            type: string
+                          kubePool:
+                            type: string
+                          name:
+                            type: string
+                          namespace:
+                            description: Namespace is authoritative; apps no longer list XKubEnvs.
+                            type: string
+                          priority:
+                            type: integer
+                          schedulingProfile:
+                            description: SchedulingProfileStatus contains the scheduling configuration produced by XKubEnv
+                            properties:
+                              availabilityZones:
+                                description: AvailabilityZones are the availability zones where environment nodes run
+                                items:
+                                  type: string
+                                type: array
+                              nodeSelector:
+                                additionalProperties:
+                                  type: string
+                                description: NodeSelector are the node labels to use as scheduling constraints
+                                type: object
+                              tolerations:
+                                description: Tolerations are the tolerations required to schedule on environment nodes
+                                items:
+                                  description: TolerationStatus represents a single Kubernetes toleration
+                                  properties:
+                                    effect:
+                                      type: string
+                                    key:
+                                      type: string
+                                    operator:
+                                      type: string
+                                    value:
+                                      type: string
+                                  required:
+                                    - key
+                                  type: object
+                                type: array
+                            type: object
+                          xKubEnvRef:
+                            description: |-
+                              XKubEnvRef (name+uid) is the stable join key for kaos-graph / NOUS after H-1
+                              removes ownerRef edges — the label+ref pair replaces the ownerRef graph edge.
+                            properties:
+                              apiVersion:
+                                description: API version of the resource
+                                type: string
+                              kind:
+                                description: Kind of the resource
+                                type: string
+                              name:
+                                description: Name of the resource
+                                type: string
+                              namespace:
+                                description: Namespace of the resource (if namespaced)
+                                type: string
+                              uid:
+                                description: UID of the resource
+                                type: string
+                            type: object
+                        required:
+                          - kubePool
+                          - name
+                          - namespace
+                        type: object
+                      type: array
+                    mlStack:
+                      description: |-
+                        MLStackStatus tracks the per-project ML stack (XProjectMLStack).
+                        Populated by the KubeProject Reporting phase (PRD #240, F-07) after the
+                        cloud-specific composition set has materialised the workloads in the
+                        client KubePool.
+                      properties:
+                        features:
+                          description: Features records which ML stack components are enabled.
+                          properties:
+                            lakefs:
+                              type: boolean
+                            mlflow:
+                              type: boolean
+                            postgres:
+                              type: boolean
+                            s3:
+                              type: boolean
+                          type: object
+                        lakeFSEndpoint:
+                          description: LakeFSEndpoint is the in-cluster service URL for LakeFS.
+                          type: string
+                        lakeFSOIDC:
+                          description: |-
+                            LakeFSOIDC tracks the Zitadel OIDC app and secret-chain status for
+                            LakeFS SSO via oauth2-proxy (PRD-240 F-18).
+                          properties:
+                            appId:
+                              description: AppID is the Zitadel application ID.
+                              type: string
+                            clientId:
+                              description: ClientID is the OIDC client ID.
+                              type: string
+                            discoveryUrl:
+                              description: DiscoveryURL is the Zitadel OIDC issuer's discovery endpoint.
+                              type: string
+                            projectId:
+                              description: ProjectID is the Zitadel project the app belongs to.
+                              type: string
+                            rbacSeeded:
+                              description: |-
+                                RBACSeeded indicates the operator has seeded MLflow group permissions for
+                                this project's (project,role) groups via the mlflow-oidc-auth plugin API
+                                (KubeTeam role → MLflow permission: admin=MANAGE, ops/dev=EDIT, business=READ).
+                                MLflow-only; LakeFS OSS has no per-user RBAC. PRD-240 KubeTeam→MLflow RBAC.
+                              type: boolean
+                            ready:
+                              description: |-
+                                Ready indicates the OIDC app is created and credentials are pushed
+                                to the cloud Secret Manager.
+                              type: boolean
+                            secretName:
+                              description: SecretName is the cloud Secret Manager key holding OIDC credentials.
+                              type: string
+                            serviceUserSecretName:
+                              description: |-
+                                ServiceUserSecretName is the cloud Secret Manager key holding the minted
+                                pipeline service-user credentials (username + access token) for the MLflow
+                                basic-auth protocol. Empty until the operator provisions the service user.
+                              type: string
+                          type: object
+                        lakeFSRepository:
+                          description: LakeFSRepository is the LakeFS repository name.
+                          type: string
+                        lakeFSUrl:
+                          description: |-
+                            LakeFSURL is the public HTTPS URL for LakeFS via oauth2-proxy
+                            (lakefs-{project}.{baseDns}). Only set when the LakeFS OIDC route is
+                            provisioned.
+                          type: string
+                        lastReconciled:
+                          description: LastReconciled is when the ML stack was last reconciled.
+                          format: date-time
+                          type: string
+                        message:
+                          description: Message contains details about the current state.
+                          type: string
+                        mlflowEndpoint:
+                          description: MLflowEndpoint is the in-cluster service URL for MLflow.
+                          type: string
+                        mlflowOIDC:
+                          description: |-
+                            MlflowOIDC tracks the Zitadel OIDC app and secret-chain status for
+                            MLflow SSO. Populated by the Reconciling phase when the parent
+                            KubeOrg has a Ready IdentityProvider (PRD-240 F-18).
+                          properties:
+                            appId:
+                              description: AppID is the Zitadel application ID.
+                              type: string
+                            clientId:
+                              description: ClientID is the OIDC client ID.
+                              type: string
+                            discoveryUrl:
+                              description: DiscoveryURL is the Zitadel OIDC issuer's discovery endpoint.
+                              type: string
+                            projectId:
+                              description: ProjectID is the Zitadel project the app belongs to.
+                              type: string
+                            rbacSeeded:
+                              description: |-
+                                RBACSeeded indicates the operator has seeded MLflow group permissions for
+                                this project's (project,role) groups via the mlflow-oidc-auth plugin API
+                                (KubeTeam role → MLflow permission: admin=MANAGE, ops/dev=EDIT, business=READ).
+                                MLflow-only; LakeFS OSS has no per-user RBAC. PRD-240 KubeTeam→MLflow RBAC.
+                              type: boolean
+                            ready:
+                              description: |-
+                                Ready indicates the OIDC app is created and credentials are pushed
+                                to the cloud Secret Manager.
+                              type: boolean
+                            secretName:
+                              description: SecretName is the cloud Secret Manager key holding OIDC credentials.
+                              type: string
+                            serviceUserSecretName:
+                              description: |-
+                                ServiceUserSecretName is the cloud Secret Manager key holding the minted
+                                pipeline service-user credentials (username + access token) for the MLflow
+                                basic-auth protocol. Empty until the operator provisions the service user.
+                              type: string
+                          type: object
+                        mlflowPipelineIdentityReady:
+                          description: |-
+                            MlflowPipelineIdentityReady is true once the per-project MLflow *pipeline*
+                            machine identity (Zitadel machine user + key, published to
+                            {project}-mlflow-svc) has been provisioned. The Ready phase re-triggers
+                            Reconciling while this is nil/false so existing projects self-heal into the
+                            bearer-JWT pipeline-auth model with no manual reconcile.
+                          type: boolean
+                        mlflowUrl:
+                          description: |-
+                            MLflowURL is the public HTTPS URL for MLflow, served through the pool's
+                            Envoy Gateway HTTPRoute (mlflow-{project}.{baseDns}). Only set when the
+                            MLflow OIDC route is provisioned (mlflowOIDC enabled and baseDns known).
+                          type: string
+                        namespace:
+                          description: |-
+                            Namespace is the Kubernetes namespace hosting the ML stack in the client
+                            KubePool cluster (typically "ml-{project}").
+                          type: string
+                        objectStorageBucket:
+                          description: |-
+                            ObjectStorageBucket is the name of the artifact bucket. The scheme
+                            (s3://, gs://, file:///...) is resolved by StorageProviderContract at
+                            composition rendering time (D-06); this field carries only the name.
+                          type: string
+                        postgresHost:
+                          description: |-
+                            PostgresHost is the in-cluster Postgres read-write service host
+                            (e.g., "{project}-pg-rw.ml-{project}.svc").
+                          type: string
+                        state:
+                          description: 'State of the ML stack: "Pending", "Creating", "Ready", "Failed".'
+                          type: string
+                        xProjectMLStackRef:
+                          description: |-
+                            XProjectMLStackRef references the created namespaced XProjectMLStack XR
+                            in the KubeOrg namespace.
+                          properties:
+                            apiVersion:
+                              description: API version of the resource
+                              type: string
+                            kind:
+                              description: Kind of the resource
+                              type: string
+                            name:
+                              description: Name of the resource
+                              type: string
+                            namespace:
+                              description: Namespace of the resource (if namespaced)
+                              type: string
+                            uid:
+                              description: UID of the resource
+                              type: string
+                          type: object
+                      type: object
+                    observedGeneration:
+                      description: |-
+                        Stamped by the SAME producer write that fills the rest of this struct,
+                        from resource.GetGeneration() read at render time. NEVER defaulted or
+                        filled by status_updater (design decision 3).
+                      format: int64
+                      type: integer
+                  type: object
                 phase:
                   description: Phase indicates the current reconciliation phase
                   enum:
@@ -1213,8 +1506,19 @@ spec:
                 reconciliationAttempts:
                   description: ReconciliationAttempts tracks the number of reconciliation attempts for backoff
                   type: integer
+                renderedGeneration:
+                  description: |-
+                    RenderedGeneration is the generation whose spec the last completed
+                    Reconciling pass rendered into child XRs. Internal bookkeeping for the
+                    observedGeneration attestation on the Ready transition (plan §3.1); NOT
+                    an output — no other controller may read it.
+                  format: int64
+                  type: integer
               type: object
           type: object
+          x-kubernetes-validations:
+            - message: metadata.name must not contain '--' (reserved separator for dedicated-environment XKubEnv naming {project}-{app}--{env}, V-14)
+              rule: '!self.metadata.name.contains(''--'')'
       served: true
       storage: true
       subresources:
