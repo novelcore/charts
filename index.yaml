@@ -1,1482 +1,1560 @@
 apiVersion: v1
 entries:
   argo-cd:
-    - annotations:
-        artifacthub.io/changes: |
-          - kind: added
-            description: Add condition for rootpath in NOTES.txt
-        artifacthub.io/signKey: |
-          fingerprint: 2B8F22F57260EFA67BE1C5824B11F800CD9D2252
-          url: https://argoproj.github.io/argo-helm/pgp_keys.asc
-      apiVersion: v2
-      appVersion: v3.0.12
-      created: "2026-07-22T14:28:34.897791052Z"
-      dependencies:
-        - condition: redis-ha.enabled
-          name: redis-ha
-          repository: https://dandydeveloper.github.io/charts/
-          version: 4.33.7
-      description: A Helm chart for Argo CD, a declarative, GitOps continuous delivery tool for Kubernetes.
-      digest: a319a7448c4a964627c1e7e4f49d7aaea15a8ce6a863dc0fb087f453096ad58d
-      home: https://github.com/argoproj/argo-helm
-      icon: https://argo-cd.readthedocs.io/en/stable/assets/logo.png
-      keywords:
-        - argoproj
-        - argocd
-        - gitops
-      kubeVersion: '>=1.25.0-0'
-      maintainers:
-        - name: argoproj
-          url: https://argoproj.github.io/
-      name: argo-cd
-      sources:
-        - https://github.com/argoproj/argo-helm/tree/main/charts/argo-cd
-        - https://github.com/argoproj/argo-cd
-      urls:
-        - https://novelcore.github.io/charts/argo-cd-8.2.5.tgz
-      version: 8.2.5
+  - annotations:
+      artifacthub.io/changes: |
+        - kind: added
+          description: Add condition for rootpath in NOTES.txt
+      artifacthub.io/signKey: |
+        fingerprint: 2B8F22F57260EFA67BE1C5824B11F800CD9D2252
+        url: https://argoproj.github.io/argo-helm/pgp_keys.asc
+    apiVersion: v2
+    appVersion: v3.0.12
+    created: "2026-07-22T15:14:56.1863163Z"
+    dependencies:
+    - condition: redis-ha.enabled
+      name: redis-ha
+      repository: https://dandydeveloper.github.io/charts/
+      version: 4.33.7
+    description: A Helm chart for Argo CD, a declarative, GitOps continuous delivery
+      tool for Kubernetes.
+    digest: a319a7448c4a964627c1e7e4f49d7aaea15a8ce6a863dc0fb087f453096ad58d
+    home: https://github.com/argoproj/argo-helm
+    icon: https://argo-cd.readthedocs.io/en/stable/assets/logo.png
+    keywords:
+    - argoproj
+    - argocd
+    - gitops
+    kubeVersion: '>=1.25.0-0'
+    maintainers:
+    - name: argoproj
+      url: https://argoproj.github.io/
+    name: argo-cd
+    sources:
+    - https://github.com/argoproj/argo-helm/tree/main/charts/argo-cd
+    - https://github.com/argoproj/argo-cd
+    urls:
+    - https://novelcore.github.io/charts/argo-cd-8.2.5.tgz
+    version: 8.2.5
   argo-cd-with-rollouts:
-    - annotations:
-        artifacthub.io/changes: |
-          - kind: added
-            description: Add condition for rootpath in NOTES.txt
-        artifacthub.io/signKey: |
-          fingerprint: 2B8F22F57260EFA67BE1C5824B11F800CD9D2252
-          url: https://argoproj.github.io/argo-helm/pgp_keys.asc
-      apiVersion: v2
-      appVersion: v3.0.12
-      created: "2026-07-22T14:28:34.908609246Z"
-      dependencies:
-        - condition: redis-ha.enabled
-          name: redis-ha
-          repository: https://dandydeveloper.github.io/charts/
-          version: 4.33.7
-        - condition: rollouts.enabled
-          name: argo-rollouts
-          repository: https://novelcore.github.io/charts/
-          version: 2.40.3
-      description: A Helm chart for Argo CD with Argo Rollouts included, a declarative, GitOps continuous delivery tool for Kubernetes.
-      digest: ede5a9049ecf3e508de4b58d2d17e2bbb829f7fee828f6e9c65849bb3fe8bed9
-      home: https://github.com/argoproj/argo-helm
-      icon: https://argo-cd.readthedocs.io/en/stable/assets/logo.png
-      keywords:
-        - argoproj
-        - argocd
-        - gitops
-      kubeVersion: '>=1.25.0-0'
-      maintainers:
-        - name: argoproj
-          url: https://argoproj.github.io/
-      name: argo-cd-with-rollouts
-      sources:
-        - https://github.com/argoproj/argo-helm/tree/main/charts/argo-cd
-        - https://github.com/argoproj/argo-cd
-      urls:
-        - https://novelcore.github.io/charts/argo-cd-with-rollouts-8.2.5.tgz
-      version: 8.2.5
-  argo-events:
-    - annotations:
-        artifacthub.io/changes: |
-          - kind: changed
-            description: Bump argo-events to v1.9.6
-        artifacthub.io/signKey: |
-          fingerprint: 2B8F22F57260EFA67BE1C5824B11F800CD9D2252
-          url: https://argoproj.github.io/argo-helm/pgp_keys.asc
-      apiVersion: v2
-      appVersion: v1.9.6
-      created: "2026-07-22T14:28:34.909700971Z"
-      description: A Helm chart for Argo Events, the event-driven workflow automation framework
-      digest: 35777a2b1f7ec00c07339edde461a71785f9c52715a044103ba7bd664c1dd63c
-      home: https://github.com/argoproj/argo-helm
-      icon: https://avatars.githubusercontent.com/u/30269780?s=200&v=4
-      keywords:
-        - argoproj
-        - argo-events
-      maintainers:
-        - name: argoproj
-          url: https://argoproj.github.io/
-      name: argo-events
-      sources:
-        - https://github.com/argoproj/argo-events
-      urls:
-        - https://novelcore.github.io/charts/argo-events-2.4.15.tgz
-      version: 2.4.15
-  argo-rollouts:
-    - annotations:
-        artifacthub.io/changes: |
-          - kind: added
-            description: support dnsConfig for controller and dashboard pods
-        artifacthub.io/signKey: |
-          fingerprint: 2B8F22F57260EFA67BE1C5824B11F800CD9D2252
-          url: https://argoproj.github.io/argo-helm/pgp_keys.asc
-      apiVersion: v2
-      appVersion: v1.8.3
-      created: "2026-07-22T14:28:34.912500272Z"
-      description: A Helm chart for Argo Rollouts
-      digest: 1dab468e27ebd4f356cbf405c2646cfad7fe1175d54dd96871c8fb751ef9a99e
-      home: https://github.com/argoproj/argo-helm
-      icon: https://argoproj.github.io/argo-rollouts/assets/logo.png
-      keywords:
-        - argoproj
-        - argo-rollouts
-      maintainers:
-        - name: argoproj
-          url: https://argoproj.github.io/
+  - annotations:
+      artifacthub.io/changes: |
+        - kind: added
+          description: Add condition for rootpath in NOTES.txt
+      artifacthub.io/signKey: |
+        fingerprint: 2B8F22F57260EFA67BE1C5824B11F800CD9D2252
+        url: https://argoproj.github.io/argo-helm/pgp_keys.asc
+    apiVersion: v2
+    appVersion: v3.0.12
+    created: "2026-07-22T15:14:56.197443228Z"
+    dependencies:
+    - condition: redis-ha.enabled
+      name: redis-ha
+      repository: https://dandydeveloper.github.io/charts/
+      version: 4.33.7
+    - condition: rollouts.enabled
       name: argo-rollouts
-      sources:
-        - https://github.com/argoproj/argo-rollouts
-      urls:
-        - https://novelcore.github.io/charts/argo-rollouts-2.40.3.tgz
+      repository: https://novelcore.github.io/charts/
       version: 2.40.3
+    description: A Helm chart for Argo CD with Argo Rollouts included, a declarative,
+      GitOps continuous delivery tool for Kubernetes.
+    digest: 593c275272643a4facab9b2e8868ff0db70361f52a35c2272a08a1af6f8ce667
+    home: https://github.com/argoproj/argo-helm
+    icon: https://argo-cd.readthedocs.io/en/stable/assets/logo.png
+    keywords:
+    - argoproj
+    - argocd
+    - gitops
+    kubeVersion: '>=1.25.0-0'
+    maintainers:
+    - name: argoproj
+      url: https://argoproj.github.io/
+    name: argo-cd-with-rollouts
+    sources:
+    - https://github.com/argoproj/argo-helm/tree/main/charts/argo-cd
+    - https://github.com/argoproj/argo-cd
+    urls:
+    - https://novelcore.github.io/charts/argo-cd-with-rollouts-8.2.5.tgz
+    version: 8.2.5
+  argo-events:
+  - annotations:
+      artifacthub.io/changes: |
+        - kind: changed
+          description: Bump argo-events to v1.9.6
+      artifacthub.io/signKey: |
+        fingerprint: 2B8F22F57260EFA67BE1C5824B11F800CD9D2252
+        url: https://argoproj.github.io/argo-helm/pgp_keys.asc
+    apiVersion: v2
+    appVersion: v1.9.6
+    created: "2026-07-22T15:14:56.198548479Z"
+    description: A Helm chart for Argo Events, the event-driven workflow automation
+      framework
+    digest: 58498439c72c7b12e35b1d08f9b2fc6292573a67a498c699faf4a5c5afc97397
+    home: https://github.com/argoproj/argo-helm
+    icon: https://avatars.githubusercontent.com/u/30269780?s=200&v=4
+    keywords:
+    - argoproj
+    - argo-events
+    maintainers:
+    - name: argoproj
+      url: https://argoproj.github.io/
+    name: argo-events
+    sources:
+    - https://github.com/argoproj/argo-events
+    urls:
+    - https://novelcore.github.io/charts/argo-events-2.4.15.tgz
+    version: 2.4.15
+  argo-rollouts:
+  - annotations:
+      artifacthub.io/changes: |
+        - kind: added
+          description: support dnsConfig for controller and dashboard pods
+      artifacthub.io/signKey: |
+        fingerprint: 2B8F22F57260EFA67BE1C5824B11F800CD9D2252
+        url: https://argoproj.github.io/argo-helm/pgp_keys.asc
+    apiVersion: v2
+    appVersion: v1.8.3
+    created: "2026-07-22T15:14:56.202175492Z"
+    description: A Helm chart for Argo Rollouts
+    digest: 601b1459713b3bbcdfebf9dd7e085d3b989bf1b4dcd88a6b3e721bb26bbeec54
+    home: https://github.com/argoproj/argo-helm
+    icon: https://argoproj.github.io/argo-rollouts/assets/logo.png
+    keywords:
+    - argoproj
+    - argo-rollouts
+    maintainers:
+    - name: argoproj
+      url: https://argoproj.github.io/
+    name: argo-rollouts
+    sources:
+    - https://github.com/argoproj/argo-rollouts
+    urls:
+    - https://novelcore.github.io/charts/argo-rollouts-2.40.3.tgz
+    version: 2.40.3
   argo-workflows:
-    - annotations:
-        artifacthub.io/changes: |
-          - kind: fixed
-            description: Fix yamllint error 'trailing spaces'
-        artifacthub.io/signKey: |
-          fingerprint: 2B8F22F57260EFA67BE1C5824B11F800CD9D2252
-          url: https://argoproj.github.io/argo-helm/pgp_keys.asc
-      apiVersion: v2
-      appVersion: v3.6.5
-      created: "2026-07-22T14:28:34.915417698Z"
-      description: A Helm chart for Argo Workflows
-      digest: 6824cdeb1757c2147733ad71888e038b9bd54800c1c95cf0773519a5e8ff5b13
-      home: https://github.com/argoproj/argo-helm
-      icon: https://argo-workflows.readthedocs.io/en/stable/assets/logo.png
-      maintainers:
-        - name: argoproj
-          url: https://argoproj.github.io/
-      name: argo-workflows
-      sources:
-        - https://github.com/argoproj/argo-workflows
-      type: application
-      urls:
-        - https://novelcore.github.io/charts/argo-workflows-0.45.12.tgz
-      version: 0.45.12
+  - annotations:
+      artifacthub.io/changes: |
+        - kind: fixed
+          description: Fix yamllint error 'trailing spaces'
+      artifacthub.io/signKey: |
+        fingerprint: 2B8F22F57260EFA67BE1C5824B11F800CD9D2252
+        url: https://argoproj.github.io/argo-helm/pgp_keys.asc
+    apiVersion: v2
+    appVersion: v3.6.5
+    created: "2026-07-22T15:14:56.204419456Z"
+    description: A Helm chart for Argo Workflows
+    digest: 4cb69ca7fa1cd1373344a7e91bd501591b1aa4c591db726d2a3205ed2b08e68c
+    home: https://github.com/argoproj/argo-helm
+    icon: https://argo-workflows.readthedocs.io/en/stable/assets/logo.png
+    maintainers:
+    - name: argoproj
+      url: https://argoproj.github.io/
+    name: argo-workflows
+    sources:
+    - https://github.com/argoproj/argo-workflows
+    type: application
+    urls:
+    - https://novelcore.github.io/charts/argo-workflows-0.45.12.tgz
+    version: 0.45.12
   atlas-operator:
-    - apiVersion: v2
-      appVersion: 0.7.7
-      created: "2026-07-22T14:28:34.916145332Z"
-      description: The Atlas Kubernetes Operator
-      digest: b99818764dc4136681631b13b37832d9f907ac35c91386c8b2a8fea2c24c6be9
-      name: atlas-operator
-      type: application
-      urls:
-        - https://novelcore.github.io/charts/atlas-operator-0.7.7.tgz
-      version: 0.7.7
+  - apiVersion: v2
+    appVersion: 0.7.7
+    created: "2026-07-22T15:14:56.204823615Z"
+    description: The Atlas Kubernetes Operator
+    digest: 8c62d1b89511783eb3bbfde9eb5e5f5963de6e1277084758634864b7aa01b654
+    name: atlas-operator
+    type: application
+    urls:
+    - https://novelcore.github.io/charts/atlas-operator-0.7.7.tgz
+    version: 0.7.7
   cert-manager:
-    - annotations:
-        artifacthub.io/category: security
-        artifacthub.io/license: Apache-2.0
-        artifacthub.io/prerelease: "false"
-        artifacthub.io/signKey: |
-          fingerprint: 1020CF3C033D4F35BAE1C19E1226061C665DF13E
-          url: https://cert-manager.io/public-keys/cert-manager-keyring-2021-09-20-1020CF3C033D4F35BAE1C19E1226061C665DF13E.gpg
-      apiVersion: v2
-      appVersion: v1.17.1
-      created: "2026-07-22T14:28:34.921450756Z"
-      description: A Helm chart for cert-manager
-      digest: f30d3da614e9272b7171764b9ed2dec041ec361b41d3a1843945556acd88cc97
-      home: https://cert-manager.io
-      icon: https://raw.githubusercontent.com/cert-manager/community/4d35a69437d21b76322157e6284be4cd64e6d2b7/logo/logo-small.png
-      keywords:
-        - cert-manager
-        - kube-lego
-        - letsencrypt
-        - tls
-      kubeVersion: '>= 1.22.0-0'
-      maintainers:
-        - email: cert-manager-maintainers@googlegroups.com
-          name: cert-manager-maintainers
-          url: https://cert-manager.io
-      name: cert-manager
-      sources:
-        - https://github.com/cert-manager/cert-manager
-      urls:
-        - https://novelcore.github.io/charts/cert-manager-v1.17.1.tgz
-      version: v1.17.1
+  - annotations:
+      artifacthub.io/category: security
+      artifacthub.io/license: Apache-2.0
+      artifacthub.io/prerelease: "false"
+      artifacthub.io/signKey: |
+        fingerprint: 1020CF3C033D4F35BAE1C19E1226061C665DF13E
+        url: https://cert-manager.io/public-keys/cert-manager-keyring-2021-09-20-1020CF3C033D4F35BAE1C19E1226061C665DF13E.gpg
+    apiVersion: v2
+    appVersion: v1.17.1
+    created: "2026-07-22T15:14:56.211060018Z"
+    description: A Helm chart for cert-manager
+    digest: 3ffaaa1a4ab71d80966db5c5a0454a82e44927e211a5634c06d76b0055dd7a6e
+    home: https://cert-manager.io
+    icon: https://raw.githubusercontent.com/cert-manager/community/4d35a69437d21b76322157e6284be4cd64e6d2b7/logo/logo-small.png
+    keywords:
+    - cert-manager
+    - kube-lego
+    - letsencrypt
+    - tls
+    kubeVersion: '>= 1.22.0-0'
+    maintainers:
+    - email: cert-manager-maintainers@googlegroups.com
+      name: cert-manager-maintainers
+      url: https://cert-manager.io
+    name: cert-manager
+    sources:
+    - https://github.com/cert-manager/cert-manager
+    urls:
+    - https://novelcore.github.io/charts/cert-manager-v1.17.1.tgz
+    version: v1.17.1
   crossplane:
-    - apiVersion: v1
-      appVersion: 1.20.0
-      created: "2026-07-22T14:28:34.922259424Z"
-      description: Crossplane is an open source Kubernetes add-on that enables platform teams to assemble infrastructure from multiple vendors, and expose higher level self-service APIs for application teams to consume.
-      digest: 7ca09df71e7154a47b673c0fe66e0631e8bd205d5fe69dde0d7f220a60e2be6c
-      home: https://crossplane.io
-      icon: https://docs.crossplane.io/android-chrome-192x192.png
-      keywords:
-        - cloud
-        - infrastructure
-        - services
-        - application
-        - database
-        - cache
-        - bucket
-        - infra
-        - app
-        - ops
-        - gcp
-        - azure
-        - aws
-        - alibaba
-        - cloudsql
-        - rds
-        - s3
-        - azuredatabase
-        - asparadb
-        - gke
-        - aks
-        - eks
-      maintainers:
-        - email: info@crossplane.io
-          name: Crossplane Maintainers
-      name: crossplane
-      urls:
-        - https://novelcore.github.io/charts/crossplane-1.20.0.tgz
-      version: 1.20.0
+  - apiVersion: v1
+    appVersion: 1.20.0
+    created: "2026-07-22T15:14:56.211953246Z"
+    description: Crossplane is an open source Kubernetes add-on that enables platform
+      teams to assemble infrastructure from multiple vendors, and expose higher level
+      self-service APIs for application teams to consume.
+    digest: 619f0ea318e382fcaa48b05fd30d5db0fdb702da153559f871dbcf204b4cfa4c
+    home: https://crossplane.io
+    icon: https://docs.crossplane.io/android-chrome-192x192.png
+    keywords:
+    - cloud
+    - infrastructure
+    - services
+    - application
+    - database
+    - cache
+    - bucket
+    - infra
+    - app
+    - ops
+    - gcp
+    - azure
+    - aws
+    - alibaba
+    - cloudsql
+    - rds
+    - s3
+    - azuredatabase
+    - asparadb
+    - gke
+    - aks
+    - eks
+    maintainers:
+    - email: info@crossplane.io
+      name: Crossplane Maintainers
+    name: crossplane
+    urls:
+    - https://novelcore.github.io/charts/crossplane-1.20.0.tgz
+    version: 1.20.0
   eck-operator:
-    - apiVersion: v2
-      appVersion: 3.0.0
-      created: "2026-07-22T14:28:34.926859768Z"
-      dependencies:
-        - condition: installCRDs
-          name: eck-operator-crds
-          repository: ""
-          version: 3.0.0
-      description: Elastic Cloud on Kubernetes (ECK) operator
-      digest: c1fd7758ffc98e734a11d0cfbf3c1dc9abc08d578024301dce223263e43a3ddc
-      home: https://github.com/elastic/cloud-on-k8s
-      icon: https://helm.elastic.co/icons/eck.png
-      keywords:
-        - Logstash
-        - Elasticsearch
-        - Kibana
-        - APM Server
-        - Beats
-        - Enterprise Search
-        - Elastic Stack
-        - Operator
-      kubeVersion: '>=1.21.0-0'
-      maintainers:
-        - email: eck@elastic.co
-          name: Elastic
-      name: eck-operator
-      type: application
-      urls:
-        - https://novelcore.github.io/charts/eck-operator-3.0.0.tgz
+  - apiVersion: v2
+    appVersion: 3.0.0
+    created: "2026-07-22T15:14:56.216916328Z"
+    dependencies:
+    - condition: installCRDs
+      name: eck-operator-crds
+      repository: ""
       version: 3.0.0
+    description: Elastic Cloud on Kubernetes (ECK) operator
+    digest: 05cec6582c66acb68a17fcf2f7f21d28f20e8f113ff31c67708cf704297a81b0
+    home: https://github.com/elastic/cloud-on-k8s
+    icon: https://helm.elastic.co/icons/eck.png
+    keywords:
+    - Logstash
+    - Elasticsearch
+    - Kibana
+    - APM Server
+    - Beats
+    - Enterprise Search
+    - Elastic Stack
+    - Operator
+    kubeVersion: '>=1.21.0-0'
+    maintainers:
+    - email: eck@elastic.co
+      name: Elastic
+    name: eck-operator
+    type: application
+    urls:
+    - https://novelcore.github.io/charts/eck-operator-3.0.0.tgz
+    version: 3.0.0
   everest:
-    - apiVersion: v2
-      appVersion: 1.6.0
-      created: "2026-07-22T14:28:34.96367457Z"
-      dependencies:
-        - name: common
-          repository: file://charts/common
-          version: 0.0.*
-        - alias: dbNamespace
-          condition: dbNamespace.enabled
-          name: everest-db-namespace
-          repository: file://charts/everest-db-namespace
-          version: 1.6.0
-        - condition: kube-state-metrics.enabled
-          name: kube-state-metrics
-          repository: https://prometheus-community.github.io/helm-charts
-          version: 5.27.0
-        - alias: monitoring
-          condition: monitoring.enabled
-          name: victoria-metrics-operator
-          repository: https://victoriametrics.github.io/helm-charts
-          version: 0.43.0
-        - condition: pmm.enabled
-          name: pmm
-          repository: https://percona.github.io/percona-helm-charts
-          version: 1.3.*
-      description: A cloud-native database platform
-      digest: 2aad240379fd546e84a921329629d3ff5eac7f60c27daa7c582f894d1c1e8173
-      kubeVersion: '>= 1.27.0-0'
-      maintainers:
-        - email: mayank.shah@percona.com
-          name: mayankshah1607
-        - email: oksana.grishchenko@percona.com
-          name: oksana-grishchenko
-        - email: diogo.recharte@percona.com
-          name: recharte
-      name: everest
-      type: application
-      urls:
-        - https://novelcore.github.io/charts/everest-1.6.0.tgz
+  - apiVersion: v2
+    appVersion: 1.6.0
+    created: "2026-07-22T15:14:56.25319061Z"
+    dependencies:
+    - name: common
+      repository: file://charts/common
+      version: 0.0.*
+    - alias: dbNamespace
+      condition: dbNamespace.enabled
+      name: everest-db-namespace
+      repository: file://charts/everest-db-namespace
       version: 1.6.0
-  gitops-promoter:
-    - annotations:
-        artifacthub.io/category: integration-delivery
-        artifacthub.io/changes: |
-          - kind: fixed
-            description: "Restore tini as PID 1 to eliminate zombie git-remote-https process accumulation"
-          - kind: fixed
-            description: "Add shareProcessNamespace to ensure pause container reaps orphaned processes"
-          - kind: changed
-            description: "Reduce maxConcurrentReconciles from 10 to 3 to lower git subprocess burst rate"
-          - kind: added
-            description: "Add GIT_HTTP_LOW_SPEED_LIMIT/TIME env vars to kill stalled git HTTPS connections"
-        artifacthub.io/images: |-
-          - name: gitops-promoter
-            image: quay.io/argoprojlabs/gitops-promoter:v0.22.6
-          - name: kube-rbac-proxy
-            image: quay.io/brancz/kube-rbac-proxy:v0.20.2
-        artifacthub.io/license: Apache-2.0
-        artifacthub.io/links: |-
-          - name: GitOps Promoter Documentation
-            url: https://github.com/argoproj-labs/gitops-promoter/blob/main/README.md
-          - name: Release Notes
-            url: https://github.com/argoproj-labs/gitops-promoter/releases/tag/v0.22.6
-      apiVersion: v2
-      appVersion: 0.22.6
-      created: "2026-07-22T14:28:34.978002336Z"
-      description: A Helm chart for GitOps Promoter - A tool for promoting changes between environments in GitOps workflows
-      digest: 3dd62f7d34f93b55cbecc8b9425289bcbc4a7ae96c293d7cdb681d36110a2871
-      home: https://github.com/argoproj-labs/gitops-promoter
-      keywords:
-        - gitops
-        - promotion
-        - argocd
-        - continuous-deployment
-        - environment-promotion
-      kubeVersion: '>=1.20.0-0'
-      maintainers:
-        - email: platform@novelcore.io
-          name: Novelcore Platform Team
-      name: gitops-promoter
-      sources:
-        - https://github.com/argoproj-labs/gitops-promoter
-      type: application
-      urls:
-        - https://novelcore.github.io/charts/gitops-promoter-0.8.3.tgz
-      version: 0.8.3
-    - annotations:
-        artifacthub.io/category: integration-delivery
-        artifacthub.io/changes: |
-          - kind: changed
-            description: "Updated GitOps Promoter to v0.20.3"
-        artifacthub.io/images: |-
-          - name: gitops-promoter
-            image: quay.io/argoprojlabs/gitops-promoter:v0.22.6
-          - name: kube-rbac-proxy
-            image: quay.io/brancz/kube-rbac-proxy:v0.20.2
-        artifacthub.io/license: Apache-2.0
-        artifacthub.io/links: |-
-          - name: GitOps Promoter Documentation
-            url: https://github.com/argoproj-labs/gitops-promoter/blob/main/README.md
-          - name: Release Notes
-            url: https://github.com/argoproj-labs/gitops-promoter/releases/tag/v0.22.6
-      apiVersion: v2
-      appVersion: 0.22.6
-      created: "2026-07-22T14:28:34.974570342Z"
-      description: A Helm chart for GitOps Promoter - A tool for promoting changes between environments in GitOps workflows
-      digest: 48533cd08f8b341f71b00ffee4b7db4fc483aa6062a5779316640981733ce162
-      home: https://github.com/argoproj-labs/gitops-promoter
-      keywords:
-        - gitops
-        - promotion
-        - argocd
-        - continuous-deployment
-        - environment-promotion
-      kubeVersion: '>=1.20.0-0'
-      maintainers:
-        - email: platform@novelcore.io
-          name: Novelcore Platform Team
-      name: gitops-promoter
-      sources:
-        - https://github.com/argoproj-labs/gitops-promoter
-      type: application
-      urls:
-        - https://novelcore.github.io/charts/gitops-promoter-0.8.2.tgz
-      version: 0.8.2
-    - annotations:
-        artifacthub.io/category: integration-delivery
-        artifacthub.io/changes: |
-          - kind: changed
-            description: "Updated GitOps Promoter to v0.20.3"
-        artifacthub.io/images: |-
-          - name: gitops-promoter
-            image: quay.io/argoprojlabs/gitops-promoter:v0.22.6
-          - name: kube-rbac-proxy
-            image: quay.io/brancz/kube-rbac-proxy:v0.20.2
-        artifacthub.io/license: Apache-2.0
-        artifacthub.io/links: |-
-          - name: GitOps Promoter Documentation
-            url: https://github.com/argoproj-labs/gitops-promoter/blob/main/README.md
-          - name: Release Notes
-            url: https://github.com/argoproj-labs/gitops-promoter/releases/tag/v0.22.6
-      apiVersion: v2
-      appVersion: 0.22.6
-      created: "2026-07-22T14:28:34.971682963Z"
-      description: A Helm chart for GitOps Promoter - A tool for promoting changes between environments in GitOps workflows
-      digest: 5c078a753b69368feb01d4f3d805380d2e7333232225a698d7acd8a1ebbb86be
-      home: https://github.com/argoproj-labs/gitops-promoter
-      keywords:
-        - gitops
-        - promotion
-        - argocd
-        - continuous-deployment
-        - environment-promotion
-      kubeVersion: '>=1.20.0-0'
-      maintainers:
-        - email: platform@novelcore.io
-          name: Novelcore Platform Team
-      name: gitops-promoter
-      sources:
-        - https://github.com/argoproj-labs/gitops-promoter
-      type: application
-      urls:
-        - https://novelcore.github.io/charts/gitops-promoter-0.8.1.tgz
-      version: 0.8.1
-    - annotations:
-        artifacthub.io/category: integration-delivery
-        artifacthub.io/changes: |
-          - kind: changed
-            description: "Updated GitOps Promoter to v0.20.3"
-        artifacthub.io/images: |
-          - name: gitops-promoter
-            image: quay.io/argoprojlabs/gitops-promoter:v0.20.3
-          - name: kube-rbac-proxy
-            image: quay.io/brancz/kube-rbac-proxy:v0.17.0
-          - name: git-fetch-daemon
-            image: alpine/git:2.47.0
-        artifacthub.io/license: Apache-2.0
-        artifacthub.io/links: |
-          - name: GitOps Promoter Documentation
-            url: https://github.com/argoproj-labs/gitops-promoter/blob/main/README.md
-          - name: Release Notes
-            url: https://github.com/argoproj-labs/gitops-promoter/releases/tag/v0.20.3
-      apiVersion: v2
-      appVersion: 0.20.3
-      created: "2026-07-22T14:28:34.968827886Z"
-      description: A Helm chart for GitOps Promoter - A tool for promoting changes between environments in GitOps workflows
-      digest: 643fae5a94850b873d5938b15a244489c322ddd74295730d90dab76c3f48ba2a
-      home: https://github.com/argoproj-labs/gitops-promoter
-      keywords:
-        - gitops
-        - promotion
-        - argocd
-        - continuous-deployment
-        - environment-promotion
-      kubeVersion: '>=1.20.0-0'
-      maintainers:
-        - email: platform@novelcore.io
-          name: Novelcore Platform Team
-      name: gitops-promoter
-      sources:
-        - https://github.com/argoproj-labs/gitops-promoter
-      type: application
-      urls:
-        - https://novelcore.github.io/charts/gitops-promoter-0.8.0.tgz
-      version: 0.8.0
-    - annotations:
-        artifacthub.io/category: integration-delivery
-        artifacthub.io/changes: |
-          - kind: changed
-            description: "Updated GitOps Promoter to v0.17.0"
-          - kind: changed
-            description: "Increased default memory limits to 2Gi (limit) and 1Gi (request) to prevent OOM issues with large projects"
-          - kind: fixed
-            description: "Fixed OOM crashes when managing multiple promotion strategies"
-        artifacthub.io/images: |
-          - name: gitops-promoter
-            image: quay.io/argoprojlabs/gitops-promoter:v0.17.0
-          - name: kube-rbac-proxy
-            image: quay.io/brancz/kube-rbac-proxy:v0.17.0
-          - name: git-fetch-daemon
-            image: alpine/git:2.47.0
-        artifacthub.io/license: Apache-2.0
-        artifacthub.io/links: |
-          - name: GitOps Promoter Documentation
-            url: https://github.com/argoproj-labs/gitops-promoter/blob/main/README.md
-          - name: Release Notes
-            url: https://github.com/argoproj-labs/gitops-promoter/releases/tag/v0.17.0
-      apiVersion: v2
-      appVersion: 0.17.0
-      created: "2026-07-22T14:28:34.966081005Z"
-      description: A Helm chart for GitOps Promoter - A tool for promoting changes between environments in GitOps workflows
-      digest: 890d9627171bf017c0a2c4cf18902970847dee9eba7179ff37ea3fe98f751b86
-      home: https://github.com/argoproj-labs/gitops-promoter
-      keywords:
-        - gitops
-        - promotion
-        - argocd
-        - continuous-deployment
-        - environment-promotion
-      kubeVersion: '>=1.20.0-0'
-      maintainers:
-        - email: platform@novelcore.io
-          name: Novelcore Platform Team
-      name: gitops-promoter
-      sources:
-        - https://github.com/argoproj-labs/gitops-promoter
-      type: application
-      urls:
-        - https://novelcore.github.io/charts/gitops-promoter-0.7.0.tgz
-      version: 0.7.0
-  grafana-operator:
-    - apiVersion: v2
-      appVersion: v5.17.1
-      created: "2026-07-22T14:28:34.981153115Z"
-      description: Helm chart for the Grafana Operator
-      digest: 3c1b583be7c9ae5a2b46220cf944ec14b5c79ae1d57bbdc7f4e18dc27b3dc8c5
-      name: grafana-operator
-      type: application
-      urls:
-        - https://novelcore.github.io/charts/grafana-operator-v5.17.1.tgz
-      version: v5.17.1
-  keda:
-    - apiVersion: v2
-      appVersion: 2.17.0
-      created: "2026-07-22T14:28:34.986006982Z"
-      description: Event-based autoscaler for workloads on Kubernetes
-      digest: 5b46ddb2fbff1d589742403a7ae1defdaf1e6e13d1ed40636e9248d01f0e91f6
-      home: https://github.com/kedacore/keda
-      icon: https://raw.githubusercontent.com/kedacore/keda/main/images/keda-logo-500x500-white.png
-      kubeVersion: '>=v1.23.0-0'
-      maintainers:
-        - email: jorge_turrado@hotmail.es
-          name: Jorge Turrado
-        - email: zbynek@kedify.io
-          name: Zbynek Roubalik
-        - email: jan@kedify.io
-          name: Jan Wozniak
-      name: keda
-      sources:
-        - https://github.com/kedacore/keda
-      urls:
-        - https://novelcore.github.io/charts/keda-2.17.0.tgz
-      version: 2.17.0
-  kubecore-ci-workflows:
-    - apiVersion: v2
-      appVersion: 0.9.9
-      created: "2026-07-22T14:28:35.061226156Z"
-      description: Argo Workflows CI pipeline templates for KubeCore platform
-      digest: 8483897d70d3b9753736cc4ffe94bd55d69202c3e71ae8ec6db93f974bb55894
-      home: https://github.com/novelcore/charts
-      keywords:
-        - ci-cd
-        - argo-workflows
-        - buildkit
-        - kubecore
-      kubeVersion: '>=1.26.0-0'
-      maintainers:
-        - email: platform@novelcore.io
-          name: Novelcore Platform Team
-      name: kubecore-ci-workflows
-      sources:
-        - https://github.com/novelcore/charts
-      type: application
-      urls:
-        - https://novelcore.github.io/charts/kubecore-ci-workflows-0.12.41.tgz
-      version: 0.12.41
-    - apiVersion: v2
-      appVersion: 0.9.9
-      created: "2026-07-22T14:28:35.058803581Z"
-      description: Argo Workflows CI pipeline templates for KubeCore platform
-      digest: 170eef5ecc982d131a41eefeb4d8cf42581aa70b44185af467983164b74beebc
-      home: https://github.com/novelcore/charts
-      keywords:
-        - ci-cd
-        - argo-workflows
-        - buildkit
-        - kubecore
-      kubeVersion: '>=1.26.0-0'
-      maintainers:
-        - email: platform@novelcore.io
-          name: Novelcore Platform Team
-      name: kubecore-ci-workflows
-      sources:
-        - https://github.com/novelcore/charts
-      type: application
-      urls:
-        - https://novelcore.github.io/charts/kubecore-ci-workflows-0.12.40.tgz
-      version: 0.12.40
-    - apiVersion: v2
-      appVersion: 0.9.9
-      created: "2026-07-22T14:28:35.055292767Z"
-      description: Argo Workflows CI pipeline templates for KubeCore platform
-      digest: 870136ff177f599e4a95fe9fad913fd279b47578464a7f138b85da980e28577c
-      home: https://github.com/novelcore/charts
-      keywords:
-        - ci-cd
-        - argo-workflows
-        - buildkit
-        - kubecore
-      kubeVersion: '>=1.26.0-0'
-      maintainers:
-        - email: platform@novelcore.io
-          name: Novelcore Platform Team
-      name: kubecore-ci-workflows
-      sources:
-        - https://github.com/novelcore/charts
-      type: application
-      urls:
-        - https://novelcore.github.io/charts/kubecore-ci-workflows-0.12.39.tgz
-      version: 0.12.39
-    - apiVersion: v2
-      appVersion: 0.9.9
-      created: "2026-07-22T14:28:35.053294619Z"
-      description: Argo Workflows CI pipeline templates for KubeCore platform
-      digest: d8f4fe33dc5339254c75ee947a0186fe6838c93dbe8b56e3fc51ba53385e04a4
-      home: https://github.com/novelcore/charts
-      keywords:
-        - ci-cd
-        - argo-workflows
-        - buildkit
-        - kubecore
-      kubeVersion: '>=1.26.0-0'
-      maintainers:
-        - email: platform@novelcore.io
-          name: Novelcore Platform Team
-      name: kubecore-ci-workflows
-      sources:
-        - https://github.com/novelcore/charts
-      type: application
-      urls:
-        - https://novelcore.github.io/charts/kubecore-ci-workflows-0.12.38.tgz
-      version: 0.12.38
-    - apiVersion: v2
-      appVersion: 0.9.9
-      created: "2026-07-22T14:28:35.050689246Z"
-      description: Argo Workflows CI pipeline templates for KubeCore platform
-      digest: c53eab5c756efd71913685f2297a104d4753c1f962a038df648bd39516d8d074
-      home: https://github.com/novelcore/charts
-      keywords:
-        - ci-cd
-        - argo-workflows
-        - buildkit
-        - kubecore
-      kubeVersion: '>=1.26.0-0'
-      maintainers:
-        - email: platform@novelcore.io
-          name: Novelcore Platform Team
-      name: kubecore-ci-workflows
-      sources:
-        - https://github.com/novelcore/charts
-      type: application
-      urls:
-        - https://novelcore.github.io/charts/kubecore-ci-workflows-0.12.37.tgz
-      version: 0.12.37
-    - apiVersion: v2
-      appVersion: 0.9.9
-      created: "2026-07-22T14:28:35.048631645Z"
-      description: Argo Workflows CI pipeline templates for KubeCore platform
-      digest: f75ead7f8d8ee6a0b1679723d743d70f08e22fbac3b701b4bf4cb80e5588c8f8
-      home: https://github.com/novelcore/charts
-      keywords:
-        - ci-cd
-        - argo-workflows
-        - buildkit
-        - kubecore
-      kubeVersion: '>=1.26.0-0'
-      maintainers:
-        - email: platform@novelcore.io
-          name: Novelcore Platform Team
-      name: kubecore-ci-workflows
-      sources:
-        - https://github.com/novelcore/charts
-      type: application
-      urls:
-        - https://novelcore.github.io/charts/kubecore-ci-workflows-0.12.36.tgz
-      version: 0.12.36
-    - apiVersion: v2
-      appVersion: 0.9.9
-      created: "2026-07-22T14:28:35.046651611Z"
-      description: Argo Workflows CI pipeline templates for KubeCore platform
-      digest: 3fa20b15c5a4bd875229b19b1c8345951d8c22a1bbb24fef46a7ede086877042
-      home: https://github.com/novelcore/charts
-      keywords:
-        - ci-cd
-        - argo-workflows
-        - buildkit
-        - kubecore
-      kubeVersion: '>=1.26.0-0'
-      maintainers:
-        - email: platform@novelcore.io
-          name: Novelcore Platform Team
-      name: kubecore-ci-workflows
-      sources:
-        - https://github.com/novelcore/charts
-      type: application
-      urls:
-        - https://novelcore.github.io/charts/kubecore-ci-workflows-0.12.35.tgz
-      version: 0.12.35
-    - apiVersion: v2
-      appVersion: 0.9.9
-      created: "2026-07-22T14:28:35.044628465Z"
-      description: Argo Workflows CI pipeline templates for KubeCore platform
-      digest: e4222c1105a54a5bc62f4ab5c2d024735e10dc59c6c05c2e62b8b9582fddc80f
-      home: https://github.com/novelcore/charts
-      keywords:
-        - ci-cd
-        - argo-workflows
-        - buildkit
-        - kubecore
-      kubeVersion: '>=1.26.0-0'
-      maintainers:
-        - email: platform@novelcore.io
-          name: Novelcore Platform Team
-      name: kubecore-ci-workflows
-      sources:
-        - https://github.com/novelcore/charts
-      type: application
-      urls:
-        - https://novelcore.github.io/charts/kubecore-ci-workflows-0.12.34.tgz
-      version: 0.12.34
-    - apiVersion: v2
-      appVersion: 0.9.9
-      created: "2026-07-22T14:28:35.042638332Z"
-      description: Argo Workflows CI pipeline templates for KubeCore platform
-      digest: 5bf8a548efb6d5f3c03157d3ee1aed44fc30879e4f1b1c97e254308fcce6b17e
-      home: https://github.com/novelcore/charts
-      keywords:
-        - ci-cd
-        - argo-workflows
-        - buildkit
-        - kubecore
-      kubeVersion: '>=1.26.0-0'
-      maintainers:
-        - email: platform@novelcore.io
-          name: Novelcore Platform Team
-      name: kubecore-ci-workflows
-      sources:
-        - https://github.com/novelcore/charts
-      type: application
-      urls:
-        - https://novelcore.github.io/charts/kubecore-ci-workflows-0.12.33.tgz
-      version: 0.12.33
-    - apiVersion: v2
-      appVersion: 0.9.9
-      created: "2026-07-22T14:28:35.040088496Z"
-      description: Argo Workflows CI pipeline templates for KubeCore platform
-      digest: 5b0687ab44f523322d481b8a4978d793ce93126478bebabc54ffb7f4afb15747
-      home: https://github.com/novelcore/charts
-      keywords:
-        - ci-cd
-        - argo-workflows
-        - buildkit
-        - kubecore
-      kubeVersion: '>=1.26.0-0'
-      maintainers:
-        - email: platform@novelcore.io
-          name: Novelcore Platform Team
-      name: kubecore-ci-workflows
-      sources:
-        - https://github.com/novelcore/charts
-      type: application
-      urls:
-        - https://novelcore.github.io/charts/kubecore-ci-workflows-0.12.32.tgz
-      version: 0.12.32
-  kubecore-observability-rules:
-    - apiVersion: v2
-      appVersion: 1.0.0
-      created: "2026-07-22T14:28:35.079279103Z"
-      description: KubeCore observability rules and dashboards from external sources
-      digest: f1f8f3fd02f55bc11ef86d645fb69865e5f5386cac7a6506ad82600f327479e3
-      home: https://github.com/novelcore/kubecore-operator
-      keywords:
-        - kubecore
-        - observability
-        - victoriametrics
-        - grafana
-        - alerts
-        - dashboards
-      maintainers:
-        - email: platform@novelcore.io
-          name: novelcore
-          url: https://github.com/novelcore
-      name: kubecore-observability-rules
-      sources:
-        - https://github.com/novelcore/kubecore-operator
-      type: application
-      urls:
-        - https://novelcore.github.io/charts/kubecore-observability-rules-0.2.0.tgz
-      version: 0.2.0
-    - apiVersion: v2
-      appVersion: 1.0.0
-      created: "2026-07-22T14:28:35.072918742Z"
-      description: KubeCore observability rules and dashboards from external sources
-      digest: fa114ab63e8942707225e81fbf1007bfd3a68d49dc2d7f7dbb498da261101983
-      home: https://github.com/novelcore/kubecore-operator
-      keywords:
-        - kubecore
-        - observability
-        - victoriametrics
-        - grafana
-        - alerts
-        - dashboards
-      maintainers:
-        - name: KubeCore Platform Team
-      name: kubecore-observability-rules
-      sources:
-        - https://github.com/novelcore/kubecore-operator
-      type: application
-      urls:
-        - https://novelcore.github.io/charts/kubecore-observability-rules-0.1.0.tgz
-      version: 0.1.0
-  kubecore-operator:
-    - annotations:
-        artifacthub.io/category: automation
-        artifacthub.io/changes: |
-          - kind: changed
-            description: "Changed XEKS Cluster, ClusterAuth, and NodeGroup deletionPolicy from Orphan to Delete for proper AWS resource cleanup"
-          - kind: fixed
-            description: "Fixed XEKS deletion blocking issue caused by orphaned AWS resources preventing subnet deletion"
-        artifacthub.io/license: Apache-2.0
-        artifacthub.io/links: |
-          - name: GitHub Repository
-            url: https://github.com/novelcore/kubecore-operator
-          - name: Documentation
-            url: https://github.com/novelcore/kubecore-operator/blob/main/README.md
-          - name: Release Notes
-            url: https://github.com/novelcore/kubecore-operator/releases
-      apiVersion: v2
-      appVersion: 0.44.1
-      created: "2026-07-22T14:28:35.095882765Z"
-      description: A sophisticated Kubernetes operator that implements a four-layer framework architecture for provisioning and managing cloud infrastructure through Crossplane compositions.
-      digest: 686c50db021c6971d4ef2d496b0df47d06ad464e28c62340e930767524372045
-      home: https://github.com/novelcore/kubecore-operator
-      icon: https://github.com/novelcore/kubecore-operator/raw/main/docs/icon.png
-      keywords:
-        - kubernetes
-        - kubecore
-        - operator
-        - crossplane
-        - infrastructure
-        - gitops
-        - platform
-        - kubecore
-        - infrastructure-as-code
-      kubeVersion: '>=1.20.0-0'
-      maintainers:
-        - email: platform@novelcore.io
-          name: Novelcore Platform Team
-      name: kubecore-operator
-      sources:
-        - https://github.com/novelcore/kubecore-operator
-      type: application
-      urls:
-        - https://novelcore.github.io/charts/kubecore-operator-0.44.1.tgz
-      version: 0.44.1
-    - annotations:
-        artifacthub.io/category: automation
-        artifacthub.io/changes: |
-          - kind: changed
-            description: "Changed XEKS Cluster, ClusterAuth, and NodeGroup deletionPolicy from Orphan to Delete for proper AWS resource cleanup"
-          - kind: fixed
-            description: "Fixed XEKS deletion blocking issue caused by orphaned AWS resources preventing subnet deletion"
-        artifacthub.io/license: Apache-2.0
-        artifacthub.io/links: |
-          - name: GitHub Repository
-            url: https://github.com/novelcore/kubecore-operator
-          - name: Documentation
-            url: https://github.com/novelcore/kubecore-operator/blob/main/README.md
-          - name: Release Notes
-            url: https://github.com/novelcore/kubecore-operator/releases
-      apiVersion: v2
-      appVersion: 0.44.0
-      created: "2026-07-22T14:28:35.09273418Z"
-      description: A sophisticated Kubernetes operator that implements a four-layer framework architecture for provisioning and managing cloud infrastructure through Crossplane compositions.
-      digest: 0e062d72b9fa6d7e5a60c97b490a6b6c23f962ef9914d71dffcf0fc2f6d1fd91
-      home: https://github.com/novelcore/kubecore-operator
-      icon: https://github.com/novelcore/kubecore-operator/raw/main/docs/icon.png
-      keywords:
-        - kubernetes
-        - kubecore
-        - operator
-        - crossplane
-        - infrastructure
-        - gitops
-        - platform
-        - kubecore
-        - infrastructure-as-code
-      kubeVersion: '>=1.20.0-0'
-      maintainers:
-        - email: platform@novelcore.io
-          name: Novelcore Platform Team
-      name: kubecore-operator
-      sources:
-        - https://github.com/novelcore/kubecore-operator
-      type: application
-      urls:
-        - https://novelcore.github.io/charts/kubecore-operator-0.44.0.tgz
-      version: 0.44.0
-    - annotations:
-        artifacthub.io/category: automation
-        artifacthub.io/changes: |
-          - kind: changed
-            description: "Changed XEKS Cluster, ClusterAuth, and NodeGroup deletionPolicy from Orphan to Delete for proper AWS resource cleanup"
-          - kind: fixed
-            description: "Fixed XEKS deletion blocking issue caused by orphaned AWS resources preventing subnet deletion"
-        artifacthub.io/license: Apache-2.0
-        artifacthub.io/links: |
-          - name: GitHub Repository
-            url: https://github.com/novelcore/kubecore-operator
-          - name: Documentation
-            url: https://github.com/novelcore/kubecore-operator/blob/main/README.md
-          - name: Release Notes
-            url: https://github.com/novelcore/kubecore-operator/releases
-      apiVersion: v2
-      appVersion: 0.43.0
-      created: "2026-07-22T14:28:35.090058343Z"
-      description: A sophisticated Kubernetes operator that implements a four-layer framework architecture for provisioning and managing cloud infrastructure through Crossplane compositions.
-      digest: 0ea5dda43e4773e679aa450416c64057e2e09ae203619eeb76a933fb20b71972
-      home: https://github.com/novelcore/kubecore-operator
-      icon: https://github.com/novelcore/kubecore-operator/raw/main/docs/icon.png
-      keywords:
-        - kubernetes
-        - kubecore
-        - operator
-        - crossplane
-        - infrastructure
-        - gitops
-        - platform
-        - kubecore
-        - infrastructure-as-code
-      kubeVersion: '>=1.20.0-0'
-      maintainers:
-        - email: platform@novelcore.io
-          name: Novelcore Platform Team
-      name: kubecore-operator
-      sources:
-        - https://github.com/novelcore/kubecore-operator
-      type: application
-      urls:
-        - https://novelcore.github.io/charts/kubecore-operator-0.43.0.tgz
+    - condition: kube-state-metrics.enabled
+      name: kube-state-metrics
+      repository: https://prometheus-community.github.io/helm-charts
+      version: 5.27.0
+    - alias: monitoring
+      condition: monitoring.enabled
+      name: victoria-metrics-operator
+      repository: https://victoriametrics.github.io/helm-charts
       version: 0.43.0
-    - annotations:
-        artifacthub.io/category: automation
-        artifacthub.io/changes: |
-          - kind: changed
-            description: "Changed XEKS Cluster, ClusterAuth, and NodeGroup deletionPolicy from Orphan to Delete for proper AWS resource cleanup"
-          - kind: fixed
-            description: "Fixed XEKS deletion blocking issue caused by orphaned AWS resources preventing subnet deletion"
-        artifacthub.io/license: Apache-2.0
-        artifacthub.io/links: |
-          - name: GitHub Repository
-            url: https://github.com/novelcore/kubecore-operator
-          - name: Documentation
-            url: https://github.com/novelcore/kubecore-operator/blob/main/README.md
-          - name: Release Notes
-            url: https://github.com/novelcore/kubecore-operator/releases
-      apiVersion: v2
-      appVersion: 0.42.0
-      created: "2026-07-22T14:28:35.087377978Z"
-      description: A sophisticated Kubernetes operator that implements a four-layer framework architecture for provisioning and managing cloud infrastructure through Crossplane compositions.
-      digest: a96faea28e91446ebc4696140a55a804a177797f3963a4643695308629b0e5db
-      home: https://github.com/novelcore/kubecore-operator
-      icon: https://github.com/novelcore/kubecore-operator/raw/main/docs/icon.png
-      keywords:
-        - kubernetes
-        - kubecore
-        - operator
-        - crossplane
-        - infrastructure
-        - gitops
-        - platform
-        - kubecore
-        - infrastructure-as-code
-      kubeVersion: '>=1.20.0-0'
-      maintainers:
-        - email: platform@novelcore.io
-          name: Novelcore Platform Team
-      name: kubecore-operator
-      sources:
-        - https://github.com/novelcore/kubecore-operator
-      type: application
-      urls:
-        - https://novelcore.github.io/charts/kubecore-operator-0.42.0.tgz
-      version: 0.42.0
-    - annotations:
-        artifacthub.io/category: automation
-        artifacthub.io/changes: |
-          - kind: changed
-            description: "Changed XEKS Cluster, ClusterAuth, and NodeGroup deletionPolicy from Orphan to Delete for proper AWS resource cleanup"
-          - kind: fixed
-            description: "Fixed XEKS deletion blocking issue caused by orphaned AWS resources preventing subnet deletion"
-        artifacthub.io/license: Apache-2.0
-        artifacthub.io/links: |
-          - name: GitHub Repository
-            url: https://github.com/novelcore/kubecore-operator
-          - name: Documentation
-            url: https://github.com/novelcore/kubecore-operator/blob/main/README.md
-          - name: Release Notes
-            url: https://github.com/novelcore/kubecore-operator/releases
-      apiVersion: v2
-      appVersion: 0.41.4
-      created: "2026-07-22T14:28:35.084602783Z"
-      description: A sophisticated Kubernetes operator that implements a four-layer framework architecture for provisioning and managing cloud infrastructure through Crossplane compositions.
-      digest: 66b66a890e81f9b260b8ad5cce88b80e95e285ed9d97a3bdf24b51ddb66649c3
-      home: https://github.com/novelcore/kubecore-operator
-      icon: https://github.com/novelcore/kubecore-operator/raw/main/docs/icon.png
-      keywords:
-        - kubernetes
-        - kubecore
-        - operator
-        - crossplane
-        - infrastructure
-        - gitops
-        - platform
-        - kubecore
-        - infrastructure-as-code
-      kubeVersion: '>=1.20.0-0'
-      maintainers:
-        - email: platform@novelcore.io
-          name: Novelcore Platform Team
-      name: kubecore-operator
-      sources:
-        - https://github.com/novelcore/kubecore-operator
-      type: application
-      urls:
-        - https://novelcore.github.io/charts/kubecore-operator-0.41.4.tgz
-      version: 0.41.4
-    - annotations:
-        artifacthub.io/category: automation
-        artifacthub.io/changes: |
-          - kind: changed
-            description: "Changed XEKS Cluster, ClusterAuth, and NodeGroup deletionPolicy from Orphan to Delete for proper AWS resource cleanup"
-          - kind: fixed
-            description: "Fixed XEKS deletion blocking issue caused by orphaned AWS resources preventing subnet deletion"
-        artifacthub.io/license: Apache-2.0
-        artifacthub.io/links: |
-          - name: GitHub Repository
-            url: https://github.com/novelcore/kubecore-operator
-          - name: Documentation
-            url: https://github.com/novelcore/kubecore-operator/blob/main/README.md
-          - name: Release Notes
-            url: https://github.com/novelcore/kubecore-operator/releases
-      apiVersion: v2
-      appVersion: 0.41.3
-      created: "2026-07-22T14:28:35.08184465Z"
-      description: A sophisticated Kubernetes operator that implements a four-layer framework architecture for provisioning and managing cloud infrastructure through Crossplane compositions.
-      digest: e6537b7f52b6a9d1fd1624f811112ca59fa1489b4ae5c994efa83c238d710cb8
-      home: https://github.com/novelcore/kubecore-operator
-      icon: https://github.com/novelcore/kubecore-operator/raw/main/docs/icon.png
-      keywords:
-        - kubernetes
-        - kubecore
-        - operator
-        - crossplane
-        - infrastructure
-        - gitops
-        - platform
-        - kubecore
-        - infrastructure-as-code
-      kubeVersion: '>=1.20.0-0'
-      maintainers:
-        - email: platform@novelcore.io
-          name: Novelcore Platform Team
-      name: kubecore-operator
-      sources:
-        - https://github.com/novelcore/kubecore-operator
-      type: application
-      urls:
-        - https://novelcore.github.io/charts/kubecore-operator-0.41.3.tgz
-      version: 0.41.3
+    - condition: pmm.enabled
+      name: pmm
+      repository: https://percona.github.io/percona-helm-charts
+      version: 1.3.*
+    description: A cloud-native database platform
+    digest: 4d4bc5abbdb895fde85610d74ea9cf01ad89efad5158bc3138ca4d8f1f444e1d
+    kubeVersion: '>= 1.27.0-0'
+    maintainers:
+    - email: mayank.shah@percona.com
+      name: mayankshah1607
+    - email: oksana.grishchenko@percona.com
+      name: oksana-grishchenko
+    - email: diogo.recharte@percona.com
+      name: recharte
+    name: everest
+    type: application
+    urls:
+    - https://novelcore.github.io/charts/everest-1.6.0.tgz
+    version: 1.6.0
+  gitops-promoter:
+  - annotations:
+      artifacthub.io/category: integration-delivery
+      artifacthub.io/changes: |
+        - kind: fixed
+          description: "Restore tini as PID 1 to eliminate zombie git-remote-https process accumulation"
+        - kind: fixed
+          description: "Add shareProcessNamespace to ensure pause container reaps orphaned processes"
+        - kind: changed
+          description: "Reduce maxConcurrentReconciles from 10 to 3 to lower git subprocess burst rate"
+        - kind: added
+          description: "Add GIT_HTTP_LOW_SPEED_LIMIT/TIME env vars to kill stalled git HTTPS connections"
+      artifacthub.io/images: |-
+        - name: gitops-promoter
+          image: quay.io/argoprojlabs/gitops-promoter:v0.22.6
+        - name: kube-rbac-proxy
+          image: quay.io/brancz/kube-rbac-proxy:v0.20.2
+      artifacthub.io/license: Apache-2.0
+      artifacthub.io/links: |-
+        - name: GitOps Promoter Documentation
+          url: https://github.com/argoproj-labs/gitops-promoter/blob/main/README.md
+        - name: Release Notes
+          url: https://github.com/argoproj-labs/gitops-promoter/releases/tag/v0.22.6
+    apiVersion: v2
+    appVersion: 0.22.6
+    created: "2026-07-22T15:14:56.266594515Z"
+    description: A Helm chart for GitOps Promoter - A tool for promoting changes between
+      environments in GitOps workflows
+    digest: 8662bc6f1887a9d524d95c0141c33d2910bf8f844165a425ffd1dc4ce7de63e2
+    home: https://github.com/argoproj-labs/gitops-promoter
+    keywords:
+    - gitops
+    - promotion
+    - argocd
+    - continuous-deployment
+    - environment-promotion
+    kubeVersion: '>=1.20.0-0'
+    maintainers:
+    - email: platform@novelcore.io
+      name: Novelcore Platform Team
+    name: gitops-promoter
+    sources:
+    - https://github.com/argoproj-labs/gitops-promoter
+    type: application
+    urls:
+    - https://novelcore.github.io/charts/gitops-promoter-0.8.3.tgz
+    version: 0.8.3
+  - annotations:
+      artifacthub.io/category: integration-delivery
+      artifacthub.io/changes: |
+        - kind: changed
+          description: "Updated GitOps Promoter to v0.20.3"
+      artifacthub.io/images: |-
+        - name: gitops-promoter
+          image: quay.io/argoprojlabs/gitops-promoter:v0.22.6
+        - name: kube-rbac-proxy
+          image: quay.io/brancz/kube-rbac-proxy:v0.20.2
+      artifacthub.io/license: Apache-2.0
+      artifacthub.io/links: |-
+        - name: GitOps Promoter Documentation
+          url: https://github.com/argoproj-labs/gitops-promoter/blob/main/README.md
+        - name: Release Notes
+          url: https://github.com/argoproj-labs/gitops-promoter/releases/tag/v0.22.6
+    apiVersion: v2
+    appVersion: 0.22.6
+    created: "2026-07-22T15:14:56.263609311Z"
+    description: A Helm chart for GitOps Promoter - A tool for promoting changes between
+      environments in GitOps workflows
+    digest: 48533cd08f8b341f71b00ffee4b7db4fc483aa6062a5779316640981733ce162
+    home: https://github.com/argoproj-labs/gitops-promoter
+    keywords:
+    - gitops
+    - promotion
+    - argocd
+    - continuous-deployment
+    - environment-promotion
+    kubeVersion: '>=1.20.0-0'
+    maintainers:
+    - email: platform@novelcore.io
+      name: Novelcore Platform Team
+    name: gitops-promoter
+    sources:
+    - https://github.com/argoproj-labs/gitops-promoter
+    type: application
+    urls:
+    - https://novelcore.github.io/charts/gitops-promoter-0.8.2.tgz
+    version: 0.8.2
+  - annotations:
+      artifacthub.io/category: integration-delivery
+      artifacthub.io/changes: |
+        - kind: changed
+          description: "Updated GitOps Promoter to v0.20.3"
+      artifacthub.io/images: |-
+        - name: gitops-promoter
+          image: quay.io/argoprojlabs/gitops-promoter:v0.22.6
+        - name: kube-rbac-proxy
+          image: quay.io/brancz/kube-rbac-proxy:v0.20.2
+      artifacthub.io/license: Apache-2.0
+      artifacthub.io/links: |-
+        - name: GitOps Promoter Documentation
+          url: https://github.com/argoproj-labs/gitops-promoter/blob/main/README.md
+        - name: Release Notes
+          url: https://github.com/argoproj-labs/gitops-promoter/releases/tag/v0.22.6
+    apiVersion: v2
+    appVersion: 0.22.6
+    created: "2026-07-22T15:14:56.260781236Z"
+    description: A Helm chart for GitOps Promoter - A tool for promoting changes between
+      environments in GitOps workflows
+    digest: 5c078a753b69368feb01d4f3d805380d2e7333232225a698d7acd8a1ebbb86be
+    home: https://github.com/argoproj-labs/gitops-promoter
+    keywords:
+    - gitops
+    - promotion
+    - argocd
+    - continuous-deployment
+    - environment-promotion
+    kubeVersion: '>=1.20.0-0'
+    maintainers:
+    - email: platform@novelcore.io
+      name: Novelcore Platform Team
+    name: gitops-promoter
+    sources:
+    - https://github.com/argoproj-labs/gitops-promoter
+    type: application
+    urls:
+    - https://novelcore.github.io/charts/gitops-promoter-0.8.1.tgz
+    version: 0.8.1
+  - annotations:
+      artifacthub.io/category: integration-delivery
+      artifacthub.io/changes: |
+        - kind: changed
+          description: "Updated GitOps Promoter to v0.20.3"
+      artifacthub.io/images: |
+        - name: gitops-promoter
+          image: quay.io/argoprojlabs/gitops-promoter:v0.20.3
+        - name: kube-rbac-proxy
+          image: quay.io/brancz/kube-rbac-proxy:v0.17.0
+        - name: git-fetch-daemon
+          image: alpine/git:2.47.0
+      artifacthub.io/license: Apache-2.0
+      artifacthub.io/links: |
+        - name: GitOps Promoter Documentation
+          url: https://github.com/argoproj-labs/gitops-promoter/blob/main/README.md
+        - name: Release Notes
+          url: https://github.com/argoproj-labs/gitops-promoter/releases/tag/v0.20.3
+    apiVersion: v2
+    appVersion: 0.20.3
+    created: "2026-07-22T15:14:56.258048873Z"
+    description: A Helm chart for GitOps Promoter - A tool for promoting changes between
+      environments in GitOps workflows
+    digest: 643fae5a94850b873d5938b15a244489c322ddd74295730d90dab76c3f48ba2a
+    home: https://github.com/argoproj-labs/gitops-promoter
+    keywords:
+    - gitops
+    - promotion
+    - argocd
+    - continuous-deployment
+    - environment-promotion
+    kubeVersion: '>=1.20.0-0'
+    maintainers:
+    - email: platform@novelcore.io
+      name: Novelcore Platform Team
+    name: gitops-promoter
+    sources:
+    - https://github.com/argoproj-labs/gitops-promoter
+    type: application
+    urls:
+    - https://novelcore.github.io/charts/gitops-promoter-0.8.0.tgz
+    version: 0.8.0
+  - annotations:
+      artifacthub.io/category: integration-delivery
+      artifacthub.io/changes: |
+        - kind: changed
+          description: "Updated GitOps Promoter to v0.17.0"
+        - kind: changed
+          description: "Increased default memory limits to 2Gi (limit) and 1Gi (request) to prevent OOM issues with large projects"
+        - kind: fixed
+          description: "Fixed OOM crashes when managing multiple promotion strategies"
+      artifacthub.io/images: |
+        - name: gitops-promoter
+          image: quay.io/argoprojlabs/gitops-promoter:v0.17.0
+        - name: kube-rbac-proxy
+          image: quay.io/brancz/kube-rbac-proxy:v0.17.0
+        - name: git-fetch-daemon
+          image: alpine/git:2.47.0
+      artifacthub.io/license: Apache-2.0
+      artifacthub.io/links: |
+        - name: GitOps Promoter Documentation
+          url: https://github.com/argoproj-labs/gitops-promoter/blob/main/README.md
+        - name: Release Notes
+          url: https://github.com/argoproj-labs/gitops-promoter/releases/tag/v0.17.0
+    apiVersion: v2
+    appVersion: 0.17.0
+    created: "2026-07-22T15:14:56.255498155Z"
+    description: A Helm chart for GitOps Promoter - A tool for promoting changes between
+      environments in GitOps workflows
+    digest: 890d9627171bf017c0a2c4cf18902970847dee9eba7179ff37ea3fe98f751b86
+    home: https://github.com/argoproj-labs/gitops-promoter
+    keywords:
+    - gitops
+    - promotion
+    - argocd
+    - continuous-deployment
+    - environment-promotion
+    kubeVersion: '>=1.20.0-0'
+    maintainers:
+    - email: platform@novelcore.io
+      name: Novelcore Platform Team
+    name: gitops-promoter
+    sources:
+    - https://github.com/argoproj-labs/gitops-promoter
+    type: application
+    urls:
+    - https://novelcore.github.io/charts/gitops-promoter-0.7.0.tgz
+    version: 0.7.0
+  grafana-operator:
+  - apiVersion: v2
+    appVersion: v5.17.1
+    created: "2026-07-22T15:14:56.27034363Z"
+    description: Helm chart for the Grafana Operator
+    digest: d15f9405908fe4cd35b6c24fb06b9ca9027f3f71273ff74cfaecc8433f53b7b8
+    name: grafana-operator
+    type: application
+    urls:
+    - https://novelcore.github.io/charts/grafana-operator-v5.17.1.tgz
+    version: v5.17.1
+  keda:
+  - apiVersion: v2
+    appVersion: 2.17.0
+    created: "2026-07-22T15:14:56.275324226Z"
+    description: Event-based autoscaler for workloads on Kubernetes
+    digest: f38cb458b5f556bdda98b7c7be1c4e5bebb29a29b87f39c0c56165ba45a90e8c
+    home: https://github.com/kedacore/keda
+    icon: https://raw.githubusercontent.com/kedacore/keda/main/images/keda-logo-500x500-white.png
+    kubeVersion: '>=v1.23.0-0'
+    maintainers:
+    - email: jorge_turrado@hotmail.es
+      name: Jorge Turrado
+    - email: zbynek@kedify.io
+      name: Zbynek Roubalik
+    - email: jan@kedify.io
+      name: Jan Wozniak
+    name: keda
+    sources:
+    - https://github.com/kedacore/keda
+    urls:
+    - https://novelcore.github.io/charts/keda-2.17.0.tgz
+    version: 2.17.0
+  kubecore-ci-workflows:
+  - apiVersion: v2
+    appVersion: 0.9.9
+    created: "2026-07-22T15:14:56.298655649Z"
+    description: Argo Workflows CI pipeline templates for KubeCore platform
+    digest: c7a153c27c5165eef715452edd3c9168aa303f74deabb3daa93af100487ee232
+    home: https://github.com/novelcore/charts
+    keywords:
+    - ci-cd
+    - argo-workflows
+    - buildkit
+    - kubecore
+    kubeVersion: '>=1.26.0-0'
+    maintainers:
+    - email: platform@novelcore.io
+      name: Novelcore Platform Team
+    name: kubecore-ci-workflows
+    sources:
+    - https://github.com/novelcore/charts
+    type: application
+    urls:
+    - https://novelcore.github.io/charts/kubecore-ci-workflows-0.12.41.tgz
+    version: 0.12.41
+  - apiVersion: v2
+    appVersion: 0.9.9
+    created: "2026-07-22T15:14:56.295889762Z"
+    description: Argo Workflows CI pipeline templates for KubeCore platform
+    digest: 170eef5ecc982d131a41eefeb4d8cf42581aa70b44185af467983164b74beebc
+    home: https://github.com/novelcore/charts
+    keywords:
+    - ci-cd
+    - argo-workflows
+    - buildkit
+    - kubecore
+    kubeVersion: '>=1.26.0-0'
+    maintainers:
+    - email: platform@novelcore.io
+      name: Novelcore Platform Team
+    name: kubecore-ci-workflows
+    sources:
+    - https://github.com/novelcore/charts
+    type: application
+    urls:
+    - https://novelcore.github.io/charts/kubecore-ci-workflows-0.12.40.tgz
+    version: 0.12.40
+  - apiVersion: v2
+    appVersion: 0.9.9
+    created: "2026-07-22T15:14:56.29385239Z"
+    description: Argo Workflows CI pipeline templates for KubeCore platform
+    digest: 870136ff177f599e4a95fe9fad913fd279b47578464a7f138b85da980e28577c
+    home: https://github.com/novelcore/charts
+    keywords:
+    - ci-cd
+    - argo-workflows
+    - buildkit
+    - kubecore
+    kubeVersion: '>=1.26.0-0'
+    maintainers:
+    - email: platform@novelcore.io
+      name: Novelcore Platform Team
+    name: kubecore-ci-workflows
+    sources:
+    - https://github.com/novelcore/charts
+    type: application
+    urls:
+    - https://novelcore.github.io/charts/kubecore-ci-workflows-0.12.39.tgz
+    version: 0.12.39
+  - apiVersion: v2
+    appVersion: 0.9.9
+    created: "2026-07-22T15:14:56.291709036Z"
+    description: Argo Workflows CI pipeline templates for KubeCore platform
+    digest: d8f4fe33dc5339254c75ee947a0186fe6838c93dbe8b56e3fc51ba53385e04a4
+    home: https://github.com/novelcore/charts
+    keywords:
+    - ci-cd
+    - argo-workflows
+    - buildkit
+    - kubecore
+    kubeVersion: '>=1.26.0-0'
+    maintainers:
+    - email: platform@novelcore.io
+      name: Novelcore Platform Team
+    name: kubecore-ci-workflows
+    sources:
+    - https://github.com/novelcore/charts
+    type: application
+    urls:
+    - https://novelcore.github.io/charts/kubecore-ci-workflows-0.12.38.tgz
+    version: 0.12.38
+  - apiVersion: v2
+    appVersion: 0.9.9
+    created: "2026-07-22T15:14:56.289550554Z"
+    description: Argo Workflows CI pipeline templates for KubeCore platform
+    digest: c53eab5c756efd71913685f2297a104d4753c1f962a038df648bd39516d8d074
+    home: https://github.com/novelcore/charts
+    keywords:
+    - ci-cd
+    - argo-workflows
+    - buildkit
+    - kubecore
+    kubeVersion: '>=1.26.0-0'
+    maintainers:
+    - email: platform@novelcore.io
+      name: Novelcore Platform Team
+    name: kubecore-ci-workflows
+    sources:
+    - https://github.com/novelcore/charts
+    type: application
+    urls:
+    - https://novelcore.github.io/charts/kubecore-ci-workflows-0.12.37.tgz
+    version: 0.12.37
+  - apiVersion: v2
+    appVersion: 0.9.9
+    created: "2026-07-22T15:14:56.28633373Z"
+    description: Argo Workflows CI pipeline templates for KubeCore platform
+    digest: f75ead7f8d8ee6a0b1679723d743d70f08e22fbac3b701b4bf4cb80e5588c8f8
+    home: https://github.com/novelcore/charts
+    keywords:
+    - ci-cd
+    - argo-workflows
+    - buildkit
+    - kubecore
+    kubeVersion: '>=1.26.0-0'
+    maintainers:
+    - email: platform@novelcore.io
+      name: Novelcore Platform Team
+    name: kubecore-ci-workflows
+    sources:
+    - https://github.com/novelcore/charts
+    type: application
+    urls:
+    - https://novelcore.github.io/charts/kubecore-ci-workflows-0.12.36.tgz
+    version: 0.12.36
+  - apiVersion: v2
+    appVersion: 0.9.9
+    created: "2026-07-22T15:14:56.284303051Z"
+    description: Argo Workflows CI pipeline templates for KubeCore platform
+    digest: 3fa20b15c5a4bd875229b19b1c8345951d8c22a1bbb24fef46a7ede086877042
+    home: https://github.com/novelcore/charts
+    keywords:
+    - ci-cd
+    - argo-workflows
+    - buildkit
+    - kubecore
+    kubeVersion: '>=1.26.0-0'
+    maintainers:
+    - email: platform@novelcore.io
+      name: Novelcore Platform Team
+    name: kubecore-ci-workflows
+    sources:
+    - https://github.com/novelcore/charts
+    type: application
+    urls:
+    - https://novelcore.github.io/charts/kubecore-ci-workflows-0.12.35.tgz
+    version: 0.12.35
+  - apiVersion: v2
+    appVersion: 0.9.9
+    created: "2026-07-22T15:14:56.282186869Z"
+    description: Argo Workflows CI pipeline templates for KubeCore platform
+    digest: e4222c1105a54a5bc62f4ab5c2d024735e10dc59c6c05c2e62b8b9582fddc80f
+    home: https://github.com/novelcore/charts
+    keywords:
+    - ci-cd
+    - argo-workflows
+    - buildkit
+    - kubecore
+    kubeVersion: '>=1.26.0-0'
+    maintainers:
+    - email: platform@novelcore.io
+      name: Novelcore Platform Team
+    name: kubecore-ci-workflows
+    sources:
+    - https://github.com/novelcore/charts
+    type: application
+    urls:
+    - https://novelcore.github.io/charts/kubecore-ci-workflows-0.12.34.tgz
+    version: 0.12.34
+  - apiVersion: v2
+    appVersion: 0.9.9
+    created: "2026-07-22T15:14:56.279591135Z"
+    description: Argo Workflows CI pipeline templates for KubeCore platform
+    digest: 5bf8a548efb6d5f3c03157d3ee1aed44fc30879e4f1b1c97e254308fcce6b17e
+    home: https://github.com/novelcore/charts
+    keywords:
+    - ci-cd
+    - argo-workflows
+    - buildkit
+    - kubecore
+    kubeVersion: '>=1.26.0-0'
+    maintainers:
+    - email: platform@novelcore.io
+      name: Novelcore Platform Team
+    name: kubecore-ci-workflows
+    sources:
+    - https://github.com/novelcore/charts
+    type: application
+    urls:
+    - https://novelcore.github.io/charts/kubecore-ci-workflows-0.12.33.tgz
+    version: 0.12.33
+  - apiVersion: v2
+    appVersion: 0.9.9
+    created: "2026-07-22T15:14:56.277300442Z"
+    description: Argo Workflows CI pipeline templates for KubeCore platform
+    digest: 5b0687ab44f523322d481b8a4978d793ce93126478bebabc54ffb7f4afb15747
+    home: https://github.com/novelcore/charts
+    keywords:
+    - ci-cd
+    - argo-workflows
+    - buildkit
+    - kubecore
+    kubeVersion: '>=1.26.0-0'
+    maintainers:
+    - email: platform@novelcore.io
+      name: Novelcore Platform Team
+    name: kubecore-ci-workflows
+    sources:
+    - https://github.com/novelcore/charts
+    type: application
+    urls:
+    - https://novelcore.github.io/charts/kubecore-ci-workflows-0.12.32.tgz
+    version: 0.12.32
+  kubecore-observability-rules:
+  - apiVersion: v2
+    appVersion: 1.0.0
+    created: "2026-07-22T15:14:56.311467298Z"
+    description: KubeCore observability rules and dashboards from external sources
+    digest: d21ba54bcaa9b935e07290892762c8f4d937330f9c30673eab8e7dac9c4449f1
+    home: https://github.com/novelcore/kubecore-operator
+    keywords:
+    - kubecore
+    - observability
+    - victoriametrics
+    - grafana
+    - alerts
+    - dashboards
+    maintainers:
+    - email: platform@novelcore.io
+      name: novelcore
+      url: https://github.com/novelcore
+    name: kubecore-observability-rules
+    sources:
+    - https://github.com/novelcore/kubecore-operator
+    type: application
+    urls:
+    - https://novelcore.github.io/charts/kubecore-observability-rules-0.2.0.tgz
+    version: 0.2.0
+  - apiVersion: v2
+    appVersion: 1.0.0
+    created: "2026-07-22T15:14:56.305209134Z"
+    description: KubeCore observability rules and dashboards from external sources
+    digest: fa114ab63e8942707225e81fbf1007bfd3a68d49dc2d7f7dbb498da261101983
+    home: https://github.com/novelcore/kubecore-operator
+    keywords:
+    - kubecore
+    - observability
+    - victoriametrics
+    - grafana
+    - alerts
+    - dashboards
+    maintainers:
+    - name: KubeCore Platform Team
+    name: kubecore-observability-rules
+    sources:
+    - https://github.com/novelcore/kubecore-operator
+    type: application
+    urls:
+    - https://novelcore.github.io/charts/kubecore-observability-rules-0.1.0.tgz
+    version: 0.1.0
+  kubecore-operator:
+  - annotations:
+      artifacthub.io/category: automation
+      artifacthub.io/changes: |
+        - kind: changed
+          description: "Changed XEKS Cluster, ClusterAuth, and NodeGroup deletionPolicy from Orphan to Delete for proper AWS resource cleanup"
+        - kind: fixed
+          description: "Fixed XEKS deletion blocking issue caused by orphaned AWS resources preventing subnet deletion"
+      artifacthub.io/license: Apache-2.0
+      artifacthub.io/links: |
+        - name: GitHub Repository
+          url: https://github.com/novelcore/kubecore-operator
+        - name: Documentation
+          url: https://github.com/novelcore/kubecore-operator/blob/main/README.md
+        - name: Release Notes
+          url: https://github.com/novelcore/kubecore-operator/releases
+    apiVersion: v2
+    appVersion: 0.44.2
+    created: "2026-07-22T15:14:56.336967994Z"
+    description: A sophisticated Kubernetes operator that implements a four-layer
+      framework architecture for provisioning and managing cloud infrastructure through
+      Crossplane compositions.
+    digest: f10baaee41d809600965d7056c9b480b2861903dfa13daffc8c72461d53b14e1
+    home: https://github.com/novelcore/kubecore-operator
+    icon: https://github.com/novelcore/kubecore-operator/raw/main/docs/icon.png
+    keywords:
+    - kubernetes
+    - kubecore
+    - operator
+    - crossplane
+    - infrastructure
+    - gitops
+    - platform
+    - kubecore
+    - infrastructure-as-code
+    kubeVersion: '>=1.20.0-0'
+    maintainers:
+    - email: platform@novelcore.io
+      name: Novelcore Platform Team
+    name: kubecore-operator
+    sources:
+    - https://github.com/novelcore/kubecore-operator
+    type: application
+    urls:
+    - https://novelcore.github.io/charts/kubecore-operator-0.44.2.tgz
+    version: 0.44.2
+  - annotations:
+      artifacthub.io/category: automation
+      artifacthub.io/changes: |
+        - kind: changed
+          description: "Changed XEKS Cluster, ClusterAuth, and NodeGroup deletionPolicy from Orphan to Delete for proper AWS resource cleanup"
+        - kind: fixed
+          description: "Fixed XEKS deletion blocking issue caused by orphaned AWS resources preventing subnet deletion"
+      artifacthub.io/license: Apache-2.0
+      artifacthub.io/links: |
+        - name: GitHub Repository
+          url: https://github.com/novelcore/kubecore-operator
+        - name: Documentation
+          url: https://github.com/novelcore/kubecore-operator/blob/main/README.md
+        - name: Release Notes
+          url: https://github.com/novelcore/kubecore-operator/releases
+    apiVersion: v2
+    appVersion: 0.44.1
+    created: "2026-07-22T15:14:56.3333087Z"
+    description: A sophisticated Kubernetes operator that implements a four-layer
+      framework architecture for provisioning and managing cloud infrastructure through
+      Crossplane compositions.
+    digest: 686c50db021c6971d4ef2d496b0df47d06ad464e28c62340e930767524372045
+    home: https://github.com/novelcore/kubecore-operator
+    icon: https://github.com/novelcore/kubecore-operator/raw/main/docs/icon.png
+    keywords:
+    - kubernetes
+    - kubecore
+    - operator
+    - crossplane
+    - infrastructure
+    - gitops
+    - platform
+    - kubecore
+    - infrastructure-as-code
+    kubeVersion: '>=1.20.0-0'
+    maintainers:
+    - email: platform@novelcore.io
+      name: Novelcore Platform Team
+    name: kubecore-operator
+    sources:
+    - https://github.com/novelcore/kubecore-operator
+    type: application
+    urls:
+    - https://novelcore.github.io/charts/kubecore-operator-0.44.1.tgz
+    version: 0.44.1
+  - annotations:
+      artifacthub.io/category: automation
+      artifacthub.io/changes: |
+        - kind: changed
+          description: "Changed XEKS Cluster, ClusterAuth, and NodeGroup deletionPolicy from Orphan to Delete for proper AWS resource cleanup"
+        - kind: fixed
+          description: "Fixed XEKS deletion blocking issue caused by orphaned AWS resources preventing subnet deletion"
+      artifacthub.io/license: Apache-2.0
+      artifacthub.io/links: |
+        - name: GitHub Repository
+          url: https://github.com/novelcore/kubecore-operator
+        - name: Documentation
+          url: https://github.com/novelcore/kubecore-operator/blob/main/README.md
+        - name: Release Notes
+          url: https://github.com/novelcore/kubecore-operator/releases
+    apiVersion: v2
+    appVersion: 0.44.0
+    created: "2026-07-22T15:14:56.328657359Z"
+    description: A sophisticated Kubernetes operator that implements a four-layer
+      framework architecture for provisioning and managing cloud infrastructure through
+      Crossplane compositions.
+    digest: 0e062d72b9fa6d7e5a60c97b490a6b6c23f962ef9914d71dffcf0fc2f6d1fd91
+    home: https://github.com/novelcore/kubecore-operator
+    icon: https://github.com/novelcore/kubecore-operator/raw/main/docs/icon.png
+    keywords:
+    - kubernetes
+    - kubecore
+    - operator
+    - crossplane
+    - infrastructure
+    - gitops
+    - platform
+    - kubecore
+    - infrastructure-as-code
+    kubeVersion: '>=1.20.0-0'
+    maintainers:
+    - email: platform@novelcore.io
+      name: Novelcore Platform Team
+    name: kubecore-operator
+    sources:
+    - https://github.com/novelcore/kubecore-operator
+    type: application
+    urls:
+    - https://novelcore.github.io/charts/kubecore-operator-0.44.0.tgz
+    version: 0.44.0
+  - annotations:
+      artifacthub.io/category: automation
+      artifacthub.io/changes: |
+        - kind: changed
+          description: "Changed XEKS Cluster, ClusterAuth, and NodeGroup deletionPolicy from Orphan to Delete for proper AWS resource cleanup"
+        - kind: fixed
+          description: "Fixed XEKS deletion blocking issue caused by orphaned AWS resources preventing subnet deletion"
+      artifacthub.io/license: Apache-2.0
+      artifacthub.io/links: |
+        - name: GitHub Repository
+          url: https://github.com/novelcore/kubecore-operator
+        - name: Documentation
+          url: https://github.com/novelcore/kubecore-operator/blob/main/README.md
+        - name: Release Notes
+          url: https://github.com/novelcore/kubecore-operator/releases
+    apiVersion: v2
+    appVersion: 0.43.0
+    created: "2026-07-22T15:14:56.325500981Z"
+    description: A sophisticated Kubernetes operator that implements a four-layer
+      framework architecture for provisioning and managing cloud infrastructure through
+      Crossplane compositions.
+    digest: 0ea5dda43e4773e679aa450416c64057e2e09ae203619eeb76a933fb20b71972
+    home: https://github.com/novelcore/kubecore-operator
+    icon: https://github.com/novelcore/kubecore-operator/raw/main/docs/icon.png
+    keywords:
+    - kubernetes
+    - kubecore
+    - operator
+    - crossplane
+    - infrastructure
+    - gitops
+    - platform
+    - kubecore
+    - infrastructure-as-code
+    kubeVersion: '>=1.20.0-0'
+    maintainers:
+    - email: platform@novelcore.io
+      name: Novelcore Platform Team
+    name: kubecore-operator
+    sources:
+    - https://github.com/novelcore/kubecore-operator
+    type: application
+    urls:
+    - https://novelcore.github.io/charts/kubecore-operator-0.43.0.tgz
+    version: 0.43.0
+  - annotations:
+      artifacthub.io/category: automation
+      artifacthub.io/changes: |
+        - kind: changed
+          description: "Changed XEKS Cluster, ClusterAuth, and NodeGroup deletionPolicy from Orphan to Delete for proper AWS resource cleanup"
+        - kind: fixed
+          description: "Fixed XEKS deletion blocking issue caused by orphaned AWS resources preventing subnet deletion"
+      artifacthub.io/license: Apache-2.0
+      artifacthub.io/links: |
+        - name: GitHub Repository
+          url: https://github.com/novelcore/kubecore-operator
+        - name: Documentation
+          url: https://github.com/novelcore/kubecore-operator/blob/main/README.md
+        - name: Release Notes
+          url: https://github.com/novelcore/kubecore-operator/releases
+    apiVersion: v2
+    appVersion: 0.42.0
+    created: "2026-07-22T15:14:56.322355402Z"
+    description: A sophisticated Kubernetes operator that implements a four-layer
+      framework architecture for provisioning and managing cloud infrastructure through
+      Crossplane compositions.
+    digest: a96faea28e91446ebc4696140a55a804a177797f3963a4643695308629b0e5db
+    home: https://github.com/novelcore/kubecore-operator
+    icon: https://github.com/novelcore/kubecore-operator/raw/main/docs/icon.png
+    keywords:
+    - kubernetes
+    - kubecore
+    - operator
+    - crossplane
+    - infrastructure
+    - gitops
+    - platform
+    - kubecore
+    - infrastructure-as-code
+    kubeVersion: '>=1.20.0-0'
+    maintainers:
+    - email: platform@novelcore.io
+      name: Novelcore Platform Team
+    name: kubecore-operator
+    sources:
+    - https://github.com/novelcore/kubecore-operator
+    type: application
+    urls:
+    - https://novelcore.github.io/charts/kubecore-operator-0.42.0.tgz
+    version: 0.42.0
+  - annotations:
+      artifacthub.io/category: automation
+      artifacthub.io/changes: |
+        - kind: changed
+          description: "Changed XEKS Cluster, ClusterAuth, and NodeGroup deletionPolicy from Orphan to Delete for proper AWS resource cleanup"
+        - kind: fixed
+          description: "Fixed XEKS deletion blocking issue caused by orphaned AWS resources preventing subnet deletion"
+      artifacthub.io/license: Apache-2.0
+      artifacthub.io/links: |
+        - name: GitHub Repository
+          url: https://github.com/novelcore/kubecore-operator
+        - name: Documentation
+          url: https://github.com/novelcore/kubecore-operator/blob/main/README.md
+        - name: Release Notes
+          url: https://github.com/novelcore/kubecore-operator/releases
+    apiVersion: v2
+    appVersion: 0.41.4
+    created: "2026-07-22T15:14:56.31974453Z"
+    description: A sophisticated Kubernetes operator that implements a four-layer
+      framework architecture for provisioning and managing cloud infrastructure through
+      Crossplane compositions.
+    digest: 66b66a890e81f9b260b8ad5cce88b80e95e285ed9d97a3bdf24b51ddb66649c3
+    home: https://github.com/novelcore/kubecore-operator
+    icon: https://github.com/novelcore/kubecore-operator/raw/main/docs/icon.png
+    keywords:
+    - kubernetes
+    - kubecore
+    - operator
+    - crossplane
+    - infrastructure
+    - gitops
+    - platform
+    - kubecore
+    - infrastructure-as-code
+    kubeVersion: '>=1.20.0-0'
+    maintainers:
+    - email: platform@novelcore.io
+      name: Novelcore Platform Team
+    name: kubecore-operator
+    sources:
+    - https://github.com/novelcore/kubecore-operator
+    type: application
+    urls:
+    - https://novelcore.github.io/charts/kubecore-operator-0.41.4.tgz
+    version: 0.41.4
+  - annotations:
+      artifacthub.io/category: automation
+      artifacthub.io/changes: |
+        - kind: changed
+          description: "Changed XEKS Cluster, ClusterAuth, and NodeGroup deletionPolicy from Orphan to Delete for proper AWS resource cleanup"
+        - kind: fixed
+          description: "Fixed XEKS deletion blocking issue caused by orphaned AWS resources preventing subnet deletion"
+      artifacthub.io/license: Apache-2.0
+      artifacthub.io/links: |
+        - name: GitHub Repository
+          url: https://github.com/novelcore/kubecore-operator
+        - name: Documentation
+          url: https://github.com/novelcore/kubecore-operator/blob/main/README.md
+        - name: Release Notes
+          url: https://github.com/novelcore/kubecore-operator/releases
+    apiVersion: v2
+    appVersion: 0.41.3
+    created: "2026-07-22T15:14:56.316786327Z"
+    description: A sophisticated Kubernetes operator that implements a four-layer
+      framework architecture for provisioning and managing cloud infrastructure through
+      Crossplane compositions.
+    digest: e6537b7f52b6a9d1fd1624f811112ca59fa1489b4ae5c994efa83c238d710cb8
+    home: https://github.com/novelcore/kubecore-operator
+    icon: https://github.com/novelcore/kubecore-operator/raw/main/docs/icon.png
+    keywords:
+    - kubernetes
+    - kubecore
+    - operator
+    - crossplane
+    - infrastructure
+    - gitops
+    - platform
+    - kubecore
+    - infrastructure-as-code
+    kubeVersion: '>=1.20.0-0'
+    maintainers:
+    - email: platform@novelcore.io
+      name: Novelcore Platform Team
+    name: kubecore-operator
+    sources:
+    - https://github.com/novelcore/kubecore-operator
+    type: application
+    urls:
+    - https://novelcore.github.io/charts/kubecore-operator-0.41.3.tgz
+    version: 0.41.3
   milvus-operator:
-    - apiVersion: v2
-      appVersion: 1.2.5
-      created: "2026-07-22T14:28:35.110004039Z"
-      dependencies:
-        - condition: cert-manager.enabled
-          name: cert-manager
-          repository: https://charts.jetstack.io
-          tags:
-            - cert-manager
-          version: 1.5.3
-      description: A Helm chart for deploying Milvus Operator
-      digest: 7cfa2f25984906afb3e9e15ca5456bfcea3a6929821e8bdcc306913140951e30
-      home: https://github.com/zilliztech/milvus-operator
-      kubeVersion: '>= 1.16.0-0'
-      maintainers:
-        - email: devops@zilliz.com
-          name: zilliztech
-          url: https://zilliz.com
-      name: milvus-operator
-      type: application
-      urls:
-        - https://novelcore.github.io/charts/milvus-operator-1.2.5.tgz
-      version: 1.2.5
+  - apiVersion: v2
+    appVersion: 1.2.5
+    created: "2026-07-22T15:14:56.350468463Z"
+    dependencies:
+    - condition: cert-manager.enabled
+      name: cert-manager
+      repository: https://charts.jetstack.io
+      tags:
+      - cert-manager
+      version: 1.5.3
+    description: A Helm chart for deploying Milvus Operator
+    digest: 9f893271dd862392e7af9d0dfdc23564bf5e78c2306986aa7a4d93a40477df3d
+    home: https://github.com/zilliztech/milvus-operator
+    kubeVersion: '>= 1.16.0-0'
+    maintainers:
+    - email: devops@zilliz.com
+      name: zilliztech
+      url: https://zilliz.com
+    name: milvus-operator
+    type: application
+    urls:
+    - https://novelcore.github.io/charts/milvus-operator-1.2.5.tgz
+    version: 1.2.5
   minio-operator:
-    - annotations:
-        category: Infrastructure
-        images: |
-          - name: kes
-            image: docker.io/bitnami/kes:2025.3.12-debian-12-r5
-          - name: minio
-            image: docker.io/bitnami/minio:2025.4.8-debian-12-r0
-          - name: minio-operator
-            image: docker.io/bitnami/minio-operator:7.0.1-debian-12-r4
-          - name: minio-operator-sidecar
-            image: docker.io/bitnami/minio-operator-sidecar:7.0.1-debian-12-r4
-        licenses: Apache-2.0
-        tanzuCategory: service
-      apiVersion: v2
-      appVersion: 7.0.1
-      created: "2026-07-22T14:28:35.113049828Z"
-      dependencies:
-        - name: common
-          repository: oci://registry-1.docker.io/bitnamicharts
-          tags:
-            - bitnami-common
-          version: 2.x.x
-      description: MinIO(R) Operator is a Kubernetes-native tool for deploying and managing high-performance, S3-compatible MinIO(R) object storage across hybrid cloud infrastructures.
-      digest: 9344fc956d72998e3d32a0cf891e0a341edd391c013c1473b250f6b9ab21f319
-      home: https://bitnami.com
-      icon: https://bitnami.com/assets/stacks/minio-operator/img/minio-operator-stack-220x234.png
-      keywords:
-        - minio-operator
-        - operator
-        - postgresql
-      maintainers:
-        - name: Broadcom, Inc. All Rights Reserved.
-          url: https://github.com/bitnami/charts
-      name: minio-operator
-      sources:
-        - https://github.com/bitnami/charts/tree/main/bitnami/minio-operator
-      urls:
-        - https://novelcore.github.io/charts/minio-operator-0.1.5.tgz
-      version: 0.1.5
+  - annotations:
+      category: Infrastructure
+      images: |
+        - name: kes
+          image: docker.io/bitnami/kes:2025.3.12-debian-12-r5
+        - name: minio
+          image: docker.io/bitnami/minio:2025.4.8-debian-12-r0
+        - name: minio-operator
+          image: docker.io/bitnami/minio-operator:7.0.1-debian-12-r4
+        - name: minio-operator-sidecar
+          image: docker.io/bitnami/minio-operator-sidecar:7.0.1-debian-12-r4
+      licenses: Apache-2.0
+      tanzuCategory: service
+    apiVersion: v2
+    appVersion: 7.0.1
+    created: "2026-07-22T15:14:56.353683362Z"
+    dependencies:
+    - name: common
+      repository: oci://registry-1.docker.io/bitnamicharts
+      tags:
+      - bitnami-common
+      version: 2.x.x
+    description: MinIO(R) Operator is a Kubernetes-native tool for deploying and managing
+      high-performance, S3-compatible MinIO(R) object storage across hybrid cloud
+      infrastructures.
+    digest: 9344fc956d72998e3d32a0cf891e0a341edd391c013c1473b250f6b9ab21f319
+    home: https://bitnami.com
+    icon: https://bitnami.com/assets/stacks/minio-operator/img/minio-operator-stack-220x234.png
+    keywords:
+    - minio-operator
+    - operator
+    - postgresql
+    maintainers:
+    - name: Broadcom, Inc. All Rights Reserved.
+      url: https://github.com/bitnami/charts
+    name: minio-operator
+    sources:
+    - https://github.com/bitnami/charts/tree/main/bitnami/minio-operator
+    urls:
+    - https://novelcore.github.io/charts/minio-operator-0.1.5.tgz
+    version: 0.1.5
   mlflow:
-    - annotations:
-        artifacthub.io/changes: |-
-          - kind: changed
-            description: Major version upgrade required actions documentation updated
-            links:
-              - name: Github Issue
-                url: https://github.com/community-charts/helm-charts/issues/129
-          - kind: added
-            description: Add service.enabled configuration to disable service creation
-          - kind: added
-            description: Add extra pod labels configuration with extraPodLabels field
-            links:
-              - name: Github Issue
-                url: https://github.com/community-charts/helm-charts/issues/130
-        artifacthub.io/containsSecurityUpdates: "false"
-        artifacthub.io/images: |
-          - name: mlflow
-            image: burakince/mlflow:3.1.0
-        artifacthub.io/license: MIT
-        artifacthub.io/links: |
-          - name: Chart Source
-            url: https://github.com/community-charts/helm-charts
-          - name: Upstream Project
-            url: https://github.com/burakince/mlflow
-        artifacthub.io/maintainers: |
-          - name: burakince
-            email: burak.ince@linux.org.tr
-        artifacthub.io/operator: "false"
-        artifacthub.io/prerelease: "false"
-        artifacthub.io/screenshots: |
-          - title: Quickstart UI screenshot
-            url: https://raw.githubusercontent.com/mlflow/mlflow/refs/heads/master/docs/static/images/quickstart/quickstart_ui_screenshot.png
-          - title: OSS registry 1 register
-            url: https://raw.githubusercontent.com/mlflow/mlflow/refs/heads/master/docs/static/images/oss_registry_1_register.png
-          - title: OSS Registry 2 dialog
-            url: https://raw.githubusercontent.com/mlflow/mlflow/refs/heads/master/docs/static/images/oss_registry_2_dialog.png
-          - title: OSS Registry 3 overview
-            url: https://raw.githubusercontent.com/mlflow/mlflow/refs/heads/master/docs/static/images/oss_registry_3_overview.png
-          - title: OSS Registry 3b version
-            url: https://raw.githubusercontent.com/mlflow/mlflow/refs/heads/master/docs/static/images/oss_registry_3b_version.png
-          - title: OSS Registry 4 version
-            url: https://raw.githubusercontent.com/mlflow/mlflow/refs/heads/master/docs/static/images/oss_registry_4_model.png
-          - title: OSS Registry 4b version
-            url: https://raw.githubusercontent.com/mlflow/mlflow/refs/heads/master/docs/static/images/oss_registry_4b_model_alias.png
-          - title: OSS Registry 5 transition
-            url: https://raw.githubusercontent.com/mlflow/mlflow/refs/heads/master/docs/static/images/oss_registry_5_version.png
-          - title: OSS Registry 6 transition
-            url: https://raw.githubusercontent.com/mlflow/mlflow/refs/heads/master/docs/static/images/oss_registry_6_version.png
-          - title: Experiment compare
-            url: https://raw.githubusercontent.com/mlflow/mlflow/refs/heads/master/docs/static/images/tutorial-compare.png
-        artifacthub.io/signKey: |
-          fingerprint: 939B1A0ED8AAA8E722ACCDB3B6A012EE8A76426A
-          url: https://keybase.io/communitycharts/pgp_keys.asc
-      apiVersion: v2
-      appVersion: 3.1.0
-      created: "2026-07-22T14:28:35.133548835Z"
-      dependencies:
-        - condition: postgresql.enabled
-          name: postgresql
-          repository: https://charts.bitnami.com/bitnami
-          version: 16.7.10
-        - condition: mysql.enabled
-          name: mysql
-          repository: https://charts.bitnami.com/bitnami
-          version: 13.0.1
-      description: A Helm chart for Mlflow open source platform for the machine learning lifecycle
-      digest: 61774d095415d5a224a09bb9311dd8ffa88c991fdb2111e506301bd1da87d891
-      home: https://mlflow.org
-      icon: https://raw.githubusercontent.com/mlflow/mlflow/master/assets/logo.svg
-      keywords:
-        - docker
-        - machine-learning
-        - ai
-        - ml
-        - model-management
-        - mlflow
-        - mlflow-tracking-server
-        - mlflow-docker
-        - mlflow-tracking
-        - mlflow-kube
-      kubeVersion: '>=1.16.0-0'
-      maintainers:
-        - email: burak.ince@linux.org.tr
-          name: burakince
-          url: https://www.burakince.com
-      name: mlflow
-      sources:
-        - https://github.com/community-charts/helm-charts
-        - https://github.com/burakince/mlflow
-        - https://github.com/mlflow/mlflow
-      type: application
-      urls:
-        - https://novelcore.github.io/charts/mlflow-1.1.0.tgz
-      version: 1.1.0
+  - annotations:
+      artifacthub.io/changes: |-
+        - kind: changed
+          description: Major version upgrade required actions documentation updated
+          links:
+            - name: Github Issue
+              url: https://github.com/community-charts/helm-charts/issues/129
+        - kind: added
+          description: Add service.enabled configuration to disable service creation
+        - kind: added
+          description: Add extra pod labels configuration with extraPodLabels field
+          links:
+            - name: Github Issue
+              url: https://github.com/community-charts/helm-charts/issues/130
+      artifacthub.io/containsSecurityUpdates: "false"
+      artifacthub.io/images: |
+        - name: mlflow
+          image: burakince/mlflow:3.1.0
+      artifacthub.io/license: MIT
+      artifacthub.io/links: |
+        - name: Chart Source
+          url: https://github.com/community-charts/helm-charts
+        - name: Upstream Project
+          url: https://github.com/burakince/mlflow
+      artifacthub.io/maintainers: |
+        - name: burakince
+          email: burak.ince@linux.org.tr
+      artifacthub.io/operator: "false"
+      artifacthub.io/prerelease: "false"
+      artifacthub.io/screenshots: |
+        - title: Quickstart UI screenshot
+          url: https://raw.githubusercontent.com/mlflow/mlflow/refs/heads/master/docs/static/images/quickstart/quickstart_ui_screenshot.png
+        - title: OSS registry 1 register
+          url: https://raw.githubusercontent.com/mlflow/mlflow/refs/heads/master/docs/static/images/oss_registry_1_register.png
+        - title: OSS Registry 2 dialog
+          url: https://raw.githubusercontent.com/mlflow/mlflow/refs/heads/master/docs/static/images/oss_registry_2_dialog.png
+        - title: OSS Registry 3 overview
+          url: https://raw.githubusercontent.com/mlflow/mlflow/refs/heads/master/docs/static/images/oss_registry_3_overview.png
+        - title: OSS Registry 3b version
+          url: https://raw.githubusercontent.com/mlflow/mlflow/refs/heads/master/docs/static/images/oss_registry_3b_version.png
+        - title: OSS Registry 4 version
+          url: https://raw.githubusercontent.com/mlflow/mlflow/refs/heads/master/docs/static/images/oss_registry_4_model.png
+        - title: OSS Registry 4b version
+          url: https://raw.githubusercontent.com/mlflow/mlflow/refs/heads/master/docs/static/images/oss_registry_4b_model_alias.png
+        - title: OSS Registry 5 transition
+          url: https://raw.githubusercontent.com/mlflow/mlflow/refs/heads/master/docs/static/images/oss_registry_5_version.png
+        - title: OSS Registry 6 transition
+          url: https://raw.githubusercontent.com/mlflow/mlflow/refs/heads/master/docs/static/images/oss_registry_6_version.png
+        - title: Experiment compare
+          url: https://raw.githubusercontent.com/mlflow/mlflow/refs/heads/master/docs/static/images/tutorial-compare.png
+      artifacthub.io/signKey: |
+        fingerprint: 939B1A0ED8AAA8E722ACCDB3B6A012EE8A76426A
+        url: https://keybase.io/communitycharts/pgp_keys.asc
+    apiVersion: v2
+    appVersion: 3.1.0
+    created: "2026-07-22T15:14:56.37523904Z"
+    dependencies:
+    - condition: postgresql.enabled
+      name: postgresql
+      repository: https://charts.bitnami.com/bitnami
+      version: 16.7.10
+    - condition: mysql.enabled
+      name: mysql
+      repository: https://charts.bitnami.com/bitnami
+      version: 13.0.1
+    description: A Helm chart for Mlflow open source platform for the machine learning
+      lifecycle
+    digest: 61774d095415d5a224a09bb9311dd8ffa88c991fdb2111e506301bd1da87d891
+    home: https://mlflow.org
+    icon: https://raw.githubusercontent.com/mlflow/mlflow/master/assets/logo.svg
+    keywords:
+    - docker
+    - machine-learning
+    - ai
+    - ml
+    - model-management
+    - mlflow
+    - mlflow-tracking-server
+    - mlflow-docker
+    - mlflow-tracking
+    - mlflow-kube
+    kubeVersion: '>=1.16.0-0'
+    maintainers:
+    - email: burak.ince@linux.org.tr
+      name: burakince
+      url: https://www.burakince.com
+    name: mlflow
+    sources:
+    - https://github.com/community-charts/helm-charts
+    - https://github.com/burakince/mlflow
+    - https://github.com/mlflow/mlflow
+    type: application
+    urls:
+    - https://novelcore.github.io/charts/mlflow-1.1.0.tgz
+    version: 1.1.0
   pg-operator:
-    - apiVersion: v2
-      appVersion: 2.6.0
-      created: "2026-07-22T14:28:35.144300573Z"
-      description: A Helm chart to deploy the Percona Operator for PostgreSQL
-      digest: 4210142ab5e704974ea6900b426492842b4e29e3b068d19df4c6251b882979bb
-      home: https://docs.percona.com/percona-operator-for-postgresql/2.0/
-      keywords:
-        - PostgreSQL
-        - Operator
-        - Database
-        - Postgres
-        - SQL
-        - RDBMS
-      maintainers:
-        - email: sergey.pronin@percona.com
-          name: spron-in
-        - email: natalia.marukovich@gmail.com
-          name: nmarukovich
-        - email: julio.pasinatto@percona.com
-          name: jvpasinatto
-      name: pg-operator
-      type: application
-      urls:
-        - https://novelcore.github.io/charts/pg-operator-2.6.0.tgz
-      version: 2.6.0
+  - apiVersion: v2
+    appVersion: 2.6.0
+    created: "2026-07-22T15:14:56.386159786Z"
+    description: A Helm chart to deploy the Percona Operator for PostgreSQL
+    digest: 40a1525d619b6b3cc54f375aaf316464a74287d7df752ae0edb9f3c0d0d0c738
+    home: https://docs.percona.com/percona-operator-for-postgresql/2.0/
+    keywords:
+    - PostgreSQL
+    - Operator
+    - Database
+    - Postgres
+    - SQL
+    - RDBMS
+    maintainers:
+    - email: sergey.pronin@percona.com
+      name: spron-in
+    - email: natalia.marukovich@gmail.com
+      name: nmarukovich
+    - email: julio.pasinatto@percona.com
+      name: jvpasinatto
+    name: pg-operator
+    type: application
+    urls:
+    - https://novelcore.github.io/charts/pg-operator-2.6.0.tgz
+    version: 2.6.0
   prometheus-node-exporter:
-    - annotations:
-        artifacthub.io/license: Apache-2.0
-        artifacthub.io/links: |
-          - name: Chart Source
-            url: https://github.com/prometheus-community/helm-charts
-      apiVersion: v2
-      appVersion: 1.9.1
-      created: "2026-07-22T14:28:35.145713358Z"
-      description: A Helm chart for prometheus node-exporter
-      digest: 92a9be7ebfd0c51d4ef12d350949b363f931bc81ebbd9de9e78b965fbe7a9cc3
-      home: https://github.com/prometheus/node_exporter/
-      keywords:
-        - node-exporter
-        - prometheus
-        - exporter
-      maintainers:
-        - email: gianrubio@gmail.com
-          name: gianrubio
-          url: https://github.com/gianrubio
-        - email: zanhsieh@gmail.com
-          name: zanhsieh
-          url: https://github.com/zanhsieh
-        - email: rootsandtrees@posteo.de
-          name: zeritti
-          url: https://github.com/zeritti
-      name: prometheus-node-exporter
-      sources:
-        - https://github.com/prometheus/node_exporter/
-      type: application
-      urls:
-        - https://novelcore.github.io/charts/prometheus-node-exporter-4.45.2.tgz
-      version: 4.45.2
+  - annotations:
+      artifacthub.io/license: Apache-2.0
+      artifacthub.io/links: |
+        - name: Chart Source
+          url: https://github.com/prometheus-community/helm-charts
+    apiVersion: v2
+    appVersion: 1.9.1
+    created: "2026-07-22T15:14:56.38745073Z"
+    description: A Helm chart for prometheus node-exporter
+    digest: 8da6de549debebf94eb7ef8f67097a79560b2363788d4f5bd4d60bd05340f928
+    home: https://github.com/prometheus/node_exporter/
+    keywords:
+    - node-exporter
+    - prometheus
+    - exporter
+    maintainers:
+    - email: gianrubio@gmail.com
+      name: gianrubio
+      url: https://github.com/gianrubio
+    - email: zanhsieh@gmail.com
+      name: zanhsieh
+      url: https://github.com/zanhsieh
+    - email: rootsandtrees@posteo.de
+      name: zeritti
+      url: https://github.com/zeritti
+    name: prometheus-node-exporter
+    sources:
+    - https://github.com/prometheus/node_exporter/
+    type: application
+    urls:
+    - https://novelcore.github.io/charts/prometheus-node-exporter-4.45.2.tgz
+    version: 4.45.2
   strimzi-kafka-operator:
-    - apiVersion: v2
-      appVersion: 0.46.0
-      created: "2026-07-22T14:28:35.150820487Z"
-      description: 'Strimzi: Apache Kafka running on Kubernetes'
-      digest: b5cf68807f412589abfcb5cf00a8196043b8046827cc5069910af2a5bcda09f3
-      home: https://strimzi.io/
-      icon: https://raw.githubusercontent.com/strimzi/strimzi-kafka-operator/main/documentation/logo/strimzi_logo.png
-      keywords:
-        - kafka
-        - queue
-        - stream
-        - event
-        - messaging
-        - datastore
-        - topic
-      maintainers:
-        - name: Frawless
-        - name: ppatierno
-        - name: samuel-hawker
-        - name: scholzj
-        - name: tombentley
-        - name: sknot-rh
-        - name: PaulRMellor
-        - name: im-konge
-        - name: see-quick
-      name: strimzi-kafka-operator
-      sources:
-        - https://github.com/strimzi/strimzi-kafka-operator
-      urls:
-        - https://novelcore.github.io/charts/strimzi-kafka-operator-0.46.0.tgz
-      version: 0.46.0
+  - apiVersion: v2
+    appVersion: 0.46.0
+    created: "2026-07-22T15:14:56.392413993Z"
+    description: 'Strimzi: Apache Kafka running on Kubernetes'
+    digest: f8bdaae63974ad0a375990be44c292d6a2556aa0739999f47b9dc175322a6060
+    home: https://strimzi.io/
+    icon: https://raw.githubusercontent.com/strimzi/strimzi-kafka-operator/main/documentation/logo/strimzi_logo.png
+    keywords:
+    - kafka
+    - queue
+    - stream
+    - event
+    - messaging
+    - datastore
+    - topic
+    maintainers:
+    - name: Frawless
+    - name: ppatierno
+    - name: samuel-hawker
+    - name: scholzj
+    - name: tombentley
+    - name: sknot-rh
+    - name: PaulRMellor
+    - name: im-konge
+    - name: see-quick
+    name: strimzi-kafka-operator
+    sources:
+    - https://github.com/strimzi/strimzi-kafka-operator
+    urls:
+    - https://novelcore.github.io/charts/strimzi-kafka-operator-0.46.0.tgz
+    version: 0.46.0
   teleport-cluster:
-    - apiVersion: v2
-      appVersion: 17.5.2
-      created: "2026-07-22T14:28:35.155782949Z"
-      dependencies:
-        - alias: operator
-          name: teleport-operator
-          repository: ""
-          version: 17.5.2
-      description: Teleport is an access platform for your infrastructure
-      digest: 340d51494fa737b273495fcee05de588a22df0d2d2bd0489f53dea2c8697ba54
-      icon: https://goteleport.com/static/teleport-symbol-bimi.svg
-      keywords:
-        - Teleport
-      name: teleport-cluster
-      urls:
-        - https://novelcore.github.io/charts/teleport-cluster-17.5.2.tgz
+  - apiVersion: v2
+    appVersion: 17.5.2
+    created: "2026-07-22T15:14:56.397841699Z"
+    dependencies:
+    - alias: operator
+      name: teleport-operator
+      repository: ""
       version: 17.5.2
+    description: Teleport is an access platform for your infrastructure
+    digest: 4b9e53189f3b374bfc6b5cc221f96fc01b4b0260a8c08fb1840b3c40daad47cb
+    icon: https://goteleport.com/static/teleport-symbol-bimi.svg
+    keywords:
+    - Teleport
+    name: teleport-cluster
+    urls:
+    - https://novelcore.github.io/charts/teleport-cluster-17.5.2.tgz
+    version: 17.5.2
   teleport-kube-agent:
-    - apiVersion: v2
-      appVersion: 17.5.2
-      created: "2026-07-22T14:28:35.158820934Z"
-      description: Teleport provides a secure SSH, Kubernetes, database and application remote access solution that doesn't get in the way.
-      digest: c0110c217cce95936d931f440fc7d1acbc3021b1a28871a5a08578586ec78dd6
-      icon: https://goteleport.com/static/teleport-symbol-bimi.svg
-      keywords:
-        - Teleport
-      name: teleport-kube-agent
-      urls:
-        - https://novelcore.github.io/charts/teleport-kube-agent-17.5.2.tgz
-      version: 17.5.2
+  - apiVersion: v2
+    appVersion: 17.5.2
+    created: "2026-07-22T15:14:56.400328875Z"
+    description: Teleport provides a secure SSH, Kubernetes, database and application
+      remote access solution that doesn't get in the way.
+    digest: bafad2cbb75b50d5c97f4e5db1fb2eaa6f77a3585ba9a4e988a8fe06bd789014
+    icon: https://goteleport.com/static/teleport-symbol-bimi.svg
+    keywords:
+    - Teleport
+    name: teleport-kube-agent
+    urls:
+    - https://novelcore.github.io/charts/teleport-kube-agent-17.5.2.tgz
+    version: 17.5.2
   traefik:
-    - annotations:
-        artifacthub.io/changes: "- \"fix: do not quote protocol on pod ports\"\n- \"fix(tracing): \U0001F41B multiple response or request headers\"\n- \"feat: ✨ Oracle Cloud marketplace integration\"\n- \"feat(deps): update traefik docker tag to v3.3.5\"\n- \"feat!: add port name template functions\"\n- \"chore(release): :rocket: publish traefik 35.0.0\"\n- \"chore(helpers): :bookmark: update hub proxy corresponding versions\"\n- \"chore(ci): :bug: should fail on test error\"\n"
-      apiVersion: v2
-      appVersion: v3.3.5
-      created: "2026-07-22T14:28:35.167964165Z"
-      description: A Traefik based Kubernetes ingress controller
-      digest: 4a3572400ed775f39c675392e1ae5dd90fd97cc6cead4058e40e5351c0fc9631
-      home: https://traefik.io/
-      icon: https://raw.githubusercontent.com/traefik/traefik/v2.3/docs/content/assets/img/traefik.logo.png
-      keywords:
-        - traefik
-        - ingress
-        - networking
-      kubeVersion: '>=1.22.0-0'
-      maintainers:
-        - email: michel.loiseleur@traefik.io
-          name: mloiseleur
-        - email: charlie.haley@traefik.io
-          name: charlie-haley
-        - email: remi.buisson@traefik.io
-          name: darkweaver87
-        - name: jnoordsij
-      name: traefik
-      sources:
-        - https://github.com/traefik/traefik-helm-chart
-        - https://github.com/traefik/traefik
-      type: application
-      urls:
-        - https://novelcore.github.io/charts/traefik-35.0.0.tgz
-      version: 35.0.0
+  - annotations:
+      artifacthub.io/changes: "- \"fix: do not quote protocol on pod ports\"\n- \"fix(tracing):
+        \U0001F41B multiple response or request headers\"\n- \"feat: ✨ Oracle Cloud
+        marketplace integration\"\n- \"feat(deps): update traefik docker tag to v3.3.5\"\n-
+        \"feat!: add port name template functions\"\n- \"chore(release): :rocket:
+        publish traefik 35.0.0\"\n- \"chore(helpers): :bookmark: update hub proxy
+        corresponding versions\"\n- \"chore(ci): :bug: should fail on test error\"\n"
+    apiVersion: v2
+    appVersion: v3.3.5
+    created: "2026-07-22T15:14:56.410268276Z"
+    description: A Traefik based Kubernetes ingress controller
+    digest: 7ca850051c8b13432bb056229059ba0fa94b735b84d0ca16eef5b7873f74f96c
+    home: https://traefik.io/
+    icon: https://raw.githubusercontent.com/traefik/traefik/v2.3/docs/content/assets/img/traefik.logo.png
+    keywords:
+    - traefik
+    - ingress
+    - networking
+    kubeVersion: '>=1.22.0-0'
+    maintainers:
+    - email: michel.loiseleur@traefik.io
+      name: mloiseleur
+    - email: charlie.haley@traefik.io
+      name: charlie-haley
+    - email: remi.buisson@traefik.io
+      name: darkweaver87
+    - name: jnoordsij
+    name: traefik
+    sources:
+    - https://github.com/traefik/traefik-helm-chart
+    - https://github.com/traefik/traefik
+    type: application
+    urls:
+    - https://novelcore.github.io/charts/traefik-35.0.0.tgz
+    version: 35.0.0
   victoria-metrics-agent:
-    - annotations:
-        artifacthub.io/category: monitoring-logging
-        artifacthub.io/changes: |
-          - Support wildcard in ingress hostname. See [this issue](https://github.com/VictoriaMetrics/helm-charts/issues/2134).
-        artifacthub.io/license: Apache-2.0
-        artifacthub.io/links: |
-          - name: Sources
-            url: https://github.com/VictoriaMetrics/helm-charts/tree/master/charts/victoria-metrics-agent
-          - name: Charts repo
-            url: https://victoriametrics.github.io/helm-charts/
-          - name: Docs
-            url: https://docs.victoriametrics.com/vmagent
-          - name: Changelog
-            url: https://docs.victoriametrics.com/changelog
-      apiVersion: v2
-      appVersion: v1.115.0
-      created: "2026-07-22T14:28:35.170190958Z"
-      dependencies:
-        - name: victoria-metrics-common
-          repository: https://victoriametrics.github.io/helm-charts
-          version: 0.0.*
-      description: Victoria Metrics Agent - collects metrics from various sources and stores them to VictoriaMetrics
-      digest: 784b58f1ee26349833dfbe22cdd066b0e1db2f2f2f83768eacdad4065a65b1e9
-      home: https://github.com/VictoriaMetrics/helm-charts
-      icon: https://avatars.githubusercontent.com/u/43720803?s=200&v=4
-      keywords:
-        - victoriametrics
-        - vmagent
-        - agent
-        - collector
-        - monitoring
-        - kubernetes
-        - observability
-        - metrics
-        - timeseries
-        - servicediscovery
-      kubeVersion: '>=1.25.0-0'
-      name: victoria-metrics-agent
-      sources:
-        - https://github.com/VictoriaMetrics/helm-charts
-      type: application
-      urls:
-        - https://novelcore.github.io/charts/victoria-metrics-agent-0.18.2.tgz
-      version: 0.18.2
+  - annotations:
+      artifacthub.io/category: monitoring-logging
+      artifacthub.io/changes: |
+        - Support wildcard in ingress hostname. See [this issue](https://github.com/VictoriaMetrics/helm-charts/issues/2134).
+      artifacthub.io/license: Apache-2.0
+      artifacthub.io/links: |
+        - name: Sources
+          url: https://github.com/VictoriaMetrics/helm-charts/tree/master/charts/victoria-metrics-agent
+        - name: Charts repo
+          url: https://victoriametrics.github.io/helm-charts/
+        - name: Docs
+          url: https://docs.victoriametrics.com/vmagent
+        - name: Changelog
+          url: https://docs.victoriametrics.com/changelog
+    apiVersion: v2
+    appVersion: v1.115.0
+    created: "2026-07-22T15:14:56.412559651Z"
+    dependencies:
+    - name: victoria-metrics-common
+      repository: https://victoriametrics.github.io/helm-charts
+      version: 0.0.*
+    description: Victoria Metrics Agent - collects metrics from various sources and
+      stores them to VictoriaMetrics
+    digest: 568ddd021a5c946a01b98727b3e71e16dae598a78feaaea23037a80968c8cee6
+    home: https://github.com/VictoriaMetrics/helm-charts
+    icon: https://avatars.githubusercontent.com/u/43720803?s=200&v=4
+    keywords:
+    - victoriametrics
+    - vmagent
+    - agent
+    - collector
+    - monitoring
+    - kubernetes
+    - observability
+    - metrics
+    - timeseries
+    - servicediscovery
+    kubeVersion: '>=1.25.0-0'
+    name: victoria-metrics-agent
+    sources:
+    - https://github.com/VictoriaMetrics/helm-charts
+    type: application
+    urls:
+    - https://novelcore.github.io/charts/victoria-metrics-agent-0.18.2.tgz
+    version: 0.18.2
   victoria-metrics-cluster:
-    - annotations:
-        artifacthub.io/category: monitoring-logging
-        artifacthub.io/changes: |
-          - Support wildcard in ingress hostname. See [this issue](https://github.com/VictoriaMetrics/helm-charts/issues/2134).
-        artifacthub.io/license: Apache-2.0
-        artifacthub.io/links: |
-          - name: Sources
-            url: https://github.com/VictoriaMetrics/helm-charts/tree/master/charts/victoria-metrics-cluster
-          - name: Charts repo
-            url: https://victoriametrics.github.io/helm-charts/
-          - name: Docs
-            url: https://docs.victoriametrics.com/cluster-victoriametrics
-          - name: Changelog
-            url: https://docs.victoriametrics.com/changelog
-      apiVersion: v2
-      appVersion: v1.115.0
-      created: "2026-07-22T14:28:35.172745644Z"
-      dependencies:
-        - name: victoria-metrics-common
-          repository: https://victoriametrics.github.io/helm-charts
-          version: 0.0.*
-      description: Victoria Metrics Cluster version - high-performance, cost-effective and scalable TSDB, long-term remote storage for Prometheus
-      digest: 69f868fddda8535d5ae8d411705df3e0cfefac378bf343d9927a6c85bb9c6596
-      home: https://github.com/VictoriaMetrics/helm-charts
-      icon: https://avatars.githubusercontent.com/u/43720803?s=200&v=4
-      keywords:
-        - victoriametrics
-        - vmcluster
-        - vmselect
-        - vminsert
-        - vmstorage
-        - tsdb
-        - monitoring
-        - kubernetes
-        - observability
-        - metrics
-        - metricsql
-        - timeseries
-      kubeVersion: '>=1.25.0-0'
-      name: victoria-metrics-cluster
-      sources:
-        - https://github.com/VictoriaMetrics/helm-charts
-      type: application
-      urls:
-        - https://novelcore.github.io/charts/victoria-metrics-cluster-0.20.1.tgz
-      version: 0.20.1
-generated: "2026-07-22T14:28:34.883252466Z"
+  - annotations:
+      artifacthub.io/category: monitoring-logging
+      artifacthub.io/changes: |
+        - Support wildcard in ingress hostname. See [this issue](https://github.com/VictoriaMetrics/helm-charts/issues/2134).
+      artifacthub.io/license: Apache-2.0
+      artifacthub.io/links: |
+        - name: Sources
+          url: https://github.com/VictoriaMetrics/helm-charts/tree/master/charts/victoria-metrics-cluster
+        - name: Charts repo
+          url: https://victoriametrics.github.io/helm-charts/
+        - name: Docs
+          url: https://docs.victoriametrics.com/cluster-victoriametrics
+        - name: Changelog
+          url: https://docs.victoriametrics.com/changelog
+    apiVersion: v2
+    appVersion: v1.115.0
+    created: "2026-07-22T15:14:56.415298476Z"
+    dependencies:
+    - name: victoria-metrics-common
+      repository: https://victoriametrics.github.io/helm-charts
+      version: 0.0.*
+    description: Victoria Metrics Cluster version - high-performance, cost-effective
+      and scalable TSDB, long-term remote storage for Prometheus
+    digest: 4dc3a49181d2ccd34ff3aa054f21c38e36552bdffce35a34d1f8993178c1e128
+    home: https://github.com/VictoriaMetrics/helm-charts
+    icon: https://avatars.githubusercontent.com/u/43720803?s=200&v=4
+    keywords:
+    - victoriametrics
+    - vmcluster
+    - vmselect
+    - vminsert
+    - vmstorage
+    - tsdb
+    - monitoring
+    - kubernetes
+    - observability
+    - metrics
+    - metricsql
+    - timeseries
+    kubeVersion: '>=1.25.0-0'
+    name: victoria-metrics-cluster
+    sources:
+    - https://github.com/VictoriaMetrics/helm-charts
+    type: application
+    urls:
+    - https://novelcore.github.io/charts/victoria-metrics-cluster-0.20.1.tgz
+    version: 0.20.1
+generated: "2026-07-22T15:14:56.16995289Z"
