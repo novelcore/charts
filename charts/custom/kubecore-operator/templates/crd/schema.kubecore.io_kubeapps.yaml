@@ -573,6 +573,70 @@ spec:
                   description: KubeProjectRef references the KubeProject that owns this application
                   minLength: 1
                   type: string
+                networking:
+                  description: |-
+                    Networking declares application network exposure and consumption edges
+                    (PRD-ARCH-002 D-14′/D-05/D-15). Optional; existing apps are unaffected.
+                    NOTE: Networking.Visibility is NETWORK exposure and is DISTINCT from the
+                    repo-visibility field Visibility above — do not conflate them.
+                  properties:
+                    connections:
+                      description: Connections are declared consumption edges from this app to another app or tool.
+                      items:
+                        description: ConnectionSpec is one declared consumption edge.
+                        properties:
+                          mode:
+                            default: service
+                            description: Mode is "service" (east-west svc DNS + env vars) or "browser" (public URL + CORS).
+                            enum:
+                              - service
+                              - browser
+                            type: string
+                          name:
+                            description: Name is the env-var prefix for injected discovery ({NAME}_URI, {NAME}_HOST, ...).
+                            minLength: 1
+                            type: string
+                          port:
+                            description: Port is the named target port; defaults to the first declared port.
+                            type: string
+                          to:
+                            description: To is the connection target; exactly one of kubeApp | tool must be set.
+                            properties:
+                              kubeApp:
+                                description: KubeApp is the name of a sibling KubeApp in the same project.
+                                type: string
+                              tool:
+                                description: Tool is a tool instance name in the same named environment (Phase 2; reserved).
+                                type: string
+                            type: object
+                        required:
+                          - name
+                          - to
+                        type: object
+                      type: array
+                    cors:
+                      description: CORS is the target-owner-controlled origin policy for browser-mode consumers (D-15).
+                      properties:
+                        allowedOrigins:
+                          description: AllowedOrigins lists additional explicit origins.
+                          items:
+                            type: string
+                          type: array
+                        fromConnections:
+                          description: FromConnections, when true, allows the origins of declared browser-consumers.
+                          type: boolean
+                      type: object
+                    visibility:
+                      default: public
+                      description: |-
+                        Visibility sets NETWORK exposure. "public" renders a public HTTPRoute on the
+                        pool gateway; "internal" renders none (reachable only via declared connections).
+                        Distinct from KubeAppSpec.Visibility (repository visibility).
+                      enum:
+                        - public
+                        - internal
+                      type: string
+                  type: object
                 profile:
                   default: small
                   description: Profile specifies the resource profile size for the application
@@ -743,6 +807,59 @@ spec:
                   x-kubernetes-list-map-keys:
                     - type
                   x-kubernetes-list-type: map
+                connections:
+                  description: Connections surfaces per-(connection × named environment) resolution (F-07/F-13).
+                  items:
+                    description: ConnectionStatus is one connection's resolution in one named environment.
+                    properties:
+                      environment:
+                        type: string
+                      message:
+                        type: string
+                      name:
+                        type: string
+                      resolvedVia:
+                        description: ConnectionResolution is the provenance chain for a Ready connection (OSR/agents).
+                        properties:
+                          authzPolicyRef:
+                            type: string
+                          bindingVersion:
+                            type: string
+                          endpoint:
+                            type: string
+                          secretRef:
+                            type: string
+                          toolBindingRef:
+                            type: string
+                        type: object
+                      state:
+                        description: |-
+                          State is one of: Ready | Pending | BindingUnverified | BindingStale |
+                          CapabilityMissing | Drifted | TargetAbsent | Error.
+                        type: string
+                    required:
+                      - environment
+                      - name
+                      - state
+                    type: object
+                  type: array
+                endpoints:
+                  description: Endpoints surfaces per-named-environment reachability (D-14′/F-13).
+                  items:
+                    description: EndpointStatus is one app endpoint in one named environment.
+                    properties:
+                      clusterDNS:
+                        description: ClusterDNS is the in-cluster service DNS name.
+                        type: string
+                      environment:
+                        type: string
+                      url:
+                        description: URL is the public URL when visibility is public; empty for internal.
+                        type: string
+                    required:
+                      - environment
+                    type: object
+                  type: array
                 gitHubProviderConfig:
                   description: GitHubProviderConfig contains the GitHub provider configuration name
                   type: string

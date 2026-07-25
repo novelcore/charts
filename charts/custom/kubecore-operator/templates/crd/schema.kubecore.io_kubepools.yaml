@@ -1330,6 +1330,12 @@ spec:
                     region:
                       type: string
                     registryEndpoint:
+                      description: |-
+                        RegistryEndpoint is feature-conditional, NOT core: required for Ready only when
+                        spec.features.zotRegistry is enabled (defaults to true). A pool with zotRegistry
+                        explicitly set to false legitimately reaches Ready with this field empty —
+                        parentref.GetKubePoolOutputs mirrors the same enable/default logic the operator's
+                        own syncing phase uses before gating on it (plan r2 remediation Defect 2).
                       type: string
                     xKubeSystemRef:
                       description: ResourceReference contains a reference to a Kubernetes resource
