@@ -1,0 +1,358 @@
+{{- if .Values.crd.enable }}
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  labels:
+    {{- include "chart.labels" . | nindent 4 }}
+  annotations:
+    {{- if .Values.crd.keep }}
+    "helm.sh/resource-policy": keep
+    {{- end }}
+    controller-gen.kubebuilder.io/version: v0.18.0
+  name: toolbindings.schema.kubecore.io
+spec:
+  group: schema.kubecore.io
+  names:
+    kind: ToolBinding
+    listKind: ToolBindingList
+    plural: toolbindings
+    singular: toolbinding
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.pool
+      name: Pool
+      type: string
+    - jsonPath: .spec.bindingClass
+      name: BindingClass
+      type: string
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1beta1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          ToolBinding is the Schema for the toolbindings API. It is a per-pool
+          recipe describing how to consume a labelled tool of a given binding-class
+          (D-02/D-03/D-04/D-09/D-19/D-20) — never a provisioner.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: |-
+              ToolBindingSpec defines the desired state of ToolBinding — a per-pool
+              recipe (D-02), never a provisioner. There is deliberately no instance
+              list: the set of instances a binding verifies is DISCOVERED, not declared
+              (D-20) — spec carries only the recipe (which pool, which label, how to
+              name the Service/Secret), never a spec.instances[].
+            properties:
+              bindingClass:
+                description: |-
+                  BindingClass matches the kaos.io/binding-class label value carried by
+                  tool Secrets/Services this recipe verifies (D-04, D-18). This is the
+                  SOLE selector of a ToolBinding recipe.
+                minLength: 1
+                type: string
+              endpoint:
+                description: Endpoint is the recipe's Service naming template + port.
+                properties:
+                  port:
+                    description: |-
+                      Port is the Service port the recipe expects. NOT verified by 2a: a
+                      metadata-only PartialObjectMetadata LIST (CON-13) carries no Service
+                      spec, so a Service's actual port(s) cannot be observed by discovery at
+                      all. Asserted here; consumed only at 2b bind time (F-12).
+                    format: int32
+                    maximum: 65535
+                    minimum: 1
+                    type: integer
+                  service:
+                    description: |-
+                      Service is a naming template for the tool's Kubernetes Service, e.g.
+                      "{name}-rw". At least one "{name}" placeholder is required; the first
+                      occurrence is substituted with the discovered tool instance name.
+                    pattern: .*\{name\}.*
+                    type: string
+                required:
+                - port
+                - service
+                type: object
+              lane:
+                allOf:
+                - enum:
+                  - kaos-managed
+                  - client-managed
+                - enum:
+                  - kaos-managed
+                  - client-managed
+                description: Lane records operator-lifecycle ownership (D-08). Not
+                  enforced by 2a.
+                type: string
+              license:
+                description: License records the recipe's license posture (D-08).
+                properties:
+                  requiresAcceptance:
+                    description: |-
+                      RequiresAcceptance flags a restricted license needing counsel
+                      sign-off before Lane-B use (NG-06). Not enforced by 2a.
+                    type: boolean
+                  spdx:
+                    description: SPDX is the SPDX license identifier, e.g. "Apache-2.0".
+                    type: string
+                required:
+                - spdx
+                type: object
+              operatorVersion:
+                description: |-
+                  OperatorVersion is the tool operator version this recipe is keyed to
+                  (D-03, Lane A). Informational in 2a.
+                type: string
+              pool:
+                description: |-
+                  Pool is the KubePool this binding recipe verifies against (D-03).
+                  Must name a KubePool in the same (org) namespace as this ToolBinding.
+                minLength: 1
+                type: string
+              provenance:
+                allOf:
+                - enum:
+                  - platform
+                  - organization
+                - enum:
+                  - platform
+                  - organization
+                description: |-
+                  Provenance distinguishes platform-generated from client-authored
+                  bindings (D-19). Both share the org namespace; only this field and
+                  the authoring source differ.
+                type: string
+              requiredApi:
+                description: |-
+                  RequiredAPI names the API group/version the tool's operator must
+                  register (capability gate, F-13). Not enforced by 2a.
+                type: string
+              requiredOperator:
+                description: |-
+                  RequiredOperator names the operator the recipe depends on, surfaced
+                  in CapabilityMissing errors (F-13). Not enforced by 2a.
+                type: string
+              secret:
+                description: Secret is the recipe's Secret naming template + canonical
+                  key map.
+                properties:
+                  keyMap:
+                    additionalProperties:
+                      type: string
+                    description: |-
+                      KeyMap maps canonical servicebinding.io keys (host, port, username,
+                      password, uri, caCert, type — CON-03) to the tool secret's
+                      implementation-specific key names. Asserted here; shape-verified
+                      against reality only at 2b bind time (F-12), never by 2a discovery.
+                    type: object
+                  name:
+                    description: |-
+                      Name is a naming template for the tool's Secret, e.g. "{name}-app".
+                      At least one "{name}" placeholder is required; the first occurrence
+                      is substituted with the discovered tool instance name.
+                    pattern: .*\{name\}.*
+                    type: string
+                required:
+                - name
+                type: object
+              semanticClass:
+                description: |-
+                  SemanticClass is the OSR/NOUS ontology class (D-04), e.g.
+                  "relational-database". Not consumed by 2a verification logic.
+                type: string
+            required:
+            - bindingClass
+            - endpoint
+            - pool
+            - provenance
+            - secret
+            type: object
+          status:
+            description: ToolBindingStatus defines the observed state of ToolBinding.
+            properties:
+              conditions:
+                description: Conditions represent the latest available observations.
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
+              lastTransitionTime:
+                description: LastTransitionTime records when the status was last updated.
+                format: date-time
+                type: string
+              observedGeneration:
+                description: |-
+                  ObservedGeneration is the most recent generation attested Ready by
+                  the controller (framework Ready-attestation gate,
+                  internal/framework/reconciler_entry.go).
+                format: int64
+                type: integer
+              phase:
+                description: Phase indicates the current reconciliation phase.
+                enum:
+                - Reconciling
+                - Syncing
+                - Reporting
+                - Ready
+                - Failed
+                - Deleting
+                type: string
+              reconciliationAttempts:
+                description: ReconciliationAttempts tracks reconciliation attempts
+                  for backoff.
+                type: integer
+              renderedGeneration:
+                description: |-
+                  RenderedGeneration is the generation the last completed Reconciling
+                  pass validated. Internal bookkeeping for the Ready attestation; not a
+                  cross-controller output.
+                format: int64
+                type: integer
+              verifiedTargets:
+                description: |-
+                  VerifiedTargets is the eager-verification catalogue: one row per
+                  discovered tool instance (D-20, F-10). Populated ONLY by the
+                  metadata-only discovery LIST — never by a declared instance list.
+                items:
+                  description: |-
+                    VerifiedTarget is one row of the eager-verification catalogue: one
+                    discovered tool instance and its presence/addressability verdict (D-20,
+                    F-10). Never carries a secret value or key-name (invariant 1, CON-13).
+                  properties:
+                    environment:
+                      description: |-
+                        Environment is the namespace the instance was discovered in on the
+                        target pool (a named-environment namespace, or a fixed shared
+                        namespace for a project/pool-scoped tool per D-16).
+                      type: string
+                    instance:
+                      description: |-
+                        Instance is the tool instance name extracted from the recipe's
+                        secret/service naming templates (the "{name}" substitution).
+                      type: string
+                    lastVerified:
+                      description: |-
+                        LastVerified is the timestamp of the last successful discovery LIST
+                        that produced this row's State (F-11 freshness).
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        Message is a human-readable explanation, populated for
+                        TargetAbsent/Pending/Stale states (AC-23: names the expected
+                        binding-class and environment).
+                      type: string
+                    observedKeys:
+                      description: |-
+                        ObservedKeys is NOT populated by 2a (metadata-only discovery never
+                        reads .data); populated at 2b bind time by the PushSecret publish
+                        (F-12). Present now so the field is not a schema break later.
+                      items:
+                        type: string
+                      type: array
+                    state:
+                      allOf:
+                      - enum:
+                        - Verified
+                        - TargetAbsent
+                        - Pending
+                        - Stale
+                      - enum:
+                        - Verified
+                        - TargetAbsent
+                        - Pending
+                        - Stale
+                      description: State is the 2a-writable presence/addressability
+                        verdict.
+                      type: string
+                  required:
+                  - environment
+                  - instance
+                  - state
+                  type: object
+                type: array
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
+{{- end -}}

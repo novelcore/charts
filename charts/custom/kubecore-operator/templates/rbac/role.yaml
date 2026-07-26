@@ -560,6 +560,7 @@ rules:
   - kubepools
   - kubeprojects
   - kubeteams
+  - toolbindings
   verbs:
   - create
   - delete
@@ -576,6 +577,7 @@ rules:
   - kubepools/finalizers
   - kubeprojects/finalizers
   - kubeteams/finalizers
+  - toolbindings/finalizers
   verbs:
   - update
 - apiGroups:
@@ -586,6 +588,7 @@ rules:
   - kubepools/status
   - kubeprojects/status
   - kubeteams/status
+  - toolbindings/status
   verbs:
   - get
   - patch
