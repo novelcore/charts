@@ -688,6 +688,12 @@ spec:
                         Kyverno enables the Kyverno policy engine on this child cluster.
                         Defaults to true when not specified. Set to false to disable.
                       type: boolean
+                    logging:
+                      description: |-
+                        Logging deploys VictoriaLogs plus the bundled Vector DaemonSet to aggregate
+                        container logs pool-wide. Requires observability (Grafana renders the logs
+                        datasource). Defaults to true when not specified.
+                      type: boolean
                     mesh:
                       default: false
                       description: |-
@@ -740,6 +746,13 @@ spec:
                     observability:
                       description: Observability enables VictoriaMetrics observability stack
                       type: boolean
+                    tracing:
+                      description: |-
+                        Tracing deploys VictoriaTraces with an OTLP gRPC receiver, and wires Envoy
+                        Gateway (north-south) and — when features.mesh is on — the Istio mesh
+                        (east-west) to export spans to it. Requires observability (Grafana renders
+                        the traces datasource). Defaults to true when not specified.
+                      type: boolean
                     zotRegistry:
                       description: |-
                         ZotRegistry enables in-cluster Zot OCI container registry.
@@ -749,6 +762,10 @@ spec:
                   x-kubernetes-validations:
                     - message: features.costTracking requires features.observability (OpenCost reads the pool VictoriaMetrics)
                       rule: '!(has(self.costTracking) && self.costTracking) || (has(self.observability) && self.observability)'
+                    - message: features.logging requires features.observability (Grafana renders the VictoriaLogs datasource)
+                      rule: '!(has(self.logging) && self.logging) || !has(self.observability) || self.observability'
+                    - message: features.tracing requires features.observability (Grafana renders the VictoriaTraces datasource)
+                      rule: '!(has(self.tracing) && self.tracing) || !has(self.observability) || self.observability'
                 kaosCloud:
                   description: KaosCloud configures KubeCore-managed cloud connectivity features.
                   properties:
@@ -1164,6 +1181,26 @@ spec:
                       properties:
                         grafana:
                           description: Grafana component status
+                          properties:
+                            ready:
+                              description: Ready indicates if the component is ready
+                              type: boolean
+                            replicas:
+                              description: Replicas is the number of replicas
+                              type: integer
+                          type: object
+                        victoriaLogs:
+                          description: VictoriaLogs component status (log aggregation backend)
+                          properties:
+                            ready:
+                              description: Ready indicates if the component is ready
+                              type: boolean
+                            replicas:
+                              description: Replicas is the number of replicas
+                              type: integer
+                          type: object
+                        victoriaTraces:
+                          description: VictoriaTraces component status (OTLP trace backend)
                           properties:
                             ready:
                               description: Ready indicates if the component is ready
