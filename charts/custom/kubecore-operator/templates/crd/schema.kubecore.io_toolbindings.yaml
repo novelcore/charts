@@ -350,7 +350,11 @@ spec:
                           identity for Namespace, read from the namespace's own labels (D-22).
                           Present ONLY when Namespace is a KubeProject named-environment
                           namespace; absent means this instance is platform-private and is NOT
-                          a valid Phase-2b (F-12) to.tool bind target.
+                          a valid Phase-2b (F-12) to.tool bind target. A PRESENT value is
+                          discoverability metadata, NOT authorization: it is resolved from
+                          labels on the child pool's own namespaces, so a Phase-2b bind must
+                          still verify the resolved KubeOrg matches the consuming resource's
+                          own org rather than trusting this field.
                         properties:
                           dedicatedApp:
                             description: |-
