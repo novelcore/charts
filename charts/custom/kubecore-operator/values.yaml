@@ -44,7 +44,7 @@ controllerManager:
       # GAR registry + version as the operator image, pulled keylessly by the GKE
       # node SA. The v2-branch placeholder below mirrors the operator image path so
       # even an unstamped chart resolves to a keyless-pullable image.
-      MELUXINA_TOKENMINT_IMAGE: "europe-west1-docker.pkg.dev/kaos-dev-gcp/kaos-images/platform/meluxina-tokenmint:0.52.2"
+      MELUXINA_TOKENMINT_IMAGE: "europe-west1-docker.pkg.dev/kaos-dev-gcp/kaos-images/platform/meluxina-tokenmint:0.52.3"
     resources:
       limits:
         cpu: 500m
@@ -198,7 +198,8 @@ tokenBroker:
   tolerations: []
 
   # networkPolicy: controls the NetworkPolicy that restricts broker ingress to
-  # ESO and provider-gcp pods. Enabled by default when tokenBroker.enabled=true.
+  # ESO, provider-gcp, and the operator's own controller-manager pods. Enabled
+  # by default when tokenBroker.enabled=true.
   #
   # SELECTOR STRATEGY (confirmed against gke_kaos-dev-gcp_europe-west1_kubecore-prod-kaos-v2-gke):
   #   ESO pods (namespace external-secrets):
@@ -206,11 +207,17 @@ tokenBroker:
   #     app.kubernetes.io/name: external-secrets
   #   provider-gcp pods (namespace crossplane-system):
   #     pkg.crossplane.io/provider: upbound-provider-family-gcp
+  #   controller-manager pod (same namespace as the broker, {{ .Release.Namespace }}):
+  #     control-plane: controller-manager (see dist/chart/templates/manager/manager.yaml)
   #
-  # The namespace selectors require the target namespaces to carry the label
-  # "kubecore.io/token-broker-client: true" — add it once per cluster:
+  # The ESO/Crossplane namespace selectors require the target namespaces to carry
+  # the label "kubecore.io/token-broker-client: true" — add it once per cluster:
   #   kubectl label namespace external-secrets  kubecore.io/token-broker-client=true
   #   kubectl label namespace crossplane-system kubecore.io/token-broker-client=true
+  #
+  # The controller-manager rule needs NO namespace label: it is same-namespace
+  # (podSelector only, no namespaceSelector), which NetworkPolicy semantics scope
+  # to the policy's own namespace automatically.
   networkPolicy:
     enabled: true
 
@@ -250,6 +257,18 @@ tokenBroker:
     dashboardPodSelector:
       app: kaos-dashboard-api
 
+    # managerPodSelector: extra pod-level matchLabels identifying the operator's
+    # own controller-manager pod, merged with the chart's `chart.selectorLabels`
+    # helper (app.kubernetes.io/name + app.kubernetes.io/instance) in the
+    # template. Default matches the label the manager Deployment's pod template
+    # actually carries (dist/chart/templates/manager/manager.yaml). This rule is
+    # always present when networkPolicy.enabled=true — unlike the dashboard rule,
+    # it is not optional: PRD-ARCH-002 Phase 2a ToolBinding discovery (the GCP
+    # external_account token exchange) runs in the manager process itself and
+    # requires broker access to function at all.
+    managerPodSelector:
+      control-plane: controller-manager
+
 # [REGISTRY]: Container registry configuration
 # GAR (europe-west1-docker.pkg.dev) is pulled keylessly by the GKE node SA
 # (artifactregistry.reader), so no imagePullSecret is needed: createImagePullSecret
@@ -282,7 +301,7 @@ compositions:
   # OCI image for the kubecore-compositions Configuration package.
   # CI overwrites this with <REGISTRY_URL>/<PROJECT_REGISTRY>/kubecore-compositions:vX.Y.Z
   # at release. Required (must be non-empty) when compositions.enabled=true.
-  package: "europe-west1-docker.pkg.dev/kaos-dev-gcp/kaos-images/platform/kubecore-compositions:v0.52.2"
+  package: "europe-west1-docker.pkg.dev/kaos-dev-gcp/kaos-images/platform/kubecore-compositions:v0.52.3"
   # pullPolicy controls when Crossplane downloads the package.
   # Options: IfNotPresent (default), Always, Never
   pullPolicy: IfNotPresent

@@ -2,18 +2,28 @@
 # Token-broker NetworkPolicy (F-11, PRD-352, T-09).
 #
 # Allows ingress to :8080 only from pods in the labelled ESO, Crossplane, and
-# onboarding dashboard namespaces. All other ingress is denied.
+# onboarding dashboard namespaces, plus the operator's own controller-manager
+# pod in this same namespace. All other ingress is denied.
 #
 # SELECTOR STRATEGY:
-# The primary discriminator is the namespace label kubecore.io/token-broker-client=true.
-# Pod-level selectors default to {} (all pods in the namespace) because GCP token
-# requests come from multiple sub-provider pods (upbound-provider-gcp-secretmanager,
+# The primary discriminator for the ESO/Crossplane/dashboard rules is the
+# namespace label kubecore.io/token-broker-client=true. Pod-level selectors
+# default to {} (all pods in the namespace) because GCP token requests come
+# from multiple sub-provider pods (upbound-provider-gcp-secretmanager,
 # -cloudplatform, etc.) that each carry their own pkg.crossplane.io/provider value —
 # restricting to the family pod label alone would silently drop those requests.
 # Both esoPodSelector and crossplanePodSelector are overridable via values once
 # sub-provider label stability is confirmed for a given environment.
 #
-# Namespace label prerequisites (add once per cluster):
+# The controller-manager rule below is different: the manager runs in this
+# policy's OWN namespace ({{ .Release.Namespace }}), so it uses a `from` entry
+# containing ONLY a podSelector (no namespaceSelector). Per NetworkPolicy
+# semantics, a podSelector-only peer matches pods in the policy's own
+# namespace — it needs no kubecore.io/token-broker-client namespace label at
+# all, and is strictly narrower than labelling the namespace (which would
+# admit every pod in it, not just the manager).
+#
+# Namespace label prerequisites (add once per cluster, for ESO/Crossplane only):
 #   kubectl label namespace external-secrets  kubecore.io/token-broker-client=true
 #   kubectl label namespace crossplane-system kubecore.io/token-broker-client=true
 #
@@ -81,4 +91,18 @@ spec:
         - port: 8080
           protocol: TCP
     {{- end }}
+    # Allow the operator's own controller-manager pod to call GET /token/{org}.
+    # PRD-ARCH-002 Phase 2a ToolBinding discovery performs the GCP
+    # `external_account` credential exchange directly from the manager process
+    # (not from a Crossplane provider pod); that exchange's subject token comes
+    # from this broker. Same-namespace podSelector only — see SELECTOR STRATEGY
+    # above for why no namespaceSelector/namespace label is needed here.
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "chart.selectorLabels" . | nindent 14 }}
+              {{- toYaml .Values.tokenBroker.networkPolicy.managerPodSelector | nindent 14 }}
+      ports:
+        - port: 8080
+          protocol: TCP
 {{- end }}
