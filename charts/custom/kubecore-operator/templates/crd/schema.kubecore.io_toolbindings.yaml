@@ -312,12 +312,6 @@ spec:
                       discovered tool instance and its presence/addressability verdict (D-20,
                       F-10). Never carries a secret value or key-name (invariant 1, CON-13).
                     properties:
-                      environment:
-                        description: |-
-                          Environment is the namespace the instance was discovered in on the
-                          target pool (a named-environment namespace, or a fixed shared
-                          namespace for a project/pool-scoped tool per D-16).
-                        type: string
                       instance:
                         description: |-
                           Instance is the tool instance name extracted from the recipe's
@@ -335,6 +329,13 @@ spec:
                           TargetAbsent/Pending/Stale states (AC-23: names the expected
                           binding-class and environment).
                         type: string
+                      namespace:
+                        description: |-
+                          Namespace is the PHYSICAL namespace the instance was discovered in on
+                          the target pool — a discovery fact (D-22, §0.11 DEC-13), NOT the
+                          resolved project/environment identity (see ProjectEnvironment below).
+                          Do not re-derive project/environment identity by parsing this value.
+                        type: string
                       observedKeys:
                         description: |-
                           ObservedKeys is NOT populated by 2a (metadata-only discovery never
@@ -343,6 +344,41 @@ spec:
                         items:
                           type: string
                         type: array
+                      projectEnvironment:
+                        description: |-
+                          ProjectEnvironment is the RESOLVED KubeProject named-environment
+                          identity for Namespace, read from the namespace's own labels (D-22).
+                          Present ONLY when Namespace is a KubeProject named-environment
+                          namespace; absent means this instance is platform-private and is NOT
+                          a valid Phase-2b (F-12) to.tool bind target.
+                        properties:
+                          dedicatedApp:
+                            description: |-
+                              DedicatedApp is the owning KubeApp name, read from
+                              platform.kubecore.io/app. Set ONLY for a dedicated (app-scoped)
+                              named-environment namespace (V-14); empty for a shared environment.
+                            type: string
+                          environment:
+                            description: |-
+                              Environment is the named environment, read from
+                              platform.kubecore.io/environment — the same sense as
+                              KubeApp.status.selectedEnvironments.
+                            type: string
+                          kubeOrg:
+                            description: |-
+                              KubeOrg is the owning KubeOrg name, read from
+                              platform.kubecore.io/kubeorg.
+                            type: string
+                          kubeProject:
+                            description: |-
+                              KubeProject is the owning KubeProject name, read from
+                              platform.kubecore.io/project.
+                            type: string
+                        required:
+                          - environment
+                          - kubeOrg
+                          - kubeProject
+                        type: object
                       state:
                         allOf:
                           - enum:
@@ -358,8 +394,8 @@ spec:
                         description: State is the 2a-writable presence/addressability verdict.
                         type: string
                     required:
-                      - environment
                       - instance
+                      - namespace
                       - state
                     type: object
                   type: array
