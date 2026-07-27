@@ -1604,6 +1604,32 @@ spec:
                           description: Version of the tool
                           type: string
                       type: object
+                    postgres:
+                      description: |-
+                        Postgres reports the CloudNativePG OPERATOR installed by this pool,
+                        sourced from XClusterOperators status.tools.postgres; nil when
+                        spec.operators.postgres is off (D-21 gate 1) or the composition has not
+                        yet written the entry. It reports the operator, NOT the shared Postgres
+                        Cluster instance — spec.provisionSharedPostgres gates that separately.
+                        Version is the pool's authoritative CNPG chart version (PRD-ARCH-002
+                        D-03): the KubePool installs the operator, so the KubePool reports it.
+                      properties:
+                        enabled:
+                          description: Enabled indicates if the tool is enabled
+                          type: boolean
+                        namespace:
+                          description: Namespace where the tool is installed
+                          type: string
+                        status:
+                          description: Status of the tool (Pending, Installing, Ready, Error)
+                          type: string
+                        url:
+                          description: URL is the access URL for the tool (if applicable)
+                          type: string
+                        version:
+                          description: Version of the tool
+                          type: string
+                      type: object
                     skupper:
                       description: |-
                         Skupper (secure interconnect) tool status. Synthesized from XInterconnect status when
