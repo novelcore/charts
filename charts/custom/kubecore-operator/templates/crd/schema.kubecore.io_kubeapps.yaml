@@ -602,11 +602,22 @@ spec:
                           to:
                             description: To is the connection target; exactly one of kubeApp | tool must be set.
                             properties:
+                              bindingClass:
+                                description: |-
+                                  BindingClass is the ToolBinding recipe class governing Tool, and is
+                                  REQUIRED whenever Tool is set. The governing ToolBinding is addressed
+                                  deterministically as "{bindingClass}--{pool}" in the org namespace
+                                  (D-19), so no pool-wide scan is needed and two recipes that happened to
+                                  discover the same instance name can never be confused for each other.
+                                type: string
                               kubeApp:
                                 description: KubeApp is the name of a sibling KubeApp in the same project.
                                 type: string
                               tool:
-                                description: Tool is a tool instance name in the same named environment (Phase 2; reserved).
+                                description: |-
+                                  Tool is the name of a tool INSTANCE discovered by a ToolBinding recipe
+                                  (F-12). Resolution joins this value against that ToolBinding's
+                                  status.verifiedTargets[].instance — never against a namespace name.
                                 type: string
                             type: object
                         required:
