@@ -336,14 +336,6 @@ spec:
                           resolved project/environment identity (see ProjectEnvironment below).
                           Do not re-derive project/environment identity by parsing this value.
                         type: string
-                      observedKeys:
-                        description: |-
-                          ObservedKeys is NOT populated by 2a (metadata-only discovery never
-                          reads .data); populated at 2b bind time by the PushSecret publish
-                          (F-12). Present now so the field is not a schema break later.
-                        items:
-                          type: string
-                        type: array
                       projectEnvironment:
                         description: |-
                           ProjectEnvironment is the RESOLVED KubeProject named-environment
