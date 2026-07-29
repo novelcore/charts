@@ -625,6 +625,27 @@ rules:
   verbs:
   - get
 - apiGroups:
+  - skupper.io
+  resources:
+  - connectors
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - update
+  - watch
+- apiGroups:
+  - skupper.io
+  resources:
+  - sites
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - watch
+- apiGroups:
   - team.github.m.upbound.io
   resources:
   - members
