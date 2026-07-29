@@ -33,11 +33,8 @@ rules:
   resources:
   - namespaces
   verbs:
-  - create
   - get
   - list
-  - patch
-  - update
 - apiGroups:
   - apiextensions.crossplane.io
   resources:
@@ -628,22 +625,13 @@ rules:
   - skupper.io
   resources:
   - connectors
-  verbs:
-  - create
-  - delete
-  - get
-  - list
-  - update
-  - watch
-- apiGroups:
-  - skupper.io
-  resources:
   - sites
   verbs:
   - create
   - delete
   - get
   - list
+  - update
   - watch
 - apiGroups:
   - team.github.m.upbound.io

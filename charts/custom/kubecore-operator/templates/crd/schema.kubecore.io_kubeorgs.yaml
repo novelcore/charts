@@ -1052,6 +1052,35 @@ spec:
                     an output — no other controller may read it.
                   format: int64
                   type: integer
+                skupperHub:
+                  description: |-
+                    SkupperHub is the observed state of this organisation's control-plane Skupper hub.
+                    Observational, not a cross-controller contract: it is written on every hub
+                    reconciliation (Syncing AND Ready), including when the hub is NOT ready — a status
+                    block that only appears on success is useless exactly when it is needed.
+                  properties:
+                    endpoints:
+                      description: |-
+                        Endpoints are the hub Site's advertised endpoints as "<name>=<host>:<port>",
+                        sorted. Empty until Skupper's controller resolves them.
+                      items:
+                        type: string
+                      type: array
+                    message:
+                      description: Message carries detail when not Ready (which Site, in which namespace, and why).
+                      type: string
+                    namespace:
+                      description: Namespace is the resolved hub namespace — the org's own namespace.
+                      type: string
+                    ready:
+                      description: |-
+                        Ready indicates the hub Site reports Ready AND advertises at least one endpoint,
+                        i.e. a pool of this org could redeem an AccessGrant against it right now.
+                      type: boolean
+                    state:
+                      description: 'State is a human-readable rollup: Pending | Ready | Degraded | Error.'
+                      type: string
+                  type: object
               type: object
           required:
             - spec
