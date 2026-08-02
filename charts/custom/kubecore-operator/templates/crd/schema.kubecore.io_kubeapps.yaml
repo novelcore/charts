@@ -573,6 +573,23 @@ spec:
                   description: KubeProjectRef references the KubeProject that owns this application
                   minLength: 1
                   type: string
+                mlCompute:
+                  description: |-
+                    MLCompute overrides the per-tier ML pipeline step compute class for THIS
+                    app (PRD-858 F-05). Per-tier merge: set only gpuClass and the cpu tier
+                    keeps the environment/pool default (effective = app ?? default). Each
+                    name must exist in the active class catalog (the hardcoded ml-environment
+                    catalog when the app targets an ml-type environment via
+                    environmentSelector, else the pool's mlClasses) — an unknown name fails
+                    reconciliation rather than being silently ignored (T-02).
+                  properties:
+                    cpuClass:
+                      description: CpuClass is the class name cpu-tier steps default to (e.g. "cpu-standard").
+                      type: string
+                    gpuClass:
+                      description: GpuClass is the class name gpu-tier steps default to (e.g. "gpu-t4").
+                      type: string
+                  type: object
                 networking:
                   description: |-
                     Networking declares application network exposure and consumption edges
