@@ -223,9 +223,37 @@ rules:
   - watch
 - apiGroups:
   - ec2.aws.m.upbound.io
+  - ec2.aws.upbound.io
   resources:
   - subnets/status
   - vpcs/status
+  verbs:
+  - get
+- apiGroups:
+  - ec2.aws.upbound.io
+  resources:
+  - subnets
+  - vpcs
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - eks.aws.crossplane.io
+  resources:
+  - xeks
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - eks.aws.crossplane.io
+  resources:
+  - xeks/status
   verbs:
   - get
 - apiGroups:
@@ -249,10 +277,19 @@ rules:
   - watch
 - apiGroups:
   - eks.aws.m.upbound.io
+  - eks.aws.upbound.io
   resources:
   - nodegroups/status
   verbs:
   - get
+- apiGroups:
+  - eks.aws.upbound.io
+  resources:
+  - nodegroups
+  verbs:
+  - get
+  - list
+  - watch
 - apiGroups:
   - external-secrets.io
   resources:
@@ -349,10 +386,19 @@ rules:
   - watch
 - apiGroups:
   - iam.aws.m.upbound.io
+  - iam.aws.upbound.io
   resources:
   - roles/status
   verbs:
   - get
+- apiGroups:
+  - iam.aws.upbound.io
+  resources:
+  - roles
+  verbs:
+  - get
+  - list
+  - watch
 - apiGroups:
   - k8s.platform.kubecore.io
   resources:

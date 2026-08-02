@@ -123,15 +123,20 @@ spec:
                               - dev
                               - stage
                               - prod
+                              - ml
                           - enum:
                               - dev
                               - stage
                               - prod
+                              - ml
                         description: |-
-                          EnvironmentType classifies the environment (dev/stage/prod). It is the
+                          EnvironmentType classifies the environment (dev/stage/prod/ml). It is the
                           authoritative source for the priority-uniqueness validator and the status
                           writer; it replaces the value that was previously read from the KubePool
-                          environment template (PRD-KUBENV-001 S-1/A2, D-01).
+                          environment template (PRD-KUBENV-001 S-1/A2, D-01). The "ml" type marks a
+                          per-project ML environment: it provisions its OWN MLOps stack (one per ml
+                          environment — PRD-858 supersedes PRD-240 CON-07) and hosts whole-node
+                          pipeline step compute; it carries no app-promotion semantics.
                         type: string
                       kubePool:
                         description: KubePool references the KubePool resource to use for this environment
