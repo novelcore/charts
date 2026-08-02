@@ -797,6 +797,15 @@ spec:
         compute_catalog_ref = ctx.get('computeCatalog') or {}
         live_compute = bool((pool_context.get('projectId') or '').strip())
 
+        # PRD-858 F-05: when the pipeline context targets an ml-type named
+        # environment, every step is pinned onto that environment's own
+        # scale-to-zero class pools: nodeSelector gains the environment label
+        # and tolerations gain the env-exclusivity taint (both mirror exactly
+        # what kubenv-gcp stamps on those pools). Absent -> byte-for-byte
+        # unchanged for every existing app.
+        ml_env = ctx.get('mlEnvironment') or {}
+        ml_env_name = (ml_env.get('name') or '').strip()
+
         compute = ctx.get('computeClasses', {})
         cpu_cls = compute.get('cpu', {})
         gpu_cls = compute.get('gpu', {})
@@ -1500,6 +1509,14 @@ spec:
                     {'key': 'platform.kubecore.io/ml-workload', 'operator': 'Exists', 'effect': 'NoSchedule'},
                     {'key': 'nvidia.com/gpu', 'operator': 'Exists', 'effect': 'NoSchedule'},
                 ]
+                step_node_selector = {'platform.kubecore.io/nodegroup-type': OB + 'inputs.parameters.pool-name' + CB}
+                if ml_env_name:
+                    # PRD-858: the env pools carry the kubenv env-exclusivity
+                    # taint and the environment label - tolerate the former,
+                    # select on the latter, so steps land ONLY on this ml
+                    # environment's pools.
+                    step_tolerations.append({'key': 'platform.kubecore.io/kubenv', 'operator': 'Equal', 'value': ml_env_name, 'effect': 'NoSchedule'})
+                    step_node_selector['platform.kubecore.io/environment'] = ml_env_name
 
                 tmpl = {
                     'name': sn,
@@ -1517,7 +1534,7 @@ spec:
                             'platform.kubecore.io/compute-class': OB + 'inputs.parameters.class-name' + CB,
                         }
                     },
-                    'nodeSelector': {'platform.kubecore.io/nodegroup-type': OB + 'inputs.parameters.pool-name' + CB},
+                    'nodeSelector': step_node_selector,
                     'tolerations': step_tolerations,
                     'serviceAccountName': sa,
                     'retryStrategy': {
