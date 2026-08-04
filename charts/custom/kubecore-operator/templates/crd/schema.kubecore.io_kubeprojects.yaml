@@ -1315,6 +1315,48 @@ spec:
                           - namespace
                         type: object
                       type: array
+                    mlEnvironments:
+                      description: |-
+                        MLEnvironments publishes the per-ml-environment MLOps stack outputs
+                        (PRD-858): one entry per environmentType "ml" whose XProjectEnvMLStack
+                        has reported status. Consumers (the kubeapp operator) read this ONLY
+                        via parentref.GetKubeProjectOutputs to wire env-targeted ML apps at
+                        the env stack's endpoints and admin-secret naming.
+                      items:
+                        description: |-
+                          MLEnvironmentOutput is the published projection of one ml-type environment's
+                          MLOps stack (PRD-858). All fields are read from the XProjectEnvMLStack's
+                          composition-written status plus the deterministic per-env naming.
+                        properties:
+                          lakeFSAdminSecret:
+                            description: |-
+                              LakeFSAdminSecret is the in-namespace admin Secret the env stack's init
+                              job creates ({project}-{environment}-lakefs-admin) — the name the
+                              pipeline's step env secretKeyRefs must reference.
+                            type: string
+                          lakeFSEndpoint:
+                            type: string
+                          lakeFSRepository:
+                            type: string
+                          mlflowEndpoint:
+                            type: string
+                          name:
+                            description: Name is the ml environment name (ProjectEnvironment.name).
+                            type: string
+                          namespace:
+                            description: |-
+                              Namespace is the env stack namespace on the workload cluster
+                              (ml-{project}-{environment}) — where pipeline pods run.
+                            type: string
+                          postgresHost:
+                            type: string
+                          state:
+                            description: State mirrors the stack XR's status.state ("Creating"/"Ready"/...).
+                            type: string
+                        required:
+                          - name
+                        type: object
+                      type: array
                     mlStack:
                       description: |-
                         MLStackStatus tracks the per-project ML stack (XProjectMLStack).
