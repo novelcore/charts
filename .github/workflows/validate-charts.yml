@@ -75,6 +75,19 @@ jobs:
         if: steps.list-changed.outputs.changed == 'true'
         uses: helm/kind-action@v1.8.0
 
+      # Custom charts ship Argo Workflows resources (ClusterWorkflowTemplate,
+      # WorkflowTemplate, CronWorkflow). A vanilla kind cluster has none of
+      # those CRDs, so `ct install` fails with "no matches for kind ..." the
+      # moment list-changed actually detects such a chart — the gate only
+      # LOOKED green historically because list-changed usually skipped it.
+      - name: Install CRDs required by custom charts (Argo Workflows)
+        if: steps.list-changed.outputs.changed == 'true'
+        run: |
+          kubectl apply --server-side -k "https://github.com/argoproj/argo-workflows/manifests/base/crds/minimal?ref=v3.5.11"
+          # Charts pin cross-namespace resources into argo-workflows (where the
+          # platform's Argo controller lives); create it so install can proceed.
+          kubectl create namespace argo-workflows
+
       - name: Run chart-testing (install)
         if: steps.list-changed.outputs.changed == 'true'
         run: |
