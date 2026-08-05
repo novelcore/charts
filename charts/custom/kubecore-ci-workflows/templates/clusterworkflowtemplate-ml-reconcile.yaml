@@ -215,6 +215,30 @@ spec:
           else
             echo "reconcile: context in sync (${WANT}Gi)"
           fi
+
+          # PRD-858: the context's mlEnvironment (env-targeted scheduling) is a
+          # THIRD input with the same no-commit failure mode — the operator
+          # (re)targets an app at an ml environment, the context changes with
+          # no push, and a commit-only check leaves the live WFT pinning steps
+          # at the OLD environment (or none) forever. Compare the context's env
+          # name against the env pin the live WFT actually renders.
+          WANT_ENV=$(echo "$CTX" | sed -n '/^mlEnvironment:/,/^[a-z]/p' | sed -n 's/^  name: *"\{0,1\}\([^"]*\)"\{0,1\}$/\1/p' | head -1)
+          # A failed WFT read must NOT look like "unpinned" (= drift) — that is
+          # the self-triggering-storm shape. Read once, skip loudly on failure;
+          # an empty pin from a SUCCESSFUL read is a real "not env-targeted".
+          if ! WFT_JSON=$(kubectl get workflowtemplate "${APP}-pipeline" -n "${ML_NS}" -o json 2>&1); then
+            echo "reconcile: WARN cannot read ${ML_NS}/${APP}-pipeline — mlEnvironment drift check SKIPPED: ${WFT_JSON}"
+          else
+            GOT_ENV=$(echo "$WFT_JSON" \
+                | jq -r '[.spec.templates[]?.nodeSelector["platform.kubecore.io/environment"] // empty] | map(select(. != "")) | first // empty')
+            if [ "$WANT_ENV" != "$GOT_ENV" ]; then
+              printf 'true' > /tmp/needs_build
+              echo "reconcile: CONTEXT DRIFT — mlEnvironment is '${WANT_ENV:-<none>}' but the live WFT pins '${GOT_ENV:-<none>}'; re-rendering"
+              exit 0
+            else
+              echo "reconcile: mlEnvironment in sync ('${WANT_ENV:-<none>}')"
+            fi
+          fi
         else
           echo "reconcile: WARN no ${ML_NS}/${APP}-pipeline-context — context-drift check SKIPPED"
         fi
