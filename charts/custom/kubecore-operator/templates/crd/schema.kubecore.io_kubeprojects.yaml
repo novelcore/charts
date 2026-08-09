@@ -1340,6 +1340,19 @@ spec:
                             type: string
                           mlflowEndpoint:
                             type: string
+                          mlflowOIDCDiscoveryUrl:
+                            description: |-
+                              MlflowOIDCDiscoveryURL is the env stack's MLflow OIDC discovery URL
+                              (PRD-858 Q-02, from the stack XR's spec.mlflowOIDC). The kubeapp
+                              reconciler derives the Zitadel domain from it so env-targeted
+                              pipelines get MLflow bearer auth (#868) — without it the pipeline
+                              context's mlflow.oidcDomain stays empty and every real MLflow call 401s.
+                            type: string
+                          mlflowOIDCProjectId:
+                            description: |-
+                              MlflowOIDCProjectID is the Zitadel org-project id the pipeline's
+                              machine JWT must be audienced to (urn:zitadel:iam:org:project:id:{id}:aud).
+                            type: string
                           name:
                             description: Name is the ml environment name (ProjectEnvironment.name).
                             type: string
