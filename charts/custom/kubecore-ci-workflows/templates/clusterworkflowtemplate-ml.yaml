@@ -38,6 +38,12 @@ spec:
     secondsAfterCompletion: {{ .Values.workflow.ttlStrategy.secondsAfterCompletion }}
   podGC:
     strategy: {{ .Values.workflow.podGC.strategy }}
+  # Release the 40Gi workspace PVC the moment the build COMPLETES, not when
+  # the (TTL-retained) workflow object is eventually deleted — retained
+  # workflows were each pinning a pd-balanced volume against the regional
+  # SSD_TOTAL_GB quota (kubecore-operator#872: 4×40Gi idle at quota ceiling).
+  volumeClaimGC:
+    strategy: OnWorkflowCompletion
   {{- with .Values.nodeSelector }}
   nodeSelector:
     {{- toYaml . | nindent 4 }}

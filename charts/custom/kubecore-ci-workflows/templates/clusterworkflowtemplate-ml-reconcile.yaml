@@ -120,6 +120,29 @@ spec:
             || { echo "FATAL: could not install kubectl" >&2; exit 1; }
         fi
         command -v jq >/dev/null 2>&1 || apk add --no-cache jq >/dev/null 2>&1 || true
+
+        # IN-FLIGHT GUARD (kubecore-operator#872): never stack a new build on an
+        # unfinished one. When builds cannot complete (live 2026-08-09: regional
+        # SSD quota exhausted -> workspace PVCs Pending forever), every tick used
+        # to submit ANOTHER build: 43 stacked workflows whose 42 pending/bound
+        # 40Gi workspaces themselves held the quota exhausted - a self-sustaining
+        # storm. A build already Running/Pending means drift is being handled;
+        # skip LOUDLY (never silently - the self-disabling class this template
+        # documents). A read failure also skips: unknown state must never mean
+        # "submit more work".
+        if ! INFLIGHT=$(kubectl get workflows -n "{{`{{workflow.namespace}}`}}"               -o json 2>&1); then
+          echo "reconcile: WARN cannot list workflows - in-flight state unknown, skipping this poll: ${INFLIGHT}"
+          printf 'false' > /tmp/needs_build
+          printf '' > /tmp/head_sha
+          exit 0
+        fi
+        ACTIVE=$(echo "$INFLIGHT" | jq -r '[.items[] | select((.metadata.name|startswith("ml-ci-build")) and (.status.phase=="Running" or .status.phase=="Pending" or .status.phase==null))] | length')
+        if [ "${ACTIVE:-0}" != "0" ]; then
+          echo "reconcile: build already in flight (${ACTIVE} active ml-ci-build workflow(s)) - skipping submit this poll"
+          printf 'false' > /tmp/needs_build
+          printf '' > /tmp/head_sha
+          exit 0
+        fi
         # Fail LOUDLY if a tool is still missing rather than silently treating an
         # unreadable baseline as drift — that is what turned a missing binary
         # into a build storm instead of a red workflow (live 2026-07-16).
