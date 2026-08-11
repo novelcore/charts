@@ -1,0 +1,99 @@
+{{- /*
+PRD-3 D-06 / F-12 — labelled members of the kaos-crd-reader aggregation base.
+
+Two objects, not one per API group, and not one for everything:
+
+  <release>-crd-reader-kaos    the curated list KAOS installs on a child pool
+                               (.Values.readGroups)
+  <release>-crd-reader-extra   groups added at install time by the operator of
+                               this cluster (.Values.extraReadGroups)
+
+Splitting by PROVENANCE is the point. An auditor running
+`kubectl get clusterrole -l kaos.io/aggregate-to-crd-reader=true` can tell at a
+glance which part of THE AGGREGATE this chart shipped and which part was
+widened locally, without diffing against a released chart. (That query is
+complete for the aggregate and for nothing else — the read API's built-in read
+role is bound directly and carries only kaos.io/osr-read-surface, so the full
+OSR read surface takes both label queries. See docs/security/osr-rbac-audit.md
+§3.) Splitting further —
+one ClusterRole per group — would add ~20 cluster-scoped objects and answer no
+question the `-o yaml` of these two does not.
+
+WHY A RESOURCE WILDCARD IS SAFE HERE, AND ONLY HERE
+
+`resources: ['*']` under a NAMED, dotted API group reaches only that group:
+cert-manager.io/* is every cert-manager CRD and nothing else. Secrets live in
+the core group, whose name is the empty string, and every entry rendered below
+is validated to be a dotted DNS subdomain — so the core group is not
+expressible, and neither is "*". This is precisely the distinction the deleted
+`apiGroups: ["*"]` rule failed to make. Enumerating individual resources
+instead is not an option: the operator discovers CRDs dynamically and cannot
+know a group's resource names at chart-render time.
+
+The verbs are get, list, watch. Nothing else is ever added: a member carrying a
+write verb is merged into the base by kube-controller-manager with no diff on
+the base object, so an audit that inspects only the base would show nothing.
+That is T-11, and the Kyverno policy in kyverno-no-secrets-policy.yaml is the
+admission-time guard against it.
+
+A group that appears in NEITHER list is not silently unobservable: its informer
+receives Forbidden and stops (terminal — no retry loop, no goroutine per
+unreadable group), and the group surfaces on the KnowledgeSyncContract as
+ObservationScopeComplete=False / RBACForbidden with the CRDs itemised in
+status.rejectedCRDs. Adding the group here and upgrading takes effect on the
+next reconcile; the operator re-tests forbidden groups every cycle and does not
+need a restart (PRD-3 AC-21).
+*/ -}}
+{{- if not .Values.rbac.namespaced }}
+{{- if .Values.readGroups }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    app.kubernetes.io/name: {{ include "kaos-osr-edge-operator.name" . }}
+    helm.sh/chart: {{ .Chart.Name }}-{{ .Chart.Version | replace "+" "_" }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    {{ include "kaos-osr-edge-operator.crdReaderAggregationLabel" . }}: "true"
+    {{ include "kaos-osr-edge-operator.readSurfaceLabel" . }}: "true"
+  name: {{ include "kaos-osr-edge-operator.resourceName" (dict "suffix" "crd-reader-kaos" "context" $) }}
+rules:
+{{- range $group := .Values.readGroups }}
+{{- include "kaos-osr-edge-operator.validateAPIGroup" (dict "group" $group "source" "readGroups") }}
+  - apiGroups:
+      - {{ $group | quote }}
+    resources:
+      - '*'
+    verbs:
+      - get
+      - list
+      - watch
+{{- end }}
+{{- end }}
+{{- if .Values.extraReadGroups }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    app.kubernetes.io/name: {{ include "kaos-osr-edge-operator.name" . }}
+    helm.sh/chart: {{ .Chart.Name }}-{{ .Chart.Version | replace "+" "_" }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    {{ include "kaos-osr-edge-operator.crdReaderAggregationLabel" . }}: "true"
+    {{ include "kaos-osr-edge-operator.readSurfaceLabel" . }}: "true"
+  name: {{ include "kaos-osr-edge-operator.resourceName" (dict "suffix" "crd-reader-extra" "context" $) }}
+rules:
+{{- range $group := .Values.extraReadGroups }}
+{{- include "kaos-osr-edge-operator.validateAPIGroup" (dict "group" $group "source" "extraReadGroups") }}
+  - apiGroups:
+      - {{ $group | quote }}
+    resources:
+      - '*'
+    verbs:
+      - get
+      - list
+      - watch
+{{- end }}
+{{- end }}
+{{- end }}

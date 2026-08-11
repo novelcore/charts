@@ -1,0 +1,44 @@
+{{- if .Values.sampleContract.create }}
+{{- if not .Values.sampleContract.orgId }}{{- fail "sampleContract.create=true requires sampleContract.orgId" }}{{- end }}
+{{- if not .Values.sampleContract.poolId }}{{- fail "sampleContract.create=true requires sampleContract.poolId" }}{{- end }}
+{{- if not .Values.sampleContract.cloudEndpoint.url }}{{- fail "sampleContract.create=true requires sampleContract.cloudEndpoint.url" }}{{- end }}
+apiVersion: osr.kaos.kubecore.io/v1alpha1
+kind: KnowledgeSyncContract
+metadata:
+  name: {{ include "kaos-osr-edge-operator.resourceName" (dict "suffix" "sample" "context" $) }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    app.kubernetes.io/name: {{ include "kaos-osr-edge-operator.name" . }}
+    helm.sh/chart: {{ .Chart.Name }}-{{ .Chart.Version | replace "+" "_" }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  orgId: {{ .Values.sampleContract.orgId }}
+  poolId: {{ .Values.sampleContract.poolId }}
+  cloudEndpoint:
+    url: {{ .Values.sampleContract.cloudEndpoint.url }}
+    authSecretRef:
+      name: {{ .Values.sampleContract.cloudEndpoint.authSecretRef.name }}
+      clientIDKey: {{ .Values.sampleContract.cloudEndpoint.authSecretRef.clientIDKey }}
+      clientSecretKey: {{ .Values.sampleContract.cloudEndpoint.authSecretRef.clientSecretKey }}
+      issuerURLKey: {{ .Values.sampleContract.cloudEndpoint.authSecretRef.issuerURLKey }}
+  observation:
+    resourceTypes:
+      {{- toYaml .Values.sampleContract.observation.resourceTypes | nindent 6 }}
+    namespaces:
+      {{- toYaml .Values.sampleContract.observation.namespaces | nindent 6 }}
+    excludeNamespaces:
+      {{- toYaml .Values.sampleContract.observation.excludeNamespaces | nindent 6 }}
+    # Defence-in-depth for CON-07 / T-05. The binary's discovery filter applies
+    # discovery.MandatoryExclusions defensively even if this list is missing,
+    # but explicitly listing the entries here makes the contract visible to
+    # operators inspecting the KSC via kubectl.
+    excludeResourceTypes:
+      {{- range concat .Values.mandatoryExcludeResourceTypes .Values.defaultExcludeResourceTypes }}
+      - {{ . }}
+      {{- end }}
+  push:
+    debounceWindowSeconds: {{ .Values.sampleContract.push.debounceWindowSeconds }}
+    sweepIntervalMinutes: {{ .Values.sampleContract.push.sweepIntervalMinutes }}
+    heartbeatIntervalSeconds: {{ .Values.sampleContract.push.heartbeatIntervalSeconds }}
+{{- end }}

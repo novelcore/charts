@@ -1,0 +1,51 @@
+apiVersion: v2
+name: kaos-osr-edge-operator
+description: Kubernetes operator that observes a workload cluster's CRDs and Custom Resources and pushes a normalised knowledge graph to the KAOS control plane (PRD-1 OSR Edge Operator).
+type: application
+
+version: 0.1.1
+appVersion: "0.1.1"
+
+# Maintainers
+maintainers:
+  - name: Novelcore Platform Team
+    email: platform@novelcore.io
+
+# Keywords for chart discovery
+keywords:
+  - kubernetes
+  - operator
+  - kaos
+  - kubecore
+  - osr
+  - knowledge-graph
+  - observability
+  - edge
+
+# Home page
+home: https://github.com/novelcore/kaos-osr-edge-operator
+
+# Source code
+sources:
+  - https://github.com/novelcore/kaos-osr-edge-operator
+
+# Icon
+icon: "https://github.com/novelcore/kaos-osr-edge-operator/raw/main/docs/icon.png"
+
+# Annotations for additional metadata
+annotations:
+  kubebuilder.io/generated-by: kubebuilder
+
+  # Category for Artifact Hub
+  artifacthub.io/category: integration-delivery
+  artifacthub.io/license: Apache-2.0
+
+  # Links for Artifact Hub
+  artifacthub.io/links: |
+    - name: GitHub Repository
+      url: https://github.com/novelcore/kaos-osr-edge-operator
+    - name: PRD
+      url: https://github.com/novelcore/kaos-osr-edge-operator/blob/main/knowledge/prds/1-osr-edge-operator.md
+
+# Kubernetes version compatibility
+kubeVersion: ">=1.29.0-0"

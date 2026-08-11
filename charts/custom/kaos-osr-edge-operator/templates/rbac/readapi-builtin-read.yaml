@@ -1,0 +1,233 @@
+{{- /*
+PRD-3 D-06 / F-09 — the built-in Kubernetes read surface for the read API.
+
+WHY THIS EXISTS
+
+The crd-reader aggregate covers CUSTOM resources: one member per named API
+group. It grants nothing on the built-in groups, so with it alone the read API
+cannot list a namespace, read a pod, or fetch a pod log — which is most of what
+it exists to do:
+
+  - F-11 / Task 4 resolves the caller's scope by LISTING NAMESPACES and reading
+    their platform.kubecore.io/* labels. Without namespaces there is no
+    authorisation input at all and every request fails closed.
+  - F-09 / Task 5 serves resources and events.
+  - F-13 / Task 6 serves pod logs (pods/log) and must redact ConfigMap content.
+  - F-14 / Task 9 queries VictoriaMetrics and VictoriaLogs, which are not
+    Kubernetes reads, but reports alongside the workloads they describe.
+
+WHY NOT THE BUILT-IN `view` CLUSTERROLE
+
+`view` carries rbac.authorization.k8s.io/aggregate-to-view, so ANY operator
+installed later on the cluster can silently extend what we hold by shipping its
+own aggregate-to-view member. Our granted set would change with no diff in this
+chart, and it would change through a THIRD label — aggregate-to-view — that
+neither of the two audit queries below selects on. Enumerating is more verbose
+and is the only form that keeps the audited surface reachable from the labels
+this chart controls.
+
+WHY IT IS NOT A MEMBER OF THE crd-reader AGGREGATE
+
+This object carries the kaos.io/osr-read-surface marker but NOT
+kaos.io/aggregate-to-crd-reader, and is bound directly to the read API's
+ServiceAccount. Both OSR ServiceAccounts hold the aggregate, so making this a
+member would hand the operator read on ConfigMaps, namespaces, services, nodes
+and PVs — a surface its code never touches. That matters specifically because
+the operator holds the outbound cloud credential and has egress, and ConfigMaps
+are exactly where clients paste credentials (PRD-3 AC-20's premise). ConfigMap
+read plus egress on one identity is worse than either alone.
+
+The split costs nothing at audit time PROVIDED both labels are queried, which
+is what docs/security/osr-rbac-audit.md §3 and the Kyverno policy both do:
+
+  kubectl get clusterrole -l kaos.io/osr-read-surface=true        # chart-shipped
+  kubectl get clusterrole -l kaos.io/aggregate-to-crd-reader=true # merged in
+
+The marker alone is NOT a complete enumeration and must never be presented as
+one. It answers "what did the chart ship", not "what can OSR read": a
+ClusterRole created by anyone else carrying only the aggregation label is
+merged into the aggregate both ServiceAccounts hold and carries this marker
+nowhere. Measured on a test cluster, a marker-only query returned 0 while both
+ServiceAccounts held cluster-wide Secret read.
+
+WHY EVERY RESOURCE IS ENUMERATED
+
+`resources: ['*']` is safe under a named non-core API group — cert-manager.io/*
+reaches cert-manager.io and nothing else. It is NOT safe here: Secrets live in
+the core group (""), so `""/*` grants Secret read and is exactly the rule
+PRD-3 D-06 exists to remove. Every core-group resource below is therefore named
+individually, and the render assertions in test/helm/render.sh reject a wildcard
+resource under any group that is not a dotted DNS subdomain.
+
+The denylist is absolute and holds by construction: no secrets, no
+serviceaccounts/token, no certificatesigningrequests, no exec/attach/portforward.
+serviceaccounts objects are also omitted — nothing in Tasks 4/5/6/9 needs them,
+and their .secrets references disclose Secret names.
+
+DELIBERATELY OMITTED: rbac.authorization.k8s.io
+
+Reading Roles, RoleBindings, ClusterRoles and ClusterRoleBindings grants no
+privilege — they are policy documents, not credentials — and it is genuinely the
+best diagnostic for "why can my workload not read X". It is omitted anyway, on
+two grounds. First, no shipped feature needs it: Tasks 4, 5, 6 and 9 never read
+RBAC, so it would be capability held for a use case that does not exist, which
+is the definition of excess privilege. Second, this surface feeds an LLM whose
+output is shown to users and may be logged (PRD-3 CON-04's premise); a complete
+map of the cluster's privilege structure is a materially different disclosure
+from a Deployment spec, and `resourceNames` in a Role can name Secrets, leaking
+Secret names though never values. If a diagnostic need materialises it is one
+auditable line — `extraReadGroups: [rbac.authorization.k8s.io]` — which renders
+a labelled member, is covered by the same Kyverno deny, and contains no Secrets.
+*/ -}}
+{{- if and .Values.readApi.enabled (not .Values.rbac.namespaced) }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    app.kubernetes.io/name: {{ include "kaos-osr-edge-operator.name" . }}
+    helm.sh/chart: {{ .Chart.Name }}-{{ .Chart.Version | replace "+" "_" }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    control-plane: read-api
+    {{ include "kaos-osr-edge-operator.readSurfaceLabel" . }}: "true"
+  name: {{ include "kaos-osr-edge-operator.resourceName" (dict "suffix" "readapi-builtin-read" "context" $) }}
+rules:
+  # Core group — every resource named individually. Secrets live here, so a
+  # resource wildcard is never used.
+  - apiGroups:
+      - ""
+    resources:
+      # Namespaces are the authorisation input, not a convenience: F-11 resolves
+      # a caller's scope from platform.kubecore.io/* labels on namespaces.
+      - namespaces
+      - pods
+      - services
+      - endpoints
+      - configmaps
+      - events
+      - nodes
+      - persistentvolumes
+      - persistentvolumeclaims
+      # replicationcontrollers completes the ownerReference walk for workloads
+      # that predate apps/v1.
+      - replicationcontrollers
+      # Quota and limit objects answer "why is my pod not scheduling", the most
+      # common question that is unanswerable from the workload alone.
+      - resourcequotas
+      - limitranges
+    verbs:
+      - get
+      - list
+      - watch
+  # pods/log is a distinct subresource and must be granted separately from pods.
+  # It is read-only; the execution subresources (exec, attach, portforward) are
+  # denied and never appear anywhere in this chart.
+  - apiGroups:
+      - ""
+    resources:
+      - pods/log
+      - pods/status
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - apps
+    resources:
+      - deployments
+      - replicasets
+      - statefulsets
+      - daemonsets
+      - controllerrevisions
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - batch
+    resources:
+      - jobs
+      - cronjobs
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - networking.k8s.io
+    resources:
+      - ingresses
+      - ingressclasses
+      - networkpolicies
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - autoscaling
+    resources:
+      - horizontalpodautoscalers
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - policy
+    resources:
+      - poddisruptionbudgets
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - discovery.k8s.io
+    resources:
+      - endpointslices
+    verbs:
+      - get
+      - list
+      - watch
+  # events.k8s.io is the same underlying objects as core/events through a second
+  # API surface. Both are granted so a client library using either works.
+  - apiGroups:
+      - events.k8s.io
+    resources:
+      - events
+    verbs:
+      - get
+      - list
+      - watch
+  # CRD discovery. The operator holds this through its own manager-role; the
+  # read API needs it independently to serve queries against custom resources
+  # (it must know which CRDs exist before it can route to them).
+  - apiGroups:
+      - apiextensions.k8s.io
+    resources:
+      - customresourcedefinitions
+    verbs:
+      - get
+      - list
+      - watch
+---
+{{- /*
+Binds the built-in read surface to the read API's ServiceAccount ONLY. The
+operator's manager ServiceAccount is deliberately absent — see the header.
+*/ -}}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    app.kubernetes.io/name: {{ include "kaos-osr-edge-operator.name" . }}
+    helm.sh/chart: {{ .Chart.Name }}-{{ .Chart.Version | replace "+" "_" }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    control-plane: read-api
+  name: {{ include "kaos-osr-edge-operator.resourceName" (dict "suffix" "readapi-builtin-read" "context" $) }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "kaos-osr-edge-operator.resourceName" (dict "suffix" "readapi-builtin-read" "context" $) }}
+subjects:
+- kind: ServiceAccount
+  name: {{ include "kaos-osr-edge-operator.readApiServiceAccountName" . }}
+  namespace: {{ .Release.Namespace }}
+{{- end }}

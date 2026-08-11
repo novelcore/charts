@@ -1,0 +1,48 @@
+{{- /*
+PRD-3 D-06 — binds the OSR ServiceAccounts to the kaos-crd-reader aggregate.
+
+Without this object the aggregate grants nothing to anyone and removing the
+wildcard would have removed the operator's read capability outright rather than
+narrowing it. Both OSR identities are bound:
+
+  - the operator's manager ServiceAccount, which runs the informers that
+    observe CR instances (F-04, F-05);
+  - the read API's own ServiceAccount, which serves live-state queries
+    (PRD-3 F-09) and is deliberately a DIFFERENT identity (CON-08) — it is
+    rendered only when readApi.enabled=true, and is absent from .subjects
+    otherwise so the binding never names a ServiceAccount that does not exist.
+
+The roleRef points at the AGGREGATE, never at a member. Binding a member
+directly would freeze the granted set at that member's rules, so widening
+readGroups or extraReadGroups would render new members that nothing is bound
+to — and `kubectl describe clusterrolebinding` would show a read surface that
+does not match reality.
+
+There is one binding with two subjects rather than two bindings, so that
+`kubectl get clusterrolebinding -o wide` answers "who can read custom
+resources on this cluster?" in a single row.
+*/ -}}
+{{- if not .Values.rbac.namespaced }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    app.kubernetes.io/name: {{ include "kaos-osr-edge-operator.name" . }}
+    helm.sh/chart: {{ .Chart.Name }}-{{ .Chart.Version | replace "+" "_" }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+  name: {{ include "kaos-osr-edge-operator.resourceName" (dict "suffix" "crd-reader-binding" "context" $) }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "kaos-osr-edge-operator.resourceName" (dict "suffix" "crd-reader" "context" $) }}
+subjects:
+- kind: ServiceAccount
+  name: {{ include "kaos-osr-edge-operator.serviceAccountName" . }}
+  namespace: {{ .Release.Namespace }}
+{{- if .Values.readApi.enabled }}
+- kind: ServiceAccount
+  name: {{ include "kaos-osr-edge-operator.readApiServiceAccountName" . }}
+  namespace: {{ .Release.Namespace }}
+{{- end }}
+{{- end }}

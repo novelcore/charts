@@ -1,0 +1,582 @@
+## String to partially override chart.fullname template (will maintain the release name)
+##
+# nameOverride: ""
+
+## String to fully override chart.fullname template
+##
+# fullnameOverride: ""
+
+## Configure the controller manager deployment
+##
+manager:
+  ## Set to false to skip manager installation
+  ##
+  enabled: true
+
+  replicas: 1
+
+  image:
+    repository: novelcore.azurecr.io/kubecore/kaos-osr-edge-operator
+    ## Image tag (defaults to Chart.appVersion if not set)
+    ##
+    # tag: ""
+    pullPolicy: IfNotPresent
+
+  ## Arguments
+  ##
+  args:
+    - --leader-elect
+
+  ## Environment variables
+  ##
+  env:
+    - name: POD_NAMESPACE
+      valueFrom:
+        fieldRef:
+          fieldPath: metadata.namespace
+
+  ## Env overrides (--set manager.envOverrides.VAR=value)
+  ## Same name in env above: this value takes precedence.
+  ##
+  envOverrides: {}
+
+  ## Image pull secrets
+  ##
+  # imagePullSecrets:
+  #   - name: myregistrykey
+
+  ## Pod-level security settings
+  ##
+  podSecurityContext:
+    runAsNonRoot: true
+    seccompProfile:
+      type: RuntimeDefault
+
+  ## Container-level security settings
+  ##
+  securityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+      - ALL
+    readOnlyRootFilesystem: true
+
+  ## Resource limits and requests
+  ##
+  resources:
+    limits:
+      cpu: 500m
+      memory: 256Mi
+    requests:
+      cpu: 100m
+      memory: 200Mi
+
+  ## Manager pod's affinity
+  ##
+  affinity: {}
+
+  ## Manager pod's node selector
+  ##
+  nodeSelector: {}
+
+  ## Manager pod's tolerations
+  ##
+  tolerations: []
+
+  ## Deployment strategy
+  ##
+  # strategy:
+  #   type: RollingUpdate
+  #   rollingUpdate:
+  #     maxSurge: 25%
+  #     maxUnavailable: 25%
+
+  ## Priority class name
+  ##
+  # priorityClassName: ""
+
+  ## Topology spread constraints
+  ##
+  # topologySpreadConstraints: []
+
+  ## Termination grace period seconds
+  ##
+  terminationGracePeriodSeconds: 10
+
+  ## Custom Deployment labels
+  ##
+  # labels: {}
+
+  ## Custom Deployment annotations
+  ##
+  # annotations: {}
+
+  ## Custom Pod labels and annotations
+  ##
+  # pod:
+  #   labels: {}
+  #   annotations: {}
+
+## RBAC configuration
+##
+rbac:
+  ## RBAC resource scope
+  ## - false (default): ClusterRole/ClusterRoleBinding (all namespaces)
+  ## - true: Role/RoleBinding (release namespace only)
+  ##
+  namespaced: false
+
+  ## Helper roles for CRD management (admin/editor/viewer)
+  ##
+  helpers:
+    ## Install convenience admin/editor/viewer roles for CRDs
+    ##
+    enable: false
+
+## ServiceAccount configuration
+##
+serviceAccount:
+  # Install default ServiceAccount provided
+  enable: true
+
+  ## Existing ServiceAccount name (only when enable=false)
+  ## Note: When enable=true, respects nameOverride/fullnameOverride
+  ##
+  # name: ""
+
+  ## Custom ServiceAccount annotations
+  ##
+  # annotations: {}
+
+  ## Custom ServiceAccount labels
+  ##
+  # labels: {}
+
+## Custom Resource Definitions
+##
+crd:
+  # Install CRDs with the chart
+  enable: true
+  # Keep CRDs when uninstalling
+  keep: true
+
+## Controller metrics endpoint.
+## Enable to expose /metrics endpoint
+##
+metrics:
+  enable: true
+  # Metrics server port
+  port: 8443
+  # Enable secure metrics: HTTPS with certs/auth (true) or HTTP (false).
+  # Note: Metrics authn/authz needs ClusterRole access.
+  secure: true
+
+## Cert-manager integration for TLS certificates.
+## Required for webhook certificates and metrics endpoint certificates.
+##
+certManager:
+  enable: true
+
+## Webhook server configuration
+##
+webhook:
+  enable: true
+  # Webhook server port
+  port: 9443
+
+## Prometheus ServiceMonitor for metrics scraping.
+## Requires prometheus-operator to be installed in the cluster.
+##
+prometheus:
+  enable: false
+
+## Kyverno admission guard on the CR-read aggregation members (PRD-3 T-11).
+##
+## Ships templates/rbac/kyverno-no-secrets-policy.yaml, a ClusterPolicy that
+## REFUSES ADMISSION of any ClusterRole labelled EITHER
+## kaos.io/aggregate-to-crd-reader=true OR kaos.io/osr-read-surface=true whose
+## rules name secrets, a wildcard apiGroup, the core group paired with a
+## resource wildcard, another denylisted credential resource, or a write verb.
+##
+## Both selectors, because neither alone covers the surface: the aggregation
+## label is the escalation MECHANISM an attacker uses and needs no cooperation
+## from KAOS, while the marker covers the read API's built-in read role, which
+## is bound directly and carries no aggregation label.
+##
+## Kyverno intercepts admission, NOT authorization. This policy can never block
+## a Secret read; it can only stop the creation of a rule that would permit one.
+## What actually prevents Secret reads is the permission set itself, and the
+## only evidence that matters is `kubectl auth can-i --as=<osr-sa> get secrets
+## -A` returning "no" (docs/security/osr-rbac-audit.md).
+##
+## Setting this to false removes ONLY that admission layer. The enumerated
+## permission set, the dotted-DNS validation applied to readGroups and
+## extraReadGroups below, and the read API's fail-closed startup
+## SelfSubjectAccessReview are all unaffected.
+##
+## Default false because ClusterPolicy is a CRD — rendering it on a cluster
+## without Kyverno installed breaks `helm install`. KAOS child pools do install
+## Kyverno, so the XKnowledge composition sets this true.
+##
+kyverno:
+  enable: false
+
+## Custom-resource read surface (PRD-3 D-06 / F-12).
+##
+## These two lists become the labelled member ClusterRoles of the
+## kaos-crd-reader aggregation base (templates/rbac/crd-reader-members.yaml).
+## Together they are the operator's and the read API's ENTIRE ability to read
+## custom resources. They replaced a single
+## `apiGroups: ["*"], resources: ["*"], verbs: [get,list,watch]` rule in the
+## manager ClusterRole which, because a wildcard apiGroup matches the core
+## group, granted cluster-wide read on Secrets and violated PRD-1 CON-03.
+##
+## Every entry must be a dotted DNS subdomain (cert-manager.io, karpenter.sh).
+## The chart FAILS TO RENDER otherwise. That single rule is what makes the
+## `resources: ['*']` inside each member safe: the core group — where Secrets
+## live — is the empty string and has no dot, so it cannot be named here, and
+## neither can "*".
+##
+## Audit any change to THESE TWO LISTS with:
+##   kubectl get clusterrole -l kaos.io/aggregate-to-crd-reader=true -o yaml
+##   kubectl auth can-i --as=system:serviceaccount:<ns>:<osr-sa> get secrets -A
+##
+## That first query is scoped to the aggregate, which is what these lists feed.
+## It is NOT the whole OSR read surface and must not be presented as one: the
+## read API's built-in Kubernetes read role is bound directly and carries only
+## kaos.io/osr-read-surface. Auditing the full granted surface takes both label
+## queries — docs/security/osr-rbac-audit.md §3.
+##
+## readGroups is the curated set KAOS installs on a child pool. Editing it is a
+## chart change and should stay that way — it is the list a client security
+## team reviews once.
+##
+readGroups:
+  - cert-manager.io
+  - argoproj.io
+  - promoter.argoproj.io
+  - kyverno.io
+  - external-secrets.io
+  - generators.external-secrets.io
+  - gateway.networking.k8s.io
+  - gateway.envoyproxy.io
+  - operator.victoriametrics.com
+  - postgresql.cnpg.io
+  - grafana.integreatly.org
+  - telemetry.istio.io
+  - skupper.io
+  - karpenter.sh
+  - karpenter.k8s.aws
+  - snapshot.storage.k8s.io
+  - storage.k8s.io
+  - scheduling.k8s.io
+
+## extraReadGroups widens the read surface to API groups this cluster happens
+## to have but KAOS does not install — the arbitrary, user-installed CRDs that
+## are the edge operator's founding capability. It exists because the deleted
+## wildcard was how those were reached, and the demand-driven mechanism that
+## would discover them automatically lives outside this repo.
+##
+## It preserves every audit property of readGroups: same dotted-DNS validation
+## (no wildcard and no core group is expressible), same aggregation label, same
+## Kyverno deny, same `can-i` answer, and fully visible in `helm template`
+## output. Entries render into their own ClusterRole
+## (<release>-crd-reader-extra) so an auditor can distinguish chart-shipped
+## scope from locally-added scope without diffing against a released chart.
+##
+## A group in neither list is not silently invisible: its informer receives
+## Forbidden and stops (terminal — no retry loop), and the KnowledgeSyncContract
+## reports ObservationScopeComplete=False with reason RBACForbidden, itemising
+## the affected CRDs in status.rejectedCRDs. Adding a group here and upgrading
+## takes effect on the NEXT RECONCILE — the operator re-tests forbidden groups
+## every cycle, so no restart is needed (PRD-3 AC-21).
+##
+## Example:
+##   extraReadGroups:
+##     - crossplane.io
+##     - pkg.crossplane.io
+##
+extraReadGroups: []
+
+## OSR Edge Operator — defence-in-depth excludeResourceTypes (CON-07 / T-05).
+##
+## These two slices are concatenated into the rendered sample
+## KnowledgeSyncContract's spec.observation.excludeResourceTypes
+## (templates/extras/sample-knowledgesynccontract.yaml — added in Task 4).
+## Splitting them lets the drift-guard test (added in Task 6) compare
+## ONLY the mandatory entries against discovery.MandatoryExclusions while
+## leaving operators free to extend defaultExcludeResourceTypes per cluster.
+##
+## DO NOT EDIT mandatoryExcludeResourceTypes without ALSO updating
+## internal/discovery/exclusions.go MandatoryExclusions — the drift-guard
+## test will fail otherwise. The binary enforcement
+## (discovery.Filter applying MandatoryExclusions defensively) is the
+## actual T-05 mitigation; this list is the kubectl-ergonomics mirror.
+##
+mandatoryExcludeResourceTypes:
+  - kubeorgs.schema.kubecore.io
+  - kubepools.schema.kubecore.io
+  - kubeprojects.schema.kubecore.io
+  - kubeapps.schema.kubecore.io
+  - knowledgesynccontracts.osr.kaos.kubecore.io
+
+defaultExcludeResourceTypes:
+  - events.k8s.io
+  - leases.coordination.k8s.io
+  - endpointslices.discovery.k8s.io
+
+## Read-only live-state API (PRD-3 F-09). A second Deployment in this same
+## chart, with its own ServiceAccount (never the operator's — PRD-3 CON-08)
+## and its own TLS Certificate. Off by default; Part 1's XKnowledge
+## composition sets readApi.enabled from spec.kaosCloud.osr.liveQuery.
+##
+## This Deployment's resources are ADDITIONAL to PRD-1 CON-02's 256Mi/500m
+## operator budget, not carved out of it — it is a distinct workload with
+## its own footprint.
+##
+readApi:
+  ## Set to true to install the read API Deployment, ServiceAccount,
+  ## Service, and Certificate. Driven by spec.kaosCloud.osr.liveQuery via
+  ## the composition; false is the safe chart default for a bare `helm
+  ## install`.
+  ##
+  enabled: false
+
+  replicas: 1
+
+  image:
+    repository: novelcore.azurecr.io/kubecore/kaos-osr-edge-operator
+    ## Image tag (defaults to Chart.appVersion if not set)
+    ##
+    # tag: ""
+    pullPolicy: IfNotPresent
+
+  ## Image pull secrets
+  ##
+  # imagePullSecrets:
+  #   - name: myregistrykey
+
+  ## Zitadel issuer bearer tokens must carry in `iss` (Task 3 validates
+  ## against this). Non-secret — PRD-3 CON-09: this component holds no
+  ## outbound credential, only its own projected ServiceAccount token.
+  ##
+  issuerURL: ""
+
+  ## Expected JWT `aud` claim (Task 3).
+  ##
+  audience: ""
+
+  ## Observability backend URLs, injected by the XKnowledge composition
+  ## (service names are release- and system-profile-derived, so they are
+  ## never hardcoded or discovered here). Rendered as "name=url,name=url"
+  ## in READAPI_BACKEND_URLS. Non-secret — the backends are unauthenticated
+  ## in-cluster (PRD-3 CON-09).
+  ##
+  ## Recognised keys (Task 9). A key left out simply means "this pool does
+  ## not have that backend": its endpoint answers 200 with available:false
+  ## and a reason, and every other endpoint is unaffected.
+  ##
+  ##   metrics  VictoriaMetrics query URL. This is the one value that is
+  ##            genuinely per-pool and can never be defaulted or inferred:
+  ##            vmsingle for the small/medium system profiles, vmselect for
+  ##            an `ha` VMCluster, with a release-derived service name. The
+  ##            composition is the only thing that knows which.
+  ##   logs     VictoriaLogs query URL.
+  ##   alerts   vmalert URL.
+  ##
+  ## Plus three NON-URL keys naming the fields the pool's log collector
+  ## writes the pod's namespace/name/container under. The defaults are the
+  ## spellings observed on the platform's shared observability stack — the
+  ## same compositions and components that run on child pools —
+  ## (kubernetes.pod_namespace, kubernetes.pod_name,
+  ## kubernetes.container_name); a pool running a different collector must
+  ## override them. Getting them wrong fails closed — the logs query matches
+  ## nothing and the read API's response-side namespace re-check drops
+  ## whatever did come back — so a mistake here costs visibility, never
+  ## isolation:
+  ##
+  ##   logsNamespaceField, logsPodField, logsContainerField
+  ##
+  ## And one more non-URL key:
+  ##
+  ##   observabilityNamespace  The namespace the pool's own observability
+  ##                           stack runs in. Node- and cluster-level
+  ##                           exporters run as pods, so their series carry
+  ##                           THAT namespace rather than no namespace at
+  ##                           all — observed on the platform's shared
+  ##                           observability stack, where
+  ##                           node_cpu_seconds_total is labelled
+  ##                           namespace="monitoring". This is unioned into
+  ##                           the metrics scope for "ops"/"admin" callers
+  ##                           ONLY, so they can see the node metrics PRD-3
+  ##                           D-05 grants them. It widens scope by exactly
+  ##                           one named namespace, never to "every
+  ##                           namespace", and lower tiers never receive it.
+  ##                           Defaults to "monitoring" — the same
+  ##                           observability compositions run on the control
+  ##                           plane and on child pools, so only the literal
+  ##                           name is assumed. Override it if this pool
+  ##                           differs: a wrong value costs an ops caller
+  ##                           their node metrics, and the response says so
+  ##                           explicitly (naming the namespace used and this
+  ##                           key) rather than returning a bare empty result.
+  ##
+  ## There is deliberately NO key for the METRICS namespace label: that one
+  ## is a compiled-in constant, because it is the only thing bounding what a
+  ## caller-supplied PromQL query can read, and a wrong value there would be
+  ## a cross-project leak rather than an empty result.
+  ##
+  ## Example:
+  ##   backendURLs:
+  ##     metrics: http://vmsingle-osr.observability.svc:8429
+  ##     logs: http://victoria-logs.observability.svc:9428
+  ##     alerts: http://vmalert-osr.observability.svc:8080
+  ##
+  backendURLs: {}
+
+  ## Request bounds (PRD-3 F-18/T-07): three independent limits on query
+  ## volume against the child cluster's own API server — the failure this
+  ## guards against is an LLM agent's parallel tool-call fan-out or retry
+  ## loop overloading that API server, not this component's own resource
+  ## usage. None of the three subsumes the others:
+  ##   - maxInFlight bounds parallel fan-out (many tool calls landing at
+  ##     once).
+  ##   - perTokenRPS/perTokenBurst bounds one caller's sustained or looping
+  ##     rate, so it cannot starve every other caller sharing the pool.
+  ##   - maxResponseBytes/maxItems/queryTimeout bound the cost of a single
+  ##     pathological query.
+  ## Non-secret. These are sane defaults (internal/readapi/bounds.Default*);
+  ## override per-pool only if a KubeTeam's real usage pattern warrants it.
+  ##
+  bounds:
+    ## Maximum requests allowed in flight at once, across every caller.
+    ## Lowered from 32: a metrics query costs real memory to PARSE
+    ## (metricsql's own recursive-descent parser), and maxBufferedBytes does
+    ## not see it — that budget bounds RESPONSE buffering, spent long after
+    ## the parse. Measured peak RSS for 4 concurrent worst-shape queries at
+    ## the 2048-byte query cap is 29.6 MiB over a 41 MiB idle server; with
+    ## 4 x maxResponseBytes of buffering that totals 109.6 MiB against the
+    ## 128Mi limit below. 5 measures 46.2 MiB and does not fit. See
+    ## internal/readapi/bounds.DefaultMaxInFlight and
+    ## TestQueryProcessingBudgetFitsContainerMemoryLimit, which checks this
+    ## arithmetic against the values in THIS file. The lever on this number
+    ## is handlers.MaxQueryBytes, not this field: per-request cost is linear
+    ## in the query cap.
+    maxInFlight: 4
+    ## Per-token (per bearer-token subject) sustained request rate, in
+    ## requests/second.
+    perTokenRPS: 5
+    ## Per-token burst allowance on top of perTokenRPS.
+    perTokenBurst: 10
+    ## Maximum response body size, in bytes, before truncation.
+    maxResponseBytes: 4194304
+    ## Ceiling on TOTAL response bytes buffered across every concurrent
+    ## request at once — independent of maxInFlight and maxResponseBytes.
+    ## maxInFlight x maxResponseBytes bounds ONE request's own worst case,
+    ## not the aggregate: without this field, maxInFlight (32, as it was
+    ## when this field was added) x maxResponseBytes (4194304) alone is
+    ## exactly this Deployment's own
+    ## memory limit below — the parallel fan-out maxInFlight exists to
+    ## permit becomes a self-inflicted OOM. Chosen to fit safely under
+    ## readApi.resources.limits.memory, leaving headroom for the Go
+    ## runtime, TLS, the JWKS cache, and per-token rate limiters — checked
+    ## by internal/readapi/bounds.TestDefaultBufferBudgetFitsContainerMemoryLimit,
+    ## which parses THIS file, so a future change to either value here
+    ## cannot silently reopen that gap. Keep in sync with
+    ## internal/readapi/bounds.DefaultMaxBufferedBytes.
+    maxBufferedBytes: 33554432
+    ## Maximum number of items a single list-shaped query returns before
+    ## truncation.
+    maxItems: 500
+    ## Maximum time a single request may run before its context is
+    ## cancelled — propagated to the Kubernetes/observability clients so
+    ## backend work stops too, not just this process's read of it.
+    queryTimeout: 20s
+
+  ## Pod-level security settings — same posture as the manager.
+  ##
+  podSecurityContext:
+    runAsNonRoot: true
+    seccompProfile:
+      type: RuntimeDefault
+
+  ## Container-level security settings — same posture as the manager.
+  ##
+  securityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+      - ALL
+    readOnlyRootFilesystem: true
+
+  ## Resource limits and requests. Explicit and mandatory: this Deployment
+  ## is additional to PRD-1 CON-02's operator budget (256Mi/500m), not
+  ## inside it.
+  ##
+  resources:
+    limits:
+      cpu: 250m
+      memory: 128Mi
+    requests:
+      cpu: 50m
+      memory: 64Mi
+
+  ## Read API pod's affinity
+  ##
+  affinity: {}
+
+  ## Read API pod's node selector
+  ##
+  nodeSelector: {}
+
+  ## Read API pod's tolerations
+  ##
+  tolerations: []
+
+  ## Termination grace period seconds
+  ##
+  terminationGracePeriodSeconds: 10
+
+  ## Custom Deployment labels
+  ##
+  # labels: {}
+
+  ## Custom Deployment annotations
+  ##
+  # annotations: {}
+
+  ## Custom Pod labels and annotations
+  ##
+  # pod:
+  #   labels: {}
+  #   annotations: {}
+
+## Sample KnowledgeSyncContract — opt-in, off by default. Production
+## deployments via XClusterOperators (PRD-OSR-EDGE-1 §12 item 5) create
+## the KSC separately with pool-specific values. Task 4 adds the template
+## that consumes this block.
+##
+sampleContract:
+  create: false
+  orgId: ""
+  poolId: ""
+  cloudEndpoint:
+    url: ""
+    authSecretRef:
+      name: osr-cloud-credentials
+      clientIDKey: OIDC_CLIENT_ID
+      clientSecretKey: OIDC_CLIENT_SECRET
+      issuerURLKey: OIDC_ISSUER_URL
+  observation:
+    resourceTypes: ["*"]
+    namespaces: ["*"]
+    excludeNamespaces:
+      - kube-system
+      - kube-public
+      - kube-node-lease
+      - kaos-system
+  push:
+    debounceWindowSeconds: 10
+    sweepIntervalMinutes: 5
+    heartbeatIntervalSeconds: 30
+

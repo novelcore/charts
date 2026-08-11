@@ -1,0 +1,26 @@
+{{- if .Values.readApi.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    app.kubernetes.io/name: {{ include "kaos-osr-edge-operator.name" . }}
+    helm.sh/chart: {{ .Chart.Name }}-{{ .Chart.Version | replace "+" "_" }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    control-plane: read-api
+  name: {{ include "kaos-osr-edge-operator.resourceName" (dict "suffix" "readapi" "context" $) }}
+  namespace: {{ .Release.Namespace }}
+spec:
+  # ClusterIP only. PRD-3 CON-05 / PRD-1 CON-05: no inbound listener beyond
+  # what stays in-cluster — reached from the agent side via the southbound
+  # Skupper Connector, never a LoadBalancer or NodePort.
+  type: ClusterIP
+  ports:
+  - name: https
+    port: 8443
+    protocol: TCP
+    targetPort: 8443
+  selector:
+    app.kubernetes.io/name: {{ include "kaos-osr-edge-operator.name" . }}
+    control-plane: read-api
+{{- end }}

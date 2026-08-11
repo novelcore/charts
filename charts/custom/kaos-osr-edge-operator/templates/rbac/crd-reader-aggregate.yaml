@@ -1,0 +1,45 @@
+{{- /*
+PRD-3 D-06 / F-12 — the aggregation base for the OSR custom-resource read
+surface.
+
+This object replaces `apiGroups: ["*"], resources: ["*"], verbs: [get,list,watch]`,
+which used to live in the operator's manager-role. That rule was how the
+operator read instances of arbitrary, user-installed CRDs — its founding
+capability — but a wildcard apiGroup also matches the CORE group, so it granted
+cluster-wide read on Secrets. PRD-1 CON-03 was violated in shipped code and
+`kubectl auth can-i --as=<operator-sa> get secrets -A` answered "yes".
+
+The base carries `rules: []` and never anything else. kube-controller-manager
+owns .rules on an aggregated ClusterRole and rewrites it wholesale from the
+selected members on every sync, so any rule written here would be erased —
+silently, and only sometimes, which is worse than not working at all.
+
+The label selector is KAOS-specific. rbac.authorization.k8s.io/aggregate-to-view
+would have worked mechanically and must never be used: it merges this read
+surface into the cluster's built-in `view` ClusterRole, granting it to every
+`view` holder on the cluster.
+
+The base deliberately does NOT carry the aggregation label itself. A
+self-selecting base aggregates its own (empty) rules, and because Helm owns the
+object, the resulting member set becomes dependent on sync order.
+
+Aggregation applies to ClusterRoles only, so this whole mechanism is gated on
+rbac.namespaced=false — the chart default, and the only mode in which the
+operator can observe cluster-wide (see templates/extras/manager-secrets-role.yaml).
+*/ -}}
+{{- if not .Values.rbac.namespaced }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    app.kubernetes.io/name: {{ include "kaos-osr-edge-operator.name" . }}
+    helm.sh/chart: {{ .Chart.Name }}-{{ .Chart.Version | replace "+" "_" }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+  name: {{ include "kaos-osr-edge-operator.resourceName" (dict "suffix" "crd-reader" "context" $) }}
+aggregationRule:
+  clusterRoleSelectors:
+    - matchLabels:
+        {{ include "kaos-osr-edge-operator.crdReaderAggregationLabel" . }}: "true"
+rules: []
+{{- end }}

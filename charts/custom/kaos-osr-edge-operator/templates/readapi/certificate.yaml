@@ -1,0 +1,32 @@
+{{- if .Values.readApi.enabled }}
+{{- if not .Values.certManager.enable }}
+{{- fail "readApi.enabled=true requires certManager.enable=true: the read API serves TLS unconditionally (no plaintext fallback — the bearer token traverses in-cluster hops Skupper passes through unchanged rather than terminating) and its Certificate needs cert-manager to issue readapi-server-cert. Set certManager.enable=true, or set readApi.enabled=false until cert-manager is available." }}
+{{- end }}
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    app.kubernetes.io/name: {{ include "kaos-osr-edge-operator.name" . }}
+    helm.sh/chart: {{ .Chart.Name }}-{{ .Chart.Version | replace "+" "_" }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+  name: {{ include "kaos-osr-edge-operator.resourceName" (dict "suffix" "readapi-serving-cert" "context" $) }}
+  namespace: {{ .Release.Namespace }}
+spec:
+  # TLS is mandatory, not optional, for the read API: the bearer token
+  # traverses two in-cluster hops Skupper does not terminate (control-plane
+  # agent to hub Listener, child Connector to this Service — Skupper is L4
+  # and passes TLS through unchanged). Because there is no plaintext
+  # fallback, this Certificate cannot use the metrics Certificate's
+  # certManager.enable-gated off switch — instead, the invalid combination
+  # (readApi.enabled=true, certManager.enable=false) is refused above at
+  # template time, before either a Certificate with no matching CRD or a
+  # Deployment whose readapi-certs volume can never populate is rendered.
+  dnsNames:
+  - {{ include "kaos-osr-edge-operator.resourceName" (dict "suffix" "readapi" "context" $) }}.{{ .Release.Namespace }}.svc
+  - {{ include "kaos-osr-edge-operator.resourceName" (dict "suffix" "readapi" "context" $) }}.{{ .Release.Namespace }}.svc.cluster.local
+  issuerRef:
+    kind: Issuer
+    name: {{ include "kaos-osr-edge-operator.resourceName" (dict "suffix" "selfsigned-issuer" "context" $) }}
+  secretName: readapi-server-cert
+{{- end }}

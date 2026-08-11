@@ -1,0 +1,176 @@
+{{- if .Values.readApi.enabled }}
+{{- if gt (.Values.readApi.bounds.maxResponseBytes | int64) (.Values.readApi.bounds.maxBufferedBytes | int64) }}
+{{- fail (printf "readApi.bounds.maxResponseBytes (%d) must not exceed readApi.bounds.maxBufferedBytes (%d): a single response's own worst case would then exceed the ENTIRE buffered-response memory budget, so internal/readapi/bounds' buffer-budget gate (see bounds.Config.MaxBufferedBytes's doc) would reject every request — the read API would be up but answer nothing, discoverable only from a runtime log warning nobody reads until it is already down. Lower readApi.bounds.maxResponseBytes, or raise readApi.bounds.maxBufferedBytes, before installing." (.Values.readApi.bounds.maxResponseBytes | int64) (.Values.readApi.bounds.maxBufferedBytes | int64) ) }}
+{{- end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    app.kubernetes.io/name: {{ include "kaos-osr-edge-operator.name" . }}
+    helm.sh/chart: {{ .Chart.Name }}-{{ .Chart.Version | replace "+" "_" }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    control-plane: read-api
+    {{- with .Values.readApi.labels }}
+    {{- with omit . "app.kubernetes.io/managed-by" "app.kubernetes.io/name" "helm.sh/chart" "app.kubernetes.io/instance" "control-plane" }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+    {{- end }}
+  name: {{ include "kaos-osr-edge-operator.resourceName" (dict "suffix" "readapi" "context" $) }}
+  namespace: {{ .Release.Namespace }}
+  {{- if .Values.readApi.annotations }}
+  annotations:
+    {{- toYaml .Values.readApi.annotations | nindent 4 }}
+  {{- end }}
+spec:
+  replicas: {{ .Values.readApi.replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "kaos-osr-edge-operator.name" . }}
+      control-plane: read-api
+  template:
+    metadata:
+      annotations:
+        kubectl.kubernetes.io/default-container: readapi
+        {{- with .Values.readApi.pod }}
+        {{- with .annotations }}
+        {{- with omit . "kubectl.kubernetes.io/default-container" }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+        {{- end }}
+        {{- end }}
+      labels:
+        app.kubernetes.io/name: {{ include "kaos-osr-edge-operator.name" . }}
+        helm.sh/chart: {{ .Chart.Name }}-{{ .Chart.Version | replace "+" "_" }}
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        app.kubernetes.io/managed-by: {{ .Release.Service }}
+        control-plane: read-api
+        {{- with .Values.readApi.pod }}
+        {{- with .labels }}
+        {{- with omit . "app.kubernetes.io/name" "helm.sh/chart" "app.kubernetes.io/instance" "app.kubernetes.io/managed-by" "control-plane" }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+        {{- end }}
+        {{- end }}
+    spec:
+      {{- with .Values.readApi.priorityClassName }}
+      priorityClassName: {{ . | quote }}
+      {{- end }}
+      {{- with .Values.readApi.tolerations }}
+      tolerations: {{ toYaml . | nindent 10 }}
+      {{- end }}
+      {{- with .Values.readApi.affinity }}
+      affinity: {{ toYaml . | nindent 10 }}
+      {{- end }}
+      {{- with .Values.readApi.nodeSelector }}
+      nodeSelector: {{ toYaml . | nindent 10 }}
+      {{- end }}
+      {{- with .Values.readApi.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+      - name: readapi
+        # Selects which of the two binaries baked into the shared image
+        # (Dockerfile) this Deployment runs. The manager Deployment sets
+        # `command: [/manager]`.
+        command:
+        - /readapi
+        image: "{{ .Values.readApi.image.repository }}{{- if not (contains "@" .Values.readApi.image.repository) }}:{{ .Values.readApi.image.tag | default .Chart.AppVersion }}{{- end }}"
+        {{- with .Values.readApi.image.pullPolicy }}
+        imagePullPolicy: {{ . }}
+        {{- end }}
+        env:
+        - name: READAPI_LISTEN_ADDR
+          value: ":8443"
+        - name: READAPI_TLS_CERT_FILE
+          value: /tmp/k8s-readapi-server/serving-certs/tls.crt
+        - name: READAPI_TLS_KEY_FILE
+          value: /tmp/k8s-readapi-server/serving-certs/tls.key
+        {{- if .Values.readApi.issuerURL }}
+        - name: READAPI_ISSUER_URL
+          value: {{ .Values.readApi.issuerURL | quote }}
+        {{- end }}
+        {{- if .Values.readApi.audience }}
+        - name: READAPI_AUDIENCE
+          value: {{ .Values.readApi.audience | quote }}
+        {{- end }}
+        {{- if .Values.readApi.backendURLs }}
+        - name: READAPI_BACKEND_URLS
+          value: {{ range $i, $k := (keys .Values.readApi.backendURLs | sortAlpha) }}{{ if $i }},{{ end }}{{ $k }}={{ get $.Values.readApi.backendURLs $k }}{{ end }}
+        {{- end }}
+        # Request bounds (PRD-3 F-18/T-07) — always rendered, never
+        # conditional on a truthy override, so a bare `helm install` still
+        # ships a bounded deployment rather than relying silently on the
+        # binary's own built-in defaults.
+        - name: READAPI_MAX_IN_FLIGHT
+          value: {{ .Values.readApi.bounds.maxInFlight | int64 | quote }}
+        - name: READAPI_PER_TOKEN_RPS
+          value: {{ .Values.readApi.bounds.perTokenRPS | quote }}
+        - name: READAPI_PER_TOKEN_BURST
+          value: {{ .Values.readApi.bounds.perTokenBurst | int64 | quote }}
+        - name: READAPI_MAX_RESPONSE_BYTES
+          # `int64` before `quote`: Helm's values pass through JSON, so any
+          # plain YAML integer arrives in the template as float64. fmt's
+          # default float formatting renders a 7-digit value like 4194304 as
+          # "4.194304e+06" — silently truncating the env var's precision, and
+          # a value main.go's strconv.ParseInt would reject outright. `int64`
+          # forces integer formatting regardless of value size.
+          value: {{ .Values.readApi.bounds.maxResponseBytes | int64 | quote }}
+        - name: READAPI_MAX_BUFFERED_BYTES
+          value: {{ .Values.readApi.bounds.maxBufferedBytes | int64 | quote }}
+        - name: READAPI_MAX_ITEMS
+          value: {{ .Values.readApi.bounds.maxItems | int64 | quote }}
+        - name: READAPI_QUERY_TIMEOUT
+          value: {{ .Values.readApi.bounds.queryTimeout | quote }}
+        ports:
+        - containerPort: 8443
+          name: https
+          protocol: TCP
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 8443
+            scheme: HTTPS
+          initialDelaySeconds: 15
+          periodSeconds: 20
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: 8443
+            scheme: HTTPS
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        resources:
+          {{- if .Values.readApi.resources }}
+          {{- toYaml .Values.readApi.resources | nindent 10 }}
+          {{- else }}
+          {}
+          {{- end }}
+        securityContext:
+          {{- if .Values.readApi.securityContext }}
+          {{- toYaml .Values.readApi.securityContext | nindent 10 }}
+          {{- else }}
+          {}
+          {{- end }}
+        volumeMounts:
+        - mountPath: /tmp/k8s-readapi-server/serving-certs
+          name: readapi-certs
+          readOnly: true
+      securityContext:
+        {{- if .Values.readApi.podSecurityContext }}
+        {{- toYaml .Values.readApi.podSecurityContext | nindent 8 }}
+        {{- else }}
+        {}
+        {{- end }}
+      # A ServiceAccount separate from the manager's — never shared
+      # (PRD-3 CON-08).
+      serviceAccountName: {{ include "kaos-osr-edge-operator.resourceName" (dict "suffix" "readapi" "context" $) }}
+      {{- if and (hasKey .Values.readApi "terminationGracePeriodSeconds") (ne .Values.readApi.terminationGracePeriodSeconds nil) }}
+      terminationGracePeriodSeconds: {{ .Values.readApi.terminationGracePeriodSeconds }}
+      {{- end }}
+      volumes:
+      - name: readapi-certs
+        secret:
+          secretName: readapi-server-cert
+{{- end }}

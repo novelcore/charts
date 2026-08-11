@@ -1,0 +1,413 @@
+{{- if .Values.crd.enable }}
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    {{- if .Values.crd.keep }}
+    "helm.sh/resource-policy": keep
+    {{- end }}
+    controller-gen.kubebuilder.io/version: v0.20.1
+  name: knowledgesynccontracts.osr.kaos.kubecore.io
+spec:
+  group: osr.kaos.kubecore.io
+  names:
+    kind: KnowledgeSyncContract
+    listKind: KnowledgeSyncContractList
+    plural: knowledgesynccontracts
+    shortNames:
+    - ksc
+    singular: knowledgesynccontract
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    - jsonPath: .spec.poolId
+      name: Pool
+      type: string
+    - jsonPath: .status.observedCRDCount
+      name: CRDs
+      type: integer
+    - jsonPath: .status.observedInstanceCount
+      name: Instances
+      type: integer
+    - jsonPath: .status.pendingPushCount
+      name: Pending
+      type: integer
+    - jsonPath: .status.cloudReachable
+      name: Cloud
+      type: boolean
+    - jsonPath: .status.lastSuccessfulPush
+      name: LastPush
+      type: date
+    - jsonPath: .status.lastSuccessfulHeartbeat
+      name: LastHB
+      type: date
+    - jsonPath: .status.lastSweepCompleted
+      name: LastSweep
+      type: date
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          KnowledgeSyncContract declares the data-consistency contract for one KubePool's
+          edge observation pipeline. The operator reconciles knowledge accuracy against
+          this spec — informer health, push success, sweep completion — not the underlying
+          infrastructure. NOUS reads status to gauge trust in the knowledge for this pool.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: spec defines the desired data-consistency contract.
+            properties:
+              cloudEndpoint:
+                description: CloudEndpoint is the single Knowledge Ingestion API target
+                  (CON-06).
+                properties:
+                  authSecretRef:
+                    description: |-
+                      AuthSecretRef references a Kubernetes Secret in the same namespace as the
+                      KnowledgeSyncContract that holds the OAuth2 client_credentials inputs for
+                      authenticating to the Knowledge Ingestion API. The edge operator exchanges
+                      client_id + client_secret for a Zitadel JWT and attaches it as
+                      Authorization: Bearer on every push. The reconciler watches this Secret for
+                      rotation and calls TokenProvider.Invalidate() so the next push re-mints.
+                      See PRD D-07 and §14.1 Q-02 for the full auth flow.
+                    properties:
+                      clientIDKey:
+                        default: OIDC_CLIENT_ID
+                        description: ClientIDKey is the Secret key whose value is
+                          the OAuth2 client_id.
+                        maxLength: 253
+                        minLength: 1
+                        type: string
+                      clientSecretKey:
+                        default: OIDC_CLIENT_SECRET
+                        description: ClientSecretKey is the Secret key whose value
+                          is the OAuth2 client_secret.
+                        maxLength: 253
+                        minLength: 1
+                        type: string
+                      issuerURLKey:
+                        default: OIDC_ISSUER_URL
+                        description: |-
+                          IssuerURLKey is the Secret key whose value is the full Zitadel issuer URL
+                          (e.g., "https://zitadel.dev.kaos.kubecore.eu"). The edge POSTs
+                          {issuer}/oauth/v2/token to exchange client_credentials for a JWT.
+                        maxLength: 253
+                        minLength: 1
+                        type: string
+                      name:
+                        description: Name of the Secret in the same namespace as the
+                          contract.
+                        maxLength: 253
+                        minLength: 1
+                        type: string
+                    required:
+                    - name
+                    type: object
+                  url:
+                    description: URL of the Knowledge Ingestion API. Must be an https://
+                      URL.
+                    maxLength: 2048
+                    pattern: ^https://[^\s/$.?#].[^\s]*$
+                    type: string
+                required:
+                - authSecretRef
+                - url
+                type: object
+              observation:
+                description: Observation scopes what is watched on the host cluster.
+                properties:
+                  excludeNamespaces:
+                    default:
+                    - kube-system
+                    - kube-public
+                    - kube-node-lease
+                    - kaos-system
+                    description: ExcludeNamespaces removes namespaces from observation
+                      regardless of Namespaces.
+                    items:
+                      type: string
+                    type: array
+                  excludeResourceTypes:
+                    default:
+                    - events.k8s.io
+                    - leases.coordination.k8s.io
+                    - endpointslices.discovery.k8s.io
+                    - kubeorgs.schema.kubecore.io
+                    - kubepools.schema.kubecore.io
+                    - kubeprojects.schema.kubecore.io
+                    - kubeapps.schema.kubecore.io
+                    - knowledgesynccontracts.osr.kaos.kubecore.io
+                    description: |-
+                      ExcludeResourceTypes removes resource types from observation.
+                      CON-07: KAOS CRDs and the operator's own CRD ship excluded by default.
+                      The defaulting webhook ensures these always remain in the set even if the
+                      user supplies their own list (see webhook implementation).
+                    items:
+                      type: string
+                    type: array
+                  namespaces:
+                    default:
+                    - '*'
+                    description: Namespaces is the include set for namespaced resources.
+                      Use "*" for all.
+                    items:
+                      type: string
+                    type: array
+                  resourceTypes:
+                    default:
+                    - '*'
+                    description: |-
+                      ResourceTypes is the include set, expressed as fully-qualified resource
+                      names (e.g., "certificates.cert-manager.io") or the wildcard "*".
+                    items:
+                      type: string
+                    type: array
+                type: object
+              orgId:
+                description: |-
+                  OrgID identifies the owning KubeOrg. Used as the envelope orgId on every push
+                  and validated against the bearer token's org scope by the Ingestion API.
+                maxLength: 63
+                minLength: 1
+                pattern: ^[a-z0-9]([a-z0-9-]*[a-z0-9])?$
+                type: string
+              poolId:
+                description: |-
+                  PoolID identifies the KubePool this edge instance observes. Used as the envelope
+                  poolId on every push and validated against the bearer token's pool scope.
+                maxLength: 63
+                minLength: 1
+                pattern: ^[a-z0-9]([a-z0-9-]*[a-z0-9])?$
+                type: string
+              push:
+                description: Push tunes the push pipeline cadence (debounce, sweep,
+                  heartbeat).
+                properties:
+                  debounceWindowSeconds:
+                    default: 10
+                    description: DebounceWindowSeconds coalesces bursts of informer
+                      events before flushing.
+                    format: int32
+                    maximum: 600
+                    minimum: 1
+                    type: integer
+                  heartbeatIntervalSeconds:
+                    default: 30
+                    description: HeartbeatIntervalSeconds is the cadence of the cloud-connectivity
+                      heartbeat (F-09).
+                    format: int32
+                    maximum: 600
+                    minimum: 5
+                    type: integer
+                  sweepIntervalMinutes:
+                    default: 5
+                    description: SweepIntervalMinutes is the cadence of the reconciliation
+                      sweep (F-08).
+                    format: int32
+                    maximum: 1440
+                    minimum: 1
+                    type: integer
+                type: object
+            required:
+            - cloudEndpoint
+            - orgId
+            - poolId
+            type: object
+          status:
+            description: status reflects the observed state of the contract.
+            properties:
+              cloudReachable:
+                description: |-
+                  CloudReachable is a fast-path summary for downstream consumers; mirrors
+                  the CloudConnected condition.
+                type: boolean
+              conditions:
+                description: Conditions represent the current state of the contract
+                  reconciliation.
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
+              lastSuccessfulHeartbeat:
+                description: |-
+                  LastSuccessfulHeartbeat is the timestamp of the most recent successful
+                  /v1/heartbeat call. Distinct from LastSuccessfulPush because pushes are
+                  event-driven (only fire when something changes) while heartbeats are
+                  time-driven (every spec.push.heartbeatIntervalSeconds). The two together
+                  answer "is the cloud reachable" (heartbeat) vs "is data flowing" (push).
+                format: date-time
+                type: string
+              lastSuccessfulPush:
+                description: |-
+                  LastSuccessfulPush is the timestamp of the most recent successful Ingestion
+                  API write — either a /v1/knowledge/push that returned 200 OK or a
+                  /v1/knowledge/archive that returned 200 OK. Used by operators as evidence
+                  of cloud connectivity. RFC3339 format.
+                format: date-time
+                type: string
+              lastSweepCompleted:
+                description: LastSweepCompleted is the timestamp of the most recent
+                  sweep completion.
+                format: date-time
+                type: string
+              observedCRDCount:
+                description: ObservedCRDCount is the number of CRDs currently being
+                  observed (post-filter).
+                format: int32
+                type: integer
+              observedInstanceCount:
+                description: |-
+                  ObservedInstanceCount is the total number of CR instances currently cached
+                  across all observed CRDs.
+                format: int32
+                type: integer
+              pendingPushCount:
+                description: |-
+                  PendingPushCount is the size of the in-memory push buffer at the last
+                  reconciliation. Used to detect stalled cloud connectivity.
+                format: int32
+                type: integer
+              phase:
+                description: Phase is the coarse, agent-readable status.
+                enum:
+                - Provisioning
+                - Syncing
+                - Degraded
+                - Disconnected
+                type: string
+              rejectedCRDs:
+                description: |-
+                  RejectedCRDs lists CRDs excluded from the knowledge graph for a persistent
+                  reason. Two sources feed it:
+
+                    - Ingestion API rejections with a persistent error code (e.g.
+                      CONTENT_TOO_LARGE, INVALID_SCHEMA). Transient codes
+                      (TARGET_NOT_FOUND, SOURCE_NOT_FOUND, EMBEDDING_FAILED,
+                      BACKEND_WRITE_FAILED) are not included — they resolve on retry.
+                    - Reason RBACForbidden: the API server returned 403 on list/watch, so
+                      the CRD's API group is outside the operator's granted read set. The
+                      informer is terminal for that CRD (informer.StateForbidden) — no
+                      goroutine, no backoff timer — but the entry is NOT stranded: every
+                      reconcile re-tests it with one SelfSubjectAccessReview and releases
+                      it the moment the grant appears, so instances become observable on
+                      the next reconcile rather than the next operator restart (PRD-3
+                      AC-21). This is the input F-15 consumes to request one aggregation
+                      member per unreadable group; widen the grant now via the chart's
+                      extraReadGroups values list.
+
+                  Capped at 50 entries; oldest rejection evicted on overflow. Empty when
+                  nothing is being excluded.
+                items:
+                  description: |-
+                    RejectedCRD records an Ingestion API rejection for a specific resource.
+                    Per PRD §14.1 Q-03: operators must be able to see which CRDs are excluded
+                    from the knowledge graph due to oversized schemas or other persistent
+                    rejection reasons.
+                  properties:
+                    lastSeen:
+                      description: LastSeen is the most recent timestamp at which
+                        this rejection was observed.
+                      format: date-time
+                      type: string
+                    reason:
+                      description: |-
+                        Reason is the error code from the Ingestion API response (e.g.
+                        "CONTENT_TOO_LARGE", "INVALID_SCHEMA"). Matches schema-contract §11
+                        error code enum.
+                      type: string
+                    resourceKey:
+                      description: |-
+                        ResourceKey is the OntologyEntry key (e.g. "huge.example.com/Massive/v1")
+                        for capability rejections, or the DiscoveredResource key for instance rejections.
+                      type: string
+                  required:
+                  - lastSeen
+                  - reason
+                  - resourceKey
+                  type: object
+                type: array
+            type: object
+        required:
+        - spec
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
+{{- end }}
