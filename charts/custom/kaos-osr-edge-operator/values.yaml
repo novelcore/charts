@@ -79,9 +79,26 @@ manager:
   ##
   nodeSelector: {}
 
-  ## Manager pod's tolerations
+  ## Manager pod's tolerations.
   ##
-  tolerations: []
+  ## Defaults to tolerating every NoSchedule taint, because this operator is a
+  ## platform agent installed into clusters whose taint topology we do not
+  ## control and cannot predict. KAOS child pools routinely taint EVERY node
+  ## (ml-workload, kubenv, gke-managed-components), leaving no untainted node
+  ## for an untolerating pod to land on — it stays Pending forever with
+  ## FailedScheduling, which reads like a broken install rather than a missing
+  ## toleration.
+  ##
+  ## This mirrors skupper-controller and skupper-router, the other platform
+  ## components installed into these same child pools, which both carry the
+  ## identical blanket toleration. The pods request 100m/200Mi, so landing on a
+  ## workload node costs the workload almost nothing.
+  ##
+  ## Override with [] to restrict scheduling, but verify a schedulable node
+  ## exists first.
+  tolerations:
+    - operator: Exists
+      effect: NoSchedule
 
   ## Deployment strategy
   ##
@@ -529,9 +546,11 @@ readApi:
   ##
   nodeSelector: {}
 
-  ## Read API pod's tolerations
-  ##
-  tolerations: []
+  ## Read API pod's tolerations.
+  ## Same reasoning as manager.tolerations above — see there.
+  tolerations:
+    - operator: Exists
+      effect: NoSchedule
 
   ## Termination grace period seconds
   ##
