@@ -16,7 +16,7 @@ manager:
   replicas: 1
 
   image:
-    repository: novelcore.azurecr.io/kubecore/kaos-osr-edge-operator
+    repository: europe-west1-docker.pkg.dev/kaos-dev-gcp/kaos-images/platform/kaos-osr-edge-operator
     ## Image tag (defaults to Chart.appVersion if not set)
     ##
     # tag: ""
@@ -345,7 +345,7 @@ readApi:
   replicas: 1
 
   image:
-    repository: novelcore.azurecr.io/kubecore/kaos-osr-edge-operator
+    repository: europe-west1-docker.pkg.dev/kaos-dev-gcp/kaos-images/platform/kaos-osr-edge-operator
     ## Image tag (defaults to Chart.appVersion if not set)
     ##
     # tag: ""
