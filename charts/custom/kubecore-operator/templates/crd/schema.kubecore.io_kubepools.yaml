@@ -776,6 +776,35 @@ spec:
                         plane over the interconnect. Requires features.costTracking and secureConnection.
                         Defaults to false: client data push is opt-in.
                       type: boolean
+                    osr:
+                      default: {}
+                      description: |-
+                        Osr configures the OSR edge stack on this pool: knowledge observation plus the
+                        read-only live-state API. Requires secureConnection — both flows ride the interconnect.
+                        The object-level default below is load-bearing, not decorative: CRD structural-schema
+                        defaulting only fills in a field's default once its *parent* is present in the stored
+                        object, so an omitted osr block would otherwise never materialize osr.enabled=true and
+                        the CEL rule's has(self.osr) check below would never see it — silently admitting
+                        secureConnection=false with OSR at its (Go-level) enabled default. The empty-object
+                        default makes "osr omitted" and "osr: {}" the same stored document, closing that gap.
+                      properties:
+                        chartVersion:
+                          description: |-
+                            ChartVersion pins the OSR edge chart for this pool, overriding the fleet
+                            default. Empty means follow the fleet. This is the canary and rollback control.
+                          type: string
+                        enabled:
+                          default: true
+                          description: Enabled deploys the OSR edge stack. Defaults to true when not specified.
+                          type: boolean
+                        liveQuery:
+                          default: true
+                          description: |-
+                            LiveQuery deploys the read-only live-state API and its southbound exposure.
+                            Separate from Enabled because a client may permit outbound observation while
+                            refusing an inbound read surface. Defaults to true.
+                          type: boolean
+                      type: object
                     secureConnection:
                       default: true
                       description: |-
@@ -786,6 +815,8 @@ spec:
                   x-kubernetes-validations:
                     - message: kaosCloud.costExport requires kaosCloud.secureConnection (the cost push rides the interconnect)
                       rule: '!(has(self.costExport) && self.costExport) || (!has(self.secureConnection) || self.secureConnection)'
+                    - message: kaosCloud.osr requires kaosCloud.secureConnection (both OSR data flows ride the interconnect)
+                      rule: '!(has(self.osr) && has(self.osr.enabled) && self.osr.enabled) || (!has(self.secureConnection) || self.secureConnection)'
                 kubeOrgRef:
                   description: KubeOrgRef references the KubeOrg that provides AWS configuration and network
                   minLength: 1
