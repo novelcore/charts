@@ -361,6 +361,9 @@ spec:
                       - name
                       - priority
                     type: object
+                    x-kubernetes-validations:
+                      - message: nodeGroup is required unless environmentType is 'ml' (an ml environment's compute comes from the ML compute classes, not a dedicated node group)
+                        rule: self.environmentType == 'ml' || has(self.nodeGroup)
                   maxItems: 20
                   type: array
                 githubConfiguration:
