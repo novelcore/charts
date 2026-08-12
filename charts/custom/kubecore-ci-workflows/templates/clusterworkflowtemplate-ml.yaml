@@ -109,6 +109,18 @@ spec:
   templates:
   - name: ml-ci-build
     steps:
+    # Report "pending" (with the Argo UI run URL) BEFORE any work: a merge that
+    # is building shows a yellow kubecore-ml-ci check on GitHub immediately,
+    # and a cluster-side stall is a visible stuck-pending check instead of
+    # silence (#459-class outages become observable from GitHub alone).
+    - - name: status-pending
+        template: status
+        arguments:
+          parameters:
+          - name: state
+            value: "pending"
+          - name: description
+            value: "Building in Argo Workflows"
     - - name: clone
         template: clone
     - - name: detect-steps
@@ -2729,6 +2741,13 @@ spec:
         readOnly: true
 
   - name: status
+    # GitHub reporting for the AUTHORITATIVE in-cluster build. Replaces the
+    # GH-Actions-side duplicate build as the source of merge health: a commit
+    # status (context kubecore-ml-ci) with target_url into the Argo UI run,
+    # plus a Deployment rollup (environment ml-ci) whose log/environment URL
+    # is the same run. pending creates the Deployment; success/failure resolve
+    # the Deployment created for this SHA. Best-effort against the GitHub API:
+    # curl without -f never fails the build over a status write.
     inputs:
       parameters:
       - name: state
@@ -2745,14 +2764,51 @@ spec:
         SHA="{{`{{workflow.parameters.commit_sha}}`}}"
         STATE="{{`{{inputs.parameters.state}}`}}"
         DESC="{{`{{inputs.parameters.description}}`}}"
+        API="https://api.github.com/repos/${OWNER_REPO}"
+        AUTH="Authorization: token ${TOKEN}"
+        ACCEPT="Accept: application/vnd.github+json"
+        ARGO_BASE="{{ .Values.argo.uiBaseUrl }}"
+        RUN_URL=""
+        if [ -n "${ARGO_BASE}" ]; then
+          RUN_URL="${ARGO_BASE}/workflows/{{`{{workflow.namespace}}`}}/{{`{{workflow.name}}`}}"
+        fi
 
-        curl -s -X POST \
-          -H "Authorization: token ${TOKEN}" \
-          -H "Accept: application/vnd.github+json" \
-          "https://api.github.com/repos/${OWNER_REPO}/statuses/${SHA}" \
-          -d "{\"state\":\"${STATE}\",\"description\":\"${DESC}\",\"context\":\"kubecore-ml-ci\"}"
+        if [ -n "${RUN_URL}" ]; then
+          PAYLOAD="{\"state\":\"${STATE}\",\"description\":\"${DESC}\",\"context\":\"kubecore-ml-ci\",\"target_url\":\"${RUN_URL}\"}"
+        else
+          PAYLOAD="{\"state\":\"${STATE}\",\"description\":\"${DESC}\",\"context\":\"kubecore-ml-ci\"}"
+        fi
+        curl -s -X POST -H "${AUTH}" -H "${ACCEPT}" \
+          "${API}/statuses/${SHA}" -d "${PAYLOAD}" > /dev/null
+        echo "Posted commit status: ${STATE}"
 
-        echo "Posted status: ${STATE}"
+        # Deployment rollup. required_contexts:[] is load-bearing: THIS build
+        # is what the commit statuses describe — defaulting would deadlock the
+        # Deployment on the very check this workflow is still running.
+        if [ "${STATE}" = "pending" ]; then
+          DEP_ID=$(curl -s -X POST -H "${AUTH}" -H "${ACCEPT}" \
+            "${API}/deployments" \
+            -d "{\"ref\":\"${SHA}\",\"environment\":\"ml-ci\",\"auto_merge\":false,\"required_contexts\":[],\"description\":\"ml-ci-build {{`{{workflow.name}}`}}\"}" \
+            | grep -m1 '"id":' | tr -dc '0-9')
+          DEP_STATE="in_progress"
+        else
+          DEP_ID=$(curl -s -H "${AUTH}" -H "${ACCEPT}" \
+            "${API}/deployments?sha=${SHA}&environment=ml-ci&per_page=1" \
+            | grep -m1 '"id":' | tr -dc '0-9')
+          DEP_STATE="${STATE}"
+        fi
+        if [ -n "${DEP_ID}" ]; then
+          if [ -n "${RUN_URL}" ]; then
+            DPAYLOAD="{\"state\":\"${DEP_STATE}\",\"log_url\":\"${RUN_URL}\",\"environment_url\":\"${RUN_URL}\",\"description\":\"${DESC}\"}"
+          else
+            DPAYLOAD="{\"state\":\"${DEP_STATE}\",\"description\":\"${DESC}\"}"
+          fi
+          curl -s -X POST -H "${AUTH}" -H "${ACCEPT}" \
+            "${API}/deployments/${DEP_ID}/statuses" -d "${DPAYLOAD}" > /dev/null
+          echo "Posted deployment ${DEP_ID} status: ${DEP_STATE}"
+        else
+          echo "WARN: no ml-ci Deployment resolved for ${SHA} — skipped deployment status"
+        fi
       volumeMounts:
       - name: github-token
         mountPath: /etc/github-token
