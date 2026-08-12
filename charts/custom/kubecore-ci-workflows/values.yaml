@@ -7,6 +7,14 @@ registry:
   # External registry hostname (for kustomize image references in GitOps manifests)
   externalUrl: ""
 
+# Argo Workflows UI base URL (e.g. "https://argo-workflows.system.<clusterDomain>").
+# When set, ml-ci-build's GitHub commit statuses and its Deployment rollup carry
+# a target_url/log_url linking directly to the workflow run in the Argo UI —
+# a red check on GitHub is one click from the failing step's logs. Empty keeps
+# plain statuses (no link). Populated by the clusteroperators composition.
+argo:
+  uiBaseUrl: ""
+
 # GitHub configuration
 github:
   # GitHub organization
