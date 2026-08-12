@@ -103,21 +103,15 @@ spec:
                   minItems: 0
                   type: array
                 role:
-                  allOf:
-                    - enum:
-                        - dev
-                        - ops
-                        - business
-                        - admin
-                    - enum:
-                        - dev
-                        - ops
-                        - business
-                        - admin
                   description: |-
                     Role is the single role assigned to every member of this team.
                     Each role maps to a fixed permission set across Zitadel, GitHub, and K8s RBAC (D-01).
                     CON-02, CON-03: single role enum, applied uniformly across all referencing projects/envs (see D-05).
+                  enum:
+                    - dev
+                    - ops
+                    - business
+                    - admin
                   type: string
               required:
                 - members
@@ -233,16 +227,12 @@ spec:
                         description: Email mirrors the spec email for correlation.
                         type: string
                       githubLink:
-                        allOf:
-                          - enum:
-                              - Linked
-                              - NotLinked
-                          - enum:
-                              - Linked
-                              - NotLinked
                         description: |-
                           GitHubLink indicates whether the Zitadel user has a linked GitHub IDP account (Q-02, AC-11).
                           NotLinked is not a failure — the member is excluded from GitHub team membership only.
+                        enum:
+                          - Linked
+                          - NotLinked
                         type: string
                       githubUsername:
                         description: |-
@@ -260,14 +250,10 @@ spec:
                         description: Message contains a human-readable explanation when Status is NotFound.
                         type: string
                       status:
-                        allOf:
-                          - enum:
-                              - Resolved
-                              - NotFound
-                          - enum:
-                              - Resolved
-                              - NotFound
                         description: Status is the Zitadel resolution state for this member.
+                        enum:
+                          - Resolved
+                          - NotFound
                         type: string
                       zitadelUserId:
                         description: |-
@@ -322,16 +308,12 @@ spec:
                             description: Email mirrors the spec email for correlation.
                             type: string
                           githubLink:
-                            allOf:
-                              - enum:
-                                  - Linked
-                                  - NotLinked
-                              - enum:
-                                  - Linked
-                                  - NotLinked
                             description: |-
                               GitHubLink indicates whether the Zitadel user has a linked GitHub IDP account (Q-02, AC-11).
                               NotLinked is not a failure — the member is excluded from GitHub team membership only.
+                            enum:
+                              - Linked
+                              - NotLinked
                             type: string
                           githubUsername:
                             description: |-
@@ -349,14 +331,10 @@ spec:
                             description: Message contains a human-readable explanation when Status is NotFound.
                             type: string
                           status:
-                            allOf:
-                              - enum:
-                                  - Resolved
-                                  - NotFound
-                              - enum:
-                                  - Resolved
-                                  - NotFound
                             description: Status is the Zitadel resolution state for this member.
+                            enum:
+                              - Resolved
+                              - NotFound
                             type: string
                           zitadelUserId:
                             description: |-

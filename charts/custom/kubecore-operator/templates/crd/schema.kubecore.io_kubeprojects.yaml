@@ -21,6 +21,11 @@ metadata:
         relationship: creates
         cardinality: "1:*"
         description: "KubeProject creates KubeApp resources for application management"
+      - target: KubeTeam
+        field: spec.teams[].name
+        relationship: references
+        cardinality: "*:*"
+        description: "Teams granting access to this project"
     graph.kubecore.io/hierarchy-label: kubecore.io/kubeproject
     graph.kubecore.io/xr-mappings: |
       - xrKind: XGitHubProject
@@ -118,17 +123,6 @@ spec:
                     description: ProjectEnvironment defines a single environment within a project
                     properties:
                       environmentType:
-                        allOf:
-                          - enum:
-                              - dev
-                              - stage
-                              - prod
-                              - ml
-                          - enum:
-                              - dev
-                              - stage
-                              - prod
-                              - ml
                         description: |-
                           EnvironmentType classifies the environment (dev/stage/prod/ml). It is the
                           authoritative source for the priority-uniqueness validator and the status
@@ -137,6 +131,11 @@ spec:
                           per-project ML environment: it provisions its OWN MLOps stack (one per ml
                           environment — PRD-858 supersedes PRD-240 CON-07) and hosts whole-node
                           pipeline step compute; it carries no app-promotion semantics.
+                        enum:
+                          - dev
+                          - stage
+                          - prod
+                          - ml
                         type: string
                       kubePool:
                         description: KubePool references the KubePool resource to use for this environment

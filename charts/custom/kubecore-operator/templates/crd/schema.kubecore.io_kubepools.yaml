@@ -306,14 +306,10 @@ spec:
                               description: Tags are additional tags to apply to the EKS cluster
                               type: object
                             type:
-                              allOf:
-                                - enum:
-                                    - shared
-                                    - dedicated
-                                - enum:
-                                    - shared
-                                    - dedicated
                               description: Type specifies whether this is a shared or dedicated cluster
+                              enum:
+                                - shared
+                                - dedicated
                               type: string
                           required:
                             - kubernetesVersion
@@ -402,14 +398,10 @@ spec:
                                   type: boolean
                               type: object
                             type:
-                              allOf:
-                                - enum:
-                                    - shared
-                                    - dedicated
-                                - enum:
-                                    - shared
-                                    - dedicated
                               description: Type specifies whether this is a shared or dedicated cluster.
+                              enum:
+                                - shared
+                                - dedicated
                               type: string
                           required:
                             - kubernetesVersion
@@ -609,14 +601,10 @@ spec:
                                   type: string
                               type: object
                             type:
-                              allOf:
-                                - enum:
-                                    - shared
-                                    - dedicated
-                                - enum:
-                                    - shared
-                                    - dedicated
                               description: Type specifies whether this is a shared or dedicated cluster.
+                              enum:
+                                - shared
+                                - dedicated
                               type: string
                           required:
                             - kubernetesVersion
@@ -641,13 +629,6 @@ spec:
                       type: object
                   type: object
                 clusterMode:
-                  allOf:
-                    - enum:
-                        - dev
-                        - production
-                    - enum:
-                        - dev
-                        - production
                   default: dev
                   description: |-
                     ClusterMode declares the intent of this cluster: "dev" (cost-optimized,
@@ -662,6 +643,9 @@ spec:
                     Default "dev" preserves backward compatibility with existing KubePools
                     that were created before this field existed and already run the
                     single-pool topology that dev mode codifies.
+                  enum:
+                    - dev
+                    - production
                   type: string
                   x-kubernetes-validations:
                     - message: clusterMode is immutable
@@ -836,20 +820,15 @@ spec:
                       type: boolean
                   type: object
                 systemProfile:
-                  allOf:
-                    - enum:
-                        - small
-                        - medium
-                        - ha
-                    - enum:
-                        - small
-                        - medium
-                        - ha
                   description: |-
                     SystemProfile controls the sizing of the platform system node group.
                     The composition set translates this to provider-specific instance types and scaling.
                     "small": minimal footprint (dev/test), "medium": balanced (staging),
                     "ha": high availability (production).
+                  enum:
+                    - small
+                    - medium
+                    - ha
                   type: string
                 tls:
                   description: TLS defines TLS configuration for the cluster platform system

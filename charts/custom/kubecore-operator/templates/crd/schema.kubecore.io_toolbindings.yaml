@@ -117,14 +117,10 @@ spec:
                     - service
                   type: object
                 lane:
-                  allOf:
-                    - enum:
-                        - kaos-managed
-                        - client-managed
-                    - enum:
-                        - kaos-managed
-                        - client-managed
                   description: Lane records operator-lifecycle ownership (D-08). Not enforced by 2a.
+                  enum:
+                    - kaos-managed
+                    - client-managed
                   type: string
                 license:
                   description: License records the recipe's license posture (D-08).
@@ -152,17 +148,13 @@ spec:
                   minLength: 1
                   type: string
                 provenance:
-                  allOf:
-                    - enum:
-                        - platform
-                        - organization
-                    - enum:
-                        - platform
-                        - organization
                   description: |-
                     Provenance distinguishes platform-generated from client-authored
                     bindings (D-19). Both share the org namespace; only this field and
                     the authoring source differ.
+                  enum:
+                    - platform
+                    - organization
                   type: string
                 requiredApi:
                   description: |-
@@ -376,18 +368,12 @@ spec:
                           - kubeProject
                         type: object
                       state:
-                        allOf:
-                          - enum:
-                              - Verified
-                              - TargetAbsent
-                              - Pending
-                              - Stale
-                          - enum:
-                              - Verified
-                              - TargetAbsent
-                              - Pending
-                              - Stale
                         description: State is the 2a-writable presence/addressability verdict.
+                        enum:
+                          - Verified
+                          - TargetAbsent
+                          - Pending
+                          - Stale
                         type: string
                     required:
                       - instance

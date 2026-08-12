@@ -17,6 +17,12 @@ metadata:
         cardinality: "*:1"
         required: true
         description: "KubeApp references a KubeProject for project-level configuration"
+      - target: XKubeAppTemplate
+        field: spec.kubeAppTemplateRef
+        relationship: references
+        cardinality: "*:1"
+        required: true
+        description: "Application template for this app"
     graph.kubecore.io/hierarchy-label: kubecore.io/kubeapp
     graph.kubecore.io/xr-mappings: |
       - xrKind: XGitHubApp
