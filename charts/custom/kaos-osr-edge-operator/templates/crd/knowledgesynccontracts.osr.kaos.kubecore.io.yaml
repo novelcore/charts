@@ -126,11 +126,26 @@ spec:
                     - name
                     type: object
                   url:
-                    description: URL of the Knowledge Ingestion API. Must be an https://
-                      URL.
+                    description: |-
+                      URL of the Knowledge Ingestion API. Must use https:// for every host,
+                      with one narrow exception: a cluster-internal address reached inside
+                      the Skupper mesh (host ending in .svc.cluster.local) may use http://.
+                      Skupper already provides mTLS between sites for that traffic, so
+                      requiring https there would mean running a second TLS layer inside an
+                      already-encrypted tunnel — real security, but invisible to anyone
+                      reading the CR, which is exactly why the exception is scoped to the
+                      mesh's own DNS suffix rather than widening the scheme check outright.
+                      The Pattern below only constrains shape (this must be an http(s)://
+                      URL at all); the XValidation rule enforces the host restriction.
                     maxLength: 2048
-                    pattern: ^https://[^\s/$.?#].[^\s]*$
+                    pattern: ^https?://[^\s/$.?#].[^\s]*$
                     type: string
+                    x-kubernetes-validations:
+                    - message: http:// is only permitted for cluster-internal hosts
+                        ending in .svc.cluster.local (e.g. a Skupper mesh service),
+                        with a port in 1-65535 if one is present; every other endpoint
+                        must use https://
+                      rule: self.startsWith('https://') || self.matches('^http://[^/]+[.]svc[.]cluster[.]local(:(6553[0-5]|655[0-2][0-9]|65[0-4][0-9]{2}|6[0-4][0-9]{3}|[1-5][0-9]{4}|[1-9][0-9]{0,3}))?(/.*)?$')
                 required:
                 - authSecretRef
                 - url
