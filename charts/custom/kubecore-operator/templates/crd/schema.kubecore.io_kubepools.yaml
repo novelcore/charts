@@ -1329,6 +1329,30 @@ spec:
                   description: ObservedGeneration is the most recent generation observed by the controller
                   format: int64
                   type: integer
+                osr:
+                  description: |-
+                    Osr reports the OSR edge operator's state on this pool. Reporting only — OSR is
+                    deliberately NOT on the pool readiness critical path, so a broken edge install
+                    degrades observability without holding the pool out of Ready.
+                  properties:
+                    chartVersion:
+                      description: |-
+                        ChartVersion is the RESOLVED kaos-osr-edge-operator chart version for this pool:
+                        the per-pool pin if set, else the fleet default, else the compiled-in floor. It is
+                        the resolved value rather than the spec override because a pool following the fleet
+                        has an empty override, and answering "what version is this pool on" with an empty
+                        string is exactly the gap this field closes.
+                      type: string
+                    message:
+                      description: Message carries detail when not Ready (e.g. the unready composed resource).
+                      type: string
+                    ready:
+                      description: Ready indicates the XKnowledge XR is Ready.
+                      type: boolean
+                    state:
+                      description: 'State is a human-readable rollup: Pending | Ready | Degraded | Disabled.'
+                      type: string
+                  type: object
                 outputs:
                   description: |-
                     Outputs is the deliberate cross-controller contract of this KubePool

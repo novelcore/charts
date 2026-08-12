@@ -148,6 +148,18 @@ rules:
   - list
   - watch
 - apiGroups:
+  - cert-manager.io
+  resources:
+  - certificates
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
   - cloudplatform.gcp.m.upbound.io
   resources:
   - projectiammembers
@@ -609,6 +621,7 @@ rules:
   - skupper.io
   resources:
   - accessgrants
+  - listeners
   verbs:
   - create
   - delete
