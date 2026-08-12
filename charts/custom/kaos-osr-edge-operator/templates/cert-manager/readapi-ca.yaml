@@ -1,0 +1,61 @@
+{{- if .Values.readApi.enabled }}
+{{/*
+  A two-link chain rather than a directly self-signed leaf.
+
+  cert-manager's selfSigned issuer produces a leaf that IS its own trust
+  anchor: the Secret's ca.crt equals its tls.crt. The child's Skupper
+  Connector verifies the read API using a bundle copied out of that Secret by
+  the XKnowledge composition, so with a selfSigned leaf the anchor changes on
+  every renewal (default: every 60 days) and southbound reads fail until the
+  copy catches up.
+
+  With this chain the anchor is the CA below, which outlives the leaf by
+  years, and leaf rotation is invisible to the Connector's trust bundle.
+  This mirrors the control plane, which anchors on a long-lived
+  ClusterIssuer (kaos-root-ca-issuer) rather than on per-workload
+  self-signed certificates.
+*/}}
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    app.kubernetes.io/name: {{ include "kaos-osr-edge-operator.name" . }}
+    helm.sh/chart: {{ .Chart.Name }}-{{ .Chart.Version | replace "+" "_" }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+  name: {{ include "kaos-osr-edge-operator.resourceName" (dict "suffix" "readapi-ca" "context" $) }}
+  namespace: {{ .Release.Namespace }}
+spec:
+  isCA: true
+  commonName: kaos-osr-readapi-ca
+  # Five years, renewed a year out. The CA is a trust anchor consumed by a
+  # bundle copy in another namespace, so its rotation is the expensive event
+  # and the leaf's is the cheap one.
+  duration: 43800h
+  renewBefore: 8760h
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  issuerRef:
+    kind: Issuer
+    name: {{ include "kaos-osr-edge-operator.resourceName" (dict "suffix" "selfsigned-issuer" "context" $) }}
+  # A FIXED literal, deliberately not helper-derived. The XKnowledge
+  # composition copies data["tls.crt"] out of this Secret by name to build the
+  # child Connector's trust bundle; a release-derived name would make that
+  # copy depend on the Helm release name and break silently when it changes.
+  secretName: readapi-ca
+---
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    app.kubernetes.io/name: {{ include "kaos-osr-edge-operator.name" . }}
+    helm.sh/chart: {{ .Chart.Name }}-{{ .Chart.Version | replace "+" "_" }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+  name: {{ include "kaos-osr-edge-operator.resourceName" (dict "suffix" "readapi-ca-issuer" "context" $) }}
+  namespace: {{ .Release.Namespace }}
+spec:
+  ca:
+    secretName: readapi-ca
+{{- end }}

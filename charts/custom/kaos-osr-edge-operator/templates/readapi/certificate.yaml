@@ -27,6 +27,6 @@ spec:
   - {{ include "kaos-osr-edge-operator.resourceName" (dict "suffix" "readapi" "context" $) }}.{{ .Release.Namespace }}.svc.cluster.local
   issuerRef:
     kind: Issuer
-    name: {{ include "kaos-osr-edge-operator.resourceName" (dict "suffix" "selfsigned-issuer" "context" $) }}
+    name: {{ include "kaos-osr-edge-operator.resourceName" (dict "suffix" "readapi-ca-issuer" "context" $) }}
   secretName: readapi-server-cert
 {{- end }}
