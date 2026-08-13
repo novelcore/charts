@@ -687,6 +687,22 @@ spec:
                           type: boolean
                       type: object
                   type: object
+                networkPosture:
+                  default: permissive
+                  description: |-
+                    NetworkPosture selects whether this project's connections are subject to
+                    Istio AuthorizationPolicy enforcement (PRD-ARCH-002 F-18/F-19). "permissive"
+                    is the default and the zero-value behaviour — nothing is emitted and every
+                    pre-existing KubeProject is unaffected. "enforced" opts the project in
+                    (policy emission itself lands in a later task) and requires every
+                    KubePool this project targets to report a Ready mesh
+                    (KubePool.status.platformTools.mesh.status == "Ready"); the reconciling
+                    phase rejects loudly with a NetworkPostureRejected condition rather than
+                    silently reconciling as permissive when that is not the case (AC-19).
+                  enum:
+                    - permissive
+                    - enforced
+                  type: string
                 owner:
                   description: Owner specifies the owner or team responsible for this project
                   type: string
@@ -884,6 +900,18 @@ spec:
                         description: LastReconciled records when this environment was last reconciled
                         format: date-time
                         type: string
+                      meshEnrolled:
+                        description: |-
+                          MeshEnrolled reports whether this environment's namespace has been
+                          enrolled in the ambient mesh (istio.io/dataplane-mode: ambient),
+                          PRD-ARCH-002 F-17. This is a CONFIRMED signal read back from the
+                          XKubEnv composition's status.namespace.ambientEnrolled — not merely
+                          operator intent — so it lags the enforced-posture write by however
+                          long the composition takes to converge, letting an operator watch
+                          enrollment roll out namespace by namespace (DEC-C3: incremental, never
+                          fleet-wide). false whenever posture is permissive or the composition
+                          has not yet confirmed the label.
+                        type: boolean
                       message:
                         description: Message contains a human-readable message about the environment status
                         type: string

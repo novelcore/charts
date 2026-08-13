@@ -1478,6 +1478,14 @@ spec:
                         status:
                           description: Status of the tool (Pending, Installing, Ready, Error)
                           type: string
+                        trustDomain:
+                          description: |-
+                            TrustDomain is the SPIFFE trust domain reported by the tool. This field is
+                            generic on the shared PlatformToolStatus struct but is only ever populated
+                            for the mesh tool, where it carries the pool-scoped trust domain
+                            ({pool}.{org}.mesh.kaos-labs.org) read back from the XNetworkMesh XR's
+                            status — never recomputed by the operator (DEC-C1).
+                          type: string
                         url:
                           description: URL is the access URL for the tool (if applicable)
                           type: string
@@ -1496,6 +1504,14 @@ spec:
                           type: string
                         status:
                           description: Status of the tool (Pending, Installing, Ready, Error)
+                          type: string
+                        trustDomain:
+                          description: |-
+                            TrustDomain is the SPIFFE trust domain reported by the tool. This field is
+                            generic on the shared PlatformToolStatus struct but is only ever populated
+                            for the mesh tool, where it carries the pool-scoped trust domain
+                            ({pool}.{org}.mesh.kaos-labs.org) read back from the XNetworkMesh XR's
+                            status — never recomputed by the operator (DEC-C1).
                           type: string
                         url:
                           description: URL is the access URL for the tool (if applicable)
@@ -1516,6 +1532,14 @@ spec:
                         status:
                           description: Status of the tool (Pending, Installing, Ready, Error)
                           type: string
+                        trustDomain:
+                          description: |-
+                            TrustDomain is the SPIFFE trust domain reported by the tool. This field is
+                            generic on the shared PlatformToolStatus struct but is only ever populated
+                            for the mesh tool, where it carries the pool-scoped trust domain
+                            ({pool}.{org}.mesh.kaos-labs.org) read back from the XNetworkMesh XR's
+                            status — never recomputed by the operator (DEC-C1).
+                          type: string
                         url:
                           description: URL is the access URL for the tool (if applicable)
                           type: string
@@ -1534,6 +1558,14 @@ spec:
                           type: string
                         status:
                           description: Status of the tool (Pending, Installing, Ready, Error)
+                          type: string
+                        trustDomain:
+                          description: |-
+                            TrustDomain is the SPIFFE trust domain reported by the tool. This field is
+                            generic on the shared PlatformToolStatus struct but is only ever populated
+                            for the mesh tool, where it carries the pool-scoped trust domain
+                            ({pool}.{org}.mesh.kaos-labs.org) read back from the XNetworkMesh XR's
+                            status — never recomputed by the operator (DEC-C1).
                           type: string
                         url:
                           description: URL is the access URL for the tool (if applicable)
@@ -1554,6 +1586,14 @@ spec:
                         status:
                           description: Status of the tool (Pending, Installing, Ready, Error)
                           type: string
+                        trustDomain:
+                          description: |-
+                            TrustDomain is the SPIFFE trust domain reported by the tool. This field is
+                            generic on the shared PlatformToolStatus struct but is only ever populated
+                            for the mesh tool, where it carries the pool-scoped trust domain
+                            ({pool}.{org}.mesh.kaos-labs.org) read back from the XNetworkMesh XR's
+                            status — never recomputed by the operator (DEC-C1).
+                          type: string
                         url:
                           description: URL is the access URL for the tool (if applicable)
                           type: string
@@ -1573,6 +1613,14 @@ spec:
                         status:
                           description: Status of the tool (Pending, Installing, Ready, Error)
                           type: string
+                        trustDomain:
+                          description: |-
+                            TrustDomain is the SPIFFE trust domain reported by the tool. This field is
+                            generic on the shared PlatformToolStatus struct but is only ever populated
+                            for the mesh tool, where it carries the pool-scoped trust domain
+                            ({pool}.{org}.mesh.kaos-labs.org) read back from the XNetworkMesh XR's
+                            status — never recomputed by the operator (DEC-C1).
+                          type: string
                         url:
                           description: URL is the access URL for the tool (if applicable)
                           type: string
@@ -1591,6 +1639,14 @@ spec:
                           type: string
                         status:
                           description: Status of the tool (Pending, Installing, Ready, Error)
+                          type: string
+                        trustDomain:
+                          description: |-
+                            TrustDomain is the SPIFFE trust domain reported by the tool. This field is
+                            generic on the shared PlatformToolStatus struct but is only ever populated
+                            for the mesh tool, where it carries the pool-scoped trust domain
+                            ({pool}.{org}.mesh.kaos-labs.org) read back from the XNetworkMesh XR's
+                            status — never recomputed by the operator (DEC-C1).
                           type: string
                         url:
                           description: URL is the access URL for the tool (if applicable)
@@ -1613,6 +1669,14 @@ spec:
                         status:
                           description: Status of the tool (Pending, Installing, Ready, Error)
                           type: string
+                        trustDomain:
+                          description: |-
+                            TrustDomain is the SPIFFE trust domain reported by the tool. This field is
+                            generic on the shared PlatformToolStatus struct but is only ever populated
+                            for the mesh tool, where it carries the pool-scoped trust domain
+                            ({pool}.{org}.mesh.kaos-labs.org) read back from the XNetworkMesh XR's
+                            status — never recomputed by the operator (DEC-C1).
+                          type: string
                         url:
                           description: URL is the access URL for the tool (if applicable)
                           type: string
@@ -1633,6 +1697,14 @@ spec:
                           type: string
                         status:
                           description: Status of the tool (Pending, Installing, Ready, Error)
+                          type: string
+                        trustDomain:
+                          description: |-
+                            TrustDomain is the SPIFFE trust domain reported by the tool. This field is
+                            generic on the shared PlatformToolStatus struct but is only ever populated
+                            for the mesh tool, where it carries the pool-scoped trust domain
+                            ({pool}.{org}.mesh.kaos-labs.org) read back from the XNetworkMesh XR's
+                            status — never recomputed by the operator (DEC-C1).
                           type: string
                         url:
                           description: URL is the access URL for the tool (if applicable)
@@ -1655,6 +1727,14 @@ spec:
                           type: string
                         status:
                           description: Status of the tool (Pending, Installing, Ready, Error)
+                          type: string
+                        trustDomain:
+                          description: |-
+                            TrustDomain is the SPIFFE trust domain reported by the tool. This field is
+                            generic on the shared PlatformToolStatus struct but is only ever populated
+                            for the mesh tool, where it carries the pool-scoped trust domain
+                            ({pool}.{org}.mesh.kaos-labs.org) read back from the XNetworkMesh XR's
+                            status — never recomputed by the operator (DEC-C1).
                           type: string
                         url:
                           description: URL is the access URL for the tool (if applicable)
@@ -1682,6 +1762,14 @@ spec:
                         status:
                           description: Status of the tool (Pending, Installing, Ready, Error)
                           type: string
+                        trustDomain:
+                          description: |-
+                            TrustDomain is the SPIFFE trust domain reported by the tool. This field is
+                            generic on the shared PlatformToolStatus struct but is only ever populated
+                            for the mesh tool, where it carries the pool-scoped trust domain
+                            ({pool}.{org}.mesh.kaos-labs.org) read back from the XNetworkMesh XR's
+                            status — never recomputed by the operator (DEC-C1).
+                          type: string
                         url:
                           description: URL is the access URL for the tool (if applicable)
                           type: string
@@ -1702,6 +1790,14 @@ spec:
                           type: string
                         status:
                           description: Status of the tool (Pending, Installing, Ready, Error)
+                          type: string
+                        trustDomain:
+                          description: |-
+                            TrustDomain is the SPIFFE trust domain reported by the tool. This field is
+                            generic on the shared PlatformToolStatus struct but is only ever populated
+                            for the mesh tool, where it carries the pool-scoped trust domain
+                            ({pool}.{org}.mesh.kaos-labs.org) read back from the XNetworkMesh XR's
+                            status — never recomputed by the operator (DEC-C1).
                           type: string
                         url:
                           description: URL is the access URL for the tool (if applicable)
@@ -1724,6 +1820,14 @@ spec:
                           type: string
                         status:
                           description: Status of the tool (Pending, Installing, Ready, Error)
+                          type: string
+                        trustDomain:
+                          description: |-
+                            TrustDomain is the SPIFFE trust domain reported by the tool. This field is
+                            generic on the shared PlatformToolStatus struct but is only ever populated
+                            for the mesh tool, where it carries the pool-scoped trust domain
+                            ({pool}.{org}.mesh.kaos-labs.org) read back from the XNetworkMesh XR's
+                            status — never recomputed by the operator (DEC-C1).
                           type: string
                         url:
                           description: URL is the access URL for the tool (if applicable)

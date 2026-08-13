@@ -852,6 +852,20 @@ spec:
                         type: string
                       name:
                         type: string
+                      resolvedPrincipal:
+                        description: |-
+                          ResolvedPrincipal is the SPIFFE principal
+                          ("<trustDomain>/ns/<consumerNamespace>/sa/<consumerServiceAccount>")
+                          this connection's AuthorizationPolicy allows, read back from the SAME
+                          spec.parameters the Reconciling phase wrote onto the XConnection XR
+                          (never independently recomputed — DEC-C1). Empty whenever no policy
+                          was emitted: posture is permissive, or (PRD-ARCH-002 Task 3 fail-closed
+                          rule) posture is enforced but the pool's mesh trust domain was empty —
+                          in that case State is "Error" and Message explains why. This is the
+                          only inspectable signal distinguishing a working policy from a black
+                          hole (a wrong-trust-domain policy still reports ZtunnelAccepted=True
+                          and denies every consumer, per the live A5 measurement).
+                        type: string
                       resolvedVia:
                         description: ConnectionResolution is the provenance chain for a Ready connection (OSR/agents).
                         properties:

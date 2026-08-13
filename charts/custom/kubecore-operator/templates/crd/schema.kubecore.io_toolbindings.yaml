@@ -193,6 +193,27 @@ spec:
                     SemanticClass is the OSR/NOUS ontology class (D-04), e.g.
                     "relational-database". Not consumed by 2a verification logic.
                   type: string
+                workloadSelector:
+                  additionalProperties:
+                    type: string
+                  description: |-
+                    WorkloadSelector maps pod-label keys to naming templates identifying
+                    the TOOL's own workload pods, for F-12 Slice C AuthorizationPolicy
+                    emission (PRD-ARCH-002 Task 3b, DEC-C6). Values support the same
+                    "{name}" instance-substitution already used by Endpoint.Service and
+                    Secret.Name (SubstituteInstanceName, builders/connection_names.go) —
+                    reuse that helper, never a second one. Example (postgres-cnpg):
+                    {"cnpg.io/cluster": "{name}"} — matches every CNPG instance regardless
+                    of role (primary + replicas). NEVER derive this from the tool
+                    Service's own spec.selector: measured live on gke-dev, the
+                    recipe-published "-rw" Service pins instanceRole:primary, so copying
+                    it would protect only the primary and leave the "-ro"/"-r" replica
+                    endpoints of the SAME database open to anyone (DEC-C6).
+
+                    Absent (nil/empty) means Slice C emits NO AuthorizationPolicy for
+                    instances of this binding class — fail-closed, never a guessed or
+                    defaulted selector.
+                  type: object
               required:
                 - bindingClass
                 - endpoint
