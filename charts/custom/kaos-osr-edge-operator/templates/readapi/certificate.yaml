@@ -26,7 +26,10 @@ spec:
   - {{ include "kaos-osr-edge-operator.resourceName" (dict "suffix" "readapi" "context" $) }}.{{ .Release.Namespace }}.svc
   - {{ include "kaos-osr-edge-operator.resourceName" (dict "suffix" "readapi" "context" $) }}.{{ .Release.Namespace }}.svc.cluster.local
   issuerRef:
-    kind: Issuer
-    name: {{ include "kaos-osr-edge-operator.resourceName" (dict "suffix" "readapi-ca-issuer" "context" $) }}
+    # Cluster-scoped (see readapi-ca.yaml): the CA this leaf chains to must
+    # also be referenceable from the Skupper trust-bundle Certificate, which
+    # lives in a different namespace than this one.
+    kind: ClusterIssuer
+    name: {{ include "kaos-osr-edge-operator.resourceName" (dict "suffix" "readapi-ca" "context" $) }}
   secretName: readapi-server-cert
 {{- end }}

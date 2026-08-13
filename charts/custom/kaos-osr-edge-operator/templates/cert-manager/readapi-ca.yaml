@@ -4,17 +4,44 @@
 
   cert-manager's selfSigned issuer produces a leaf that IS its own trust
   anchor: the Secret's ca.crt equals its tls.crt. The child's Skupper
-  Connector verifies the read API using a bundle copied out of that Secret by
-  the XKnowledge composition, so with a selfSigned leaf the anchor changes on
-  every renewal (default: every 60 days) and southbound reads fail until the
-  copy catches up.
+  Connector verifies the read API using a bundle issued from that same CA
+  (southbound-trust.yaml, gated on southbound.enabled), so with a selfSigned
+  leaf the anchor changes on every renewal (default: every 60 days) and
+  southbound reads fail until a new bundle is issued to match.
 
   With this chain the anchor is the CA below, which outlives the leaf by
   years, and leaf rotation is invisible to the Connector's trust bundle.
   This mirrors the control plane, which anchors on a long-lived
   ClusterIssuer (kaos-root-ca-issuer) rather than on per-workload
   self-signed certificates.
+
+  The chain is CLUSTER-SCOPED (ClusterIssuer, not Issuer), even though the
+  read API's own leaf lives in the release namespace. This is required, not
+  cosmetic: the trust bundle issued for the Skupper router
+  (southbound-trust.yaml) lives in a DIFFERENT namespace (the Skupper
+  namespace) from this CA. A namespaced Issuer can only be referenced by a
+  Certificate in its own namespace, so the CA and the trust-bundle leaf
+  could never share one unless the issuer itself is cluster-scoped.
+
+  Cluster-scoped names must be unique per cluster. Both ClusterIssuers below
+  are prefixed with the release fullname via resourceName, same as every
+  other object this chart renders. Two OSR installs on one cluster would
+  therefore collide on these ClusterIssuer names — this is a documented
+  assumption, not a defended one: the platform installs exactly one OSR
+  edge operator per pool.
 */}}
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    app.kubernetes.io/name: {{ include "kaos-osr-edge-operator.name" . }}
+    helm.sh/chart: {{ .Chart.Name }}-{{ .Chart.Version | replace "+" "_" }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+  name: {{ include "kaos-osr-edge-operator.resourceName" (dict "suffix" "selfsigned" "context" $) }}
+spec:
+  selfSigned: {}
+---
 apiVersion: cert-manager.io/v1
 kind: Certificate
 metadata:
@@ -24,37 +51,46 @@ metadata:
     helm.sh/chart: {{ .Chart.Name }}-{{ .Chart.Version | replace "+" "_" }}
     app.kubernetes.io/instance: {{ .Release.Name }}
   name: {{ include "kaos-osr-edge-operator.resourceName" (dict "suffix" "readapi-ca" "context" $) }}
-  namespace: {{ .Release.Namespace }}
+  # THE SINGLE MOST CONFUSING LINE IN THIS FILE: this Certificate is NOT in
+  # .Release.Namespace. A cert-manager ClusterIssuer of type `ca` resolves
+  # its spec.ca.secretName in cert-manager's OWN cluster resource namespace
+  # (the --cluster-resource-namespace flag, default "cert-manager"), never
+  # in the namespace of whatever references the ClusterIssuer. Issue this
+  # Certificate anywhere else and the ClusterIssuer below never reaches
+  # Ready — with an error that names a missing Secret, not this namespace
+  # mismatch, which is what makes the mistake so easy to make and so
+  # confusing to debug.
+  namespace: {{ .Values.certManager.clusterResourceNamespace }}
 spec:
   isCA: true
   commonName: kaos-osr-readapi-ca
-  # Five years, renewed a year out. The CA is a trust anchor consumed by a
-  # bundle copy in another namespace, so its rotation is the expensive event
-  # and the leaf's is the cheap one.
+  # Five years, renewed a year out. The CA is a trust anchor consumed by the
+  # southbound trust bundle in another namespace, so its rotation is the
+  # expensive event and the leaf's is the cheap one.
   duration: 43800h
   renewBefore: 8760h
   privateKey:
     algorithm: ECDSA
     size: 256
   issuerRef:
-    kind: Issuer
-    name: {{ include "kaos-osr-edge-operator.resourceName" (dict "suffix" "selfsigned-issuer" "context" $) }}
-  # A FIXED literal, deliberately not helper-derived. The XKnowledge
-  # composition copies data["tls.crt"] out of this Secret by name to build the
-  # child Connector's trust bundle; a release-derived name would make that
-  # copy depend on the Helm release name and break silently when it changes.
+    kind: ClusterIssuer
+    name: {{ include "kaos-osr-edge-operator.resourceName" (dict "suffix" "selfsigned" "context" $) }}
+  # A FIXED literal, deliberately not helper-derived. It is resolved in
+  # cert-manager's cluster resource namespace (see the namespace comment
+  # above), so a release-derived name would make that resolution depend on
+  # the Helm release name for no benefit — nothing outside this chain reads
+  # this Secret by name.
   secretName: readapi-ca
 ---
 apiVersion: cert-manager.io/v1
-kind: Issuer
+kind: ClusterIssuer
 metadata:
   labels:
     app.kubernetes.io/managed-by: {{ .Release.Service }}
     app.kubernetes.io/name: {{ include "kaos-osr-edge-operator.name" . }}
     helm.sh/chart: {{ .Chart.Name }}-{{ .Chart.Version | replace "+" "_" }}
     app.kubernetes.io/instance: {{ .Release.Name }}
-  name: {{ include "kaos-osr-edge-operator.resourceName" (dict "suffix" "readapi-ca-issuer" "context" $) }}
-  namespace: {{ .Release.Namespace }}
+  name: {{ include "kaos-osr-edge-operator.resourceName" (dict "suffix" "readapi-ca" "context" $) }}
 spec:
   ca:
     secretName: readapi-ca

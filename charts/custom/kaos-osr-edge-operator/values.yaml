@@ -194,6 +194,44 @@ metrics:
 certManager:
   enable: true
 
+  ## cert-manager's --cluster-resource-namespace flag (default: cert-manager,
+  ## which is also cert-manager's own default for that flag). A ClusterIssuer
+  ## of type `ca` resolves spec.ca.secretName in THIS namespace, never in the
+  ## release namespace — so the read API's CA Certificate is issued here
+  ## (templates/cert-manager/readapi-ca.yaml), not into .Release.Namespace.
+  ##
+  ## The default is safe because it matches cert-manager's own default: a
+  ## cluster that has not overridden --cluster-resource-namespace needs no
+  ## override here either. Set by the platform only on a cluster whose
+  ## cert-manager install customises that flag.
+  ##
+  clusterResourceNamespace: cert-manager
+
+## Southbound trust: the Skupper router's path to the read API (PRD-3 F-05).
+##
+## When on, cert-manager issues a Secret named kaos-osr-trust into the Skupper
+## namespace, carrying the ca.crt of the SAME CA that signs
+## readapi-server-cert (templates/cert-manager/southbound-trust.yaml). The
+## Skupper Connector's tlsCredentials is set to this fixed name by the
+## XKnowledge composition, never by this chart — the chart renders a
+## certificate into a namespace and stays ignorant of Skupper topology
+## (routing keys, Site names, Connectors).
+##
+## Off by default: a bare `helm install` never creates the Skupper namespace
+## or reaches across it, and a pool without secureConnection enabled has no
+## `skupper` namespace for a Certificate to target (which would fail the
+## whole release). The composition sets this true only when southbound
+## live-query is actually wired up.
+##
+southbound:
+  enabled: false
+
+  ## The namespace the child cluster's Skupper router runs in. "skupper" is
+  ## the namespace every KAOS-installed Skupper router uses; override only if
+  ## a pool's Skupper install deviates from that convention.
+  ##
+  skupperNamespace: skupper
+
 ## Webhook server configuration
 ##
 webhook:

@@ -1,0 +1,37 @@
+{{- if and .Values.readApi.enabled .Values.southbound.enabled }}
+{{/*
+  The Skupper router reads a Connector's tlsCredentials Secret ONLY from its own
+  namespace — its ServiceAccount has a single namespace-scoped RoleBinding and
+  cannot read Secrets anywhere else (verified on a live child cluster). The CA
+  that signs the read API's certificate lives with the read API, so the bundle
+  the router needs has to be issued directly into the Skupper namespace. That is
+  why the chain above is cluster-scoped: a namespaced Issuer could not be
+  referenced from here.
+
+  Nothing is copied. cert-manager issues this certificate from the same CA as
+  the read API's leaf, so its ca.crt IS the anchor the router must trust, and CA
+  rotation propagates without any copier.
+
+  The name is FIXED, deliberately. The composition sets the Connector's
+  tlsCredentials to this same constant. Deriving it from the Skupper routing key
+  would drag mesh topology into a chart that has no other reason to know it.
+*/}}
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    app.kubernetes.io/name: {{ include "kaos-osr-edge-operator.name" . }}
+    helm.sh/chart: {{ .Chart.Name }}-{{ .Chart.Version | replace "+" "_" }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+  name: kaos-osr-trust
+  namespace: {{ .Values.southbound.skupperNamespace }}
+spec:
+  # The router needs only the CA (ca.crt). A commonName is still required for a
+  # valid certificate; it is never used for verification on this path.
+  commonName: kaos-osr-trust
+  issuerRef:
+    kind: ClusterIssuer
+    name: {{ include "kaos-osr-edge-operator.resourceName" (dict "suffix" "readapi-ca" "context" $) }}
+  secretName: kaos-osr-trust
+{{- end }}
