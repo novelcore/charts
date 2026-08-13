@@ -421,6 +421,21 @@ readApi:
   ##
   audience: ""
 
+  ## This deployment's own organisation (PRD-3 Task 1, CON-01). Every read
+  ## API deployment serves exactly one organisation's pool, and this is what
+  ## tells scope resolution which one, so a project-role grant can never
+  ## resolve to a DIFFERENT org's namespace of the same project name.
+  ## Non-secret — the org name is not a credential.
+  ##
+  ## Left unset (default), project-scoped grants resolve to nothing —
+  ## fail-closed, not a silent revert to matching on project label alone.
+  ## Rendered as READAPI_ORG only when non-empty (see deployment.yaml): an
+  ## unset value must never render an empty-string env var, which a reader
+  ## could mistake for "configured with a blank org" rather than "not
+  ## configured at all."
+  ##
+  org: ""
+
   ## Observability backend URLs, injected by the XKnowledge composition
   ## (service names are release- and system-profile-derived, so they are
   ## never hardcoded or discovered here). Rendered as "name=url,name=url"

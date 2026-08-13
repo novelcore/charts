@@ -95,6 +95,18 @@ spec:
         - name: READAPI_AUDIENCE
           value: {{ .Values.readApi.audience | quote }}
         {{- end }}
+        {{- if (trim .Values.readApi.org) }}
+        # trim, not a bare truthiness check: a whitespace-only value (e.g.
+        # "readApi.org: \" \"") is truthy in Helm and would otherwise render
+        # an env var that is non-empty on the wire but fails
+        # authz.ClaimsAuthorizer's own trim-then-compare — i.e. it would
+        # LOOK configured from `kubectl describe` while actually resolving
+        # fail-closed. trim on the read side (here) keeps that agreement
+        # without also silently accepting the whitespace-only value as if it
+        # were a real org name.
+        - name: READAPI_ORG
+          value: {{ trim .Values.readApi.org | quote }}
+        {{- end }}
         {{- if .Values.readApi.backendURLs }}
         - name: READAPI_BACKEND_URLS
           value: {{ range $i, $k := (keys .Values.readApi.backendURLs | sortAlpha) }}{{ if $i }},{{ end }}{{ $k }}={{ get $.Values.readApi.backendURLs $k }}{{ end }}
