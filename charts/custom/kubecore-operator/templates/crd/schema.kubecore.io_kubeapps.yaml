@@ -848,6 +848,22 @@ spec:
                     properties:
                       environment:
                         type: string
+                      lastDriftCheck:
+                        description: |-
+                          LastDriftCheck is the timestamp of the last Ready-phase pass whose
+                          drift comparison actually ran for this connection (checked=true in
+                          connectionsDriftCheck) — set on both a clean pass and a detected
+                          drift, never on a pass that short-circuited before comparing (no
+                          client/lookup wired, nothing declared, nothing currently resolvable).
+                          Mirrors ToolBinding.status.verifiedTargets[].lastVerified (F-11
+                          freshness). Its absence, or an old value, is what lets an operator
+                          tell "checked recently, no drift" apart from "not checked for 9
+                          minutes" — the drift check's own comparison is only as fresh as the
+                          live XConnection XR, which is itself bounded by provider-kubernetes'
+                          ~10-minute poll of the composed Objects it manages (#894, #903;
+                          PRD-ARCH-002 F-14) — nothing on this platform can promise faster.
+                        format: date-time
+                        type: string
                       message:
                         type: string
                       name:
