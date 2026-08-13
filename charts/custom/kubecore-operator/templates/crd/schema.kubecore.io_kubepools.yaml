@@ -1093,6 +1093,31 @@ spec:
                       description: StartTime is when deployment started
                       type: string
                   type: object
+                derivedStatus:
+                  description: |-
+                    DerivedStatus reports the freshness of this resource's derived status,
+                    maintained by the framework's Ready prologue.
+                  properties:
+                    lastVerifiedTime:
+                      description: |-
+                        LastVerifiedTime is when every registered ReadyUnit last evaluated
+                        successfully. It does NOT advance on a pass where any unit failed.
+                      format: date-time
+                      type: string
+                    staleFields:
+                      description: |-
+                        StaleFields lists the status fields not refreshed on the last pass
+                        because their owning unit failed. Sorted for stable diffs.
+                      items:
+                        type: string
+                      type: array
+                    unitsStale:
+                      description: UnitsStale counts units whose evaluation failed on the last pass.
+                      type: integer
+                    unitsVerified:
+                      description: UnitsVerified counts units that evaluated successfully on the last pass.
+                      type: integer
+                  type: object
                 gatewayEndpoint:
                   description: |-
                     GatewayEndpoint is the reserved ingress LoadBalancer IP for the pool's

@@ -877,6 +877,31 @@ spec:
                       - state
                     type: object
                   type: array
+                derivedStatus:
+                  description: |-
+                    DerivedStatus reports the freshness of this resource's derived status,
+                    maintained by the framework's Ready prologue.
+                  properties:
+                    lastVerifiedTime:
+                      description: |-
+                        LastVerifiedTime is when every registered ReadyUnit last evaluated
+                        successfully. It does NOT advance on a pass where any unit failed.
+                      format: date-time
+                      type: string
+                    staleFields:
+                      description: |-
+                        StaleFields lists the status fields not refreshed on the last pass
+                        because their owning unit failed. Sorted for stable diffs.
+                      items:
+                        type: string
+                      type: array
+                    unitsStale:
+                      description: UnitsStale counts units whose evaluation failed on the last pass.
+                      type: integer
+                    unitsVerified:
+                      description: UnitsVerified counts units that evaluated successfully on the last pass.
+                      type: integer
+                  type: object
                 endpoints:
                   description: Endpoints surfaces per-named-environment reachability (D-14′/F-13).
                   items:
