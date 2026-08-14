@@ -616,8 +616,17 @@ spec:
                               - browser
                             type: string
                           name:
-                            description: Name is the env-var prefix for injected discovery ({NAME}_URI, {NAME}_HOST, ...).
+                            description: |-
+                              Name is the env-var prefix for injected discovery ({NAME}_URI, {NAME}_HOST, ...).
+                              It is ALSO interpolated into the names of the Kubernetes objects the
+                              xconnection composition renders for this connection, so it is
+                              lowercased at that point (case is preserved verbatim for the env-var
+                              prefix). Only characters that survive that lowercasing as a valid RFC
+                              1123 label are accepted — no leading/trailing hyphen, no characters
+                              outside [A-Za-z0-9-]; uppercase is explicitly allowed since it is the
+                              natural env-var spelling (#934).
                             minLength: 1
+                            pattern: ^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?$
                             type: string
                           port:
                             description: Port is the named target port; defaults to the first declared port.
