@@ -1,0 +1,288 @@
+{{/*
+ci-reconcile — the level-triggered CI backstop for SERVICE apps (Task 7).
+
+ml-ci-reconcile (clusterworkflowtemplate-ml-reconcile.yaml) exists because a
+dropped/failed GitHub webhook delivery means a push is never built, and the
+per-app CronWorkflow that should catch that has nothing to invoke otherwise
+(see that file's header for the #459 history). Service apps have the exact
+same webhook-drop exposure but NO equivalent backstop — this template is that
+backstop for the k8sapp / ci-build path.
+
+What it does — pure level-triggering, no edge required, same two-part shape
+ml-ci-reconcile uses:
+
+  1. IN-FLIGHT GUARD: skip this poll if a build for this app is already
+     Running/Pending in ci_namespace — never stack a build on an unfinished
+     one (mirrors kubecore-operator#872).
+  2. COMMIT-DRIFT CHECK: read the app repo's current HEAD SHA on its dev
+     branch (GitHub API) and check whether ANY "kubecore-ci" commit status
+     exists yet on that exact commit. If none exists, submit ci-build.
+
+Deliberately DROPPED from the ML version — both are ML-only and have no
+service-app equivalent to inspect:
+  - the pipeline-context drift check (compares a ConfigMap-derived compute
+    budget against a rendered per-app WorkflowTemplate)
+  - the mlEnvironment drift check (compares the same ConfigMap's env pin
+    against that same WorkflowTemplate)
+  Service apps render no per-app WorkflowTemplate and have no
+  {app}-pipeline-context/{app}-pipeline-images ConfigMaps for either check to
+  read.
+
+Also DIFFERENT from ml-ci-reconcile's "last built" mechanism: ML records
+last-built-sha into a ConfigMap that only ML builds write. ci-build (the
+service-app build template) has no such ConfigMap — but it already posts a
+"kubecore-ci" GitHub commit status on the exact commit it built, via BOTH its
+own `status` step (state=success, after a successful build-push) AND its
+`onExit: exit-handler` (state=failure, when workflow.status==Failed — see
+ci-build's `exit-handler` template). So EVERY build attempt against a commit,
+success or failure, leaves a "kubecore-ci" status on that commit.
+
+This is the reconciler's ONLY job (D-07): recover a DROPPED WEBHOOK — i.e. a
+push that never triggered a build at all. It is explicitly NOT a retry
+mechanism for a build that ran and failed; a failed build has already
+reported itself (red check on the commit, visible to the developer, who can
+push a fix or re-run it). So the check below submits ci-build only when
+HEAD has NO "kubecore-ci" status whatsoever — pending, success, failure, or
+error all mean a build was attempted and the reconciler must stay out of the
+way. Getting this wrong (treating "failure" as drift) would resubmit a
+genuinely broken commit every 3 minutes forever — the exact runaway-retry
+failure mode this design avoids. See the check-drift step below for the
+exact query.
+*/}}
+apiVersion: argoproj.io/v1alpha1
+kind: ClusterWorkflowTemplate
+metadata:
+  name: ci-reconcile
+  labels:
+    {{- include "kubecore-ci-workflows.labels" . | nindent 4 }}
+spec:
+  serviceAccountName: {{ include "kubecore-ci-workflows.serviceAccountName" . }}
+  entrypoint: ci-reconcile
+  # Same scheduling as ci-build (.Values.nodeSelector/.tolerations): the CI
+  # pool is tainted, so without these the reconciler's pods have nowhere to land.
+  {{- with .Values.nodeSelector }}
+  nodeSelector:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with .Values.tolerations }}
+  tolerations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  ttlStrategy:
+    secondsAfterCompletion: {{ .Values.workflow.ttlStrategy.secondsAfterCompletion }}
+  podGC:
+    strategy: {{ .Values.workflow.podGC.strategy }}
+
+  arguments:
+    parameters:
+    - name: app_name
+    - name: project_name
+    - name: repo_url
+      value: ""
+    - name: branch
+      value: dev
+    - name: ci_namespace
+    - name: dockerfile_path
+      value: "./Dockerfile"
+    - name: build_context
+      value: "."
+
+  volumes:
+  - name: github-token
+    secret:
+      secretName: {{ .Values.github.tokenSecretName }}
+
+  templates:
+  - name: ci-reconcile
+    steps:
+    - - name: check-drift
+        template: check-drift
+    - - name: submit-build
+        template: submit-build
+        # Only when HEAD differs from the last SHA we actually built.
+        when: "{{`{{steps.check-drift.outputs.parameters.needs_build}}`}} == true"
+        arguments:
+          parameters:
+          - name: commit_sha
+            value: "{{`{{steps.check-drift.outputs.parameters.head_sha}}`}}"
+          - name: repo_url
+            value: "{{`{{steps.check-drift.outputs.parameters.repo_url}}`}}"
+
+  - name: check-drift
+    outputs:
+      parameters:
+      - name: needs_build
+        valueFrom:
+          path: /tmp/needs_build
+      - name: head_sha
+        valueFrom:
+          path: /tmp/head_sha
+      - name: repo_url
+        valueFrom:
+          path: /tmp/repo_url
+    container:
+      # Same image ml-ci-reconcile uses for this exact reason: kubectl is
+      # required (in-flight guard) and alpine/git has none, which turned that
+      # check into an always-true build storm the first time around
+      # (clusterworkflowtemplate-ml-reconcile.yaml, live 2026-07-16).
+      image: google/cloud-sdk:alpine
+      command: [sh, -c]
+      args:
+      - |
+        set -eu
+        if ! command -v kubectl >/dev/null 2>&1; then
+          gcloud components install kubectl --quiet >/dev/null 2>&1 \
+            || apk add --no-cache kubectl >/dev/null 2>&1 \
+            || { echo "FATAL: could not install kubectl" >&2; exit 1; }
+        fi
+        command -v jq >/dev/null 2>&1 || apk add --no-cache jq >/dev/null 2>&1 || true
+
+        # IN-FLIGHT GUARD: never stack a new build on an unfinished one.
+        # Scoped to THIS app only — ci_namespace is shared by every app in
+        # the project. Name-prefix matching cannot do that scoping: a
+        # WorkflowEventBinding's `submit` has no `metadata`, so Argo names a
+        # webhook-triggered Workflow from ci-build's OWN generateName
+        # ("ci-build-xxxxx") — identical for every app in the namespace, and
+        # never "ci-{app}-...". So this filters by label instead: the k8sapp
+        # composition sets platform.kubecore.io/app on every binding's
+        # submit.metadata, and submit-build below sets the same label, so
+        # every Workflow in this namespace (webhook- or reconciler-submitted)
+        # carries it. Let the API server do the scoping via -l. A read
+        # failure also skips: unknown state must never mean "submit more work".
+        APP="{{`{{workflow.parameters.app_name}}`}}"
+        if ! INFLIGHT=$(kubectl get workflows -n "{{`{{workflow.parameters.ci_namespace}}`}}" -l "platform.kubecore.io/app=${APP}" -o json 2>&1); then
+          echo "reconcile: WARN cannot list workflows - in-flight state unknown, skipping this poll: ${INFLIGHT}"
+          printf 'false' > /tmp/needs_build
+          printf '' > /tmp/head_sha
+          printf '' > /tmp/repo_url
+          exit 0
+        fi
+        ACTIVE=$(echo "$INFLIGHT" | jq -r \
+          '[.items[] | select(.status.phase=="Running" or .status.phase=="Pending" or .status.phase==null)] | length')
+        if [ "${ACTIVE:-0}" != "0" ]; then
+          echo "reconcile: build already in flight (${ACTIVE} active workflow(s) labelled platform.kubecore.io/app=${APP}) - skipping submit this poll"
+          printf 'false' > /tmp/needs_build
+          printf '' > /tmp/head_sha
+          printf '' > /tmp/repo_url
+          exit 0
+        fi
+        for t in kubectl curl jq; do
+          command -v "$t" >/dev/null || { echo "FATAL: $t missing from this image"; exit 1; }
+        done
+
+        TOKEN=$(cat /etc/github-token/token)
+        PROJECT="{{`{{workflow.parameters.project_name}}`}}"
+        BRANCH="{{`{{workflow.parameters.branch}}`}}"
+
+        # The app's source repo is named the way the githubapp composition
+        # names it: {project}-{app}. repo_url is empty unless the caller
+        # supplies it, so derive owner/repo here (same fallback ml-ci-reconcile
+        # uses, but ${org} comes from the chart's own github.org value rather
+        # than a hardcoded org — ci-build's gitops-notify step already reads
+        # .Values.github.org the same way).
+        ORG="{{ .Values.github.org }}"
+        case "{{`{{workflow.parameters.repo_url}}`}}" in
+          https://*)
+            SLUG=$(echo "{{`{{workflow.parameters.repo_url}}`}}" | sed -E 's|https://github.com/||; s|\.git$||') ;;
+          *)
+            SLUG="${ORG}/${PROJECT}-${APP}" ;;
+        esac
+        echo "reconcile: polling ${SLUG}@${BRANCH}"
+
+        # Single source of truth for the repo identity: submit-build clones
+        # whatever this step decides to poll, never a value it re-derives
+        # itself (a re-derivation ignoring a caller-supplied repo_url could
+        # disagree with SLUG, and re-deriving from an empty .Values.github.org
+        # would render a two-slash URL ci-build's clone step can't check out).
+        REPO_URL="https://github.com/${SLUG}.git"
+        printf '%s' "$REPO_URL" > /tmp/repo_url
+
+        HEAD_SHA=$(curl -sf -H "Authorization: Bearer ${TOKEN}" \
+          -H "Accept: application/vnd.github+json" \
+          "https://api.github.com/repos/${SLUG}/commits/${BRANCH}" | jq -r '.sha // empty')
+        if [ -z "$HEAD_SHA" ]; then
+          # A transient API failure must NOT look like drift and storm builds.
+          echo "reconcile: could not read HEAD for ${SLUG}@${BRANCH} — skipping this poll"
+          printf 'false' > /tmp/needs_build
+          printf '' > /tmp/head_sha
+          exit 0
+        fi
+        printf '%s' "$HEAD_SHA" > /tmp/head_sha
+
+        # COMMIT-DRIFT CHECK: ci-build posts a "kubecore-ci" commit status on
+        # every attempt against a SHA — success via its `status` step,
+        # failure via its `onExit: exit-handler` (state=failure). So the
+        # PRESENCE of any status (regardless of state) is proof the trigger
+        # fired and a build was attempted; only its ABSENCE means the push
+        # was never built at all (dropped webhook — this reconciler's only
+        # job, D-07). Checking for state=="success" instead would resubmit
+        # ci-build against a genuinely broken commit every 3 minutes forever
+        # — this reconciler is a webhook backstop, not a build-failure retry
+        # loop; a failed build has already reported itself to the developer.
+        if ! STATUS_JSON=$(curl -sf -H "Authorization: Bearer ${TOKEN}" \
+          -H "Accept: application/vnd.github+json" \
+          "https://api.github.com/repos/${SLUG}/commits/${HEAD_SHA}/status" 2>&1); then
+          echo "reconcile: could not read commit status for ${SLUG}@${HEAD_SHA} — skipping this poll: ${STATUS_JSON}"
+          printf 'false' > /tmp/needs_build
+          exit 0
+        fi
+        STATUS_COUNT=$(echo "$STATUS_JSON" | jq -r '[.statuses[]? | select(.context=="kubecore-ci")] | length')
+        STATE=$(echo "$STATUS_JSON" | jq -r '[.statuses[]? | select(.context=="kubecore-ci")] | .[0].state // empty')
+        echo "reconcile: ${SLUG}@${HEAD_SHA} kubecore-ci status=${STATE:-<none>} (count=${STATUS_COUNT:-0})"
+
+        if [ "${STATUS_COUNT:-0}" = "0" ]; then
+          printf 'true' > /tmp/needs_build
+          echo "reconcile: NO BUILD ATTEMPT — ${HEAD_SHA} has no kubecore-ci status at all (dropped webhook?); submitting ci-build"
+        else
+          printf 'false' > /tmp/needs_build
+          echo "reconcile: a build was already attempted for ${HEAD_SHA} (kubecore-ci=${STATE}) — staying out of the way"
+        fi
+      volumeMounts:
+      - name: github-token
+        mountPath: /etc/github-token
+        readOnly: true
+
+  - name: submit-build
+    inputs:
+      parameters:
+      - name: commit_sha
+      - name: repo_url
+    resource:
+      action: create
+      manifest: |
+        apiVersion: argoproj.io/v1alpha1
+        kind: Workflow
+        metadata:
+          generateName: ci-{{`{{workflow.parameters.app_name}}`}}-reconciled-
+          namespace: {{`{{workflow.parameters.ci_namespace}}`}}
+          labels:
+            platform.kubecore.io/app: {{`{{workflow.parameters.app_name}}`}}
+            platform.kubecore.io/submitted-by: ci-reconcile
+        spec:
+          workflowTemplateRef:
+            name: ci-build
+            clusterScope: true
+          arguments:
+            parameters:
+            - name: repo_url
+              value: "{{`{{inputs.parameters.repo_url}}`}}"
+            - name: commit_sha
+              value: "{{`{{inputs.parameters.commit_sha}}`}}"
+            - name: branch
+              value: "refs/heads/{{`{{workflow.parameters.branch}}`}}"
+            - name: target_branch
+              value: "{{`{{workflow.parameters.branch}}`}}"
+            - name: branch_type
+              value: "feature"
+            - name: app_name
+              value: "{{`{{workflow.parameters.app_name}}`}}"
+            - name: project_name
+              value: "{{`{{workflow.parameters.project_name}}`}}"
+            - name: pr_merged
+              value: "true"
+            - name: event_type
+              value: "reconcile"
+            - name: dockerfile_path
+              value: "{{`{{workflow.parameters.dockerfile_path}}`}}"
+            - name: build_context
+              value: "{{`{{workflow.parameters.build_context}}`}}"
