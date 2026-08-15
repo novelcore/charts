@@ -1368,6 +1368,25 @@ spec:
                   properties:
                     baseDns:
                       type: string
+                    capabilities:
+                      additionalProperties:
+                        type: boolean
+                      description: |-
+                        Capabilities reports which cluster-scoped tool operators have LANDED on
+                        this pool (PRD-ARCH-002 F-13/D-21 capability gate), keyed by the same
+                        string a ToolBinding recipe writes into spec.requiredOperator (e.g.
+                        "cloudnative-pg" — see config/samples/
+                        schema_v1beta1_toolbinding_postgres_cnpg.yaml), NOT by the
+                        status.platformTools JSON key ("postgres"): the two vocabularies
+                        differ, and kubepool/phases/reporting.go's buildCapabilities is the one
+                        place that joins them. D-21: an operator is landed the moment it is
+                        Ready, independent of whether any instance (e.g. a shared Postgres
+                        Cluster) was ever provisioned — that is D-21's separate, second gate
+                        and is deliberately not reflected here. Never required for Ready (an
+                        absent or false entry just means the pool's spec never enabled that
+                        operator); consumed by kubeapp/phases' F-13 CapabilityMissing check via
+                        parentref.GetKubePoolOutputs, never a direct cross-CR status read.
+                      type: object
                     cloudProvider:
                       description: Core — required for Ready; the helper rejects Ready outputs with any of these empty.
                       type: string
