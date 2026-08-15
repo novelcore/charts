@@ -38,13 +38,21 @@ controllerManager:
       ZITADEL_SECRET_NAME: "zitadel-credentials"
       ZITADEL_SECRET_NAMESPACE: "kubecore-system"
 
+      # Per-Org Console OIDC Client
+      # CONSOLE_DOMAIN is the platform-wide domain that per-org console hostnames hang
+      # off: the KubeOrg syncing phase provisions a public PKCE Zitadel client for
+      # {org}.{CONSOLE_DOMAIN} in the org's own org-roles project. It already carries the
+      # "console" label, so the operator never hardcodes it. Unset disables the feature.
+      # CONSOLE_DOMAIN: "console.platform.kaos-labs.org"       # prod
+      # CONSOLE_DOMAIN: "console.dev.platform.kaos-labs.org"   # dev
+
       # MeluXina token-mint image (PRD-585). The operator stamps this into the
       # per-pool token-mint CronJob. CI overwrites it at release with
       # {REGISTRY_URL}/{PROJECT_REGISTRY}/meluxina-tokenmint:{version} — the same
       # GAR registry + version as the operator image, pulled keylessly by the GKE
       # node SA. The v2-branch placeholder below mirrors the operator image path so
       # even an unstamped chart resolves to a keyless-pullable image.
-      MELUXINA_TOKENMINT_IMAGE: "europe-west1-docker.pkg.dev/kaos-dev-gcp/kaos-images/platform/meluxina-tokenmint:0.76.4"
+      MELUXINA_TOKENMINT_IMAGE: "europe-west1-docker.pkg.dev/kaos-dev-gcp/kaos-images/platform/meluxina-tokenmint:0.77.0"
     resources:
       limits:
         cpu: 500m
@@ -301,7 +309,7 @@ compositions:
   # OCI image for the kubecore-compositions Configuration package.
   # CI overwrites this with <REGISTRY_URL>/<PROJECT_REGISTRY>/kubecore-compositions:vX.Y.Z
   # at release. Required (must be non-empty) when compositions.enabled=true.
-  package: "europe-west1-docker.pkg.dev/kaos-dev-gcp/kaos-images/platform/kubecore-compositions:v0.76.4"
+  package: "europe-west1-docker.pkg.dev/kaos-dev-gcp/kaos-images/platform/kubecore-compositions:v0.77.0"
   # pullPolicy controls when Crossplane downloads the package.
   # Options: IfNotPresent (default), Always, Never
   pullPolicy: IfNotPresent

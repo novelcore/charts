@@ -677,6 +677,22 @@ spec:
                     actionId:
                       description: ActionID is the ID of the "addGroupsClaim" action
                       type: string
+                    consoleAppId:
+                      description: |-
+                        ConsoleAppID is the Zitadel application ID of this org's console client,
+                        created in the org-roles project.
+                      type: string
+                    consoleClientId:
+                      description: |-
+                        ConsoleClientID is the OIDC client ID the console SPA authenticates with.
+                        Published so the console config discovery path can resolve host -> client.
+                      type: string
+                    consoleHost:
+                      description: ConsoleHost is the per-org console hostname, e.g. acme.console.platform.kaos-labs.org.
+                      type: string
+                    consoleReady:
+                      description: ConsoleReady reports whether the console client exists and is usable.
+                      type: boolean
                     githubIdpEnabled:
                       description: GitHubIDPEnabled indicates if GitHub IDP is activated for this organization
                       type: boolean
@@ -792,6 +808,22 @@ spec:
                         actionId:
                           description: ActionID is the ID of the "addGroupsClaim" action
                           type: string
+                        consoleAppId:
+                          description: |-
+                            ConsoleAppID is the Zitadel application ID of this org's console client,
+                            created in the org-roles project.
+                          type: string
+                        consoleClientId:
+                          description: |-
+                            ConsoleClientID is the OIDC client ID the console SPA authenticates with.
+                            Published so the console config discovery path can resolve host -> client.
+                          type: string
+                        consoleHost:
+                          description: ConsoleHost is the per-org console hostname, e.g. acme.console.platform.kaos-labs.org.
+                          type: string
+                        consoleReady:
+                          description: ConsoleReady reports whether the console client exists and is usable.
+                          type: boolean
                         githubIdpEnabled:
                           description: GitHubIDPEnabled indicates if GitHub IDP is activated for this organization
                           type: boolean
