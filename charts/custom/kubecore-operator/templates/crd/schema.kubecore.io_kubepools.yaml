@@ -818,6 +818,15 @@ spec:
                         When true, XClusterOperators installs the operator and one Cluster; XMLSystem and other
                         workloads use this cluster instead of deploying their own Postgres.
                       type: boolean
+                    redis:
+                      description: |-
+                        Redis enables a shared Redis instance (PRD-ARCH-002 F-16 — the raw-workload
+                        ToolBinding archetype, proven alongside postgres-cnpg's operator-CR archetype).
+                        Unlike Postgres (a separate CloudNativePG operator installing a Cluster CR),
+                        Redis has no operator: this flag directly gates a single Helm Release that IS
+                        the instance. See XClusterOperators' spec.provisionSharedRedis (definition.yaml)
+                        for the second, instance-level gate — mirroring spec.provisionSharedPostgres.
+                      type: boolean
                   type: object
                 systemProfile:
                   description: |-
@@ -1771,6 +1780,42 @@ spec:
                         Cluster instance — spec.provisionSharedPostgres gates that separately.
                         Version is the pool's authoritative CNPG chart version (PRD-ARCH-002
                         D-03): the KubePool installs the operator, so the KubePool reports it.
+                      properties:
+                        enabled:
+                          description: Enabled indicates if the tool is enabled
+                          type: boolean
+                        namespace:
+                          description: Namespace where the tool is installed
+                          type: string
+                        status:
+                          description: Status of the tool (Pending, Installing, Ready, Error)
+                          type: string
+                        trustDomain:
+                          description: |-
+                            TrustDomain is the SPIFFE trust domain reported by the tool. This field is
+                            generic on the shared PlatformToolStatus struct but is only ever populated
+                            for the mesh tool, where it carries the pool-scoped trust domain
+                            ({pool}.{org}.mesh.kaos-labs.org) read back from the XNetworkMesh XR's
+                            status — never recomputed by the operator (DEC-C1).
+                          type: string
+                        url:
+                          description: URL is the access URL for the tool (if applicable)
+                          type: string
+                        version:
+                          description: Version of the tool
+                          type: string
+                      type: object
+                    redis:
+                      description: |-
+                        Redis reports the shared Redis Helm release installed by this pool
+                        (PRD-ARCH-002 F-16 raw-workload archetype), sourced from XClusterOperators
+                        status.tools.redis; nil when spec.operators.redis is off (D-21 gate 1) or
+                        the composition has not yet written the entry. Unlike Postgres (a separate
+                        CloudNativePG operator fronting a Cluster instance), Redis has no operator
+                        distinct from the instance — this Status entry only reports Ready once the
+                        shared Release itself is deployed, i.e. once BOTH D-21 gates
+                        (spec.operators.redis AND spec.provisionSharedRedis) are satisfied. That is
+                        the raw-workload archetype's proof point: the capability IS the instance.
                       properties:
                         enabled:
                           description: Enabled indicates if the tool is enabled
