@@ -26,6 +26,15 @@ spec:
   - name: github-token
     secret:
       secretName: {{ .Values.github.tokenSecretName }}
+  # registry-auth was missing entirely: build-push pushed with no registry
+  # credential at all. Zot's anonymousPolicy grants read only, so an RC build
+  # could never have pushed even once BuildKit was replaced — a second,
+  # independent defect from the rootless-BuildKit one. Same Secret name the
+  # ci-build template mounts; written once per project by githubproject
+  # (PRD-962 F-08).
+  - name: registry-auth
+    secret:
+      secretName: ci-registry-auth
   arguments:
     parameters:
     - name: repo_url
@@ -194,17 +203,27 @@ spec:
   # build-push builds the Docker image with BuildKit and pushes it to the
   # internal Zot registry. dockerfile_path and build_context follow the same
   # Helm-value-driven pattern used by the ci-build template.
+  # Runs KANIKO, not rootless BuildKit — same reasoning as the ci-build
+  # template's build-push: rootlesskit cannot create its mount namespace on
+  # this platform ("failed to share mount point: /: permission denied"), which
+  # is why ml-ci-build was reverted to kaniko. That revert never reached the
+  # service-app templates.
+  #
+  # NOTE the value keys below still live under .Values.buildkit.* — they are
+  # just path strings (buildContext / dockerfilePath) and are shared with the
+  # pool chart's values, so they are left in place rather than renamed in a
+  # correctness fix. The key name is now a misnomer.
   - name: build-push
     inputs:
       parameters:
       - name: image_tag
       - name: rc_tag
-    securityContext:
-      runAsUser: 1000
-      runAsGroup: 1000
+    volumes:
+    - name: kaniko-config
+      emptyDir: {}
     container:
-      image: {{ .Values.buildkit.image }}
-      command: [sh, -c]
+      image: {{ .Values.kaniko.image | default "gcr.io/kaniko-project/executor:v1.23.2-debug" }}
+      command: ["/busybox/sh", "-c"]
       args:
       - |
         set -e
@@ -214,24 +233,33 @@ spec:
         IMAGE_TAG="{{`{{inputs.parameters.image_tag}}`}}"
         FULL_IMAGE="${REGISTRY}/${PROJECT}/${APP_NAME}:${IMAGE_TAG}"
 
-        cd /workspace/repo
+        REG_USER=$(cat /etc/registry-auth/username)
+        REG_PASS=$(cat /etc/registry-auth/password)
+        AUTH=$(printf '%s:%s' "${REG_USER}" "${REG_PASS}" | base64 | tr -d '\n')
+        mkdir -p /kaniko/.docker
+        cat > /kaniko/.docker/config.json <<EOF
+        {"auths":{"${REGISTRY}":{"auth":"${AUTH}"}}}
+        EOF
 
-        buildctl-daemonless.sh build \
-          --frontend dockerfile.v0 \
-          --local context={{ .Values.buildkit.buildContext }} \
-          --local dockerfile=$(dirname {{ .Values.buildkit.dockerfilePath }}) \
-          --opt filename=$(basename {{ .Values.buildkit.dockerfilePath }}) \
-          --opt build-arg:REGISTRY_URL=${REGISTRY} \
-          --opt build-arg:VERSION=${IMAGE_TAG} \
-          --output type=image,name=${FULL_IMAGE},push=true,registry.insecure=true
+        /kaniko/executor \
+          --context="dir:///workspace/repo/{{ .Values.buildkit.buildContext }}" \
+          --dockerfile="/workspace/repo/{{ .Values.buildkit.dockerfilePath }}" \
+          --destination="${FULL_IMAGE}" \
+          --build-arg="REGISTRY_URL=${REGISTRY}" \
+          --build-arg="VERSION=${IMAGE_TAG}" \
+          --insecure \
+          --skip-tls-verify \
+          --cleanup
 
         echo "Pushed: ${FULL_IMAGE}"
-      env:
-      - name: BUILDKITD_FLAGS
-        value: "--oci-worker-no-process-sandbox"
       volumeMounts:
       - name: workspace
         mountPath: /workspace
+      - name: registry-auth
+        mountPath: /etc/registry-auth
+        readOnly: true
+      - name: kaniko-config
+        mountPath: /kaniko/.docker
 
   # tag creates and pushes an annotated git tag for the RC to the origin remote.
   - name: tag

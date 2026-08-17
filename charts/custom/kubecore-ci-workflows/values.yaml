@@ -50,22 +50,26 @@ kaniko:
       cpu: "6"
       memory: "12Gi"
 
-# BuildKit configuration.
+# Build paths for the service-app (non-ML) CWTs.
 #
-# ml-ci-build builds step images with rootless, DAEMONLESS BuildKit
-# (buildctl-daemonless.sh) — the same pattern the RC/non-ML CWTs use. Each build
-# pod runs its own ephemeral buildkitd and exits; there is NO long-lived daemon
-# Deployment (that earlier design wedged the ci-workflows release because a
-# replicas:1 pod couldn't schedule on the scale-to-zero build pool). The fast
-# build comes from RUN --mount=type=cache in the app Dockerfiles + a registry
-# layer cache in Zot, not from a warm-PVC daemon.
+# NO BuildKit anywhere in this chart. Every build-push — ml-ci-build,
+# ci-build and ci-rc-build — runs kaniko (see the `kaniko:` block above).
+# Rootless BuildKit cannot build on this platform: rootlesskit needs a mount
+# namespace the pods are not permitted to create, so it fails with
+# "failed to share mount point: /: permission denied" before reaching the
+# registry. ml-ci-build was reverted to kaniko for this reason ("revert ML
+# build-push to kaniko (0.11.4) — daemonless is broken on this platform");
+# the service templates were only moved across later, after a live push test
+# proved they had never been able to produce an artifact.
+#
+# The `buildkit:` key name is kept because these two path values are part of
+# the chart's published values contract; renaming it is a breaking change for
+# any caller that sets them. The name is a misnomer — they are just paths.
+# The former `buildkit.image` key is gone: nothing consumes it.
 buildkit:
-  # Rootless BuildKit image (ships buildctl-daemonless.sh). Used by BOTH the ML
-  # build-push and the RC/non-ML CWTs.
-  image: "moby/buildkit:v0.27.0-rootless"
-  # Default Dockerfile path relative to repo root (non-ML CWTs).
+  # Default Dockerfile path relative to repo root (service-app CWTs).
   dockerfilePath: "./Dockerfile"
-  # Default build context relative to repo root (non-ML CWTs).
+  # Default build context relative to repo root (service-app CWTs).
   buildContext: "."
 
   # Resources for each ML build-push pod. Sized so several step builds run
