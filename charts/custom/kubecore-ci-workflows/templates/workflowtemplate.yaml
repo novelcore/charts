@@ -182,17 +182,45 @@ spec:
       - name: workspace
         mountPath: /workspace
 
+  # build-push runs KANIKO, not rootless BuildKit.
+  #
+  # This step used to run moby/buildkit:*-rootless as UID 1000. It could
+  # never build on this platform: rootlesskit needs to create a mount
+  # namespace and the pod carries no seccomp/AppArmor relaxation, so every
+  # run died before reaching the registry with:
+  #   [rootlesskit:child ] error: failed to share mount point: /: permission denied
+  #   could not connect to unix:///run/user/1000/buildkit/buildkitd.sock
+  #
+  # ml-ci-build hit exactly this and was reverted to kaniko in "revert ML
+  # build-push to kaniko (0.11.4) — daemonless is broken on this platform".
+  # That revert was never applied to the service-app path, which is why
+  # values.yaml already claims "build-push runs kaniko, not BuildKit" while
+  # this template still referenced .Values.buildkit.image. Verified live:
+  # a real push to a service KubeApp dispatched correctly (webhook 200,
+  # workflow created, correctly scoped) and then failed here, producing no
+  # artifact. Nothing else in the CI path was at fault.
+  #
+  # No securityContext: kaniko runs as root by design and needs no userns
+  # gymnastics — that is the whole reason it works where BuildKit does not.
+  # Registry auth goes to /kaniko/.docker/config.json (kaniko's DOCKER_CONFIG
+  # default) on an emptyDir, mirroring ml-ci-build.
+  #
+  # No layer cache here, matching the previous BuildKit invocation, which
+  # passed no cache flags either — this is a correctness fix, not a
+  # performance change. Adding --cache/--cache-repo is a separate decision;
+  # note ml-ci-build had to use a TOP-LEVEL {app}-buildcache repo because a
+  # nested cache path silently failed to persist in Zot.
   - name: build-push
     inputs:
       parameters:
       - name: image_tag
       - name: new_version
-    securityContext:
-      runAsUser: 1000
-      runAsGroup: 1000
+    volumes:
+    - name: kaniko-config
+      emptyDir: {}
     container:
-      image: {{ .Values.buildkit.image }}
-      command: [sh, -c]
+      image: {{ .Values.kaniko.image | default "gcr.io/kaniko-project/executor:v1.23.2-debug" }}
+      command: ["/busybox/sh", "-c"]
       args:
       - |
         set -e
@@ -204,33 +232,38 @@ spec:
         DOCKERFILE_PATH="{{`{{workflow.parameters.dockerfile_path}}`}}"
         BUILD_CONTEXT="{{`{{workflow.parameters.build_context}}`}}"
 
-        cd /workspace/repo
-
-        # Build Docker config for registry auth
+        # Registry auth for kaniko. Uses the base64 "auth" form rather than
+        # username/password so a password containing shell-special or JSON
+        # characters cannot corrupt the file (the API key is opaque).
         REG_USER=$(cat /etc/registry-auth/username)
         REG_PASS=$(cat /etc/registry-auth/password)
-        mkdir -p /home/user/.docker
-        printf '{"auths":{"%s":{"username":"%s","password":"%s"}}}' "${REGISTRY}" "${REG_USER}" "${REG_PASS}" > /home/user/.docker/config.json
+        AUTH=$(printf '%s:%s' "${REG_USER}" "${REG_PASS}" | base64 | tr -d '\n')
+        mkdir -p /kaniko/.docker
+        cat > /kaniko/.docker/config.json <<EOF
+        {"auths":{"${REGISTRY}":{"auth":"${AUTH}"}}}
+        EOF
 
-        buildctl-daemonless.sh build \
-          --frontend dockerfile.v0 \
-          --local context=${BUILD_CONTEXT} \
-          --local dockerfile=$(dirname ${DOCKERFILE_PATH}) \
-          --opt filename=$(basename ${DOCKERFILE_PATH}) \
-          --opt build-arg:REGISTRY_URL=${REGISTRY} \
-          --opt build-arg:VERSION=${IMAGE_TAG} \
-          --output type=image,name=${FULL_IMAGE},push=true,registry.insecure=true,oci-mediatypes=true
+        # Kaniko wants absolute context/dockerfile paths. The clone step
+        # populated /workspace/repo on the shared workspace volume.
+        /kaniko/executor \
+          --context="dir:///workspace/repo/${BUILD_CONTEXT}" \
+          --dockerfile="/workspace/repo/${DOCKERFILE_PATH}" \
+          --destination="${FULL_IMAGE}" \
+          --build-arg="REGISTRY_URL=${REGISTRY}" \
+          --build-arg="VERSION=${IMAGE_TAG}" \
+          --insecure \
+          --skip-tls-verify \
+          --cleanup
 
         echo "Pushed: ${FULL_IMAGE}"
-      env:
-      - name: BUILDKITD_FLAGS
-        value: "--oci-worker-no-process-sandbox"
       volumeMounts:
       - name: workspace
         mountPath: /workspace
       - name: registry-auth
         mountPath: /etc/registry-auth
         readOnly: true
+      - name: kaniko-config
+        mountPath: /kaniko/.docker
 
   - name: tag
     inputs:
