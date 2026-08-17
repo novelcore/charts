@@ -706,6 +706,13 @@ spec:
                 owner:
                   description: Owner specifies the owner or team responsible for this project
                   type: string
+                registry:
+                  description: |-
+                    Registry names an entry in the KubePool's spec.registries for every pool
+                    this project's environments reference. When unset, each pool's
+                    defaultRegistry applies. There is no fallback: a name no referenced pool
+                    declares is a hard error surfaced as RegistryResolved=False (R-08).
+                  type: string
                 teams:
                   description: |-
                     Teams is the list of KubeTeam references granting access to this project.

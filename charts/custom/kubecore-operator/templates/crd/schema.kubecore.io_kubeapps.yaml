@@ -1109,6 +1109,62 @@ spec:
                 reconciliationAttempts:
                   description: ReconciliationAttempts tracks the number of reconciliation attempts for backoff
                   type: integer
+                registry:
+                  description: |-
+                    Registry is the resolved registry for this app, per pool. Populated by
+                    the Reporting phase; never an input.
+                  properties:
+                    name:
+                      type: string
+                    perPool:
+                      items:
+                        description: |-
+                          AppRegistryPoolStatus is the resolved registry for one pool the parent
+                          KubeProject references via spec.environments[]. One entry exists per unique
+                          pool the PROJECT spans — every app in the project gets the same PerPool
+                          list, since project.spec.registry (R-07) is a project-wide decision and
+                          only ImageRef's app segment differs between apps.
+
+                          Scoping this list by the app's own spec.environmentSelector (so an app
+                          only sees the pools its selector actually reaches) is deliberately
+                          deferred, not an oversight: Phase 1 ships the simplest correct surface,
+                          and narrowing it later is additive.
+                        properties:
+                          imageRef:
+                            description: ImageRef is the full reference minus the tag.
+                            type: string
+                          kubePool:
+                            type: string
+                          pullEndpoint:
+                            type: string
+                          pushEndpoint:
+                            type: string
+                        required:
+                          - imageRef
+                          - kubePool
+                          - pullEndpoint
+                          - pushEndpoint
+                        type: object
+                      type: array
+                      x-kubernetes-list-map-keys:
+                        - kubePool
+                      x-kubernetes-list-type: map
+                    type:
+                      description: |-
+                        RegistryType names a container registry implementation. The value selects a
+                        row in the kind table (internal/common/registryref), which owns every
+                        cross-provider difference: whether repositories are implicit or provisioned,
+                        what the image path looks like, and how push and pull authenticate.
+                      enum:
+                        - zot
+                        - gar
+                        - ecr
+                        - acr
+                      type: string
+                  required:
+                    - name
+                    - type
+                  type: object
                 renderedGeneration:
                   description: |-
                     RenderedGeneration is the generation whose spec the last completed

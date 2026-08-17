@@ -650,6 +650,11 @@ spec:
                   x-kubernetes-validations:
                     - message: clusterMode is immutable
                       rule: self == oldSelf
+                defaultRegistry:
+                  description: |-
+                    DefaultRegistry names the entry projects get when they declare no
+                    spec.registry. Must name a declared entry; enforced by Kyverno (Task 9).
+                  type: string
                 features:
                   description: Features defines which platform features are enabled for this cluster
                   properties:
@@ -828,6 +833,60 @@ spec:
                         for the second, instance-level gate — mirroring spec.provisionSharedPostgres.
                       type: boolean
                   type: object
+                registries:
+                  description: |-
+                    Registries declares the container registries workloads on this pool may
+                    use. When empty, the operator synthesises a single "default" entry of
+                    type zot iff features.zotRegistry resolves true — so existing pools
+                    behave identically without declaring anything (R-11).
+                  items:
+                    description: |-
+                      RegistrySpec declares one container registry that workloads on this pool may
+                      push to and pull from. Projects select an entry by Name
+                      (KubeProject.spec.registry); names bind late, per pool, in the manner of
+                      storageClassName — the same name may resolve to GAR on a GCP pool and ECR on
+                      an AWS pool.
+                    properties:
+                      gar:
+                        description: |-
+                          GAR is required when Type is "gar" and ignored otherwise. This
+                          invariant is not currently enforced at admission — see
+                          PRD-REG-994 and internal/policy/seed.go, where it is documented as
+                          one of three cross-field, same-object invariants the policy
+                          catalog's closed Rule set cannot express. Phase 2 must add
+                          enforcement alongside the "gar" kind-table row.
+                        properties:
+                          location:
+                            description: Location is the GAR location, e.g. "europe-west1".
+                            minLength: 1
+                            type: string
+                        required:
+                          - location
+                        type: object
+                      name:
+                        description: |-
+                          Name is the selector projects use. Unique within the pool, enforced by
+                          the listType=map marker on KubePoolSpec.Registries rather than by CEL.
+                        maxLength: 63
+                        minLength: 1
+                        pattern: ^[a-z0-9][a-z0-9-]*[a-z0-9]$
+                        type: string
+                      type:
+                        description: Type selects the kind-table row.
+                        enum:
+                          - zot
+                          - gar
+                          - ecr
+                          - acr
+                        type: string
+                    required:
+                      - name
+                      - type
+                    type: object
+                  type: array
+                  x-kubernetes-list-map-keys:
+                    - name
+                  x-kubernetes-list-type: map
                 systemProfile:
                   description: |-
                     SystemProfile controls the sizing of the platform system node group.
