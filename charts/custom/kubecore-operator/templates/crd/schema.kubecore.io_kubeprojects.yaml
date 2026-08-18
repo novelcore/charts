@@ -122,6 +122,50 @@ spec:
                   items:
                     description: ProjectEnvironment defines a single environment within a project
                     properties:
+                      ci:
+                        description: |-
+                          Ci carries the cloud-agnostic CI build-compute sizing for a `ci`-typed
+                          environment (PRD-962 F-11, D-10). It has no effect on any other
+                          environmentType — the operator ignores it there. size/arch/maxNodes
+                          declare intent only; mapping to a concrete per-cloud machine type and
+                          provisioning the node group is a later slice (F-07/F-09), not this one.
+                        properties:
+                          arch:
+                            default: amd64
+                            description: |-
+                              Arch selects the CI builder's CPU architecture. It determines the
+                              architecture of the image CI produces — an arm64 builder yields an
+                              arm64 image, which amd64 deployment nodes cannot run — so the
+                              controller validates it against the inferred architecture of this
+                              project's deployment environments on the same KubePool (Q-07: fails
+                              open, i.e. skips the comparison, on a deployment machine type it
+                              cannot classify).
+                            enum:
+                              - amd64
+                              - arm64
+                            type: string
+                          maxNodes:
+                            default: 2
+                            description: |-
+                              MaxNodes bounds the CI node group's autoscaling ceiling. There is no
+                              Min or Desired field — both are always 0 (see the type doc comment).
+                            minimum: 1
+                            type: integer
+                          size:
+                            default: medium
+                            description: |-
+                              Size selects the CI builder's t-shirt size, mapped to a concrete
+                              per-cloud machine type by the resolver (small=4vCPU/16Gi,
+                              medium=8vCPU/32Gi, large=16vCPU/64Gi). "medium" on GCP resolves to the
+                              same machine type the shared kubecorecpu pool already uses today, so
+                              the default reproduces current behaviour exactly (CON-04) — changing
+                              it is a behaviour change, not a tuning knob.
+                            enum:
+                              - small
+                              - medium
+                              - large
+                            type: string
+                        type: object
                       environmentType:
                         description: |-
                           EnvironmentType classifies the environment (dev/stage/prod/ml). It is the
@@ -136,6 +180,7 @@ spec:
                           - stage
                           - prod
                           - ml
+                          - ci
                         type: string
                       kubePool:
                         description: KubePool references the KubePool resource to use for this environment
@@ -361,8 +406,8 @@ spec:
                       - priority
                     type: object
                     x-kubernetes-validations:
-                      - message: nodeGroup is required unless environmentType is 'ml' (an ml environment's compute comes from the ML compute classes, not a dedicated node group)
-                        rule: self.environmentType == 'ml' || has(self.nodeGroup)
+                      - message: nodeGroup is required unless environmentType is 'ml' or 'ci' (an ml environment's compute comes from the ML compute classes, and a ci environment's compute comes from its own sizing block, neither uses a dedicated node group)
+                        rule: self.environmentType in ['ml','ci'] || has(self.nodeGroup)
                   maxItems: 20
                   type: array
                 githubConfiguration:

@@ -420,7 +420,7 @@ spec:
                               default: dev
                               description: |-
                                 DevBranch is the integration branch a push to which fires the
-                                in-cluster CI (the Argo Events Sensor's push-dep trigger). Defaults
+                                in-cluster CI (the WorkflowEventBinding's selector). Defaults
                                 to "dev" — the gitFlow convention. Set this when the repo's
                                 integration branch is named differently (e.g. "main" for trunk-based
                                 development), otherwise pushes to that branch never trigger a build
