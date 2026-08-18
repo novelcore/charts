@@ -57,6 +57,12 @@ spec:
       value: "./Dockerfile"
     - name: build_context
       value: "."
+    # Per-submission CI node pool (PRD-962 F-09). Optional: a submitter that
+    # omits it gets the operator-resolved default below, which itself falls
+    # back to today's single workflow-level nodeSelector so behavior is
+    # unchanged until callers start passing this parameter.
+    - name: node_class
+      value: {{ .Values.ci.defaultNodeClass | default (dig "platform.kubecore.io/nodegroup-type" "kubecorecpu" .Values.nodeSelector) | quote }}
   templates:
   - name: ci-build
     steps:
@@ -215,6 +221,13 @@ spec:
       parameters:
       - name: image_tag
       - name: new_version
+    # Template-level nodeSelector overrides the workflow-level one above so
+    # this build lands on the per-submission CI pool (PRD-962 F-09) instead
+    # of the shared cluster default. Tolerations are intentionally left to
+    # the workflow-level fallback (.Values.tolerations) — the CI node group
+    # carries the same taint key/value these already tolerate.
+    nodeSelector:
+      platform.kubecore.io/nodegroup-type: "{{`{{workflow.parameters.node_class}}`}}"
     volumes:
     - name: kaniko-config
       emptyDir: {}
