@@ -54,6 +54,20 @@ rules:
   verbs:
   - get
 - apiGroups:
+  - artifact.gcp.m.upbound.io
+  resources:
+  - registryrepositories
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - artifact.gcp.m.upbound.io
+  resources:
+  - registryrepositories/status
+  verbs:
+  - get
+- apiGroups:
   - authorization.azure.m.upbound.io
   resources:
   - roleassignments
@@ -458,6 +472,7 @@ rules:
   - xobservabilities
   - xprojectenvmlstacks
   - xprojectmlstacks
+  - xprojectregistries
   verbs:
   - create
   - delete
@@ -487,6 +502,7 @@ rules:
   - xobservabilities/status
   - xprojectenvmlstacks/status
   - xprojectmlstacks/status
+  - xprojectregistries/status
   verbs:
   - get
 - apiGroups:

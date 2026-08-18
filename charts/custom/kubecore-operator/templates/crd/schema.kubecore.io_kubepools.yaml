@@ -1465,6 +1465,15 @@ spec:
                         Reporting write (single atomic status update); a unit test asserts equality.
                         Controllers may read only this copy (lint-enforced); clusterInfo is display-only.
                       type: string
+                    gcpProjectId:
+                      description: |-
+                        GcpProjectID is the GCP project this pool's cloud resources live in,
+                        derived from the parent KubeOrg's spec.gcpConfig.projectId (PRD-REG-994
+                        R-02). Empty on non-GCP pools, and NOT required for Ready — a GAR
+                        registry entry resolved against a pool with this empty fails closed in
+                        registryref.endpointsFor rather than producing an image path with an
+                        empty project segment.
+                      type: string
                     hpcReady:
                       description: Feature-conditional — validated only when the corresponding feature is enabled.
                       type: boolean
