@@ -2632,7 +2632,7 @@ spec:
           IMAGE_REPO="{{`{{workflow.parameters.project_name}}`}}/${APP_NAME}"
         fi
 
-        apk add --no-cache git >/dev/null
+        apk add --no-cache git curl >/dev/null
 
         REPO_URL="https://x-access-token:${TOKEN}@github.com/${ORG}/${GITOPS_REPO}.git"
         git clone --depth=1 --branch "${GITOPS_BRANCH}" "${REPO_URL}" /tmp/gitops
@@ -2663,6 +2663,61 @@ spec:
           yq e -i ".data.\"${STEP_NAME}\" = \"${NEW_IMAGE}\"" "${IMAGES_PATH}"
           i=$((i + 1))
         done
+
+        # ============ retag-all-on-build (kubecore-operator#1008) ============
+        # Repo-level tag retention keeps the N most-recent tags; a step that
+        # rarely rebuilds (compose, config-validation) keeps its OLD pinned
+        # tag in this ConfigMap while churny steps push that tag out of the
+        # retention window -> the pipeline ImagePullBackOffs on its own
+        # image. Fix the class: every build refreshes EVERY step's tag —
+        # unchanged steps get their current manifest ALIASED to the new
+        # image_tag (registry manifest copy, no blob movement) and their CM
+        # key updated. After any build, all pinned tags are the newest tags
+        # in the repo, so any retention count >= step count is safe.
+        # Best-effort per step: an alias failure (e.g. the old tag was
+        # already pruned — the very disease) WARNs and keeps the old value;
+        # that step heals on its next real rebuild. Never fails the build.
+        BUILD_REGISTRY="{{`{{workflow.parameters.build_registry_url}}`}}"
+        if [ -z "${BUILD_REGISTRY}" ]; then BUILD_REGISTRY="{{ .Values.registry.internalUrl }}"; fi
+        RU=$(cat /etc/registry-auth/username 2>/dev/null || true)
+        RP=$(cat /etc/registry-auth/password 2>/dev/null || true)
+        if [ -n "${RU}" ] && [ -n "${BUILD_REGISTRY}" ]; then
+          ACCEPT="Accept: application/vnd.oci.image.manifest.v1+json"
+          ACCEPT2="Accept: application/vnd.docker.distribution.manifest.v2+json"
+          ACCEPT3="Accept: application/vnd.oci.image.index.v1+json"
+          ACCEPT4="Accept: application/vnd.docker.distribution.manifest.list.v2+json"
+          for KEY in $(yq e '.data | keys | .[]' "${IMAGES_PATH}"); do
+            [ "${KEY}" = "last-built-sha" ] && continue
+            # changed steps were just updated above — skip them
+            if echo '{{`{{inputs.parameters.changed_steps}}`}}' | grep -q "\"name\": *\"${KEY}\"\|\"name\":\"${KEY}\""; then
+              continue
+            fi
+            CUR_VALUE=$(yq e ".data.\"${KEY}\"" "${IMAGES_PATH}")
+            CUR_TAG="${CUR_VALUE##*:}"
+            NEW_TAG="${KEY}-${IMAGE_TAG}"
+            [ "${CUR_TAG}" = "${NEW_TAG}" ] && continue
+            MANI_FILE="/tmp/mani-${KEY}.json"
+            if curl -sf -u "${RU}:${RP}" -H "${ACCEPT}" -H "${ACCEPT2}" -H "${ACCEPT3}" -H "${ACCEPT4}" \
+                 -D "/tmp/hdr-${KEY}" -o "${MANI_FILE}" \
+                 "http://${BUILD_REGISTRY}/v2/${IMAGE_REPO}/manifests/${CUR_TAG}"; then
+              CT=$(grep -i '^Content-Type:' "/tmp/hdr-${KEY}" | tr -d '\r' | awk '{print $2}' | head -1)
+              if curl -sf -u "${RU}:${RP}" -X PUT -H "Content-Type: ${CT}" \
+                   --data-binary "@${MANI_FILE}" \
+                   "http://${BUILD_REGISTRY}/v2/${IMAGE_REPO}/manifests/${NEW_TAG}"; then
+                NEW_VALUE="${CUR_VALUE%:*}:${NEW_TAG}"
+                yq e -i ".data.\"${KEY}\" = \"${NEW_VALUE}\"" "${IMAGES_PATH}"
+                echo "retag-all: ${KEY} ${CUR_TAG} -> ${NEW_TAG}"
+              else
+                echo "WARN retag-all: PUT alias failed for ${KEY} (${CUR_TAG}) — keeping old pin"
+              fi
+            else
+              echo "WARN retag-all: current manifest for ${KEY} (${CUR_TAG}) unreadable — old tag pruned? keeping old pin; heals on next rebuild of that step"
+            fi
+          done
+        else
+          echo "WARN retag-all: no registry auth mounted — skipped"
+        fi
+        # =====================================================================
 
         # last-built-sha: the commit this build was for. The per-app CI
         # reconciler CronWorkflow (ml-ci-reconcile) compares it against the
@@ -2704,6 +2759,9 @@ spec:
       volumeMounts:
       - name: github-token
         mountPath: /etc/github-token
+        readOnly: true
+      - name: registry-auth
+        mountPath: /etc/registry-auth
         readOnly: true
 
   - name: tag
