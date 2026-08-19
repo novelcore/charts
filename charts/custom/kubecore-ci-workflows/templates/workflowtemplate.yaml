@@ -376,9 +376,14 @@ spec:
         tar -xzf /tmp/kustomize.tar.gz -C /usr/local/bin/
         chmod +x /usr/local/bin/kustomize
 
-        # Update all dev-* overlays
+        if [ ! -d "${APP_DIR}" ]; then
+          echo "app dir ${APP_DIR} not found in ${OPS_REPO}"; exit 1
+        fi
+
+        # k8sapp composition names an overlay "{type}" when the env name IS the type,
+        # else "{type}-{envName}" — match both tokens to cover a plain "dev" overlay
         UPDATED=0
-        for OVERLAY_DIR in ${APP_DIR}/overlays/dev-*; do
+        for OVERLAY_DIR in ${APP_DIR}/overlays/dev ${APP_DIR}/overlays/dev-*; do
           if [ -d "$OVERLAY_DIR" ]; then
             echo "Updating $OVERLAY_DIR"
             cd "$OVERLAY_DIR"
