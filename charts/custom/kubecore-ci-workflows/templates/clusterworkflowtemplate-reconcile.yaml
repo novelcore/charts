@@ -86,6 +86,13 @@ spec:
       value: "./Dockerfile"
     - name: build_context
       value: "."
+    # Per-submission CI node pool (PRD-962 F-09), threaded into the ci-build
+    # Workflow this template submits below — same pattern as dockerfile_path
+    # and build_context. ci-reconcile has no build pod of its own; the actual
+    # kaniko build (and its template-level nodeSelector override) runs inside
+    # the submitted ci-build Workflow.
+    - name: node_class
+      value: {{ .Values.ci.defaultNodeClass | default (dig "platform.kubecore.io/nodegroup-type" "kubecorecpu" .Values.nodeSelector) | quote }}
 
   volumes:
   - name: github-token
@@ -286,3 +293,5 @@ spec:
               value: "{{`{{workflow.parameters.dockerfile_path}}`}}"
             - name: build_context
               value: "{{`{{workflow.parameters.build_context}}`}}"
+            - name: node_class
+              value: "{{`{{workflow.parameters.node_class}}`}}"

@@ -77,6 +77,14 @@ spec:
       value: "true"
     - name: event_type
       value: "rc"
+    # Per-submission CI node pool (PRD-962 F-09). The build-push step below
+    # is a templateRef into ml-ci-build's own build-push template, whose
+    # nodeSelector reads {{`{{workflow.parameters.node_class}}`}} — Argo
+    # resolves that against THIS running workflow's parameters, so declaring
+    # the parameter here (with the same operator-resolved default) is what
+    # makes it apply to ml-ci-rc-build's builds.
+    - name: node_class
+      value: {{ .Values.ci.defaultNodeClass | default (dig "platform.kubecore.io/nodegroup-type" "kubecorecpu" .Values.nodeSelector) | quote }}
 
   templates:
   - name: ml-ci-rc-build

@@ -71,6 +71,11 @@ spec:
     - name: gitops_branch
       value: main
     - name: workflow_template_path
+    # Per-submission CI node pool (PRD-962 F-09), threaded into the
+    # ml-ci-build Workflow this template submits below via
+    # workflowTemplateRef — ml-ci-reconcile has no build pod of its own.
+    - name: node_class
+      value: {{ .Values.ci.defaultNodeClass | default (dig "platform.kubecore.io/nodegroup-type" "kubecorecpu" .Values.nodeSelector) | quote }}
 
   volumes:
   - name: github-token
@@ -324,3 +329,5 @@ spec:
               value: "{{`{{workflow.parameters.gitops_branch}}`}}"
             - name: workflow_template_path
               value: "{{`{{workflow.parameters.workflow_template_path}}`}}"
+            - name: node_class
+              value: "{{`{{workflow.parameters.node_class}}`}}"

@@ -131,3 +131,15 @@ workspace:
 # Scheduling (typically set by composition from workflowDefaults, but can override per-template)
 nodeSelector: {}
 tolerations: []
+
+# CI configuration
+ci:
+  # Set by the KubePool clusteroperators composition from the
+  # operator-resolved CI class (PRD-962 F-09). Seeds the default of the
+  # `node_class` workflow parameter on every CI ClusterWorkflowTemplate, so
+  # a submission that omits the parameter lands exactly where it lands
+  # today. Empty until the operator starts passing this value — the
+  # templates fall back to .Values.nodeSelector's
+  # "platform.kubecore.io/nodegroup-type" entry, preserving today's
+  # single-pool behavior.
+  defaultNodeClass: ""

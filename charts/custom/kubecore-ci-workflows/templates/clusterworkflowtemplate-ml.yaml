@@ -105,6 +105,15 @@ spec:
     - name: gitops_branch
       value: "main"
     - name: workflow_template_path
+    # Per-submission CI node pool (PRD-962 F-09) for the static build-push
+    # template below. Optional: a submitter that omits it gets the
+    # operator-resolved default, which itself falls back to today's single
+    # workflow-level nodeSelector so behavior is unchanged until callers
+    # start passing this parameter. NOT the per-step compute class used by
+    # the render-wft generator further down (CI_POOL / "{step}-class") —
+    # that is a separate, per-step mechanism this PR does not touch.
+    - name: node_class
+      value: {{ .Values.ci.defaultNodeClass | default (dig "platform.kubecore.io/nodegroup-type" "kubecorecpu" .Values.nodeSelector) | quote }}
 
   templates:
   - name: ml-ci-build
@@ -527,6 +536,15 @@ spec:
     metadata:
       labels:
         app.kubernetes.io/name: "{{`{{workflow.parameters.app_name}}`}}"
+    # Template-level nodeSelector overrides the workflow-level one above so
+    # this build lands on the per-submission CI pool (PRD-962 F-09) instead
+    # of the shared cluster default. Tolerations are intentionally left to
+    # the workflow-level fallback (.Values.tolerations) — the CI node group
+    # carries the same taint key/value these already tolerate. This is
+    # distinct from the per-step CI_POOL nodeSelector the render-wft
+    # generator builds further down for the per-app rendered WFT.
+    nodeSelector:
+      platform.kubecore.io/nodegroup-type: "{{`{{workflow.parameters.node_class}}`}}"
     # Retry once on transient failures. The dominant historical failure
     # mode was GCE preemption mid-snapshot on the kubecorecpu pool (now
     # on-demand, see profiles.go). Keeping a single retry handles other
