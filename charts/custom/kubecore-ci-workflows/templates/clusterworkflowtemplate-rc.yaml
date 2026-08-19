@@ -46,6 +46,14 @@ spec:
       value: {{ .Values.buildkit.dockerfilePath | quote }}
     - name: build_context
       value: {{ .Values.buildkit.buildContext | quote }}
+    # PRD-994 CI registry threading. Both default to today's behaviour so any
+    # submitter that sets neither is byte-identical to chart 0.12.51:
+    # image_repo empty falls back to the .Values.registry.* construction, and
+    # registry_type zot keeps the htpasswd/API-key auth path.
+    - name: image_repo
+      value: ""
+    - name: registry_type
+      value: "zot"
     # Per-submission CI node pool (PRD-962 F-09). Optional: a submitter that
     # omits it gets the operator-resolved default below, which itself falls
     # back to today's single workflow-level nodeSelector so behavior is
@@ -244,15 +252,37 @@ spec:
         APP_NAME="{{`{{workflow.parameters.app_name}}`}}"
         PROJECT="{{`{{workflow.parameters.project_name}}`}}"
         IMAGE_TAG="{{`{{inputs.parameters.image_tag}}`}}"
-        FULL_IMAGE="${REGISTRY}/${PROJECT}/${APP_NAME}:${IMAGE_TAG}"
+        IMAGE_REPO="{{`{{workflow.parameters.image_repo}}`}}"
+        REGISTRY_TYPE="{{`{{workflow.parameters.registry_type}}`}}"
 
-        REG_USER=$(cat /etc/registry-auth/username)
-        REG_PASS=$(cat /etc/registry-auth/password)
-        AUTH=$(printf '%s:%s' "${REG_USER}" "${REG_PASS}" | base64 | tr -d '\n')
-        mkdir -p /kaniko/.docker
-        cat > /kaniko/.docker/config.json <<EOF
+        # image_repo is the registry-kind-aware path resolved by the operator.
+        # Empty means a submitter predating PRD-994 CI threading — fall back
+        # to the Zot layout this template has always assumed.
+        if [ -z "${IMAGE_REPO}" ]; then
+          IMAGE_REPO="${REGISTRY}/${PROJECT}/${APP_NAME}"
+        fi
+        FULL_IMAGE="${IMAGE_REPO}:${IMAGE_TAG}"
+
+        TLS_FLAGS="--insecure --skip-tls-verify"
+        if [ "${REGISTRY_TYPE}" = "gar" ]; then
+          # GAR authenticates through GKE Workload Identity: kaniko reads
+          # credentials from the metadata server via this pod's ci-build-sa,
+          # which the k8sapp composition annotates with
+          # iam.gke.io/gcp-service-account. No docker config, and GAR is
+          # TLS — both flags would be wrong.
+          TLS_FLAGS=""
+        else
+          # Registry auth for kaniko. Uses the base64 "auth" form rather than
+          # username/password so a password containing shell-special or JSON
+          # characters cannot corrupt the file (the API key is opaque).
+          REG_USER=$(cat /etc/registry-auth/username)
+          REG_PASS=$(cat /etc/registry-auth/password)
+          AUTH=$(printf '%s:%s' "${REG_USER}" "${REG_PASS}" | base64 | tr -d '\n')
+          mkdir -p /kaniko/.docker
+          cat > /kaniko/.docker/config.json <<EOF
         {"auths":{"${REGISTRY}":{"auth":"${AUTH}"}}}
         EOF
+        fi
 
         /kaniko/executor \
           --context="dir:///workspace/repo/{{ .Values.buildkit.buildContext }}" \
@@ -260,8 +290,7 @@ spec:
           --destination="${FULL_IMAGE}" \
           --build-arg="REGISTRY_URL=${REGISTRY}" \
           --build-arg="VERSION=${IMAGE_TAG}" \
-          --insecure \
-          --skip-tls-verify \
+          ${TLS_FLAGS} \
           --cleanup
 
         echo "Pushed: ${FULL_IMAGE}"
@@ -359,6 +388,14 @@ spec:
         IMAGE_TAG="{{`{{inputs.parameters.image_tag}}`}}"
         SEMANTIC_VERSION="{{`{{inputs.parameters.semantic_version}}`}}"
         REGISTRY="{{ .Values.registry.internalUrl }}"
+        IMAGE_REPO="{{`{{workflow.parameters.image_repo}}`}}"
+
+        # Same fallback as build-push, so the image reference dispatched here
+        # always matches what was actually pushed — a diverging derivation
+        # would report a destination kaniko never wrote to.
+        if [ -z "${IMAGE_REPO}" ]; then
+          IMAGE_REPO="${REGISTRY}/${PROJECT}/${APP_NAME}"
+        fi
 
         curl -s -X POST \
           -H "Authorization: token ${TOKEN}" \
@@ -368,10 +405,10 @@ spec:
             \"event_type\": \"staging-environment-update\",
             \"client_payload\": {
               \"version\": \"${IMAGE_TAG}\",
-              \"image\": \"${REGISTRY}/${PROJECT}/${APP_NAME}:${IMAGE_TAG}\",
+              \"image\": \"${IMAGE_REPO}:${IMAGE_TAG}\",
               \"app_name\": \"${APP_NAME}\",
               \"semantic_version\": \"v${SEMANTIC_VERSION}\",
-              \"plain_image_name\": \"${REGISTRY}/${PROJECT}/${APP_NAME}\"
+              \"plain_image_name\": \"${IMAGE_REPO}\"
             }
           }"
 
