@@ -143,3 +143,8 @@ ci:
   # "platform.kubecore.io/nodegroup-type" entry, preserving today's
   # single-pool behavior.
   defaultNodeClass: ""
+
+# pending-reaper (#897): bounds unschedulable-step hangs and terminate-desync.
+pendingReaper:
+  pendingMaxSeconds: 2700   # 45m — a step Pending this long is capacity-stuck, not queued
+  terminateGraceSeconds: 1200  # 20m — shutdown recorded but unhonored = controller desync
