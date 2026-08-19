@@ -1681,6 +1681,61 @@ spec:
                     an output — no other controller may read it.
                   format: int64
                   type: integer
+                synthesizedCIEnvironment:
+                  description: |-
+                    SynthesizedCIEnvironment reports the operator's CI-environment
+                    synthesis decision (PRD-962 F-07, D-03/D-05). Populated whenever this
+                    project declares no `ci`-typed environment of its own AND has at
+                    least one other environment to derive a KubePool from; nil when a
+                    `ci` environment is declared (it always wins) or there is nothing to
+                    derive from. Written unconditionally on every Reconciling pass —
+                    regardless of the CI node-group provisioning env-var gate — because
+                    the decision itself is a cheap, pure computation with no cloud side
+                    effects (T-09). It NEVER reflects a write to spec.environments; the
+                    operator does not mutate user spec.
+                  properties:
+                    arch:
+                      description: Arch mirrors the F-11 default applied (amd64).
+                      type: string
+                    derivedFromEnvironment:
+                      description: |-
+                        DerivedFromEnvironment names the declared environment whose KubePool
+                        and priority ordering produced this decision — the environment
+                        synthesis chose from, not a target of any kind.
+                      type: string
+                    kubePool:
+                      description: |-
+                        KubePool is the KubePool this synthesised environment targets: the
+                        KubePool of the lowest-priority non-CI environment (ties broken by
+                        environment name, ascending, D-03).
+                      type: string
+                    maxNodes:
+                      description: MaxNodes mirrors the F-11 default applied (2).
+                      type: integer
+                    namespace:
+                      description: |-
+                        Namespace is always "{project}-ci" (D-05) — byte-identical to what a
+                        declared `ci` environment would render.
+                      type: string
+                    nodeGroupProvisioningEnabled:
+                      description: |-
+                        NodeGroupProvisioningEnabled reports whether the CI node-group
+                        provisioning env-var gate (T-09) was enabled on the reconcile pass
+                        that produced this status: true means this decision ALSO flows
+                        through the real environment-reconciliation pipeline (a genuine
+                        status.environments[] entry and XKubEnv exist for it); false means
+                        this projection is informational only — no node group has been
+                        provisioned.
+                      type: boolean
+                    size:
+                      description: |-
+                        Size mirrors the F-11 default applied (medium) since a synthesised
+                        environment carries no user-declared Ci block.
+                      type: string
+                  required:
+                    - kubePool
+                    - namespace
+                  type: object
               type: object
           type: object
           x-kubernetes-validations:
