@@ -1,0 +1,109 @@
+# pending-reaper (#897, extended by #1046): bounds the two silent-hang classes
+# Argo's own knobs cannot cover —
+#   1. UNSCHEDULABLE STEPS: template activeDeadlineSeconds is kubelet-enforced
+#      from pod START, so a Pending pod accrues no "active" time and hangs
+#      forever (quota exhaustion, autoscaler backoff, GPU stockout — Pending
+#      17h live 2026-07-15, 55m 2026-08-17, 3h25m 2026-08-19). Argo's template
+#      `timeout` counts TOTAL node time, so any pending-bound value would also
+#      kill legitimate multi-hour trainings. The reaper Stops (not Terminates)
+#      workflows whose pods sit Pending past the threshold — Stop runs exit
+#      handlers, so the failure reaches GitHub statuses/MLflow reporting.
+#   2. TERMINATE DESYNC: a workflow whose pod vanished under node churn keeps
+#      Running with spec.shutdown recorded but never honored (the controller
+#      waits on a pod that will never report — live 2026-08-19, #1046). The
+#      reaper deletes such workflows after a grace window; first sighting is
+#      stamped in an annotation so the grace clock is reaper-owned state.
+# Runs every 5m as its own least-privilege SA. Cluster-wide except the
+# argo-workflows namespace's own reconciler machinery is INCLUDED on purpose:
+# a stuck reconciler deserves the same bound.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "kubecore-ci-workflows.fullname" . }}-pending-reaper
+  namespace: {{ include "kubecore-ci-workflows.namespace" . }}
+  labels:
+    {{- include "kubecore-ci-workflows.labels" . | nindent 4 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "kubecore-ci-workflows.fullname" . }}-pending-reaper
+  labels:
+    {{- include "kubecore-ci-workflows.labels" . | nindent 4 }}
+rules:
+  - apiGroups: ["argoproj.io"]
+    resources: ["workflows"]
+    verbs: ["get", "list", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "kubecore-ci-workflows.fullname" . }}-pending-reaper
+  labels:
+    {{- include "kubecore-ci-workflows.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "kubecore-ci-workflows.fullname" . }}-pending-reaper
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "kubecore-ci-workflows.fullname" . }}-pending-reaper
+    namespace: {{ include "kubecore-ci-workflows.namespace" . }}
+---
+apiVersion: argoproj.io/v1alpha1
+kind: CronWorkflow
+metadata:
+  name: pending-reaper
+  namespace: {{ include "kubecore-ci-workflows.namespace" . }}
+  labels:
+    {{- include "kubecore-ci-workflows.labels" . | nindent 4 }}
+spec:
+  schedule: "*/5 * * * *"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 120
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 2
+  workflowSpec:
+    serviceAccountName: {{ include "kubecore-ci-workflows.fullname" . }}-pending-reaper
+    entrypoint: reap
+    activeDeadlineSeconds: 240
+    ttlStrategy:
+      secondsAfterCompletion: 600
+    templates:
+      - name: reap
+        container:
+          image: alpine/kubectl:1.33.4
+          command: [sh, -c]
+          args:
+            - |
+              set -e
+              apk add --no-cache jq coreutils >/dev/null 2>&1 || true
+              NOW=$(date +%s)
+              PENDING_MAX={{ .Values.pendingReaper.pendingMaxSeconds | default 2700 }}
+              TERM_GRACE={{ .Values.pendingReaper.terminateGraceSeconds | default 1200 }}
+              kubectl get wf -A -o json | jq -c '.items[] | select(.status.phase=="Running") | {ns: .metadata.namespace, name: .metadata.name, shutdown: (.spec.shutdown // ""), seen: (.metadata.annotations["reaper.kubecore.io/shutdown-seen"] // "")}' | while read -r wf; do
+                NS=$(echo "$wf" | jq -r .ns); NAME=$(echo "$wf" | jq -r .name)
+                SHUTDOWN=$(echo "$wf" | jq -r .shutdown); SEEN=$(echo "$wf" | jq -r .seen)
+                if [ -n "$SHUTDOWN" ]; then
+                  # terminate/stop recorded but wf still Running: grace-clock it
+                  if [ -z "$SEEN" ]; then
+                    kubectl -n "$NS" annotate wf "$NAME" "reaper.kubecore.io/shutdown-seen=$NOW" --overwrite >/dev/null
+                    echo "grace-start: $NS/$NAME (shutdown=$SHUTDOWN)"
+                  elif [ $((NOW - SEEN)) -gt "$TERM_GRACE" ]; then
+                    echo "REAP-DESYNC: $NS/$NAME shutdown=$SHUTDOWN unhonored for $((NOW - SEEN))s -> delete"
+                    kubectl -n "$NS" delete wf "$NAME" --wait=false
+                  fi
+                  continue
+                fi
+                # any pod of this wf Pending past the threshold?
+                OLDEST=$(kubectl -n "$NS" get pods -l "workflows.argoproj.io/workflow=$NAME" -o json 2>/dev/null | jq -r --argjson now "$NOW" '[.items[] | select(.status.phase=="Pending") | ($now - (.metadata.creationTimestamp | fromdateiso8601))] | max // 0')
+                if [ "${OLDEST:-0}" -gt "$PENDING_MAX" ]; then
+                  echo "REAP-PENDING: $NS/$NAME pod Pending ${OLDEST}s -> Stop (exit handlers run, GitHub/MLflow reporting fires)"
+                  kubectl -n "$NS" annotate wf "$NAME" "reaper.kubecore.io/reason=pod Pending ${OLDEST}s > ${PENDING_MAX}s (unschedulable: capacity/quota/stockout)" --overwrite >/dev/null
+                  kubectl -n "$NS" patch wf "$NAME" --type merge -p '{"spec":{"shutdown":"Stop"}}'
+                fi
+              done
+              echo "reaper pass complete"
