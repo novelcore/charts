@@ -58,7 +58,7 @@ spec:
     - name: build_context
       value: "."
     # PRD-994 CI registry threading. Both default to today's behaviour so any
-    # submitter that sets neither is byte-identical to chart 0.12.49:
+    # submitter that sets neither is byte-identical to chart 0.12.51:
     # image_repo empty falls back to the .Values.registry.* construction, and
     # registry_type zot keeps the htpasswd/API-key auth path.
     - name: image_repo
