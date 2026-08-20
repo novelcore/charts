@@ -61,7 +61,14 @@ metadata:
   labels:
     {{- include "kubecore-ci-workflows.labels" . | nindent 4 }}
 spec:
-  schedule: "*/5 * * * *"
+  # Argo Workflows v4 REMOVED the singular `schedule` field: the CronWorkflow
+  # CRD now lists `schedules` (plural, a list) in its `required` set, so a
+  # manifest using `schedule` is rejected outright by the apiserver. Shipping
+  # the singular form wedged the whole ci-workflows Helm release on gke-dev
+  # (Argo v4.0.6), which propagated to KubePool Ready=False and blocked every
+  # KubeProject reconcile on the pool.
+  schedules:
+    - "*/5 * * * *"
   concurrencyPolicy: Forbid
   startingDeadlineSeconds: 120
   successfulJobsHistoryLimit: 1
