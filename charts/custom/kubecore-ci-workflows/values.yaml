@@ -2,6 +2,10 @@
 
 # Registry configuration
 registry:
+  # internalUrl/externalUrl are the FALLBACK registry for submitters that do
+  # not pass image_repo. Since PRD-994, the operator resolves the registry per
+  # project and passes a fully-qualified image_repo plus registry_type on each
+  # submission; these values are used only when it does not.
   # In-cluster Zot registry URL (for build push)
   internalUrl: "zot-registry.zot-registry.svc.cluster.local:5000"
   # External registry hostname (for kustomize image references in GitOps manifests)

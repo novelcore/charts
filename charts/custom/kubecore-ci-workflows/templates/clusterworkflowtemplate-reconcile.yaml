@@ -86,6 +86,14 @@ spec:
       value: "./Dockerfile"
     - name: build_context
       value: "."
+    # PRD-994 CI registry threading. Both default to today's behaviour so any
+    # submitter that sets neither is byte-identical to chart 0.12.51:
+    # image_repo empty falls back to the .Values.registry.* construction, and
+    # registry_type zot keeps the htpasswd/API-key auth path.
+    - name: image_repo
+      value: ""
+    - name: registry_type
+      value: "zot"
     # Per-submission CI node pool (PRD-962 F-09), threaded into the ci-build
     # Workflow this template submits below — same pattern as dockerfile_path
     # and build_context. ci-reconcile has no build pod of its own; the actual
@@ -293,5 +301,9 @@ spec:
               value: "{{`{{workflow.parameters.dockerfile_path}}`}}"
             - name: build_context
               value: "{{`{{workflow.parameters.build_context}}`}}"
+            - name: image_repo
+              value: "{{`{{workflow.parameters.image_repo}}`}}"
+            - name: registry_type
+              value: "{{`{{workflow.parameters.registry_type}}`}}"
             - name: node_class
               value: "{{`{{workflow.parameters.node_class}}`}}"
