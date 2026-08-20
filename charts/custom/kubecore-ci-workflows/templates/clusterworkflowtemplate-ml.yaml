@@ -2682,19 +2682,24 @@ spec:
           i=$((i + 1))
         done
 
-        # ============ retag-all-on-build (kubecore-operator#1008) ============
-        # Repo-level tag retention keeps the N most-recent tags; a step that
-        # rarely rebuilds (compose, config-validation) keeps its OLD pinned
-        # tag in this ConfigMap while churny steps push that tag out of the
-        # retention window -> the pipeline ImagePullBackOffs on its own
-        # image. Fix the class: every build refreshes EVERY step's tag —
-        # unchanged steps get their current manifest ALIASED to the new
-        # image_tag (registry manifest copy, no blob movement) and their CM
-        # key updated. After any build, all pinned tags are the newest tags
-        # in the repo, so any retention count >= step count is safe.
-        # Best-effort per step: an alias failure (e.g. the old tag was
-        # already pruned — the very disease) WARNs and keeps the old value;
-        # that step heals on its next real rebuild. Never fails the build.
+        # ============ digest-pin-on-build (kubecore-operator#1008) ============
+        # Repo-level tag retention prunes tags, and Zot ranks a tag by its
+        # MANIFEST digest's original push time, not the tag's PUT time — so
+        # the previous approach (aliasing unchanged steps' manifests to the
+        # new image_tag) was reaped on the very next retention pass: the
+        # alias inherited the old digest's age and never met
+        # mostRecentlyPushedCount. Proven live 2026-08-20 (zot retention log:
+        # alias PUT 201 at 11:05, deleted 11:40 with pushTimestamp of the
+        # day-old digest).
+        # Fix the class instead: pin every step by DIGEST (repo:tag@sha256).
+        # The kubelet pulls by digest and ignores the tag, so tag pruning can
+        # never break a pin. The manifest itself stays alive because each
+        # step's `{step}-latest` tag always references it (retained by the
+        # ^.*-latest$ retention bucket), so GC never collects it either.
+        # Per step: HEAD the pinned tag for its digest; if the tag is already
+        # pruned, fall back to `{step}-latest` (same lineage — the last image
+        # actually built for that step). WARN-and-keep on total failure.
+        # Never fails the build.
         BUILD_REGISTRY="{{`{{workflow.parameters.build_registry_url}}`}}"
         if [ -z "${BUILD_REGISTRY}" ]; then BUILD_REGISTRY="{{ .Values.registry.internalUrl }}"; fi
         RU=$(cat /etc/registry-auth/username 2>/dev/null || true)
@@ -2704,36 +2709,35 @@ spec:
           ACCEPT2="Accept: application/vnd.docker.distribution.manifest.v2+json"
           ACCEPT3="Accept: application/vnd.oci.image.index.v1+json"
           ACCEPT4="Accept: application/vnd.docker.distribution.manifest.list.v2+json"
+          head_digest() {
+            curl -sfI -u "${RU}:${RP}" -H "${ACCEPT}" -H "${ACCEPT2}" -H "${ACCEPT3}" -H "${ACCEPT4}" \
+              "http://${BUILD_REGISTRY}/v2/${IMAGE_REPO}/manifests/$1" 2>/dev/null \
+              | grep -i '^Docker-Content-Digest:' | tr -d '\r' | awk '{print $2}' | head -1
+          }
           for KEY in $(yq e '.data | keys | .[]' "${IMAGES_PATH}"); do
             [ "${KEY}" = "last-built-sha" ] && continue
-            # changed steps were just updated above — skip them
-            if echo '{{`{{inputs.parameters.changed_steps}}`}}' | grep -q "\"name\": *\"${KEY}\"\|\"name\":\"${KEY}\""; then
-              continue
-            fi
             CUR_VALUE=$(yq e ".data.\"${KEY}\"" "${IMAGES_PATH}")
-            CUR_TAG="${CUR_VALUE##*:}"
-            NEW_TAG="${KEY}-${IMAGE_TAG}"
-            [ "${CUR_TAG}" = "${NEW_TAG}" ] && continue
-            MANI_FILE="/tmp/mani-${KEY}.json"
-            if curl -sf -u "${RU}:${RP}" -H "${ACCEPT}" -H "${ACCEPT2}" -H "${ACCEPT3}" -H "${ACCEPT4}" \
-                 -D "/tmp/hdr-${KEY}" -o "${MANI_FILE}" \
-                 "http://${BUILD_REGISTRY}/v2/${IMAGE_REPO}/manifests/${CUR_TAG}"; then
-              CT=$(grep -i '^Content-Type:' "/tmp/hdr-${KEY}" | tr -d '\r' | awk '{print $2}' | head -1)
-              if curl -sf -u "${RU}:${RP}" -X PUT -H "Content-Type: ${CT}" \
-                   --data-binary "@${MANI_FILE}" \
-                   "http://${BUILD_REGISTRY}/v2/${IMAGE_REPO}/manifests/${NEW_TAG}"; then
-                NEW_VALUE="${CUR_VALUE%:*}:${NEW_TAG}"
+            BASE="${CUR_VALUE%%@*}"
+            TAG="${BASE##*:}"
+            case "${TAG}" in */*) echo "WARN digest-pin: ${KEY} value has no tag (${CUR_VALUE}) — keeping"; continue ;; esac
+            DIGEST=$(head_digest "${TAG}")
+            if [ -z "${DIGEST}" ] && [ "${TAG}" != "${KEY}-latest" ]; then
+              TAG="${KEY}-latest"
+              DIGEST=$(head_digest "${TAG}")
+              [ -n "${DIGEST}" ] && echo "digest-pin: ${KEY} pinned tag pruned — re-resolved from ${TAG}"
+            fi
+            if [ -n "${DIGEST}" ]; then
+              NEW_VALUE="${BASE%:*}:${TAG}@${DIGEST}"
+              if [ "${NEW_VALUE}" != "${CUR_VALUE}" ]; then
                 yq e -i ".data.\"${KEY}\" = \"${NEW_VALUE}\"" "${IMAGES_PATH}"
-                echo "retag-all: ${KEY} ${CUR_TAG} -> ${NEW_TAG}"
-              else
-                echo "WARN retag-all: PUT alias failed for ${KEY} (${CUR_TAG}) — keeping old pin"
+                echo "digest-pin: ${KEY} -> ${TAG}@${DIGEST}"
               fi
             else
-              echo "WARN retag-all: current manifest for ${KEY} (${CUR_TAG}) unreadable — old tag pruned? keeping old pin; heals on next rebuild of that step"
+              echo "WARN digest-pin: no digest resolvable for ${KEY} (${CUR_VALUE}) — keeping old pin; heals on next rebuild of that step"
             fi
           done
         else
-          echo "WARN retag-all: no registry auth mounted — skipped"
+          echo "WARN digest-pin: no registry auth mounted — skipped"
         fi
         # =====================================================================
 
