@@ -34,6 +34,13 @@ rules:
   - apiGroups: ["argoproj.io"]
     resources: ["workflows"]
     verbs: ["get", "list", "patch", "delete"]
+  # Argo v4 executor contract: the wait sidecar of the reaper's OWN pod
+  # reports via WorkflowTaskResults — without create the pod exits 64
+  # (same gap ci-build-sa hit in 0.12.18; observed live on the reaper's
+  # first pass 2026-08-20).
+  - apiGroups: ["argoproj.io"]
+    resources: ["workflowtaskresults"]
+    verbs: ["create", "patch"]
   - apiGroups: [""]
     resources: ["pods"]
     verbs: ["get", "list"]
