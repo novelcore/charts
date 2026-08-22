@@ -12,10 +12,15 @@ spec:
     secondsAfterCompletion: {{ .Values.workflow.ttlStrategy.secondsAfterCompletion }}
   podGC:
     strategy: {{ .Values.workflow.podGC.strategy }}
-  {{- with .Values.nodeSelector }}
+  # Workflow-level nodeSelector now follows the same per-submission CI pool
+  # as the build-push template's override below (PRD-962 F-09 stage 2:
+  # service CI moves off the shared kubecorecpu pool for every step, not
+  # just build-push). node_class's Helm-render-time default is unchanged, so
+  # a submission that omits it still resolves to today's fixed
+  # kubecorecpu selector — this is a behavior-preserving parameterization,
+  # not a scheduling change, until callers start passing node_class.
   nodeSelector:
-    {{- toYaml . | nindent 4 }}
-  {{- end }}
+    platform.kubecore.io/nodegroup-type: "{{`{{workflow.parameters.node_class}}`}}"
   {{- with .Values.tolerations }}
   tolerations:
     {{- toYaml . | nindent 4 }}
