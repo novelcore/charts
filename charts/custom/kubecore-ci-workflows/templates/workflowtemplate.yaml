@@ -68,6 +68,11 @@ spec:
     # registry_type zot keeps the htpasswd/API-key auth path.
     - name: image_repo
       value: ""
+    # Pull-side image path, matching the base Deployment's image name. The
+    # kustomize image key must equal that name exactly or the entry is inert
+    # and nothing deploys. Empty falls back to the older behaviour.
+    - name: deploy_image_repo
+      value: ""
     - name: registry_type
       value: "zot"
     # Per-submission CI node pool (PRD-962 F-09). Optional: a submitter that
@@ -393,10 +398,14 @@ spec:
         IMAGE_TAG="{{`{{inputs.parameters.image_tag}}`}}"
         REGISTRY="{{ .Values.registry.externalUrl }}"
         IMAGE_REPO="{{`{{workflow.parameters.image_repo}}`}}"
-        if [ -z "${IMAGE_REPO}" ]; then
-          IMAGE_REPO="${REGISTRY}/${PROJECT}/${APP_NAME}"
+        DEPLOY_IMAGE_REPO="{{`{{workflow.parameters.deploy_image_repo}}`}}"
+        if [ -n "${DEPLOY_IMAGE_REPO}" ]; then
+          FULL_IMAGE="${DEPLOY_IMAGE_REPO}"
+        elif [ -n "${IMAGE_REPO}" ]; then
+          FULL_IMAGE="${IMAGE_REPO}"
+        else
+          FULL_IMAGE="${REGISTRY}/${PROJECT}/${APP_NAME}"
         fi
-        FULL_IMAGE="${IMAGE_REPO}"
         OPS_REPO="${ORG}/${PROJECT}"
         APP_DIR="kubeapps/${PROJECT}-${APP_NAME}"
 
