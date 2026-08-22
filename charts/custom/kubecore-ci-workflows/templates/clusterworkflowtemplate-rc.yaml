@@ -57,6 +57,11 @@ spec:
     # registry_type zot keeps the htpasswd/API-key auth path.
     - name: image_repo
       value: ""
+    # Pull-side image path, matching the base Deployment's image name. The
+    # kustomize image key must equal that name exactly or the entry is inert
+    # and nothing deploys. Empty falls back to the older behaviour.
+    - name: deploy_image_repo
+      value: ""
     - name: registry_type
       value: "zot"
     # Per-submission CI node pool (PRD-962 F-09). Optional: a submitter that
@@ -394,12 +399,19 @@ spec:
         SEMANTIC_VERSION="{{`{{inputs.parameters.semantic_version}}`}}"
         REGISTRY="{{ .Values.registry.internalUrl }}"
         IMAGE_REPO="{{`{{workflow.parameters.image_repo}}`}}"
+        DEPLOY_IMAGE_REPO="{{`{{workflow.parameters.deploy_image_repo}}`}}"
 
-        # Same fallback as build-push, so the image reference dispatched here
-        # always matches what was actually pushed — a diverging derivation
-        # would report a destination kaniko never wrote to.
-        if [ -z "${IMAGE_REPO}" ]; then
-          IMAGE_REPO="${REGISTRY}/${PROJECT}/${APP_NAME}"
+        # deploy_image_repo takes priority: it is the pull-side path the
+        # staging overlay's kustomize key must match, which for Zot differs
+        # from the push-side image_repo/internalUrl construction below (the
+        # "same fallback as build-push" behaviour this template used to rely
+        # on unconditionally).
+        if [ -n "${DEPLOY_IMAGE_REPO}" ]; then
+          FULL_IMAGE="${DEPLOY_IMAGE_REPO}"
+        elif [ -n "${IMAGE_REPO}" ]; then
+          FULL_IMAGE="${IMAGE_REPO}"
+        else
+          FULL_IMAGE="${REGISTRY}/${PROJECT}/${APP_NAME}"
         fi
 
         curl -s -X POST \
@@ -410,10 +422,10 @@ spec:
             \"event_type\": \"staging-environment-update\",
             \"client_payload\": {
               \"version\": \"${IMAGE_TAG}\",
-              \"image\": \"${IMAGE_REPO}:${IMAGE_TAG}\",
+              \"image\": \"${FULL_IMAGE}:${IMAGE_TAG}\",
               \"app_name\": \"${APP_NAME}\",
               \"semantic_version\": \"v${SEMANTIC_VERSION}\",
-              \"plain_image_name\": \"${IMAGE_REPO}\"
+              \"plain_image_name\": \"${FULL_IMAGE}\"
             }
           }"
 

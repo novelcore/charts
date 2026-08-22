@@ -97,6 +97,11 @@ spec:
     # registry_type zot keeps the htpasswd/API-key auth path.
     - name: image_repo
       value: ""
+    # Pull-side image path, matching the base Deployment's image name. The
+    # kustomize image key must equal that name exactly or the entry is inert
+    # and nothing deploys. Empty falls back to the older behaviour.
+    - name: deploy_image_repo
+      value: ""
     - name: registry_type
       value: "zot"
     # Per-submission CI node pool (PRD-962 F-09), threaded into the ci-build
@@ -308,6 +313,8 @@ spec:
               value: "{{`{{workflow.parameters.build_context}}`}}"
             - name: image_repo
               value: "{{`{{workflow.parameters.image_repo}}`}}"
+            - name: deploy_image_repo
+              value: "{{`{{workflow.parameters.deploy_image_repo}}`}}"
             - name: registry_type
               value: "{{`{{workflow.parameters.registry_type}}`}}"
             - name: node_class
