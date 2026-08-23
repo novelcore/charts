@@ -19,8 +19,18 @@ spec:
   # a submission that omits it still resolves to today's fixed
   # kubecorecpu selector — this is a behavior-preserving parameterization,
   # not a scheduling change, until callers start passing node_class.
+  #
+  # kubecore-operator#1067: nodegroup-type alone is not project-scoping — the
+  # synthesised CI environment is named the literal string "ci" on EVERY
+  # project, so every project's CI pool carries the identical
+  # nodegroup-type=ci label and any of them satisfies this selector. Adding
+  # platform.kubecore.io/project (a label the node already carries, unique
+  # per project) closes that: a step can now only land on its OWN project's
+  # CI pool. project_name is a required workflow parameter on every service
+  # CI template (no fallback), so this key is never emitted empty.
   nodeSelector:
     platform.kubecore.io/nodegroup-type: "{{`{{workflow.parameters.node_class}}`}}"
+    platform.kubecore.io/project: "{{`{{workflow.parameters.project_name}}`}}"
   {{- with .Values.tolerations }}
   tolerations:
     {{- toYaml . | nindent 4 }}
@@ -244,8 +254,14 @@ spec:
     # of the shared cluster default. Tolerations are intentionally left to
     # the workflow-level fallback (.Values.tolerations) — the CI node group
     # carries the same taint key/value these already tolerate.
+    #
+    # kubecore-operator#1067: a template-level nodeSelector REPLACES the
+    # workflow-level one in Argo rather than merging with it, so the
+    # project key must be repeated here too — this is the step that
+    # actually runs the build and is the one that matters most.
     nodeSelector:
       platform.kubecore.io/nodegroup-type: "{{`{{workflow.parameters.node_class}}`}}"
+      platform.kubecore.io/project: "{{`{{workflow.parameters.project_name}}`}}"
     volumes:
     - name: kaniko-config
       emptyDir: {}

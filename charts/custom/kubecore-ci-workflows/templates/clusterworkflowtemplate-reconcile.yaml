@@ -67,8 +67,22 @@ spec:
   # not a scheduling change, until callers start passing node_class.
   # Tolerations are unchanged (.Values.tolerations): the CI pool is tainted,
   # so without these the reconciler's pods have nowhere to land.
+  #
+  # kubecore-operator#1067: nodegroup-type alone is not project-scoping — the
+  # synthesised CI environment is named the literal string "ci" on EVERY
+  # project, so every project's CI pool carries the identical
+  # nodegroup-type=ci label and any of them satisfies this selector. Adding
+  # platform.kubecore.io/project (a label the node already carries, unique
+  # per project) closes that. ci-reconcile has no build-push template of its
+  # own — its check-drift/submit-build pods now land on the project's own CI
+  # pool too, and the ci-build Workflow it submits already carries both
+  # node_class and project_name (see submit-build's manifest below), so the
+  # actual kaniko build it triggers is scoped by ci-build's own fix.
+  # project_name is a required workflow parameter here (no fallback), so
+  # this key is never emitted empty.
   nodeSelector:
     platform.kubecore.io/nodegroup-type: "{{`{{workflow.parameters.node_class}}`}}"
+    platform.kubecore.io/project: "{{`{{workflow.parameters.project_name}}`}}"
   {{- with .Values.tolerations }}
   tolerations:
     {{- toYaml . | nindent 4 }}
