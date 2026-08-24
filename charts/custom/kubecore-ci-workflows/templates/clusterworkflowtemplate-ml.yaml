@@ -1069,15 +1069,31 @@ spec:
             # so it can't run gcloud. Node scheduling for the gcloud pods themselves uses the
             # CI cpu class (they're short-lived, run on the system/CI pool, not an ML node).
             GCLOUD_SA = 'operate-workflow-sa'
-            # kubecore-operator#1024: ctx['ciCpuClass'] is never emitted by the
-            # k8smlapp composition (it writes computeClasses.{cpu,gpu}.name
-            # instead), so this ALWAYS fell through to the hardcoded name of
-            # a shared legacy pool being deleted. Fall back to
-            # node_class (the workflow parameter the operator already
-            # resolves from the project's own "ci" environment, PRD-962
-            # F-09) instead of a hardcoded shared-pool name, so these steps
-            # always target a pool that actually exists for this project.
-            CI_POOL = ctx.get('ciCpuClass', node_class)
+            # kubecore-operator#1024: this used to be
+            # ctx.get('ciCpuClass', <hardcoded legacy pool name>). That
+            # context key is NEVER written into pipeline-context.yaml —
+            # grepped the sole writer (k8smlapp composition's context.yaml
+            # block) and the whole monorepo: the only 'ciCpuClass' key
+            # anywhere is a POOL-level XClusterOperators param
+            # (resolveCICPUClass, kubepool/phases/syncing_operators.go)
+            # that feeds the chart's OWN ci.defaultNodeClass Helm value /
+            # node_class fallback — a different mechanism, never this ctx
+            # dict. So the ctx.get lookup could only ever return its
+            # default.
+            #
+            # The legacy key is deliberately NOT resurrected as a
+            # precedence layer over node_class: if pipeline-context ever
+            # did start emitting ciCpuClass, its value would be
+            # resolveCICPUClass's pool-level answer — the retired shared
+            # legacy pool (or its catalog-mode substitute), which carries
+            # no platform.kubecore.io/project label. Preferring it here
+            # would silently re-widen the nodeSelector to cross-project
+            # (kubecore-operator#1067) or, once that legacy pool is
+            # deleted, Unschedulable (kubecore-operator#451/#1024) —
+            # exactly the two failure modes this fix and #1067 exist to
+            # close. node_class is the only value these utility steps
+            # honour now.
+            CI_POOL = node_class
             # kubecore-operator#1067: nodegroup-type alone is not
             # project-scoping — the operator names every synthesised CI
             # environment the literal string "ci", so every project's CI
