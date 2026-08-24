@@ -119,12 +119,16 @@ spec:
       value: "main"
     - name: workflow_template_path
     # Per-submission CI node pool (PRD-962 F-09) for the static build-push
-    # template below. Optional: a submitter that omits it gets the
+    # template below, AND (kubecore-operator#1024) for the render-wft
+    # generator's CI_POOL further down — the create-nodegroups/
+    # destroy-nodegroups/validate-classes utility steps in the per-app
+    # rendered WFT. Optional: a submitter that omits it gets the
     # operator-resolved default, which itself falls back to today's single
     # workflow-level nodeSelector so behavior is unchanged until callers
-    # start passing this parameter. NOT the per-step compute class used by
-    # the render-wft generator further down (CI_POOL / "{step}-class") —
-    # that is a separate, per-step mechanism this PR does not touch.
+    # start passing this parameter. Distinct from the PER-STEP ML compute
+    # class ("{step}-class", e.g. cpu-standard/gpu-a100) that render-wft
+    # resolves separately per pipeline step — this parameter only targets
+    # the short-lived utility steps, never an ML workload step itself.
     - name: node_class
       value: {{ .Values.ci.defaultNodeClass | default (dig "platform.kubecore.io/nodegroup-type" "kubecorecpu" .Values.nodeSelector) | quote }}
 
@@ -759,6 +763,11 @@ spec:
         GITOPS_BRANCH="{{`{{workflow.parameters.gitops_branch}}`}}"
         APP_NAME="{{`{{workflow.parameters.app_name}}`}}"
         PROJECT_NAME="{{`{{workflow.parameters.project_name}}`}}"
+        # kubecore-operator#1024: the project's own CI node class, threaded
+        # into render_wft.py so CI_POOL (the create/destroy-nodegroups and
+        # validate-classes utility steps' nodeSelector) stops hardcoding the
+        # name of the deprecated shared CI pool.
+        NODE_CLASS="{{`{{workflow.parameters.node_class}}`}}"
         IMAGE_TAG="{{`{{inputs.parameters.image_tag}}`}}"
         BRANCH=$(echo "{{`{{workflow.parameters.branch}}`}}" | sed 's|^refs/heads/||')
 
@@ -822,6 +831,7 @@ spec:
         wft_out = os.environ['WFT_OUT']
         app_name = os.environ['APP_NAME']
         project_name = os.environ['PROJECT_NAME']
+        node_class = os.environ['NODE_CLASS']
         branch = os.environ.get('BRANCH', 'main')
 
         with open(kubeline_path) as f:
@@ -1059,8 +1069,26 @@ spec:
             # so it can't run gcloud. Node scheduling for the gcloud pods themselves uses the
             # CI cpu class (they're short-lived, run on the system/CI pool, not an ML node).
             GCLOUD_SA = 'operate-workflow-sa'
-            CI_POOL = ctx.get('ciCpuClass', 'kubecorecpu')
-            # The CI build pool (kubecorecpu) carries the taint
+            # kubecore-operator#1024: ctx['ciCpuClass'] is never emitted by the
+            # k8smlapp composition (it writes computeClasses.{cpu,gpu}.name
+            # instead), so this ALWAYS fell through to the hardcoded name of
+            # a shared legacy pool being deleted. Fall back to
+            # node_class (the workflow parameter the operator already
+            # resolves from the project's own "ci" environment, PRD-962
+            # F-09) instead of a hardcoded shared-pool name, so these steps
+            # always target a pool that actually exists for this project.
+            CI_POOL = ctx.get('ciCpuClass', node_class)
+            # kubecore-operator#1067: nodegroup-type alone is not
+            # project-scoping — the operator names every synthesised CI
+            # environment the literal string "ci", so every project's CI
+            # pool carries the identical nodegroup-type=<class> label and
+            # any tenant's pool satisfies this selector on its own (measured
+            # live: a throwaway project's builds ran on two other tenants'
+            # CI nodes). platform.kubecore.io/project (unique per project,
+            # already carried by the node) closes that for these utility
+            # steps too.
+            CI_POOL_PROJECT = project_name
+            # The CI build pool carries the taint
             # platform.kubecore.io/ml-workload=cpu:NoSchedule (gke.go builds it so).
             # The management pods that run there (validate-classes, create/destroy-
             # nodegroups) MUST tolerate it, or the autoscaler refuses to scale the
@@ -1366,7 +1394,8 @@ spec:
                 'metadata': {'labels': {'platform.kubecore.io/pipeline': pipeline_name,
                                         'platform.kubecore.io/nodepool-lifecycle': 'create'}},
                 'serviceAccountName': GCLOUD_SA,
-                'nodeSelector': {'platform.kubecore.io/nodegroup-type': CI_POOL},
+                'nodeSelector': {'platform.kubecore.io/nodegroup-type': CI_POOL,
+                                 'platform.kubecore.io/project': CI_POOL_PROJECT},
                 'tolerations': CI_POOL_TOLERATIONS,
                 'inputs': {'parameters': nodegroup_inputs},
                 'container': {
@@ -1397,7 +1426,8 @@ spec:
                 'metadata': {'labels': {'platform.kubecore.io/pipeline': pipeline_name,
                                         'platform.kubecore.io/nodepool-lifecycle': 'destroy'}},
                 'serviceAccountName': GCLOUD_SA,
-                'nodeSelector': {'platform.kubecore.io/nodegroup-type': CI_POOL},
+                'nodeSelector': {'platform.kubecore.io/nodegroup-type': CI_POOL,
+                                 'platform.kubecore.io/project': CI_POOL_PROJECT},
                 'tolerations': CI_POOL_TOLERATIONS,
                 'inputs': {'parameters': destroy_inputs},
                 'container': {
@@ -1430,7 +1460,8 @@ spec:
             templates.append({
                 'name': 'validate-classes',
                 'serviceAccountName': sa,
-                'nodeSelector': {'platform.kubecore.io/nodegroup-type': CI_POOL},
+                'nodeSelector': {'platform.kubecore.io/nodegroup-type': CI_POOL,
+                                 'platform.kubecore.io/project': CI_POOL_PROJECT},
                 'tolerations': CI_POOL_TOLERATIONS,
                 'inputs': {'parameters': guard_inputs},
                 'container': {
@@ -2313,7 +2344,7 @@ spec:
 
         KUBELINE_PATH="$KUBELINE_PATH" CONTEXT_PATH="$CONTEXT_PATH" WFT_OUT="$WFT_OUT" \
           APP_NAME="$APP_NAME" PROJECT_NAME="$PROJECT_NAME" BRANCH="$BRANCH" \
-          SRC_COMMIT_TIME="$SRC_COMMIT_TIME" \
+          SRC_COMMIT_TIME="$SRC_COMMIT_TIME" NODE_CLASS="$NODE_CLASS" \
           python3 /tmp/render_wft.py
 
         # ── Write .kubecore/dataset-config.yaml into the APP repo ─────────────
