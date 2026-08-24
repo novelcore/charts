@@ -44,10 +44,23 @@ spec:
   # SSD_TOTAL_GB quota (kubecore-operator#872: 4×40Gi idle at quota ceiling).
   volumeClaimGC:
     strategy: OnWorkflowCompletion
-  {{- with .Values.nodeSelector }}
+  # Workflow-level nodeSelector follows the same per-submission CI pool
+  # as build-push's override below (PRD-962 F-09 stage 2, ML). node_class's
+  # Helm-render-time default is unchanged, so a submission that omits it
+  # still resolves to today's fixed kubecorecpu selector — a
+  # behavior-preserving parameterization, not a scheduling change, until
+  # callers start passing node_class.
+  #
+  # kubecore-operator#1067: nodegroup-type alone is not project-scoping —
+  # the synthesised CI environment is named the literal string "ci" on
+  # EVERY project, so every project's CI pool carries the identical
+  # nodegroup-type=ci label and any of them satisfies this selector. Adding
+  # platform.kubecore.io/project (a label the node already carries, unique
+  # per project) closes that. project_name is a required workflow parameter
+  # on ml-ci-build (no fallback), so this key is never emitted empty.
   nodeSelector:
-    {{- toYaml . | nindent 4 }}
-  {{- end }}
+    platform.kubecore.io/nodegroup-type: "{{`{{workflow.parameters.node_class}}`}}"
+    platform.kubecore.io/project: "{{`{{workflow.parameters.project_name}}`}}"
   {{- with .Values.tolerations }}
   tolerations:
     {{- toYaml . | nindent 4 }}
@@ -542,9 +555,17 @@ spec:
     # the workflow-level fallback (.Values.tolerations) — the CI node group
     # carries the same taint key/value these already tolerate. This is
     # distinct from the per-step CI_POOL nodeSelector the render-wft
-    # generator builds further down for the per-app rendered WFT.
+    # generator builds further down for the per-app rendered WFT (a
+    # separate, per-step compute-class mechanism this change does not
+    # touch).
+    #
+    # kubecore-operator#1067: a template-level nodeSelector REPLACES the
+    # workflow-level one in Argo rather than merging with it, so the
+    # project key must be repeated here too — this is the step that
+    # actually runs the build and is the one that matters most.
     nodeSelector:
       platform.kubecore.io/nodegroup-type: "{{`{{workflow.parameters.node_class}}`}}"
+      platform.kubecore.io/project: "{{`{{workflow.parameters.project_name}}`}}"
     # Retry once on transient failures. The dominant historical failure
     # mode was GCE preemption mid-snapshot on the kubecorecpu pool (now
     # on-demand, see profiles.go). Keeping a single retry handles other
