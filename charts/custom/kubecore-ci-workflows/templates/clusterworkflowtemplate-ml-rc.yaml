@@ -27,10 +27,23 @@ spec:
     secondsAfterCompletion: {{ .Values.workflow.ttlStrategy.secondsAfterCompletion }}
   podGC:
     strategy: {{ .Values.workflow.podGC.strategy }}
-  {{- with .Values.nodeSelector }}
+  # Workflow-level nodeSelector follows the same per-submission CI pool
+  # as build-push's override below (PRD-962 F-09 stage 2, ML). node_class's
+  # Helm-render-time default is unchanged, so a submission that omits it
+  # still resolves to today's fixed kubecorecpu selector — a
+  # behavior-preserving parameterization, not a scheduling change, until
+  # callers start passing node_class.
+  #
+  # kubecore-operator#1067: nodegroup-type alone is not project-scoping —
+  # the synthesised CI environment is named the literal string "ci" on
+  # EVERY project, so every project's CI pool carries the identical
+  # nodegroup-type=ci label and any of them satisfies this selector. Adding
+  # platform.kubecore.io/project (a label the node already carries, unique
+  # per project) closes that. project_name is a required workflow parameter
+  # on ml-ci-rc-build (no fallback), so this key is never emitted empty.
   nodeSelector:
-    {{- toYaml . | nindent 4 }}
-  {{- end }}
+    platform.kubecore.io/nodegroup-type: "{{`{{workflow.parameters.node_class}}`}}"
+    platform.kubecore.io/project: "{{`{{workflow.parameters.project_name}}`}}"
   {{- with .Values.tolerations }}
   tolerations:
     {{- toYaml . | nindent 4 }}
