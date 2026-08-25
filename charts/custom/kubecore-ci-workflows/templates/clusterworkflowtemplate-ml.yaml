@@ -662,6 +662,20 @@ spec:
         STEP_PATH="{{`{{inputs.parameters.step_path}}`}}"
         IMAGE_TAG="{{`{{inputs.parameters.image_tag}}`}}"
 
+        # GAR auth (#1088): the mounted docker config carries only Zot creds;
+        # without a credHelpers entry kaniko sends UNAUTHENTICATED requests to
+        # *-docker.pkg.dev (live UNAUTHORIZED, apriloumpa 2026-08-25) even
+        # though ci-build-sa is WI-bound. Point the GAR host at kaniko's
+        # bundled gcr helper, which exchanges the metadata (WI) token.
+        case "$REGISTRY" in
+          *-docker.pkg.dev*)
+            GAR_HOST="${REGISTRY%%/*}"
+            mkdir -p /kaniko/.docker-gar
+            printf '{"credHelpers":{"%s":"gcr"}}' "$GAR_HOST" > /kaniko/.docker-gar/config.json
+            export DOCKER_CONFIG=/kaniko/.docker-gar
+            ;;
+        esac
+
         VERSIONED_IMAGE="${REGISTRY}/${IMAGE_REPO}:${STEP_NAME}-${IMAGE_TAG}"
         LATEST_IMAGE="${REGISTRY}/${IMAGE_REPO}:${STEP_NAME}-latest"
 
