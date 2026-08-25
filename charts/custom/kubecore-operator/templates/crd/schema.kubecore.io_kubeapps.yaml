@@ -907,8 +907,12 @@ spec:
                         type: object
                       state:
                         description: |-
-                          State is one of: Ready | Pending | BindingUnverified | BindingStale |
+                          State is one of: Ready | AwaitingCompile | Pending | BindingUnverified |
                           CapabilityMissing | Drifted | TargetAbsent | Error.
+
+                          AwaitingCompile (#1112) means the XConnection XR does not exist yet;
+                          Pending means it exists but has no Ready verdict. Only the latter blocks
+                          the KubeApp's health gate — see phases.connectionsBlockHealth.
                         type: string
                     required:
                       - environment
