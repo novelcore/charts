@@ -810,6 +810,32 @@ spec:
                   description: KubeOrgRef references the KubeOrg that provides AWS configuration and network
                   minLength: 1
                   type: string
+                observability:
+                  description: Observability configures the pool's observability stack.
+                  properties:
+                    resourceProfile:
+                      description: |-
+                        ResourceProfile selects the VMCluster sizing tier for vmstorage,
+                        vmselect and vminsert. Tiers are monotonic — small <= medium <= large on
+                        every component, enforced by
+                        compositions/apis/kubepool/observability/tests/test-resource-profile-ladder.sh.
+
+                        Defaults to "small" when unset, which is the sizing the entire fleet
+                        runs today. The default lives in the Go accessor
+                        (KubePoolResource.ObservabilityResourceProfile), NOT via a
+                        `+kubebuilder:default` marker on this field: CRD structural defaulting
+                        only fills a child field once its PARENT is present in the stored
+                        object, so defaulting this field would additionally require an
+                        object-level default on Observability above — the same
+                        load-bearing-default trap documented on KaosCloudConfig.Osr. Keeping
+                        the default in Go also avoids rewriting every stored KubePool on
+                        upgrade.
+                      enum:
+                        - small
+                        - medium
+                        - large
+                      type: string
+                  type: object
                 operators:
                   description: |-
                     Operators enables cluster-scoped operators (e.g. CloudNativePG). When set, the
