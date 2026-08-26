@@ -131,6 +131,10 @@ spec:
     # the short-lived utility steps, never an ML workload step itself.
     - name: node_class
       value: {{ .Values.ci.defaultNodeClass | default (dig "platform.kubecore.io/nodegroup-type" "kubecorecpu" .Values.nodeSelector) | quote }}
+    # pull request number when the run came from a PR ("" otherwise): the
+    # run report is then a PR comment instead of a commit comment.
+    - name: pr_number
+      value: ""
 
   templates:
   - name: ml-ci-build
@@ -3136,6 +3140,126 @@ spec:
         mountPath: /etc/github-token
         readOnly: true
 
+  # report — the human-readable run report on GitHub (#1126). Runs from EVERY
+  # pipeline's exit handler, success or failure, and upserts ONE marker
+  # comment: a PR comment when the run came from a pull request (pr_number),
+  # a commit comment on the built SHA otherwise (commit comments also appear
+  # in the PR timeline). Content: verdict, why (the failing step's message +
+  # the tail of its main-container log, read via the CI SA's pods/log grant
+  # in the project's ci namespace — pods are still present when the exit
+  # handler runs), every step with phase + duration, and the links: the Argo
+  # run, the commit, the Deployment environment. Complements the commit
+  # status (the check) and the Deployment (the rollup): together they are
+  # the full GitHub-native report — no GitHub Actions anywhere.
+  - name: report
+    inputs:
+      parameters:
+      - name: pipeline
+      - name: context
+      - name: environment
+        value: ""
+      - name: pr_number
+        value: ""
+    container:
+      image: alpine/kubectl:1.33.4
+      command: [sh, -c]
+      args:
+      - |
+        set +e
+        apk add --no-cache curl jq >/dev/null 2>&1
+        TOKEN=$(cat /etc/github-token/token)
+        REPO="{{`{{workflow.parameters.repo_url}}`}}"
+        OWNER_REPO=$(echo "$REPO" | sed 's|https://github.com/||' | sed 's|.git$||')
+        SHA="{{`{{workflow.parameters.commit_sha}}`}}"
+        WF="{{`{{workflow.name}}`}}"; NS="{{`{{workflow.namespace}}`}}"
+        PHASE="{{`{{workflow.status}}`}}"; DURATION="{{`{{workflow.duration}}`}}"
+        PIPELINE="{{`{{inputs.parameters.pipeline}}`}}"
+        CONTEXT="{{`{{inputs.parameters.context}}`}}"
+        ENVIRONMENT="{{`{{inputs.parameters.environment}}`}}"
+        PR="{{`{{inputs.parameters.pr_number}}`}}"
+        API="https://api.github.com/repos/${OWNER_REPO}"
+        AUTH="Authorization: token ${TOKEN}"
+        ACCEPT="Accept: application/vnd.github+json"
+        ARGO_BASE="{{ .Values.argo.uiBaseUrl }}"
+        RUN_URL=""; [ -n "${ARGO_BASE}" ] && RUN_URL="${ARGO_BASE}/workflows/${NS}/${WF}"
+        MARKER="<!-- kubecore-ci-report:${CONTEXT} -->"
+
+        # Argo hands the exit handler the failed nodes as JSON.
+        cat > /tmp/failures.json <<'FAILEOF'
+        {{`{{workflow.failures}}`}}
+        FAILEOF
+
+        # Step table from this run's pods (annotations carry the node name;
+        # skipped steps never got a pod and are listed as not run).
+        kubectl get pods -n "${NS}" -l "workflows.argoproj.io/workflow=${WF}" -o json > /tmp/pods.json 2>/dev/null || echo '{"items":[]}' > /tmp/pods.json
+        jq -r '
+          def dur: if .st and .ft then ((.ft|fromdateiso8601) - (.st|fromdateiso8601) | tostring) + "s" else "-" end;
+          [.items[] | {
+            name: (.metadata.annotations["workflows.argoproj.io/node-name"] // .metadata.name | split(".") | last | split("(") | first),
+            phase: (if (.status.containerStatuses // [] | map(select(.name=="main")) | .[0].state.terminated.exitCode // 0) != 0 then "Failed" elif .status.phase=="Succeeded" then "Succeeded" else .status.phase end),
+            exit: ((.status.containerStatuses // [] | map(select(.name=="main")) | .[0].state.terminated.exitCode) // "-"),
+            pod: .metadata.name,
+            st: .status.startTime, ft: ((.status.containerStatuses // [] | map(select(.name=="main")) | .[0].state.terminated.finishedAt) // null)
+          }] | sort_by(.st) | .[] | "| \(.phase|if .=="Succeeded" then "✅" elif .=="Failed" then "❌" else "⏳" end) `\(.name)` | \(.phase) | \(dur) |"
+        ' /tmp/pods.json > /tmp/steps.md 2>/dev/null
+
+        # Why: for every failed pod, the tail of its main log.
+        : > /tmp/why.md
+        jq -r '.items[] | select(((.status.containerStatuses // []) | map(select(.name=="main")) | .[0].state.terminated.exitCode // 0) != 0) | .metadata.name + " " + (.metadata.annotations["workflows.argoproj.io/node-name"] // .metadata.name)' /tmp/pods.json | while read -r POD NODE; do
+          STEP=$(echo "$NODE" | awk -F. '{print $NF}')
+          MSG=$(jq -r --arg p "$POD" '.[]? | select(.podName==$p) | .message' /tmp/failures.json 2>/dev/null | head -1)
+          echo "" >> /tmp/why.md
+          echo "**Step \`${STEP}\` failed**${MSG:+ — ${MSG}}. Last lines of its log:" >> /tmp/why.md
+          echo "" >> /tmp/why.md
+          echo '```' >> /tmp/why.md
+          kubectl logs -n "${NS}" "${POD}" -c main --tail=60 2>/dev/null | grep -v "^time=.*argo=true" | tail -60 | cut -c1-400 >> /tmp/why.md
+          echo '```' >> /tmp/why.md
+        done
+        if [ "${PHASE}" != "Succeeded" ] && [ ! -s /tmp/why.md ]; then
+          echo "" >> /tmp/why.md
+          echo "The run ended **${PHASE}** without a failed step pod — usually an executor / scheduling error. Argo's failure list:" >> /tmp/why.md
+          echo '```' >> /tmp/why.md; jq -r '.[]? | "\(.displayName): \(.message)"' /tmp/failures.json 2>/dev/null | head -20 >> /tmp/why.md; echo '```' >> /tmp/why.md
+        fi
+
+        if [ "${PHASE}" = "Succeeded" ]; then VERDICT="✅ **${PIPELINE} succeeded**"; else VERDICT="❌ **${PIPELINE} ${PHASE}**"; fi
+        LINKS="- Argo run: ${RUN_URL:-${WF} in namespace ${NS}}"$'\n'"- Commit: https://github.com/${OWNER_REPO}/commit/${SHA}"$'\n'"- Check: \`${CONTEXT}\`"
+        [ -n "${ENVIRONMENT}" ] && LINKS="${LINKS}"$'\n'"- Deployment: https://github.com/${OWNER_REPO}/deployments/${ENVIRONMENT} (environment \`${ENVIRONMENT}\`)"
+        {
+          echo "${MARKER}"
+          echo "### ${VERDICT}"
+          echo ""
+          echo "Ran in-cluster on Argo Workflows (\`${NS}/${WF}\`, ${DURATION}); reported back through this comment, the \`${CONTEXT}\` commit status and${ENVIRONMENT:+ the \`${ENVIRONMENT}\` Deployment and} the links below. No GitHub Actions."
+          echo ""
+          if [ "${PHASE}" != "Succeeded" ]; then echo "#### Why it failed"; cat /tmp/why.md; echo ""; fi
+          echo "#### Steps"
+          echo ""
+          echo "| step | result | duration |"
+          echo "|---|---|---|"
+          cat /tmp/steps.md
+          echo ""
+          echo "#### Links"
+          echo "${LINKS}"
+        } > /tmp/body.md
+        jq -Rs '{body: .}' /tmp/body.md > /tmp/payload.json
+
+        # Upsert: one comment per (context, target) — PR comment when the run
+        # came from a PR, commit comment otherwise.
+        if [ -n "${PR}" ]; then
+          LIST="${API}/issues/${PR}/comments?per_page=100"; CREATE="${API}/issues/${PR}/comments"; EDIT="${API}/issues/comments"
+        else
+          LIST="${API}/commits/${SHA}/comments?per_page=100"; CREATE="${API}/commits/${SHA}/comments"; EDIT="${API}/comments"
+        fi
+        CID=$(curl -s -H "${AUTH}" -H "${ACCEPT}" "${LIST}" | jq -r --arg m "${MARKER}" '[.[]? | select(.body | startswith($m))] | .[0].id // empty')
+        if [ -n "${CID}" ]; then
+          curl -s -X PATCH -H "${AUTH}" -H "${ACCEPT}" "${EDIT}/${CID}" -d @/tmp/payload.json > /dev/null && echo "Updated report comment ${CID}"
+        else
+          curl -s -X POST -H "${AUTH}" -H "${ACCEPT}" "${CREATE}" -d @/tmp/payload.json > /dev/null && echo "Posted report comment (${PR:+PR #${PR}}${PR:-commit ${SHA}})"
+        fi
+      volumeMounts:
+      - name: github-token
+        mountPath: /etc/github-token
+        readOnly: true
+
   - name: exit-handler
     steps:
     - - name: post-failure-status
@@ -3149,3 +3273,15 @@ spec:
         # != Succeeded: an Error (executor/infra) must surface on GitHub too,
         # not only a Failed step — a silent pending is the #459 failure mode.
         when: "{{`{{workflow.status}}`}} != Succeeded"
+    - - name: run-report
+        template: report
+        arguments:
+          parameters:
+          - name: pipeline
+            value: "ML build"
+          - name: context
+            value: "kubecore-ml-ci"
+          - name: environment
+            value: "ml-ci"
+          - name: pr_number
+            value: "{{`{{workflow.parameters.pr_number}}`}}"
