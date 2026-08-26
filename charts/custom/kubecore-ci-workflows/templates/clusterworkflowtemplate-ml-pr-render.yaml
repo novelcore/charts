@@ -1,0 +1,324 @@
+{{/*
+ml-ci-pr-render — in-cluster PR gate for Hera ML apps (kubecore-operator#1126).
+
+The platform runs NO GitHub Actions. Every check runs as an Argo Workflow on
+the workload cluster and reports back to GitHub through commit statuses (and,
+for builds, GitHub Deployments). This ClusterWorkflowTemplate replaces the
+`.github/workflows/pr-render.yml` job the ML templates used to ship: it is
+submitted by the per-KubeApp pull_request WorkflowEventBinding (k8smlapp
+composition) on every PR opened/updated against the app's dev branch and
+answers with ONE commit status, context `wft-render`, on the PR head SHA:
+
+  pending  → "Rendering WorkflowTemplate in Argo Workflows"   (before any work)
+  success  → "WorkflowTemplate rendered: N steps, M form params"
+  failure  → "WorkflowTemplate render FAILED — open the Argo run for the error"
+
+target_url is the Argo UI run, so the developer reads the render error (or
+the rendered DAG) where the platform produced it — never in a GitHub job.
+
+Flow (mirrors the merge build's render path, minus the gitops commit):
+  status(pending) → clone → detect-frontend → hera-render (tokenless)
+                  → hera-enhance-gate (token-holding, platform code only)
+                  → status(success)
+
+clone and hera-render are the SAME templates ml-ci-build runs on merge
+(templateRef, clusterScope) — a PR is validated exactly the way the merge
+build will render it, from the real pipeline-context.yaml in the gitops repo,
+not a placeholder context. hera-enhance-gate = hera-enhance-commit's
+enhance + release-hygiene gate + the step↔folder check (a declared step with
+no steps/<dir>/Dockerfile would ImagePullBackOff at run time, long after
+merge) — and then STOPS. Nothing is written anywhere.
+
+kubeline-frontend apps have no PR-time render (render-wft runs on merge);
+they get a success status saying so, so the check never blocks them.
+
+Required secrets in the workflow namespace:
+  - {{ .Values.github.tokenSecretName }}  (GitHub App installation token —
+    contents:read for the clone, statuses:write for the commit status)
+*/}}
+apiVersion: argoproj.io/v1alpha1
+kind: ClusterWorkflowTemplate
+metadata:
+  name: ml-ci-pr-render
+  labels:
+    {{- include "kubecore-ci-workflows.labels" . | nindent 4 }}
+spec:
+  serviceAccountName: {{ include "kubecore-ci-workflows.serviceAccountName" . }}
+  entrypoint: ml-ci-pr-render
+  onExit: exit-handler
+  ttlStrategy:
+    secondsAfterCompletion: {{ .Values.workflow.ttlStrategy.secondsAfterCompletion }}
+  podGC:
+    strategy: {{ .Values.workflow.podGC.strategy }}
+  volumeClaimGC:
+    strategy: OnWorkflowCompletion
+  # Same per-project CI pool selection as ml-ci-build (kubecore-operator#1067:
+  # nodegroup-type alone is not project-scoping; project_name is required).
+  nodeSelector:
+    platform.kubecore.io/nodegroup-type: "{{`{{workflow.parameters.node_class}}`}}"
+    platform.kubecore.io/project: "{{`{{workflow.parameters.project_name}}`}}"
+  {{- with .Values.tolerations }}
+  tolerations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  volumeClaimTemplates:
+  - metadata:
+      name: workspace
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      resources:
+        requests:
+          storage: {{ .Values.workspace.size | default "5Gi" }}
+      {{- with .Values.workspace.storageClassName }}
+      storageClassName: {{ . }}
+      {{- end }}
+  volumes:
+  - name: github-token
+    secret:
+      secretName: {{ .Values.github.tokenSecretName }}
+  arguments:
+    parameters:
+    # repo_url / commit_sha / branch are read by ml-ci-build's clone template
+    # (templateRef below) under these exact names: the PR HEAD repo clone URL
+    # (so a fork PR clones the fork), the PR head SHA, and the PR head ref.
+    - name: repo_url
+    - name: commit_sha
+    - name: branch
+    - name: app_name
+    - name: project_name
+    # gitops repo/branch holding {basePath}/{app}/{branch}/pipeline-context.yaml
+    # — the REAL platform context the enhancer needs (endpoints, secrets
+    # names, compute classes). Same values the merge build receives.
+    - name: gitops_repository
+    - name: gitops_branch
+      value: "main"
+    - name: node_class
+      value: {{ .Values.ci.defaultNodeClass | default (dig "platform.kubecore.io/nodegroup-type" "kubecorecpu" .Values.nodeSelector) | quote }}
+
+  templates:
+  - name: ml-ci-pr-render
+    steps:
+    - - name: status-pending
+        template: status
+        arguments:
+          parameters:
+          - name: state
+            value: "pending"
+          - name: description
+            value: "Rendering WorkflowTemplate in Argo Workflows"
+    - - name: clone
+        templateRef:
+          name: ml-ci-build
+          template: clone
+          clusterScope: true
+    - - name: detect-frontend
+        template: detect-frontend
+    - - name: hera-render
+        templateRef:
+          name: ml-ci-build
+          template: hera-render
+          clusterScope: true
+        when: "{{`{{steps.detect-frontend.outputs.parameters.frontend}}`}} == hera"
+    - - name: hera-enhance-gate
+        template: hera-enhance-gate
+        when: "{{`{{steps.detect-frontend.outputs.parameters.frontend}}`}} == hera"
+    # The success description is read from /workspace/summary (written by
+    # detect-frontend for kubeline apps, overwritten by hera-enhance-gate
+    # for Hera apps) rather than a step output: a skipped step has no
+    # outputs, and a steps.x.outputs reference to one fails the
+    # workflow at substitution time.
+    - - name: status-success
+        template: status
+        arguments:
+          parameters:
+          - name: state
+            value: "success"
+          - name: description
+            value: "@/workspace/summary"
+
+  # Surfaces the frontend marker clone wrote (hera|kubeline) as a step output
+  # so the entrypoint can route: only Hera apps have a PR-time render. Seeds
+  # the kubeline success description; hera-enhance-gate overwrites it.
+  - name: detect-frontend
+    outputs:
+      parameters:
+      - name: frontend
+        valueFrom:
+          path: /workspace/frontend
+    container:
+      image: alpine:3.20
+      command: [sh, -c]
+      args:
+      - |
+        set -e
+        echo "frontend=$(cat /workspace/frontend)"
+        printf '%s' "kubeline frontend: WorkflowTemplate is rendered on merge (render-wft)" > /workspace/summary
+      volumeMounts:
+      - name: workspace
+        mountPath: /workspace
+
+  # TOKEN-HOLDING, platform code only (same trust boundary as
+  # hera-enhance-commit): the developer's pipeline.py already ran tokenless in
+  # hera-render; this step only runs the vendored platform enhancer on the raw
+  # WFT it produced, then gates. It never writes to any repo.
+  - name: hera-enhance-gate
+    securityContext:
+      runAsUser: 0
+      runAsGroup: 0
+    container:
+      image: python:3.12-slim
+      command: [sh, -c]
+      securityContext:
+        runAsUser: 0
+        runAsGroup: 0
+      args:
+      - |
+        set -e
+        apt-get update -qq >/dev/null 2>&1 && apt-get install -y -qq git >/dev/null 2>&1
+        pip install --quiet pyyaml
+
+        TOKEN=$(cat /etc/github-token/token)
+        ORG="{{ .Values.github.org }}"
+        GITOPS_REPO="{{`{{workflow.parameters.gitops_repository}}`}}"
+        GITOPS_BRANCH="{{`{{workflow.parameters.gitops_branch}}`}}"
+        APP_NAME="{{`{{workflow.parameters.app_name}}`}}"
+
+        # Real platform context: the app's pipeline-context.yaml (+ optional
+        # dataset-catalog.yaml) from the gitops repo — identical discovery to
+        # hera-enhance-commit so a PR renders exactly as the merge build will.
+        REPO_URL="https://x-access-token:${TOKEN}@github.com/${ORG}/${GITOPS_REPO}.git"
+        git clone --quiet --depth=1 --branch "${GITOPS_BRANCH}" "${REPO_URL}" /tmp/gitops
+        CONTEXT_PATH=$(find /tmp/gitops -path "*/${APP_NAME}/${GITOPS_BRANCH}/pipeline-context.yaml" | head -1)
+        if [ -z "$CONTEXT_PATH" ] || [ ! -f "$CONTEXT_PATH" ]; then
+          echo "ERROR: pipeline-context.yaml not found under */${APP_NAME}/${GITOPS_BRANCH}/ in ${ORG}/${GITOPS_REPO}@${GITOPS_BRANCH}"
+          echo "       (the KubeApp seeds it at creation — is the app still reconciling?)"
+          exit 1
+        fi
+        GITOPS_DIR=$(dirname "$CONTEXT_PATH")
+        python3 - "$CONTEXT_PATH" > /tmp/context.yaml <<'CTXEOF'
+        import sys, yaml
+        doc = yaml.safe_load(open(sys.argv[1]))
+        if isinstance(doc, dict) and doc.get("kind") == "ConfigMap":
+            key = "context.yaml" if "context.yaml" in doc["data"] else next(iter(doc["data"]))
+            sys.stdout.write(doc["data"][key])
+        else:
+            yaml.safe_dump(doc, sys.stdout, sort_keys=False)
+        CTXEOF
+        CATALOG_ARG=""
+        if [ -f "${GITOPS_DIR}/dataset-catalog.yaml" ]; then
+          CATALOG_ARG="--catalog ${GITOPS_DIR}/dataset-catalog.yaml"
+        fi
+
+        # ENHANCE (platform code on a data file — no developer code executes here).
+        pip install --quiet -e /workspace/repo 2>/dev/null || pip install --quiet hydra-core omegaconf
+        PYTHONPATH="/workspace/repo" python3 -m kubecore.enhance \
+          --raw /workspace/out/raw-workflow-template.yaml \
+          --context /tmp/context.yaml \
+          $CATALOG_ARG \
+          --output /workspace/out/workflow-template.yaml
+
+        # GATE 1: release hygiene — the same checks the merge build enforces
+        # before it commits (duplicate form params, @script templates).
+        # GATE 2: step ↔ folder — every container step must be buildable
+        # (steps/<dir>/Dockerfile, dir = step name with '-' → '_') unless it
+        # carries the platform.kubecore.io/image verbatim-image annotation.
+        # Writes the success description for the commit status.
+        cd /workspace/repo
+        python3 - /workspace/out/workflow-template.yaml <<'GATEEOF'
+        import sys, yaml
+        from pathlib import Path
+        wft = yaml.safe_load(open(sys.argv[1]))
+        spec = wft["spec"]
+        params = spec.get("arguments", {}).get("parameters", [])
+        names = [p["name"] for p in params]
+        dupes = {n for n in names if names.count(n) > 1}
+        if dupes:
+            sys.exit(f"GATE FAIL: duplicate submit-form parameters: {sorted(dupes)}")
+        for t in spec["templates"]:
+            if "script" in t:
+                sys.exit(f"GATE FAIL: template '{t['name']}' is a @script template "
+                         f"(bypasses the image supply chain — not allowed on the production tier)")
+        steps = [t for t in spec["templates"] if "container" in t]
+        missing = []
+        for t in steps:
+            if "platform.kubecore.io/image" in t.get("metadata", {}).get("annotations", {}):
+                continue
+            dockerfile = Path("steps") / t["name"].replace("-", "_") / "Dockerfile"
+            if not dockerfile.is_file():
+                missing.append((t["name"], str(dockerfile)))
+        if missing:
+            print("GATE FAIL: steps declared in pipeline.py with no buildable image "
+                  "(they would ImagePullBackOff at run time):")
+            for name, path in missing:
+                print(f"  - step '{name}': expected {path} (not found)")
+            print("Fix: add steps/<dir>/Dockerfile for the step (dir = step name, hyphens -> underscores), "
+                  "or set the platform.kubecore.io/image annotation for a verbatim utility image.")
+            sys.exit(1)
+        print(f"GATE OK: {len(steps)} container steps, {len(names)} form params")
+        print("steps: " + " -> ".join(t["name"] for t in steps))
+        Path("/workspace/summary").write_text(
+            f"WorkflowTemplate rendered: {len(steps)} steps, {len(names)} form params")
+        GATEEOF
+      volumeMounts:
+      - name: workspace
+        mountPath: /workspace
+      - name: github-token
+        mountPath: /etc/github-token
+        readOnly: true
+
+  # ONE commit status (context wft-render) on the PR head SHA, target_url =
+  # this Argo run. Best-effort against the GitHub API (curl without -f): a
+  # status write must never be what fails the gate.
+  - name: status
+    inputs:
+      parameters:
+      - name: state
+      - name: description
+    container:
+      image: alpine/curl
+      command: [sh, -c]
+      args:
+      - |
+        set -e
+        TOKEN=$(cat /etc/github-token/token)
+        REPO="{{`{{workflow.parameters.repo_url}}`}}"
+        OWNER_REPO=$(echo "$REPO" | sed 's|https://github.com/||' | sed 's|.git$||')
+        SHA="{{`{{workflow.parameters.commit_sha}}`}}"
+        STATE="{{`{{inputs.parameters.state}}`}}"
+        DESC="{{`{{inputs.parameters.description}}`}}"
+        # "@<path>" reads the description from the shared workspace (see the
+        # entrypoint's status-success step). GitHub caps description at 140.
+        case "${DESC}" in @*) DESC=$(cat "${DESC#@}") ;; esac
+        DESC=$(printf '%s' "${DESC}" | cut -c1-140)
+        API="https://api.github.com/repos/${OWNER_REPO}"
+        ARGO_BASE="{{ .Values.argo.uiBaseUrl }}"
+        RUN_URL=""
+        if [ -n "${ARGO_BASE}" ]; then
+          RUN_URL="${ARGO_BASE}/workflows/{{`{{workflow.namespace}}`}}/{{`{{workflow.name}}`}}"
+        fi
+        if [ -n "${RUN_URL}" ]; then
+          PAYLOAD="{\"state\":\"${STATE}\",\"description\":\"${DESC}\",\"context\":\"wft-render\",\"target_url\":\"${RUN_URL}\"}"
+        else
+          PAYLOAD="{\"state\":\"${STATE}\",\"description\":\"${DESC}\",\"context\":\"wft-render\"}"
+        fi
+        curl -s -X POST -H "Authorization: token ${TOKEN}" -H "Accept: application/vnd.github+json" \
+          "${API}/statuses/${SHA}" -d "${PAYLOAD}" > /dev/null
+        echo "Posted commit status wft-render=${STATE} on ${OWNER_REPO}@${SHA}"
+      volumeMounts:
+      - name: workspace
+        mountPath: /workspace
+      - name: github-token
+        mountPath: /etc/github-token
+        readOnly: true
+
+  - name: exit-handler
+    steps:
+    - - name: post-failure-status
+        template: status
+        arguments:
+          parameters:
+          - name: state
+            value: "failure"
+          - name: description
+            value: "WorkflowTemplate render FAILED — open the Argo run for the error"
+        when: "{{`{{workflow.status}}`}} != Succeeded"
