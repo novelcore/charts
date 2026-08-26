@@ -219,13 +219,20 @@ spec:
 
         # GATE 1: release hygiene — the same checks the merge build enforces
         # before it commits (duplicate form params, @script templates).
-        # GATE 2: step ↔ folder — every container step must be buildable
-        # (steps/<dir>/Dockerfile, dir = step name with '-' → '_') unless it
-        # carries the platform.kubecore.io/image verbatim-image annotation.
+        # GATE 2: step ↔ folder — every step the enhancer wired to a
+        # platform-built image (container.image is the
+        # workflow.parameters.image-<step> moustache, kubecore/enhance.py) must
+        # have steps/<dir>/Dockerfile (dir = step name with '-' → '_').
+        # Steps with a verbatim image are NOT checked: the
+        # platform.kubecore.io/image escape hatch, and platform-injected
+        # templates such as meluxina-run (HPC-ready pools; python:3.12-alpine)
+        # — the first live run of this gate (#1126 e2e) failed on exactly
+        # that, because the retired GitHub job rendered with a placeholder
+        # context that never produced an HPC step.
         # Writes the success description for the commit status.
         cd /workspace/repo
         python3 - /workspace/out/workflow-template.yaml <<'GATEEOF'
-        import sys, yaml
+        import re, sys, yaml
         from pathlib import Path
         wft = yaml.safe_load(open(sys.argv[1]))
         spec = wft["spec"]
@@ -241,9 +248,11 @@ spec:
         steps = [t for t in spec["templates"] if "container" in t]
         missing = []
         for t in steps:
-            if "platform.kubecore.io/image" in t.get("metadata", {}).get("annotations", {}):
-                continue
-            dockerfile = Path("steps") / t["name"].replace("-", "_") / "Dockerfile"
+            # regex split in two so the Helm renderer never sees a double brace
+            ref = re.fullmatch(r"\{" + r"\{workflow\.parameters\.image-(.+)\}" + r"\}", str(t["container"].get("image", "")))
+            if ref is None:
+                continue  # verbatim image (escape hatch or platform-injected step): nothing to build
+            dockerfile = Path("steps") / ref.group(1).replace("-", "_") / "Dockerfile"
             if not dockerfile.is_file():
                 missing.append((t["name"], str(dockerfile)))
         if missing:
