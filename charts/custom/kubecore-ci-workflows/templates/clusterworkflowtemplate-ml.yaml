@@ -3046,17 +3046,26 @@ spec:
         readOnly: true
 
   - name: status
-    # GitHub reporting for the AUTHORITATIVE in-cluster build. Replaces the
-    # GH-Actions-side duplicate build as the source of merge health: a commit
-    # status (context kubecore-ml-ci) with target_url into the Argo UI run,
-    # plus a Deployment rollup (environment ml-ci) whose log/environment URL
-    # is the same run. pending creates the Deployment; success/failure resolve
-    # the Deployment created for this SHA. Best-effort against the GitHub API:
-    # curl without -f never fails the build over a status write.
+    # GitHub reporting for the AUTHORITATIVE in-cluster build (#1126): ONE
+    # commit status (context kubecore-ml-ci by default) with target_url into
+    # the Argo UI run, plus a Deployment rollup (environment ml-ci by default)
+    # whose log/environment URL is the same run. pending creates the
+    # Deployment; success/failure resolve the Deployment created for this SHA.
+    # Best-effort against the GitHub API: curl without -f never fails the
+    # build over a status write. Shared by ml-ci-rc-build via templateRef
+    # with context kubecore-ml-ci/rc + environment ml-rc.
     inputs:
       parameters:
       - name: state
       - name: description
+      # context = the commit-status check name; environment = the GitHub
+      # Deployment environment this pipeline rolls up into ("" = no
+      # Deployment, statuses only). Defaults are this pipeline's own; RC
+      # variants override both via templateRef.
+      - name: context
+        value: "kubecore-ml-ci"
+      - name: environment
+        value: "ml-ci"
     container:
       image: alpine/curl
       command: [sh, -c]
@@ -3068,7 +3077,9 @@ spec:
         OWNER_REPO=$(echo "$REPO" | sed 's|https://github.com/||' | sed 's|.git$||')
         SHA="{{`{{workflow.parameters.commit_sha}}`}}"
         STATE="{{`{{inputs.parameters.state}}`}}"
-        DESC="{{`{{inputs.parameters.description}}`}}"
+        DESC=$(printf '%s' "{{`{{inputs.parameters.description}}`}}" | cut -c1-140)
+        CONTEXT="{{`{{inputs.parameters.context}}`}}"
+        ENVIRONMENT="{{`{{inputs.parameters.environment}}`}}"
         API="https://api.github.com/repos/${OWNER_REPO}"
         AUTH="Authorization: token ${TOKEN}"
         ACCEPT="Accept: application/vnd.github+json"
@@ -3078,37 +3089,34 @@ spec:
           RUN_URL="${ARGO_BASE}/workflows/{{`{{workflow.namespace}}`}}/{{`{{workflow.name}}`}}"
         fi
 
+        # 1) commit status — the check on the commit / PR, linking to the run.
         if [ -n "${RUN_URL}" ]; then
-          PAYLOAD="{\"state\":\"${STATE}\",\"description\":\"${DESC}\",\"context\":\"kubecore-ml-ci\",\"target_url\":\"${RUN_URL}\"}"
+          PAYLOAD="{\"state\":\"${STATE}\",\"description\":\"${DESC}\",\"context\":\"${CONTEXT}\",\"target_url\":\"${RUN_URL}\"}"
         else
-          PAYLOAD="{\"state\":\"${STATE}\",\"description\":\"${DESC}\",\"context\":\"kubecore-ml-ci\"}"
+          PAYLOAD="{\"state\":\"${STATE}\",\"description\":\"${DESC}\",\"context\":\"${CONTEXT}\"}"
         fi
-        curl -s -X POST -H "${AUTH}" -H "${ACCEPT}" \
-          "${API}/statuses/${SHA}" -d "${PAYLOAD}" > /dev/null
-        echo "Posted commit status: ${STATE}"
+        curl -s -X POST -H "${AUTH}" -H "${ACCEPT}" "${API}/statuses/${SHA}" -d "${PAYLOAD}" > /dev/null
+        echo "Posted commit status ${CONTEXT}=${STATE} on ${OWNER_REPO}@${SHA}"
 
-        # Deployment rollup. required_contexts:[] is load-bearing: THIS build
-        # is what the commit statuses describe — defaulting would deadlock the
-        # Deployment on the very check this workflow is still running.
-        # jq for JSON parsing (the id extraction must not depend on GitHub's
-        # response formatting — compact vs pretty-printed both occur). Same
-        # runtime-apk pattern patch-images already uses for git. If the
-        # install fails we skip the Deployment rollup but keep the commit
-        # statuses (which need no response parsing).
+        # 2) Deployment rollup (environment = this pipeline). Created on pending
+        # with required_contexts:[] — THIS run is what the commit statuses
+        # describe; defaulting would deadlock the Deployment on its own check.
+        # Resolved on success/failure against the Deployment created for this
+        # SHA + environment. jq for response parsing (compact vs pretty JSON
+        # both occur); if jq cannot be installed the statuses still stand.
+        [ -n "${ENVIRONMENT}" ] || exit 0
         apk add --no-cache jq >/dev/null 2>&1 || true
         if ! command -v jq >/dev/null; then
           echo "WARN: jq unavailable — commit status posted, deployment rollup skipped"
           exit 0
         fi
         if [ "${STATE}" = "pending" ]; then
-          DEP_ID=$(curl -s -X POST -H "${AUTH}" -H "${ACCEPT}" \
-            "${API}/deployments" \
-            -d "{\"ref\":\"${SHA}\",\"environment\":\"ml-ci\",\"auto_merge\":false,\"required_contexts\":[],\"description\":\"ml-ci-build {{`{{workflow.name}}`}}\"}" \
+          DEP_ID=$(curl -s -X POST -H "${AUTH}" -H "${ACCEPT}" "${API}/deployments" \
+            -d "{\"ref\":\"${SHA}\",\"environment\":\"${ENVIRONMENT}\",\"auto_merge\":false,\"required_contexts\":[],\"transient_environment\":true,\"description\":\"{{`{{workflow.name}}`}}\"}" \
             | jq -r 'if type == "object" then (.id // empty) else empty end' 2>/dev/null || true)
           DEP_STATE="in_progress"
         else
-          DEP_ID=$(curl -s -H "${AUTH}" -H "${ACCEPT}" \
-            "${API}/deployments?sha=${SHA}&environment=ml-ci&per_page=1" \
+          DEP_ID=$(curl -s -H "${AUTH}" -H "${ACCEPT}" "${API}/deployments?sha=${SHA}&environment=${ENVIRONMENT}&per_page=1" \
             | jq -r 'if type == "array" then (.[0].id // empty) else empty end' 2>/dev/null || true)
           DEP_STATE="${STATE}"
         fi
@@ -3118,11 +3126,10 @@ spec:
           else
             DPAYLOAD="{\"state\":\"${DEP_STATE}\",\"description\":\"${DESC}\"}"
           fi
-          curl -s -X POST -H "${AUTH}" -H "${ACCEPT}" \
-            "${API}/deployments/${DEP_ID}/statuses" -d "${DPAYLOAD}" > /dev/null
-          echo "Posted deployment ${DEP_ID} status: ${DEP_STATE}"
+          curl -s -X POST -H "${AUTH}" -H "${ACCEPT}" "${API}/deployments/${DEP_ID}/statuses" -d "${DPAYLOAD}" > /dev/null
+          echo "Posted deployment ${ENVIRONMENT}#${DEP_ID} status: ${DEP_STATE}"
         else
-          echo "WARN: no ml-ci Deployment resolved for ${SHA} — skipped deployment status"
+          echo "WARN: no ${ENVIRONMENT} Deployment resolved for ${SHA} — skipped deployment status"
         fi
       volumeMounts:
       - name: github-token
@@ -3138,5 +3145,7 @@ spec:
           - name: state
             value: "failure"
           - name: description
-            value: "ML build failed"
-        when: "{{`{{workflow.status}}`}} == Failed"
+            value: "ML build failed — open the Argo run for the error"
+        # != Succeeded: an Error (executor/infra) must surface on GitHub too,
+        # not only a Failed step — a silent pending is the #459 failure mode.
+        when: "{{`{{workflow.status}}`}} != Succeeded"
