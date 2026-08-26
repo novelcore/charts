@@ -150,6 +150,12 @@ spec:
                                     MLClasses is the list of CPU and GPU classes the cluster exposes.
                                     The operator provisions one NodePool per class; idle classes scale
                                     to zero nodes.
+
+                                    DEPRECATED (PRD-1124): pool-level ML compute is superseded by each ml
+                                    environment's declared flavours (KubeProject environments[].ml sizes,
+                                    rendered per environment by kubenv). Leave this empty on new pools.
+                                    An empty list provisions NO pool-level ML step pools — the former
+                                    kubecorecpu/kubecoregpu fallback pair is retired (#1134).
                                   items:
                                     description: |-
                                       MLComputeClass declares one named compute class in the cluster catalog.
@@ -437,6 +443,12 @@ spec:
                                     MLClasses is the list of CPU and GPU classes the cluster exposes.
                                     The operator provisions one NodePool per class; idle classes scale
                                     to zero nodes.
+
+                                    DEPRECATED (PRD-1124): pool-level ML compute is superseded by each ml
+                                    environment's declared flavours (KubeProject environments[].ml sizes,
+                                    rendered per environment by kubenv). Leave this empty on new pools.
+                                    An empty list provisions NO pool-level ML step pools — the former
+                                    kubecorecpu/kubecoregpu fallback pair is retired (#1134).
                                   items:
                                     description: |-
                                       MLComputeClass declares one named compute class in the cluster catalog.
