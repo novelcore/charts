@@ -40,19 +40,28 @@ kaniko:
   image: "gcr.io/kaniko-project/executor:v1.23.2-debug"
   # Resources for the build-push (kaniko) container. Previously unset, so
   # kaniko ran with no guaranteed CPU and was throttled on a busy node,
-  # making ML image builds slow. Sized to fit the kubecorecpu pool
-  # (n2-standard-8 = 8 vCPU / 32 GiB, ~7.5 vCPU / ~28 GiB allocatable) so a
-  # build pod always lands: requests claim half the box, cpu may burst to 6.
-  # memory limit == request so kaniko can't be OOMKilled mid-snapshot of a
-  # multi-GB ML image; no cpu limit ceiling beyond the burst so cache-cold
-  # CUDA builds aren't CPU-throttled (the pool is min=0 → one build per node).
+  # making ML image builds slow.
+  #
+  # Sized to fit the platform's DEFAULT per-project CI node (PRD-962 F-09):
+  # kubecore-operator cicompute.DefaultSize = "small" = e2-standard-4
+  # (3920m CPU / ~12.9Gi allocatable, ~0.4 CPU / ~0.6Gi of that taken by GKE
+  # daemonsets), maxNodes 1. The previous 4 CPU / 12Gi request was sized for
+  # the retired shared n2-standard-8 kubecorecpu pool and can NEVER fit an
+  # e2-standard-4: the autoscaler scaled the project's single CI node up,
+  # nothing scheduled, and it scaled it back down — every project without an
+  # explicit `ci: size:` was unable to build (kubecore-operator#1126 e2e,
+  # prgate-gate, 2026-08-26; the 2026-08-20 "small" decision assumed the
+  # chart set no request). Bigger declared sizes (medium/large) simply leave
+  # headroom. memory limit == request so kaniko can't be OOMKilled
+  # mid-snapshot of a multi-GB ML image; the pool is min=0 → one build per
+  # node, so the cpu limit is the whole node.
   resources:
     requests:
-      cpu: "4"
-      memory: "12Gi"
+      cpu: "3"
+      memory: "11Gi"
     limits:
-      cpu: "6"
-      memory: "12Gi"
+      cpu: "4"
+      memory: "11Gi"
 
 # Build paths for the service-app (non-ML) CWTs.
 #
