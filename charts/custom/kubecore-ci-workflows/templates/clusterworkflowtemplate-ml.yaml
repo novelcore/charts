@@ -3172,7 +3172,7 @@ spec:
         OWNER_REPO=$(echo "$REPO" | sed 's|https://github.com/||' | sed 's|.git$||')
         SHA="{{`{{workflow.parameters.commit_sha}}`}}"
         WF="{{`{{workflow.name}}`}}"; NS="{{`{{workflow.namespace}}`}}"
-        PHASE="{{`{{workflow.status}}`}}"; DURATION="{{`{{workflow.duration}}`}}"
+        PHASE="{{`{{workflow.status}}`}}"; DURATION="$(printf '%.0f' "{{`{{workflow.duration}}`}}" 2>/dev/null || echo "{{`{{workflow.duration}}`}}")s"
         PIPELINE="{{`{{inputs.parameters.pipeline}}`}}"
         CONTEXT="{{`{{inputs.parameters.context}}`}}"
         ENVIRONMENT="{{`{{inputs.parameters.environment}}`}}"
@@ -3206,14 +3206,21 @@ spec:
         # Why: for every failed pod, the tail of its main log.
         : > /tmp/why.md
         jq -r '.items[] | select(((.status.containerStatuses // []) | map(select(.name=="main")) | .[0].state.terminated.exitCode // 0) != 0) | .metadata.name + " " + (.metadata.annotations["workflows.argoproj.io/node-name"] // .metadata.name)' /tmp/pods.json | while read -r POD NODE; do
-          STEP=$(echo "$NODE" | awk -F. '{print $NF}')
-          MSG=$(jq -r --arg p "$POD" '.[]? | select(.podName==$p) | .message' /tmp/failures.json 2>/dev/null | head -1)
+          STEP=$(echo "$NODE" | awk -F. '{print $NF}' | sed 's/(.*//')
+          MSG=$(jq -r --arg n "$STEP" --arg p "$POD" '.[]? | select(.displayName==$n or .podName==$p) | .message' /tmp/failures.json 2>/dev/null | head -1)
+          # Log excerpt: ANSI-stripped, executor chatter removed; the lines
+          # that carry an error first (build tools bury the reason under
+          # hundreds of INFO lines), then the tail.
+          ESC=$(printf '\033')
+          kubectl logs -n "${NS}" "${POD}" -c main --tail=400 2>/dev/null | sed "s/${ESC}\[[0-9;]*m//g" | grep -v "^time=.*argo=true" | cut -c1-300 > /tmp/log.txt
           echo "" >> /tmp/why.md
-          echo "**Step \`${STEP}\` failed**${MSG:+ — ${MSG}}. Last lines of its log:" >> /tmp/why.md
-          echo "" >> /tmp/why.md
-          echo '```' >> /tmp/why.md
-          kubectl logs -n "${NS}" "${POD}" -c main --tail=60 2>/dev/null | grep -v "^time=.*argo=true" | tail -60 | cut -c1-400 >> /tmp/why.md
-          echo '```' >> /tmp/why.md
+          echo "**Step \`${STEP}\` failed**${MSG:+ — ${MSG}}." >> /tmp/why.md
+          ERR=$(grep -inE "error|fail|exit (code|status)|exception|traceback|fatal|denied|not found|no such|cannot|unable" /tmp/log.txt | grep -viE "INFO.*(cached|Executing|Retrieving)|warning: " | tail -12 | cut -d: -f2-)
+          if [ -n "$ERR" ]; then
+            echo "" >> /tmp/why.md; echo "Error lines:" >> /tmp/why.md; echo '```' >> /tmp/why.md; echo "$ERR" >> /tmp/why.md; echo '```' >> /tmp/why.md
+          fi
+          echo "" >> /tmp/why.md; echo "<details><summary>Last 30 lines of the step log</summary>" >> /tmp/why.md; echo "" >> /tmp/why.md
+          echo '```' >> /tmp/why.md; tail -30 /tmp/log.txt >> /tmp/why.md; echo '```' >> /tmp/why.md; echo "</details>" >> /tmp/why.md
         done
         if [ "${PHASE}" != "Succeeded" ] && [ ! -s /tmp/why.md ]; then
           echo "" >> /tmp/why.md
