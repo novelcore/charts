@@ -210,3 +210,16 @@ spec:
           - name: environment
             value: "ml-rc"
         when: "{{`{{workflow.status}}`}} != Succeeded"
+    - - name: run-report
+        templateRef:
+          name: ml-ci-build
+          template: report
+          clusterScope: true
+        arguments:
+          parameters:
+          - name: pipeline
+            value: "ML RC build"
+          - name: context
+            value: "kubecore-ml-ci/rc"
+          - name: environment
+            value: "ml-rc"

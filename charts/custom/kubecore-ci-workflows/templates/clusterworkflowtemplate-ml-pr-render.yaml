@@ -94,6 +94,9 @@ spec:
       value: "main"
     - name: node_class
       value: {{ .Values.ci.defaultNodeClass | default (dig "platform.kubecore.io/nodegroup-type" "kubecorecpu" .Values.nodeSelector) | quote }}
+    # PR number: the run report is posted as a comment on the PR itself.
+    - name: pr_number
+      value: ""
 
   templates:
   - name: ml-ci-pr-render
@@ -331,3 +334,18 @@ spec:
           - name: description
             value: "WorkflowTemplate render FAILED — open the Argo run for the error"
         when: "{{`{{workflow.status}}`}} != Succeeded"
+    - - name: run-report
+        templateRef:
+          name: ml-ci-build
+          template: report
+          clusterScope: true
+        arguments:
+          parameters:
+          - name: pipeline
+            value: "WorkflowTemplate render (PR gate)"
+          - name: context
+            value: "wft-render"
+          - name: environment
+            value: ""
+          - name: pr_number
+            value: "{{`{{workflow.parameters.pr_number}}`}}"

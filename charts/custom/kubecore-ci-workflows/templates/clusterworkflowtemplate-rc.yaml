@@ -638,3 +638,16 @@ spec:
             value: "RC build failed — open the Argo run for the error"
         # != Succeeded: an Error (executor/infra) must surface on GitHub too.
         when: "{{`{{workflow.status}}`}} != Succeeded"
+    - - name: run-report
+        templateRef:
+          name: ml-ci-build
+          template: report
+          clusterScope: true
+        arguments:
+          parameters:
+          - name: pipeline
+            value: "RC build"
+          - name: context
+            value: "kubecore-ci/rc"
+          - name: environment
+            value: "rc"
