@@ -102,6 +102,24 @@ spec:
   templates:
   - name: ml-ci-rc-build
     steps:
+    # Report pending (with the Argo run URL) BEFORE any work: a stalled RC
+    # build is a visible stuck-pending check + in_progress ml-rc Deployment,
+    # never silence (#1126 — full GitHub reporting on every pipeline).
+    - - name: status-pending
+        templateRef:
+          name: ml-ci-build
+          template: status
+          clusterScope: true
+        arguments:
+          parameters:
+          - name: state
+            value: "pending"
+          - name: description
+            value: "ML RC build running in Argo Workflows"
+          - name: context
+            value: "kubecore-ml-ci/rc"
+          - name: environment
+            value: "ml-rc"
     - - name: clone
         templateRef:
           name: ml-ci-build
@@ -169,6 +187,10 @@ spec:
             value: "success"
           - name: description
             value: "ML RC build succeeded"
+          - name: context
+            value: "kubecore-ml-ci/rc"
+          - name: environment
+            value: "ml-rc"
 
   - name: exit-handler
     steps:
@@ -182,5 +204,9 @@ spec:
           - name: state
             value: "failure"
           - name: description
-            value: "ML RC build failed"
-        when: "{{`{{workflow.status}}`}} == Failed"
+            value: "ML RC build failed — open the Argo run for the error"
+          - name: context
+            value: "kubecore-ml-ci/rc"
+          - name: environment
+            value: "ml-rc"
+        when: "{{`{{workflow.status}}`}} != Succeeded"

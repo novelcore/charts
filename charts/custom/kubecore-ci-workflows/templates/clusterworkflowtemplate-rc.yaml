@@ -91,8 +91,21 @@ spec:
   - name: ci-rc-build
     dag:
       tasks:
+      # Report pending (with the Argo run URL) BEFORE any work (#1126 — full
+      # GitHub reporting on every pipeline): kubecore-ci/rc check + rc
+      # Deployment go in_progress the moment the rc/* push lands.
+      - name: status-pending
+        template: status
+        arguments:
+          parameters:
+          - name: state
+            value: "pending"
+          - name: description
+            value: "RC build running in Argo Workflows"
+
       - name: clone
         template: clone
+        dependencies: [status-pending]
 
       - name: version
         template: version
@@ -363,10 +376,24 @@ spec:
   # status posts a commit status to GitHub. Context is kubecore-ci/rc to
   # distinguish RC build results from dev build results on the same commit.
   - name: status
+    # GitHub reporting for the RC build (#1126): ONE commit status (context
+    # kubecore-ci/rc) with target_url into the Argo UI run, plus a Deployment
+    # rollup (environment rc) whose log/environment URL is the same run. The
+    # GitHub Release + tracking issue below are the RC's own artefacts; this
+    # is the check + rollup the rc/* commit carries. Best-effort against the
+    # GitHub API: curl without -f never fails the build over a status write.
     inputs:
       parameters:
       - name: state
       - name: description
+      # context = the commit-status check name; environment = the GitHub
+      # Deployment environment this pipeline rolls up into ("" = no
+      # Deployment, statuses only). Defaults are this pipeline's own; RC
+      # variants override both via templateRef.
+      - name: context
+        value: "kubecore-ci/rc"
+      - name: environment
+        value: "rc"
     container:
       image: alpine/curl
       command: [sh, -c]
@@ -378,23 +405,65 @@ spec:
         OWNER_REPO=$(echo "$REPO" | sed 's|https://github.com/||' | sed 's|.git$||')
         SHA="{{`{{workflow.parameters.commit_sha}}`}}"
         STATE="{{`{{inputs.parameters.state}}`}}"
-        DESC="{{`{{inputs.parameters.description}}`}}"
+        DESC=$(printf '%s' "{{`{{inputs.parameters.description}}`}}" | cut -c1-140)
+        CONTEXT="{{`{{inputs.parameters.context}}`}}"
+        ENVIRONMENT="{{`{{inputs.parameters.environment}}`}}"
+        API="https://api.github.com/repos/${OWNER_REPO}"
+        AUTH="Authorization: token ${TOKEN}"
+        ACCEPT="Accept: application/vnd.github+json"
+        ARGO_BASE="{{ .Values.argo.uiBaseUrl }}"
+        RUN_URL=""
+        if [ -n "${ARGO_BASE}" ]; then
+          RUN_URL="${ARGO_BASE}/workflows/{{`{{workflow.namespace}}`}}/{{`{{workflow.name}}`}}"
+        fi
 
-        curl -s -X POST \
-          -H "Authorization: token ${TOKEN}" \
-          -H "Accept: application/vnd.github+json" \
-          "https://api.github.com/repos/${OWNER_REPO}/statuses/${SHA}" \
-          -d "{\"state\":\"${STATE}\",\"description\":\"${DESC}\",\"context\":\"kubecore-ci/rc\"}"
+        # 1) commit status — the check on the commit / PR, linking to the run.
+        if [ -n "${RUN_URL}" ]; then
+          PAYLOAD="{\"state\":\"${STATE}\",\"description\":\"${DESC}\",\"context\":\"${CONTEXT}\",\"target_url\":\"${RUN_URL}\"}"
+        else
+          PAYLOAD="{\"state\":\"${STATE}\",\"description\":\"${DESC}\",\"context\":\"${CONTEXT}\"}"
+        fi
+        curl -s -X POST -H "${AUTH}" -H "${ACCEPT}" "${API}/statuses/${SHA}" -d "${PAYLOAD}" > /dev/null
+        echo "Posted commit status ${CONTEXT}=${STATE} on ${OWNER_REPO}@${SHA}"
 
-        echo "Posted status: ${STATE}"
+        # 2) Deployment rollup (environment = this pipeline). Created on pending
+        # with required_contexts:[] — THIS run is what the commit statuses
+        # describe; defaulting would deadlock the Deployment on its own check.
+        # Resolved on success/failure against the Deployment created for this
+        # SHA + environment. jq for response parsing (compact vs pretty JSON
+        # both occur); if jq cannot be installed the statuses still stand.
+        [ -n "${ENVIRONMENT}" ] || exit 0
+        apk add --no-cache jq >/dev/null 2>&1 || true
+        if ! command -v jq >/dev/null; then
+          echo "WARN: jq unavailable — commit status posted, deployment rollup skipped"
+          exit 0
+        fi
+        if [ "${STATE}" = "pending" ]; then
+          DEP_ID=$(curl -s -X POST -H "${AUTH}" -H "${ACCEPT}" "${API}/deployments" \
+            -d "{\"ref\":\"${SHA}\",\"environment\":\"${ENVIRONMENT}\",\"auto_merge\":false,\"required_contexts\":[],\"transient_environment\":true,\"description\":\"{{`{{workflow.name}}`}}\"}" \
+            | jq -r 'if type == "object" then (.id // empty) else empty end' 2>/dev/null || true)
+          DEP_STATE="in_progress"
+        else
+          DEP_ID=$(curl -s -H "${AUTH}" -H "${ACCEPT}" "${API}/deployments?sha=${SHA}&environment=${ENVIRONMENT}&per_page=1" \
+            | jq -r 'if type == "array" then (.[0].id // empty) else empty end' 2>/dev/null || true)
+          DEP_STATE="${STATE}"
+        fi
+        if [ -n "${DEP_ID}" ]; then
+          if [ -n "${RUN_URL}" ]; then
+            DPAYLOAD="{\"state\":\"${DEP_STATE}\",\"log_url\":\"${RUN_URL}\",\"environment_url\":\"${RUN_URL}\",\"description\":\"${DESC}\"}"
+          else
+            DPAYLOAD="{\"state\":\"${DEP_STATE}\",\"description\":\"${DESC}\"}"
+          fi
+          curl -s -X POST -H "${AUTH}" -H "${ACCEPT}" "${API}/deployments/${DEP_ID}/statuses" -d "${DPAYLOAD}" > /dev/null
+          echo "Posted deployment ${ENVIRONMENT}#${DEP_ID} status: ${DEP_STATE}"
+        else
+          echo "WARN: no ${ENVIRONMENT} Deployment resolved for ${SHA} — skipped deployment status"
+        fi
       volumeMounts:
       - name: github-token
         mountPath: /etc/github-token
         readOnly: true
 
-  # gitops-notify dispatches a staging-environment-update repository_dispatch
-  # event to the project ops repo so that the GitOps pipeline can update the
-  # staging environment with the new RC image.
   - name: gitops-notify
     inputs:
       parameters:
@@ -566,5 +635,6 @@ spec:
           - name: state
             value: "failure"
           - name: description
-            value: "RC build failed"
-        when: "{{`{{workflow.status}}`}} == Failed"
+            value: "RC build failed — open the Argo run for the error"
+        # != Succeeded: an Error (executor/infra) must surface on GitHub too.
+        when: "{{`{{workflow.status}}`}} != Succeeded"
