@@ -172,9 +172,11 @@ spec:
                           authoritative source for the priority-uniqueness validator and the status
                           writer; it replaces the value that was previously read from the KubePool
                           environment template (PRD-KUBENV-001 S-1/A2, D-01). The "ml" type marks a
-                          per-project ML environment: it provisions its OWN MLOps stack (one per ml
-                          environment — PRD-858 supersedes PRD-240 CON-07) and hosts whole-node
-                          pipeline step compute; it carries no app-promotion semantics.
+                          compute-only ML environment (PRD-1124 CON-02): its namespace hosts the
+                          project's pipeline runs on the whole-node, scale-to-zero flavour pools
+                          declared in `ml`, and every run logs to the project's single MLOps stack
+                          (spec.ml). It provisions no stack of its own and carries no
+                          app-promotion semantics.
                         enum:
                           - dev
                           - stage
@@ -186,6 +188,81 @@ spec:
                         description: KubePool references the KubePool resource to use for this environment
                         minLength: 1
                         type: string
+                      ml:
+                        description: |-
+                          ML declares the pipeline compute of an `ml`-typed environment as lists
+                          of platform sizes per tier (PRD-1124 D-02). Each entry becomes one
+                          whole-node, scale-to-zero node pool named {tier}-{size}, tainted for
+                          this environment, and every listed flavour is offered in the pipeline
+                          step's compute dropdown (first entry = the tier's default). Both lists
+                          are optional: an ml environment may declare none, cpu only, gpu only,
+                          or several of each. Sizes map to concrete machine flavours in operator
+                          code (internal/config/mlclasses.go), never to a raw cloud SKU here.
+                          Only valid when environmentType is "ml".
+                        properties:
+                          cpu:
+                            description: CPU flavour pools for CPU-only pipeline steps.
+                            items:
+                              description: MLTierCompute is one flavour pool of an ml environment.
+                              properties:
+                                maxNodes:
+                                  default: 2
+                                  description: |-
+                                    MaxNodes bounds the pool's 0→N autoscale. Each step takes a whole
+                                    node, so this is the maximum number of concurrent steps on this
+                                    flavour. Min is always 0 (scale-to-zero is the point of the model).
+                                  maximum: 8
+                                  minimum: 1
+                                  type: integer
+                                size:
+                                  description: |-
+                                    Size is the platform t-shirt size of the whole node a step runs on.
+                                    The mapping to machine type / accelerator is owned by the platform
+                                    (PRD-1124 CON-03); the enum here is pinned to that catalog by test.
+                                  enum:
+                                    - small
+                                    - medium
+                                    - large
+                                  type: string
+                              required:
+                                - size
+                              type: object
+                            type: array
+                            x-kubernetes-list-map-keys:
+                              - size
+                            x-kubernetes-list-type: map
+                          gpu:
+                            description: GPU flavour pools for steps that request nvidia.com/gpu.
+                            items:
+                              description: MLTierCompute is one flavour pool of an ml environment.
+                              properties:
+                                maxNodes:
+                                  default: 2
+                                  description: |-
+                                    MaxNodes bounds the pool's 0→N autoscale. Each step takes a whole
+                                    node, so this is the maximum number of concurrent steps on this
+                                    flavour. Min is always 0 (scale-to-zero is the point of the model).
+                                  maximum: 8
+                                  minimum: 1
+                                  type: integer
+                                size:
+                                  description: |-
+                                    Size is the platform t-shirt size of the whole node a step runs on.
+                                    The mapping to machine type / accelerator is owned by the platform
+                                    (PRD-1124 CON-03); the enum here is pinned to that catalog by test.
+                                  enum:
+                                    - small
+                                    - medium
+                                    - large
+                                  type: string
+                              required:
+                                - size
+                              type: object
+                            type: array
+                            x-kubernetes-list-map-keys:
+                              - size
+                            x-kubernetes-list-type: map
+                        type: object
                       name:
                         description: Name of the environment (e.g., "dev", "staging", "prod")
                         maxLength: 63
@@ -408,6 +485,8 @@ spec:
                     x-kubernetes-validations:
                       - message: nodeGroup is required unless environmentType is 'ml' or 'ci' (an ml environment's compute comes from the ML compute classes, and a ci environment's compute comes from its own sizing block, neither uses a dedicated node group)
                         rule: self.environmentType in ['ml','ci'] || has(self.nodeGroup)
+                      - message: ml (pipeline compute flavours) is only valid on an environmentType 'ml' environment (PRD-1124 F-01)
+                        rule: '!has(self.ml) || self.environmentType == ''ml'''
                   maxItems: 20
                   type: array
                 githubConfiguration:
@@ -797,6 +876,9 @@ spec:
                 - githubConfiguration
                 - kubeOrgRef
               type: object
+              x-kubernetes-validations:
+                - message: an environmentType 'ml' environment requires spec.ml.enabled=true — the MLOps stack (MLflow, lakeFS, Postgres) is provisioned once per project from spec.ml and every ml environment's pipelines log to it (PRD-1124 CON-01, D-03)
+                  rule: '!has(self.environments) || !self.environments.exists(e, e.environmentType == ''ml'') || (has(self.ml) && self.ml.enabled)'
             status:
               description: KubeProjectStatus defines the observed state of KubeProject
               properties:
@@ -1428,61 +1510,6 @@ spec:
                           - kubePool
                           - name
                           - namespace
-                        type: object
-                      type: array
-                    mlEnvironments:
-                      description: |-
-                        MLEnvironments publishes the per-ml-environment MLOps stack outputs
-                        (PRD-858): one entry per environmentType "ml" whose XProjectEnvMLStack
-                        has reported status. Consumers (the kubeapp operator) read this ONLY
-                        via parentref.GetKubeProjectOutputs to wire env-targeted ML apps at
-                        the env stack's endpoints and admin-secret naming.
-                      items:
-                        description: |-
-                          MLEnvironmentOutput is the published projection of one ml-type environment's
-                          MLOps stack (PRD-858). All fields are read from the XProjectEnvMLStack's
-                          composition-written status plus the deterministic per-env naming.
-                        properties:
-                          lakeFSAdminSecret:
-                            description: |-
-                              LakeFSAdminSecret is the in-namespace admin Secret the env stack's init
-                              job creates ({project}-{environment}-lakefs-admin) — the name the
-                              pipeline's step env secretKeyRefs must reference.
-                            type: string
-                          lakeFSEndpoint:
-                            type: string
-                          lakeFSRepository:
-                            type: string
-                          mlflowEndpoint:
-                            type: string
-                          mlflowOIDCDiscoveryUrl:
-                            description: |-
-                              MlflowOIDCDiscoveryURL is the env stack's MLflow OIDC discovery URL
-                              (PRD-858 Q-02, from the stack XR's spec.mlflowOIDC). The kubeapp
-                              reconciler derives the Zitadel domain from it so env-targeted
-                              pipelines get MLflow bearer auth (#868) — without it the pipeline
-                              context's mlflow.oidcDomain stays empty and every real MLflow call 401s.
-                            type: string
-                          mlflowOIDCProjectId:
-                            description: |-
-                              MlflowOIDCProjectID is the Zitadel org-project id the pipeline's
-                              machine JWT must be audienced to (urn:zitadel:iam:org:project:id:{id}:aud).
-                            type: string
-                          name:
-                            description: Name is the ml environment name (ProjectEnvironment.name).
-                            type: string
-                          namespace:
-                            description: |-
-                              Namespace is the env stack namespace on the workload cluster
-                              (ml-{project}-{environment}) — where pipeline pods run.
-                            type: string
-                          postgresHost:
-                            type: string
-                          state:
-                            description: State mirrors the stack XR's status.state ("Creating"/"Ready"/...).
-                            type: string
-                        required:
-                          - name
                         type: object
                       type: array
                     mlStack:
