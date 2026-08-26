@@ -529,10 +529,15 @@ spec:
                       type: string
                     lakeFSOIDC:
                       description: |-
-                        LakeFSOIDC enables Zitadel OIDC SSO on LakeFS via oauth2-proxy + an
-                        nginx Basic-auth-injection sidecar (LakeFS OSS lacks native OIDC).
-                        When set + Enabled, the composition emits the oauth2-proxy Deployment
-                        Zitadel client credentials and oauth2-proxy cookie secret. PRD-240 F-18.
+                        LakeFSOIDC is OPERATOR-MANAGED: when ml.enabled is true and the org's
+                        identity provider is ready, the operator provisions the Zitadel OIDC app,
+                        publishes its client secret + oauth2-proxy cookie secret, and fills this
+                        block itself (discoveryUrl, secretName). Users and agents must NOT set it
+                        — it is never input at project creation. Zitadel OIDC SSO on LakeFS via
+                        oauth2-proxy + an nginx Basic-auth-injection sidecar (LakeFS OSS lacks
+                        native OIDC): the composition emits the oauth2-proxy Deployment, Service,
+                        route and Certificate plus an ExternalSecret carrying the credentials.
+                        PRD-240 F-18.
                       properties:
                         apiSecretName:
                           description: |-
@@ -578,11 +583,14 @@ spec:
                       type: object
                     mlflowOIDC:
                       description: |-
-                        MlflowOIDC enables Zitadel OIDC SSO on MLflow via the chart's native OIDC
-                        plugin. When set + Enabled, the composition emits an ExternalSecret
-                        pulling client credentials from the org-level ClusterSecretStore, sets
-                        MLflow's auth.appName to "oidc-auth", and renders a traefik-class
-                        Ingress with cluster-issuer cert-manager annotation. PRD-240 F-18.
+                        MlflowOIDC is OPERATOR-MANAGED: when ml.enabled is true and the org's
+                        identity provider is ready, the operator provisions the Zitadel OIDC app,
+                        publishes its client secret, and fills this block itself (discoveryUrl,
+                        secretName). Users and agents must NOT set it — it is never input at
+                        project creation. Zitadel OIDC SSO on MLflow via the chart's native OIDC
+                        plugin: the composition emits an ExternalSecret pulling client
+                        credentials from the org-level ClusterSecretStore, sets MLflow's
+                        auth.appName to "oidc-auth", and renders the public route. PRD-240 F-18.
                       properties:
                         discoveryUrl:
                           description: |-
