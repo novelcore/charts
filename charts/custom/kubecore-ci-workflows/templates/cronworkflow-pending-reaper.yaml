@@ -44,6 +44,11 @@ rules:
   - apiGroups: [""]
     resources: ["pods"]
     verbs: ["get", "list"]
+  # events: quote the scheduler's / cluster-autoscaler's last word (quota,
+  # stockout, no matching pool) in the reap reason.
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["get", "list"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
@@ -113,10 +118,18 @@ spec:
                   continue
                 fi
                 # any pod of this wf Pending past the threshold?
-                OLDEST=$(kubectl -n "$NS" get pods -l "workflows.argoproj.io/workflow=$NAME" -o json 2>/dev/null | jq -r --argjson now "$NOW" '[.items[] | select(.status.phase=="Pending") | ($now - (.metadata.creationTimestamp | fromdateiso8601))] | max // 0')
-                if [ "${OLDEST:-0}" -gt "$PENDING_MAX" ]; then
-                  echo "REAP-PENDING: $NS/$NAME pod Pending ${OLDEST}s -> Stop (exit handlers run, GitHub/MLflow reporting fires)"
-                  kubectl -n "$NS" annotate wf "$NAME" "reaper.kubecore.io/reason=pod Pending ${OLDEST}s > ${PENDING_MAX}s (unschedulable: capacity/quota/stockout)" --overwrite >/dev/null
+                # Each pod's own activeDeadlineSeconds (the enhancer's per-step
+                # pending allowance: CPU 30 min, GPU 90 min — scale-from-zero +
+                # autoscaler retries) is the limit while it Pends; Argo only
+                # enforces it once the pod runs (#897), so the reaper does. Pods
+                # without one fall back to PENDING_MAX. Before 0.12.76 a flat
+                # PENDING_MAX undercut every GPU step at 45 min.
+                WORST=$(kubectl -n "$NS" get pods -l "workflows.argoproj.io/workflow=$NAME" -o json 2>/dev/null | jq -r --argjson now "$NOW" --argjson max "$PENDING_MAX" '[.items[] | select(.status.phase=="Pending") | {name: .metadata.name, age: ($now - (.metadata.creationTimestamp | fromdateiso8601)), limit: (.spec.activeDeadlineSeconds // $max)} | select(.age > .limit)] | sort_by(-(.age - .limit)) | .[0] // empty | "\(.name) \(.age) \(.limit)"')
+                if [ -n "$WORST" ]; then
+                  POD=${WORST%% *}; REST=${WORST#* }; AGE=${REST%% *}; LIMIT=${REST#* }
+                  WHY=$(kubectl -n "$NS" get events --field-selector "involvedObject.name=$POD" -o json 2>/dev/null | jq -r '[.items[] | select(.reason | test("FailedScheduling|NotTriggerScaleUp|FailedScaleUp|TriggeredScaleUp"))] | sort_by(.lastTimestamp) | last // empty | "\(.reason): \(.message)"' | cut -c1-300)
+                  echo "REAP-PENDING: $NS/$NAME pod $POD Pending ${AGE}s > ${LIMIT}s -> Stop (exit handlers run, GitHub/MLflow reporting fires); ${WHY:-no scheduling event}"
+                  kubectl -n "$NS" annotate wf "$NAME" "reaper.kubecore.io/reason=step pod $POD Pending ${AGE}s > its ${LIMIT}s allowance — ${WHY:-unschedulable (capacity/quota/stockout)}" --overwrite >/dev/null
                   kubectl -n "$NS" patch wf "$NAME" --type merge -p '{"spec":{"shutdown":"Stop"}}'
                 fi
               done
