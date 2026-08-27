@@ -217,6 +217,51 @@ spec:
           CATALOG_ARG="--catalog ${GITOPS_DIR}/dataset-catalog.yaml"
         fi
 
+        # PLATFORM ENHANCER (kubecore-operator#1161): the enhancer is platform
+        # code, so it runs from the platform's pinned copy — the template repo's
+        # kubecore/ at .Values.platformEnhancer.ref — overlaid on the app's
+        # vendored copy (kept only for local dev). Every app renders with the
+        # same enhancer on its next render; a platform fix never again waits
+        # for a per-app re-vendor PR (live cross-tenant leak, 2026-08-27).
+        # Fails loud: rendering with unknown enhancer code is not an option.
+        python3 - <<'OVERLAYEOF'
+        import io, os, shutil, tarfile, urllib.request
+        repo, ref = "{{ .Values.platformEnhancer.repo }}", "{{ .Values.platformEnhancer.ref }}"
+        req = urllib.request.Request(f"https://api.github.com/repos/{repo}/tarball/{ref}",
+                                     headers={"Accept": "application/vnd.github+json", "User-Agent": "kubecore-ci"})
+        tok = open("/etc/github-token/token").read().strip() if os.path.exists("/etc/github-token/token") else ""
+        if tok:
+            req.add_header("Authorization", f"Bearer {tok}")
+        with urllib.request.urlopen(req, timeout=60) as r:
+            tb = tarfile.open(fileobj=io.BytesIO(r.read()), mode="r:gz")
+        dst = "/workspace/repo/kubecore"
+        keep = os.path.join(dst, "local-dev")
+        saved = "/tmp/kubecore-local-dev"
+        if os.path.isdir(keep):
+            shutil.rmtree(saved, ignore_errors=True); shutil.copytree(keep, saved)
+        shutil.rmtree(dst, ignore_errors=True); os.makedirs(dst)
+        n = 0
+        for m in tb.getmembers():
+            parts = m.name.split("/", 1)
+            if len(parts) < 2 or not parts[1].startswith("kubecore/") or "/local-dev/" in parts[1] + "/":
+                continue
+            rel = parts[1][len("kubecore/"):]
+            if not rel or "__pycache__" in rel:
+                continue
+            out = os.path.join(dst, rel)
+            if m.isdir():
+                os.makedirs(out, exist_ok=True)
+            elif m.isfile():
+                os.makedirs(os.path.dirname(out), exist_ok=True)
+                with tb.extractfile(m) as src, open(out, "wb") as f:
+                    f.write(src.read())
+                n += 1
+        if os.path.isdir(saved):
+            shutil.copytree(saved, keep, dirs_exist_ok=True)
+        if n == 0:
+            raise SystemExit(f"platform enhancer: no kubecore/ files in {repo}@{ref}")
+        print(f"platform enhancer: {repo}@{ref[:12]} ({n} files) overlaid on the app's vendored kubecore/")
+        OVERLAYEOF
         # ENHANCE (platform code on a data file — no developer code executes here).
         pip install --quiet -e /workspace/repo 2>/dev/null || pip install --quiet hydra-core omegaconf
         PYTHONPATH="/workspace/repo" python3 -m kubecore.enhance \
