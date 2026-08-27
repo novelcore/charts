@@ -80,9 +80,16 @@ spec:
   # actual kaniko build it triggers is scoped by ci-build's own fix.
   # project_name is a required workflow parameter here (no fallback), so
   # this key is never emitted empty.
+  # System pool, NOT the project's CI pool (kubecore-operator#1126, 2026-08-27):
+  # this poll ran every 3 minutes on the scale-to-zero CI pool it was meant to
+  # watch, so that pool could never scale to zero — 20 scale-downs / 21 node
+  # registrations on gke-dev's CI nodes in one event window, each churn also
+  # discarding the node-local kaniko cache. The check needs only kubectl +
+  # the GitHub API; it lands where the pending-reaper and autoscaler-healer
+  # already run (kubecoresys, via the chart's inherited tolerations). The
+  # build it submits still targets the CI pool through node_class.
   nodeSelector:
-    platform.kubecore.io/nodegroup-type: "{{`{{workflow.parameters.node_class}}`}}"
-    platform.kubecore.io/project: "{{`{{workflow.parameters.project_name}}`}}"
+    platform.kubecore.io/system: "true"
   {{- with .Values.tolerations }}
   tolerations:
     {{- toYaml . | nindent 4 }}
