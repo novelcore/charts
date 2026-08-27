@@ -1,0 +1,37 @@
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: d1-kubeapp-kube-project-ref-immutable
+  annotations:
+    kubecore.io/catalog-domain: "D1"
+    kubecore.io/catalog-id: "d1-kubeapp-kube-project-ref-immutable"
+    kubecore.io/evidence-ref: "api/v1beta1/kubeapp_types.go"
+    policies.kyverno.io/category: "KubeCore Catalog"
+    policies.kyverno.io/description: "Reassigning a KubeApp to a different KubeProject orphans its environment + repo wiring; identity-immutable."
+    policies.kyverno.io/severity: "high"
+    policies.kyverno.io/subject: "schema.kubecore.io/KubeApp"
+spec:
+  validationFailureAction: Enforce
+  failurePolicy: Fail
+  background: true
+  rules:
+  - name: d1-kubeapp-kube-project-ref-immutable
+    match:
+      any:
+      - resources:
+          kinds:
+            - KubeApp
+    preconditions:
+      all:
+      - key: "{{ request.operation }}"
+        operator: Equals
+        value: UPDATE
+    validate:
+      message: "Field spec.kubeProjectRef on KubeApp is immutable (catalog: d1-kubeapp-kube-project-ref-immutable, domain: D1). See PRD-310."
+      deny:
+        conditions:
+          all:
+          - key: "{{ request.object.spec.kubeProjectRef || '' }}"
+            operator: NotEquals
+            value: "{{ request.oldObject.spec.kubeProjectRef || '' }}"
+

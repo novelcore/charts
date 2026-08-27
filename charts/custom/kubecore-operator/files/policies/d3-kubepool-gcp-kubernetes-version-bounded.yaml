@@ -1,0 +1,51 @@
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: d3-kubepool-gcp-kubernetes-version-bounded
+  annotations:
+    kubecore.io/catalog-domain: "D3"
+    kubecore.io/catalog-id: "d3-kubepool-gcp-kubernetes-version-bounded"
+    kubecore.io/evidence-ref: "api/v1beta1/kubepool_types.go"
+    kubecore.io/migration-issue: "#342"
+    kubecore.io/migration-status: "unimplemented"
+    policies.kyverno.io/category: "KubeCore Catalog"
+    policies.kyverno.io/description: "Bounded to supported GKE minor versions. GKE's release channel auto-upgrades within a minor; bump across minors requires migration (#342)."
+    policies.kyverno.io/severity: "medium"
+    policies.kyverno.io/subject: "schema.kubecore.io/KubePool"
+spec:
+  validationFailureAction: Enforce
+  failurePolicy: Fail
+  background: true
+  rules:
+  - name: d3-kubepool-gcp-kubernetes-version-bounded
+    match:
+      any:
+      - resources:
+          kinds:
+            - KubePool
+    preconditions:
+      all:
+      - key: "{{ request.operation }}"
+        operator: AnyIn
+        value:
+        - CREATE
+        - UPDATE
+      - key: "{{ request.object.spec.cloudProvider.gcp.cluster.kubernetesVersion || '' }}"
+        operator: NotEquals
+        value: ""
+      - key: "{{ request.object.spec.cloudProvider.gcp || '' }}"
+        operator: NotEquals
+        value: ""
+    validate:
+      message: "Field spec.cloudProvider.gcp.cluster.kubernetesVersion on KubePool must lie within the bounded set (catalog: d3-kubepool-gcp-kubernetes-version-bounded, domain: D3). See PRD-310."
+      deny:
+        conditions:
+          any:
+          - key: "{{ request.object.spec.cloudProvider.gcp.cluster.kubernetesVersion }}"
+            operator: AnyNotIn
+            value:
+            - "1.32"
+            - "1.33"
+            - "1.34"
+            - "1.35"
+

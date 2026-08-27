@@ -1,0 +1,14 @@
+{{- /*
+PRD-310 policy catalog. The ClusterPolicy bodies are raw Kyverno YAML under
+files/policies/ (synced from dist/policies/kyverno by hack/sync-release-artifacts.sh)
+because they contain Kyverno's own {{ request.* }} expressions, which Helm must
+not parse. validationFailureAction is substituted so a fleet that predates the
+catalog can roll out in Audit first (values: policies.validationFailureAction).
+*/ -}}
+{{- if .Values.policies.enable }}
+{{- $action := printf "validationFailureAction: %s" .Values.policies.validationFailureAction }}
+{{- range $path, $_ := .Files.Glob "files/policies/*.yaml" }}
+---
+{{ $.Files.Get $path | replace "validationFailureAction: Enforce" $action }}
+{{- end }}
+{{- end }}

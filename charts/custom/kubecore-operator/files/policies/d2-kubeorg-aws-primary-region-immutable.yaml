@@ -1,0 +1,39 @@
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: d2-kubeorg-aws-primary-region-immutable
+  annotations:
+    kubecore.io/catalog-domain: "D2"
+    kubecore.io/catalog-id: "d2-kubeorg-aws-primary-region-immutable"
+    kubecore.io/evidence-ref: "knowledge/prds/310-kyverno-admission-policy-layer.md"
+    kubecore.io/migration-issue: "#343"
+    kubecore.io/migration-status: "unimplemented"
+    policies.kyverno.io/category: "KubeCore Catalog"
+    policies.kyverno.io/description: "Primary AWS region is where the bootstrap network + control-plane resources live; rotating requires the same per-region orchestration as #343."
+    policies.kyverno.io/severity: "medium"
+    policies.kyverno.io/subject: "schema.kubecore.io/KubeOrg"
+spec:
+  validationFailureAction: Enforce
+  failurePolicy: Fail
+  background: true
+  rules:
+  - name: d2-kubeorg-aws-primary-region-immutable
+    match:
+      any:
+      - resources:
+          kinds:
+            - KubeOrg
+    preconditions:
+      all:
+      - key: "{{ request.operation }}"
+        operator: Equals
+        value: UPDATE
+    validate:
+      message: "Field spec.awsConfig.primaryRegion on KubeOrg is immutable (catalog: d2-kubeorg-aws-primary-region-immutable, domain: D2). See PRD-310."
+      deny:
+        conditions:
+          all:
+          - key: "{{ request.object.spec.awsConfig.primaryRegion || '' }}"
+            operator: NotEquals
+            value: "{{ request.oldObject.spec.awsConfig.primaryRegion || '' }}"
+

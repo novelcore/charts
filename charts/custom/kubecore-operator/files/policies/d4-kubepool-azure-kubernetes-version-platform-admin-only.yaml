@@ -1,0 +1,44 @@
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: d4-kubepool-azure-kubernetes-version-platform-admin-only
+  annotations:
+    kubecore.io/catalog-domain: "D4"
+    kubecore.io/catalog-id: "d4-kubepool-azure-kubernetes-version-platform-admin-only"
+    kubecore.io/evidence-ref: "api/v1beta1/kubepool_types.go"
+    policies.kyverno.io/category: "KubeCore Catalog"
+    policies.kyverno.io/description: "Only platform-admin (Zitadel OIDC groups claim) may bump AKS K8s minor version."
+    policies.kyverno.io/severity: "high"
+    policies.kyverno.io/subject: "schema.kubecore.io/KubePool"
+spec:
+  validationFailureAction: Enforce
+  failurePolicy: Fail
+  background: false
+  rules:
+  - name: d4-kubepool-azure-kubernetes-version-platform-admin-only
+    match:
+      any:
+      - resources:
+          kinds:
+            - KubePool
+    preconditions:
+      all:
+      - key: "{{ request.operation }}"
+        operator: Equals
+        value: UPDATE
+      - key: "{{ request.object.spec.cloudProvider.azure || '' }}"
+        operator: NotEquals
+        value: ""
+      - key: "{{ request.object.spec.cloudProvider.azure.cluster.kubernetesVersion || '' }}"
+        operator: NotEquals
+        value: "{{ request.oldObject.spec.cloudProvider.azure.cluster.kubernetesVersion || '' }}"
+    validate:
+      message: "Changing spec.cloudProvider.azure.cluster.kubernetesVersion on KubePool requires membership in one of [platform-admin] (catalog: d4-kubepool-azure-kubernetes-version-platform-admin-only, domain: D4). See PRD-310."
+      deny:
+        conditions:
+          all:
+          - key: "{{ request.userInfo.groups }}"
+            operator: AnyNotIn
+            value:
+            - "platform-admin"
+

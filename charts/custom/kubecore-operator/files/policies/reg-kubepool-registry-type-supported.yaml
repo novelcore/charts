@@ -1,0 +1,47 @@
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: reg-kubepool-registry-type-supported
+  annotations:
+    kubecore.io/catalog-domain: "D3"
+    kubecore.io/catalog-id: "reg-kubepool-registry-type-supported"
+    kubecore.io/evidence-ref: "internal/common/registryref/kinds.go"
+    policies.kyverno.io/category: "KubeCore Catalog"
+    policies.kyverno.io/description: "Registry kind-table coverage: only \"zot\" has an implemented kind-table row in Phase 1, though the CRD enum already admits gar/ecr/acr for the eventual multi-cloud vocabulary. Widened per kind-table row landing (Phase 2)."
+    policies.kyverno.io/severity: "medium"
+    policies.kyverno.io/subject: "schema.kubecore.io/KubePool"
+spec:
+  validationFailureAction: Enforce
+  failurePolicy: Fail
+  background: true
+  rules:
+  - name: reg-kubepool-registry-type-supported
+    match:
+      any:
+      - resources:
+          kinds:
+            - KubePool
+    preconditions:
+      all:
+      - key: "{{ request.operation }}"
+        operator: AnyIn
+        value:
+        - CREATE
+        - UPDATE
+    validate:
+      message: "Field spec.registries[].type on KubePool must lie within the bounded set (catalog: reg-kubepool-registry-type-supported, domain: D3). See PRD-310."
+      foreach:
+      - list: "request.object.spec.registries"
+        preconditions:
+          all:
+          - key: "{{ element.type || '' }}"
+            operator: NotEquals
+            value: ""
+        deny:
+          conditions:
+            any:
+            - key: "{{ element.type }}"
+              operator: AnyNotIn
+              value:
+              - "zot"
+

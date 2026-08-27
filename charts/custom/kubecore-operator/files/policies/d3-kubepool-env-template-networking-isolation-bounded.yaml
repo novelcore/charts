@@ -1,0 +1,49 @@
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: d3-kubepool-env-template-networking-isolation-bounded
+  annotations:
+    kubecore.io/catalog-domain: "D3"
+    kubecore.io/catalog-id: "d3-kubepool-env-template-networking-isolation-bounded"
+    kubecore.io/evidence-ref: "api/v1beta1/kubepool_types.go"
+    policies.kyverno.io/category: "KubeCore Catalog"
+    policies.kyverno.io/description: "Cross-environment traffic isolation level; bounded to a known set."
+    policies.kyverno.io/severity: "medium"
+    policies.kyverno.io/subject: "schema.kubecore.io/KubePool"
+spec:
+  validationFailureAction: Enforce
+  failurePolicy: Fail
+  background: true
+  rules:
+  - name: d3-kubepool-env-template-networking-isolation-bounded
+    match:
+      any:
+      - resources:
+          kinds:
+            - KubePool
+    preconditions:
+      all:
+      - key: "{{ request.operation }}"
+        operator: AnyIn
+        value:
+        - CREATE
+        - UPDATE
+    validate:
+      message: "Field spec.environmentTemplates[].networking.isolation on KubePool must lie within the bounded set (catalog: d3-kubepool-env-template-networking-isolation-bounded, domain: D3). See PRD-310."
+      foreach:
+      - list: "request.object.spec.environmentTemplates"
+        preconditions:
+          all:
+          - key: "{{ element.networking.isolation || '' }}"
+            operator: NotEquals
+            value: ""
+        deny:
+          conditions:
+            any:
+            - key: "{{ element.networking.isolation }}"
+              operator: AnyNotIn
+              value:
+              - "none"
+              - "soft"
+              - "strict"
+

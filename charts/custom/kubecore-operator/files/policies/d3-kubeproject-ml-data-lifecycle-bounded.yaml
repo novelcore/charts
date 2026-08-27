@@ -1,0 +1,44 @@
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: d3-kubeproject-ml-data-lifecycle-bounded
+  annotations:
+    kubecore.io/catalog-domain: "D3"
+    kubecore.io/catalog-id: "d3-kubeproject-ml-data-lifecycle-bounded"
+    kubecore.io/evidence-ref: "api/v1beta1/kubeproject_types.go"
+    policies.kyverno.io/category: "KubeCore Catalog"
+    policies.kyverno.io/description: "Project ML data-lifecycle policy; CRD enum. 'retain' is the safe production default; 'wipe-on-delete' allows clean dev/test teardown by setting forceDestroy=true on data resources."
+    policies.kyverno.io/severity: "medium"
+    policies.kyverno.io/subject: "schema.kubecore.io/KubeProject"
+spec:
+  validationFailureAction: Enforce
+  failurePolicy: Fail
+  background: true
+  rules:
+  - name: d3-kubeproject-ml-data-lifecycle-bounded
+    match:
+      any:
+      - resources:
+          kinds:
+            - KubeProject
+    preconditions:
+      all:
+      - key: "{{ request.operation }}"
+        operator: AnyIn
+        value:
+        - CREATE
+        - UPDATE
+      - key: "{{ request.object.spec.ml.dataLifecycle || '' }}"
+        operator: NotEquals
+        value: ""
+    validate:
+      message: "Field spec.ml.dataLifecycle on KubeProject must lie within the bounded set (catalog: d3-kubeproject-ml-data-lifecycle-bounded, domain: D3). See PRD-310."
+      deny:
+        conditions:
+          any:
+          - key: "{{ request.object.spec.ml.dataLifecycle }}"
+            operator: AnyNotIn
+            value:
+            - "retain"
+            - "wipe-on-delete"
+

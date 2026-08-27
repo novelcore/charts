@@ -1,0 +1,39 @@
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: d2-kubepool-cluster-mode-immutable
+  annotations:
+    kubecore.io/catalog-domain: "D2"
+    kubecore.io/catalog-id: "d2-kubepool-cluster-mode-immutable"
+    kubecore.io/evidence-ref: "api/v1beta1/kubepool_types.go"
+    kubecore.io/migration-issue: "#344"
+    kubecore.io/migration-status: "unimplemented"
+    policies.kyverno.io/category: "KubeCore Catalog"
+    policies.kyverno.io/description: "ClusterMode (dev/production) governs node-pool topology + platform replica counts. Switching requires destructive rebuild of every node pool + workload migration; not implemented (#344). Defense-in-depth on top of CRD-level XValidation self==oldSelf."
+    policies.kyverno.io/severity: "medium"
+    policies.kyverno.io/subject: "schema.kubecore.io/KubePool"
+spec:
+  validationFailureAction: Enforce
+  failurePolicy: Fail
+  background: true
+  rules:
+  - name: d2-kubepool-cluster-mode-immutable
+    match:
+      any:
+      - resources:
+          kinds:
+            - KubePool
+    preconditions:
+      all:
+      - key: "{{ request.operation }}"
+        operator: Equals
+        value: UPDATE
+    validate:
+      message: "Field spec.clusterMode on KubePool is immutable (catalog: d2-kubepool-cluster-mode-immutable, domain: D2). See PRD-310."
+      deny:
+        conditions:
+          all:
+          - key: "{{ request.object.spec.clusterMode || '' }}"
+            operator: NotEquals
+            value: "{{ request.oldObject.spec.clusterMode || '' }}"
+

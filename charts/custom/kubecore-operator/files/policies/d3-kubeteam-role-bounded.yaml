@@ -1,0 +1,46 @@
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: d3-kubeteam-role-bounded
+  annotations:
+    kubecore.io/catalog-domain: "D3"
+    kubecore.io/catalog-id: "d3-kubeteam-role-bounded"
+    kubecore.io/evidence-ref: "api/v1beta1/kubeteam_types.go"
+    policies.kyverno.io/category: "KubeCore Catalog"
+    policies.kyverno.io/description: "KubeTeam role; CRD enum (dev/ops/business/admin). Each role maps to a fixed permission set across Zitadel + GitHub + K8s RBAC (D-01)."
+    policies.kyverno.io/severity: "medium"
+    policies.kyverno.io/subject: "schema.kubecore.io/KubeTeam"
+spec:
+  validationFailureAction: Enforce
+  failurePolicy: Fail
+  background: true
+  rules:
+  - name: d3-kubeteam-role-bounded
+    match:
+      any:
+      - resources:
+          kinds:
+            - KubeTeam
+    preconditions:
+      all:
+      - key: "{{ request.operation }}"
+        operator: AnyIn
+        value:
+        - CREATE
+        - UPDATE
+      - key: "{{ request.object.spec.role || '' }}"
+        operator: NotEquals
+        value: ""
+    validate:
+      message: "Field spec.role on KubeTeam must lie within the bounded set (catalog: d3-kubeteam-role-bounded, domain: D3). See PRD-310."
+      deny:
+        conditions:
+          any:
+          - key: "{{ request.object.spec.role }}"
+            operator: AnyNotIn
+            value:
+            - "admin"
+            - "business"
+            - "dev"
+            - "ops"
+

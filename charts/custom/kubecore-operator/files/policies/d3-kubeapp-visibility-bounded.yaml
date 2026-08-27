@@ -1,0 +1,45 @@
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: d3-kubeapp-visibility-bounded
+  annotations:
+    kubecore.io/catalog-domain: "D3"
+    kubecore.io/catalog-id: "d3-kubeapp-visibility-bounded"
+    kubecore.io/evidence-ref: "api/v1beta1/kubeapp_types.go"
+    policies.kyverno.io/category: "KubeCore Catalog"
+    policies.kyverno.io/description: "KubeApp-level GitHub repo visibility; CRD enum (private/public/internal). Mirrored at D3 for catalog discoverability + tenant deny messages."
+    policies.kyverno.io/severity: "medium"
+    policies.kyverno.io/subject: "schema.kubecore.io/KubeApp"
+spec:
+  validationFailureAction: Enforce
+  failurePolicy: Fail
+  background: true
+  rules:
+  - name: d3-kubeapp-visibility-bounded
+    match:
+      any:
+      - resources:
+          kinds:
+            - KubeApp
+    preconditions:
+      all:
+      - key: "{{ request.operation }}"
+        operator: AnyIn
+        value:
+        - CREATE
+        - UPDATE
+      - key: "{{ request.object.spec.visibility || '' }}"
+        operator: NotEquals
+        value: ""
+    validate:
+      message: "Field spec.visibility on KubeApp must lie within the bounded set (catalog: d3-kubeapp-visibility-bounded, domain: D3). See PRD-310."
+      deny:
+        conditions:
+          any:
+          - key: "{{ request.object.spec.visibility }}"
+            operator: AnyNotIn
+            value:
+            - "internal"
+            - "private"
+            - "public"
+

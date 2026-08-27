@@ -1,0 +1,37 @@
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: d1-kubepool-kube-org-ref-immutable
+  annotations:
+    kubecore.io/catalog-domain: "D1"
+    kubecore.io/catalog-id: "d1-kubepool-kube-org-ref-immutable"
+    kubecore.io/evidence-ref: "api/v1beta1/kubepool_types.go"
+    policies.kyverno.io/category: "KubeCore Catalog"
+    policies.kyverno.io/description: "Reassigning a KubePool to a different KubeOrg breaks tenancy hierarchy; identity-immutable."
+    policies.kyverno.io/severity: "high"
+    policies.kyverno.io/subject: "schema.kubecore.io/KubePool"
+spec:
+  validationFailureAction: Enforce
+  failurePolicy: Fail
+  background: true
+  rules:
+  - name: d1-kubepool-kube-org-ref-immutable
+    match:
+      any:
+      - resources:
+          kinds:
+            - KubePool
+    preconditions:
+      all:
+      - key: "{{ request.operation }}"
+        operator: Equals
+        value: UPDATE
+    validate:
+      message: "Field spec.kubeOrgRef on KubePool is immutable (catalog: d1-kubepool-kube-org-ref-immutable, domain: D1). See PRD-310."
+      deny:
+        conditions:
+          all:
+          - key: "{{ request.object.spec.kubeOrgRef || '' }}"
+            operator: NotEquals
+            value: "{{ request.oldObject.spec.kubeOrgRef || '' }}"
+

@@ -1,0 +1,39 @@
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: d2-kubepool-operators-redis-immutable
+  annotations:
+    kubecore.io/catalog-domain: "D2"
+    kubecore.io/catalog-id: "d2-kubepool-operators-redis-immutable"
+    kubecore.io/evidence-ref: "knowledge/prds/310-kyverno-admission-policy-layer.md"
+    kubecore.io/migration-issue: "#344"
+    kubecore.io/migration-status: "unimplemented"
+    policies.kyverno.io/category: "KubeCore Catalog"
+    policies.kyverno.io/description: "Toggling redis off tears down the shared Redis Release, which any KubeApp connection depends on via ToolBinding — every bound consumer goes CapabilityMissing (Ready-blocking since F-13, #987). Migration unimplemented (#344)."
+    policies.kyverno.io/severity: "medium"
+    policies.kyverno.io/subject: "schema.kubecore.io/KubePool"
+spec:
+  validationFailureAction: Enforce
+  failurePolicy: Fail
+  background: true
+  rules:
+  - name: d2-kubepool-operators-redis-immutable
+    match:
+      any:
+      - resources:
+          kinds:
+            - KubePool
+    preconditions:
+      all:
+      - key: "{{ request.operation }}"
+        operator: Equals
+        value: UPDATE
+    validate:
+      message: "Field spec.operators.redis on KubePool is immutable (catalog: d2-kubepool-operators-redis-immutable, domain: D2). See PRD-310."
+      deny:
+        conditions:
+          all:
+          - key: "{{ request.object.spec.operators.redis || '' }}"
+            operator: NotEquals
+            value: "{{ request.oldObject.spec.operators.redis || '' }}"
+

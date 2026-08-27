@@ -1,0 +1,49 @@
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: d3-kubepool-env-template-pod-security-standard-bounded
+  annotations:
+    kubecore.io/catalog-domain: "D3"
+    kubecore.io/catalog-id: "d3-kubepool-env-template-pod-security-standard-bounded"
+    kubecore.io/evidence-ref: "api/v1beta1/kubepool_types.go"
+    policies.kyverno.io/category: "KubeCore Catalog"
+    policies.kyverno.io/description: "Pod Security Standard enforced on env namespaces; bounded to k8s.io/pod-security-admission values."
+    policies.kyverno.io/severity: "medium"
+    policies.kyverno.io/subject: "schema.kubecore.io/KubePool"
+spec:
+  validationFailureAction: Enforce
+  failurePolicy: Fail
+  background: true
+  rules:
+  - name: d3-kubepool-env-template-pod-security-standard-bounded
+    match:
+      any:
+      - resources:
+          kinds:
+            - KubePool
+    preconditions:
+      all:
+      - key: "{{ request.operation }}"
+        operator: AnyIn
+        value:
+        - CREATE
+        - UPDATE
+    validate:
+      message: "Field spec.environmentTemplates[].security.podSecurityStandard on KubePool must lie within the bounded set (catalog: d3-kubepool-env-template-pod-security-standard-bounded, domain: D3). See PRD-310."
+      foreach:
+      - list: "request.object.spec.environmentTemplates"
+        preconditions:
+          all:
+          - key: "{{ element.security.podSecurityStandard || '' }}"
+            operator: NotEquals
+            value: ""
+        deny:
+          conditions:
+            any:
+            - key: "{{ element.security.podSecurityStandard }}"
+              operator: AnyNotIn
+              value:
+              - "baseline"
+              - "privileged"
+              - "restricted"
+

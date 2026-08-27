@@ -1,0 +1,39 @@
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: d2-kubeorg-admin-team-immutable
+  annotations:
+    kubecore.io/catalog-domain: "D2"
+    kubecore.io/catalog-id: "d2-kubeorg-admin-team-immutable"
+    kubecore.io/evidence-ref: "api/v1beta1/kubeorg_types.go"
+    kubecore.io/migration-issue: "#344"
+    kubecore.io/migration-status: "unimplemented"
+    policies.kyverno.io/category: "KubeCore Catalog"
+    policies.kyverno.io/description: "AdminTeam is the org's bootstrap admin team (CON-06). Rotating it requires coordinated handoff of platform-admin access; admission immutability prevents accidental loss of admin coverage. Existence + role-check enforcement deferred to F-08 (D5 transitional)."
+    policies.kyverno.io/severity: "medium"
+    policies.kyverno.io/subject: "schema.kubecore.io/KubeOrg"
+spec:
+  validationFailureAction: Enforce
+  failurePolicy: Fail
+  background: true
+  rules:
+  - name: d2-kubeorg-admin-team-immutable
+    match:
+      any:
+      - resources:
+          kinds:
+            - KubeOrg
+    preconditions:
+      all:
+      - key: "{{ request.operation }}"
+        operator: Equals
+        value: UPDATE
+    validate:
+      message: "Field spec.adminTeam on KubeOrg is immutable (catalog: d2-kubeorg-admin-team-immutable, domain: D2). See PRD-310."
+      deny:
+        conditions:
+          all:
+          - key: "{{ request.object.spec.adminTeam || '' }}"
+            operator: NotEquals
+            value: "{{ request.oldObject.spec.adminTeam || '' }}"
+

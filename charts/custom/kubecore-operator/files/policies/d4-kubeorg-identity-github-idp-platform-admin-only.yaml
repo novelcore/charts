@@ -1,0 +1,41 @@
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: d4-kubeorg-identity-github-idp-platform-admin-only
+  annotations:
+    kubecore.io/catalog-domain: "D4"
+    kubecore.io/catalog-id: "d4-kubeorg-identity-github-idp-platform-admin-only"
+    kubecore.io/evidence-ref: "api/v1beta1/kubeorg_types.go"
+    policies.kyverno.io/category: "KubeCore Catalog"
+    policies.kyverno.io/description: "Toggling the GitHub IdP changes who can authenticate into the platform; only platform-admin (Zitadel OIDC) may flip it."
+    policies.kyverno.io/severity: "high"
+    policies.kyverno.io/subject: "schema.kubecore.io/KubeOrg"
+spec:
+  validationFailureAction: Enforce
+  failurePolicy: Fail
+  background: false
+  rules:
+  - name: d4-kubeorg-identity-github-idp-platform-admin-only
+    match:
+      any:
+      - resources:
+          kinds:
+            - KubeOrg
+    preconditions:
+      all:
+      - key: "{{ request.operation }}"
+        operator: Equals
+        value: UPDATE
+      - key: "{{ request.object.spec.identity.githubIDP.enabled || '' }}"
+        operator: NotEquals
+        value: "{{ request.oldObject.spec.identity.githubIDP.enabled || '' }}"
+    validate:
+      message: "Changing spec.identity.githubIDP.enabled on KubeOrg requires membership in one of [platform-admin] (catalog: d4-kubeorg-identity-github-idp-platform-admin-only, domain: D4). See PRD-310."
+      deny:
+        conditions:
+          all:
+          - key: "{{ request.userInfo.groups }}"
+            operator: AnyNotIn
+            value:
+            - "platform-admin"
+

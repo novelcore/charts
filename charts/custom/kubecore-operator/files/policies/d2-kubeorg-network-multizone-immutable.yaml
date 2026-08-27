@@ -1,0 +1,39 @@
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: d2-kubeorg-network-multizone-immutable
+  annotations:
+    kubecore.io/catalog-domain: "D2"
+    kubecore.io/catalog-id: "d2-kubeorg-network-multizone-immutable"
+    kubecore.io/evidence-ref: "knowledge/prds/310-kyverno-admission-policy-layer.md"
+    kubecore.io/migration-issue: "#343"
+    kubecore.io/migration-status: "unimplemented"
+    policies.kyverno.io/category: "KubeCore Catalog"
+    policies.kyverno.io/description: "Single-AZ → multi-AZ requires re-provisioning subnets in additional zones; not implemented (#343)."
+    policies.kyverno.io/severity: "medium"
+    policies.kyverno.io/subject: "schema.kubecore.io/KubeOrg"
+spec:
+  validationFailureAction: Enforce
+  failurePolicy: Fail
+  background: true
+  rules:
+  - name: d2-kubeorg-network-multizone-immutable
+    match:
+      any:
+      - resources:
+          kinds:
+            - KubeOrg
+    preconditions:
+      all:
+      - key: "{{ request.operation }}"
+        operator: Equals
+        value: UPDATE
+    validate:
+      message: "Field spec.network.multizone on KubeOrg is immutable (catalog: d2-kubeorg-network-multizone-immutable, domain: D2). See PRD-310."
+      deny:
+        conditions:
+          all:
+          - key: "{{ request.object.spec.network.multizone || '' }}"
+            operator: NotEquals
+            value: "{{ request.oldObject.spec.network.multizone || '' }}"
+

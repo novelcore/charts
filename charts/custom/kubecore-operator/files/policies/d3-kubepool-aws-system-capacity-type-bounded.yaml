@@ -1,0 +1,47 @@
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: d3-kubepool-aws-system-capacity-type-bounded
+  annotations:
+    kubecore.io/catalog-domain: "D3"
+    kubecore.io/catalog-id: "d3-kubepool-aws-system-capacity-type-bounded"
+    kubecore.io/evidence-ref: "api/v1beta1/kubepool_types.go"
+    policies.kyverno.io/category: "KubeCore Catalog"
+    policies.kyverno.io/description: "EKS system node-group capacity type (AWS-only concept). Bounded to AWS-supported values; CRD already enums but Kyverno provides per-tenant deny message."
+    policies.kyverno.io/severity: "medium"
+    policies.kyverno.io/subject: "schema.kubecore.io/KubePool"
+spec:
+  validationFailureAction: Enforce
+  failurePolicy: Fail
+  background: true
+  rules:
+  - name: d3-kubepool-aws-system-capacity-type-bounded
+    match:
+      any:
+      - resources:
+          kinds:
+            - KubePool
+    preconditions:
+      all:
+      - key: "{{ request.operation }}"
+        operator: AnyIn
+        value:
+        - CREATE
+        - UPDATE
+      - key: "{{ request.object.spec.cloudProvider.aws.cluster.system.capacityType || '' }}"
+        operator: NotEquals
+        value: ""
+      - key: "{{ request.object.spec.cloudProvider.aws || '' }}"
+        operator: NotEquals
+        value: ""
+    validate:
+      message: "Field spec.cloudProvider.aws.cluster.system.capacityType on KubePool must lie within the bounded set (catalog: d3-kubepool-aws-system-capacity-type-bounded, domain: D3). See PRD-310."
+      deny:
+        conditions:
+          any:
+          - key: "{{ request.object.spec.cloudProvider.aws.cluster.system.capacityType }}"
+            operator: AnyNotIn
+            value:
+            - "ON_DEMAND"
+            - "SPOT"
+

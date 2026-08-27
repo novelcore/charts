@@ -1,0 +1,37 @@
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: d1-kubeorg-meluxina-ssh-key-ref-immutable
+  annotations:
+    kubecore.io/catalog-domain: "D1"
+    kubecore.io/catalog-id: "d1-kubeorg-meluxina-ssh-key-ref-immutable"
+    kubecore.io/evidence-ref: "api/v1beta1/kubeorg_types.go"
+    policies.kyverno.io/category: "KubeCore Catalog"
+    policies.kyverno.io/description: "MeluXina SSH-key secret reference anchors the credential the mint CronJob uses. Re-pointing it mid-flight breaks token minting; the key source is fixed at HPC onboarding."
+    policies.kyverno.io/severity: "high"
+    policies.kyverno.io/subject: "schema.kubecore.io/KubeOrg"
+spec:
+  validationFailureAction: Enforce
+  failurePolicy: Fail
+  background: true
+  rules:
+  - name: d1-kubeorg-meluxina-ssh-key-ref-immutable
+    match:
+      any:
+      - resources:
+          kinds:
+            - KubeOrg
+    preconditions:
+      all:
+      - key: "{{ request.operation }}"
+        operator: Equals
+        value: UPDATE
+    validate:
+      message: "Field spec.meluxinaConfig.sshKeySecretRef.name on KubeOrg is immutable (catalog: d1-kubeorg-meluxina-ssh-key-ref-immutable, domain: D1). See PRD-310."
+      deny:
+        conditions:
+          all:
+          - key: "{{ request.object.spec.meluxinaConfig.sshKeySecretRef.name || '' }}"
+            operator: NotEquals
+            value: "{{ request.oldObject.spec.meluxinaConfig.sshKeySecretRef.name || '' }}"
+

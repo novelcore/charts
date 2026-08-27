@@ -102,6 +102,18 @@ crd:
   # (Certificates, Issuers, ...) due to garbage collection.
   keep: true
 
+# [POLICIES]: The PRD-310 policy catalog — one Kyverno ClusterPolicy per
+# governed CRD field (D1 identity locks, D2 shape, D3 bounded enums, D4
+# platform-admin-only). Kyverno must be installed on the control plane
+# (kaos kubetools/system/kyverno). This is the operator's only admission
+# layer; disabling it leaves every spec.* rewrite unguarded.
+policies:
+  enable: true
+  # Enforce rejects violating requests at admission (the catalog's contract);
+  # Audit only records PolicyReports — use it for a staged rollout on a fleet
+  # that predates the catalog, then flip back to Enforce.
+  validationFailureAction: Enforce
+
 # [METRICS]: Set to true to generate manifests for exporting metrics.
 # To disable metrics export set false, and ensure that the
 # ControllerManager argument "--metrics-bind-address=:8443" is removed.

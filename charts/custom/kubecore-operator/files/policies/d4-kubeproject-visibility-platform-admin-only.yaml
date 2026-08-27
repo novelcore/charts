@@ -1,0 +1,41 @@
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: d4-kubeproject-visibility-platform-admin-only
+  annotations:
+    kubecore.io/catalog-domain: "D4"
+    kubecore.io/catalog-id: "d4-kubeproject-visibility-platform-admin-only"
+    kubecore.io/evidence-ref: "api/v1beta1/kubeproject_types.go"
+    policies.kyverno.io/category: "KubeCore Catalog"
+    policies.kyverno.io/description: "Flipping repo visibility private→public exposes tenant code publicly. CRD enum (private/internal/public) constrains the values; this D4 rule gates the change-of-value to platform-admin (Zitadel OIDC)."
+    policies.kyverno.io/severity: "high"
+    policies.kyverno.io/subject: "schema.kubecore.io/KubeProject"
+spec:
+  validationFailureAction: Enforce
+  failurePolicy: Fail
+  background: false
+  rules:
+  - name: d4-kubeproject-visibility-platform-admin-only
+    match:
+      any:
+      - resources:
+          kinds:
+            - KubeProject
+    preconditions:
+      all:
+      - key: "{{ request.operation }}"
+        operator: Equals
+        value: UPDATE
+      - key: "{{ request.object.spec.githubConfiguration.visibility || '' }}"
+        operator: NotEquals
+        value: "{{ request.oldObject.spec.githubConfiguration.visibility || '' }}"
+    validate:
+      message: "Changing spec.githubConfiguration.visibility on KubeProject requires membership in one of [platform-admin] (catalog: d4-kubeproject-visibility-platform-admin-only, domain: D4). See PRD-310."
+      deny:
+        conditions:
+          all:
+          - key: "{{ request.userInfo.groups }}"
+            operator: AnyNotIn
+            value:
+            - "platform-admin"
+

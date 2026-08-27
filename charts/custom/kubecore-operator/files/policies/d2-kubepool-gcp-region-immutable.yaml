@@ -1,0 +1,42 @@
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: d2-kubepool-gcp-region-immutable
+  annotations:
+    kubecore.io/catalog-domain: "D2"
+    kubecore.io/catalog-id: "d2-kubepool-gcp-region-immutable"
+    kubecore.io/evidence-ref: "api/v1beta1/kubepool_types.go"
+    kubecore.io/migration-issue: "#342"
+    kubecore.io/migration-status: "unimplemented"
+    policies.kyverno.io/category: "KubeCore Catalog"
+    policies.kyverno.io/description: "GCP region the GKE cluster lives in. Changing it requires re-provisioning every dependent resource. Migration unimplemented (#342)."
+    policies.kyverno.io/severity: "medium"
+    policies.kyverno.io/subject: "schema.kubecore.io/KubePool"
+spec:
+  validationFailureAction: Enforce
+  failurePolicy: Fail
+  background: true
+  rules:
+  - name: d2-kubepool-gcp-region-immutable
+    match:
+      any:
+      - resources:
+          kinds:
+            - KubePool
+    preconditions:
+      all:
+      - key: "{{ request.operation }}"
+        operator: Equals
+        value: UPDATE
+      - key: "{{ request.object.spec.cloudProvider.gcp || '' }}"
+        operator: NotEquals
+        value: ""
+    validate:
+      message: "Field spec.cloudProvider.gcp.region on KubePool is immutable (catalog: d2-kubepool-gcp-region-immutable, domain: D2). See PRD-310."
+      deny:
+        conditions:
+          all:
+          - key: "{{ request.object.spec.cloudProvider.gcp.region || '' }}"
+            operator: NotEquals
+            value: "{{ request.oldObject.spec.cloudProvider.gcp.region || '' }}"
+

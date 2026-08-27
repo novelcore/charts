@@ -104,10 +104,87 @@ spec:
                     ProjectEnvironment's kubePool (no kubePool field here). Requires at least one
                     selected environment.
                   properties:
+                    ml:
+                      description: |-
+                        ML makes the app's dedicated environment an ML one (PRD-1124 D-07): for
+                        the targeted `ml`-typed environment the operator provisions an
+                        app-exclusive namespace ({project}-{app}--{env}), the pipeline runtime
+                        wiring, and one whole-node scale-to-zero pool per listed flavour —
+                        tainted and labelled for THIS app, so its steps never share the
+                        environment's pools. Same shape and rules as
+                        KubeProject.spec.environments[].ml; the step dropdown offers exactly
+                        these flavours. The project's single MLOps stack is still used. Only
+                        valid when the selected environment is of type ml.
+                      properties:
+                        cpu:
+                          description: CPU flavour pools for CPU-only pipeline steps.
+                          items:
+                            description: MLTierCompute is one flavour pool of an ml environment.
+                            properties:
+                              maxNodes:
+                                default: 2
+                                description: |-
+                                  MaxNodes bounds the pool's 0→N autoscale. Each step takes a whole
+                                  node, so this is the maximum number of concurrent steps on this
+                                  flavour. Min is always 0 (scale-to-zero is the point of the model).
+                                maximum: 8
+                                minimum: 1
+                                type: integer
+                              size:
+                                description: |-
+                                  Size is the platform t-shirt size of the whole node a step runs on.
+                                  The mapping to machine type / accelerator is owned by the platform
+                                  (PRD-1124 CON-03); the enum here is pinned to that catalog by test.
+                                enum:
+                                  - small
+                                  - medium
+                                  - large
+                                type: string
+                            required:
+                              - size
+                            type: object
+                          type: array
+                          x-kubernetes-list-map-keys:
+                            - size
+                          x-kubernetes-list-type: map
+                        gpu:
+                          description: GPU flavour pools for steps that request nvidia.com/gpu.
+                          items:
+                            description: MLTierCompute is one flavour pool of an ml environment.
+                            properties:
+                              maxNodes:
+                                default: 2
+                                description: |-
+                                  MaxNodes bounds the pool's 0→N autoscale. Each step takes a whole
+                                  node, so this is the maximum number of concurrent steps on this
+                                  flavour. Min is always 0 (scale-to-zero is the point of the model).
+                                maximum: 8
+                                minimum: 1
+                                type: integer
+                              size:
+                                description: |-
+                                  Size is the platform t-shirt size of the whole node a step runs on.
+                                  The mapping to machine type / accelerator is owned by the platform
+                                  (PRD-1124 CON-03); the enum here is pinned to that catalog by test.
+                                enum:
+                                  - small
+                                  - medium
+                                  - large
+                                type: string
+                            required:
+                              - size
+                            type: object
+                          type: array
+                          x-kubernetes-list-map-keys:
+                            - size
+                          x-kubernetes-list-type: map
+                      type: object
                     nodeGroup:
                       description: |-
                         NodeGroup is the default dedicated node-group definition applied to EVERY
-                        environment this app is selected into, unless overridden per environment in Overrides.
+                        environment this app is selected into, unless overridden per environment in
+                        Overrides. Service (deployment) apps set this. Optional since PRD-1124 D-07:
+                        an ML pipeline app declares `ml` instead.
                       properties:
                         capacityType:
                           default: on-demand
@@ -357,9 +434,10 @@ spec:
                               type: string
                           type: object
                       type: object
-                  required:
-                    - nodeGroup
                   type: object
+                  x-kubernetes-validations:
+                    - message: 'dedicatedEnvironment needs nodeGroup (service apps: one exclusive node group) or ml (ML pipeline apps: app-owned flavour pools, PRD-1124 D-07)'
+                      rule: has(self.nodeGroup) || has(self.ml)
                 description:
                   description: Description provides a description of the application
                   type: string

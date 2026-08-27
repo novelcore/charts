@@ -1,0 +1,39 @@
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: d2-kubeproject-ml-kubepool-immutable
+  annotations:
+    kubecore.io/catalog-domain: "D2"
+    kubecore.io/catalog-id: "d2-kubeproject-ml-kubepool-immutable"
+    kubecore.io/evidence-ref: "knowledge/prds/310-kyverno-admission-policy-layer.md"
+    kubecore.io/migration-issue: "#344"
+    kubecore.io/migration-status: "unimplemented"
+    policies.kyverno.io/category: "KubeCore Catalog"
+    policies.kyverno.io/description: "Moving the ML stack to a new pool requires MLflow/LakeFS/CNPG data migration; not implemented (#344)."
+    policies.kyverno.io/severity: "medium"
+    policies.kyverno.io/subject: "schema.kubecore.io/KubeProject"
+spec:
+  validationFailureAction: Enforce
+  failurePolicy: Fail
+  background: true
+  rules:
+  - name: d2-kubeproject-ml-kubepool-immutable
+    match:
+      any:
+      - resources:
+          kinds:
+            - KubeProject
+    preconditions:
+      all:
+      - key: "{{ request.operation }}"
+        operator: Equals
+        value: UPDATE
+    validate:
+      message: "Field spec.ml.kubePool on KubeProject is immutable (catalog: d2-kubeproject-ml-kubepool-immutable, domain: D2). See PRD-310."
+      deny:
+        conditions:
+          all:
+          - key: "{{ request.object.spec.ml.kubePool || '' }}"
+            operator: NotEquals
+            value: "{{ request.oldObject.spec.ml.kubePool || '' }}"
+

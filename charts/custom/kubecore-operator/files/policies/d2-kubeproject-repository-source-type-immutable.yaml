@@ -1,0 +1,39 @@
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: d2-kubeproject-repository-source-type-immutable
+  annotations:
+    kubecore.io/catalog-domain: "D2"
+    kubecore.io/catalog-id: "d2-kubeproject-repository-source-type-immutable"
+    kubecore.io/evidence-ref: "knowledge/prds/310-kyverno-admission-policy-layer.md"
+    kubecore.io/migration-issue: "#344"
+    kubecore.io/migration-status: "unimplemented"
+    policies.kyverno.io/category: "KubeCore Catalog"
+    policies.kyverno.io/description: "Flipping template↔existing requires the operator to either tear down + reseed the GitHub repo or detach from the template lineage; migration unimplemented (#344)."
+    policies.kyverno.io/severity: "medium"
+    policies.kyverno.io/subject: "schema.kubecore.io/KubeProject"
+spec:
+  validationFailureAction: Enforce
+  failurePolicy: Fail
+  background: true
+  rules:
+  - name: d2-kubeproject-repository-source-type-immutable
+    match:
+      any:
+      - resources:
+          kinds:
+            - KubeProject
+    preconditions:
+      all:
+      - key: "{{ request.operation }}"
+        operator: Equals
+        value: UPDATE
+    validate:
+      message: "Field spec.githubConfiguration.repositorySource.type on KubeProject is immutable (catalog: d2-kubeproject-repository-source-type-immutable, domain: D2). See PRD-310."
+      deny:
+        conditions:
+          all:
+          - key: "{{ request.object.spec.githubConfiguration.repositorySource.type || '' }}"
+            operator: NotEquals
+            value: "{{ request.oldObject.spec.githubConfiguration.repositorySource.type || '' }}"
+

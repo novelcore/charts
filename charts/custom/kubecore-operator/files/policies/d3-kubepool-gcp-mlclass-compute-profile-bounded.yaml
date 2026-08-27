@@ -1,0 +1,52 @@
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: d3-kubepool-gcp-mlclass-compute-profile-bounded
+  annotations:
+    kubecore.io/catalog-domain: "D3"
+    kubecore.io/catalog-id: "d3-kubepool-gcp-mlclass-compute-profile-bounded"
+    kubecore.io/evidence-ref: "api/v1beta1/kubepool_types.go"
+    policies.kyverno.io/category: "KubeCore Catalog"
+    policies.kyverno.io/description: "MLComputeClass data-integrity posture; gates preemptible (only ephemeral-training may run on spot). Bounded to the known profile set."
+    policies.kyverno.io/severity: "medium"
+    policies.kyverno.io/subject: "schema.kubecore.io/KubePool"
+spec:
+  validationFailureAction: Enforce
+  failurePolicy: Fail
+  background: true
+  rules:
+  - name: d3-kubepool-gcp-mlclass-compute-profile-bounded
+    match:
+      any:
+      - resources:
+          kinds:
+            - KubePool
+    preconditions:
+      all:
+      - key: "{{ request.operation }}"
+        operator: AnyIn
+        value:
+        - CREATE
+        - UPDATE
+      - key: "{{ request.object.spec.cloudProvider.gcp || '' }}"
+        operator: NotEquals
+        value: ""
+    validate:
+      message: "Field spec.cloudProvider.gcp.cluster.compute.mlClasses[].computeProfile on KubePool must lie within the bounded set (catalog: d3-kubepool-gcp-mlclass-compute-profile-bounded, domain: D3). See PRD-310."
+      foreach:
+      - list: "request.object.spec.cloudProvider.gcp.cluster.compute.mlClasses"
+        preconditions:
+          all:
+          - key: "{{ element.computeProfile || '' }}"
+            operator: NotEquals
+            value: ""
+        deny:
+          conditions:
+            any:
+            - key: "{{ element.computeProfile }}"
+              operator: AnyNotIn
+              value:
+              - "ephemeral-training"
+              - "stateful-database"
+              - "stateful-serving"
+
