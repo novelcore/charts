@@ -1,3 +1,5 @@
+# DO NOT EDIT; regenerate via `make gen-policies` (PRD-310 F-03, CON-30)
+---
 apiVersion: kyverno.io/v1
 kind: ClusterPolicy
 metadata:
@@ -7,7 +9,7 @@ metadata:
     kubecore.io/catalog-id: "reg-kubepool-registry-type-supported"
     kubecore.io/evidence-ref: "internal/common/registryref/kinds.go"
     policies.kyverno.io/category: "KubeCore Catalog"
-    policies.kyverno.io/description: "Registry kind-table coverage: only \"zot\" has an implemented kind-table row in Phase 1, though the CRD enum already admits gar/ecr/acr for the eventual multi-cloud vocabulary. Widened per kind-table row landing (Phase 2)."
+    policies.kyverno.io/description: "Registry kind-table coverage: \"zot\" (Phase 1) and \"gar\" (Phase 2, PRD-REG-994 F-16) have implemented kind-table rows; the CRD enum already admits ecr/acr for the eventual multi-cloud vocabulary and they widen here as their rows land. Live 2026-08-27: gke-dev carried a gar registry while this set still said zot-only, so Kyverno denied EVERY KubePool update on that pool (allowExistingViolations did not rescue an annotate/patch) — the bounded set must track kinds.go."
     policies.kyverno.io/severity: "medium"
     policies.kyverno.io/subject: "schema.kubecore.io/KubePool"
 spec:
@@ -43,5 +45,6 @@ spec:
             - key: "{{ element.type }}"
               operator: AnyNotIn
               value:
+              - "gar"
               - "zot"
 
