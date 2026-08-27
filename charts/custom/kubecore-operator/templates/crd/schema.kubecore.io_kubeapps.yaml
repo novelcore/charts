@@ -186,6 +186,16 @@ spec:
                         Overrides. Service (deployment) apps set this. Optional since PRD-1124 D-07:
                         an ML pipeline app declares `ml` instead.
                       properties:
+                        arch:
+                          default: amd64
+                          description: |-
+                            Arch selects the node CPU architecture. Only meaningful alongside Size
+                            — when MachineType pins a raw SKU, the architecture is whatever that
+                            SKU is, and Arch is ignored. Defaults to amd64.
+                          enum:
+                            - amd64
+                            - arm64
+                          type: string
                         capacityType:
                           default: on-demand
                           description: |-
@@ -209,10 +219,14 @@ spec:
                           type: object
                         machineType:
                           description: |-
-                            MachineType is the instance/machine type for the node group. It is
-                            interpreted per cloud: GCP machine type (e.g. "e2-standard-4"), EC2
-                            instance type, or Azure VM size.
-                          minLength: 1
+                            MachineType pins a raw, cloud-specific instance/machine type,
+                            bypassing Size resolution: a GCP machine type ("e2-standard-4"), an
+                            Azure VM size ("Standard_D8s_v5"), or an EC2 instance type. It is the
+                            escape hatch for a SKU the size vocabulary cannot express (a GPU or
+                            memory-optimised family, a capacity reservation). An environment that
+                            uses it is NOT portable across clouds — prefer Size.
+
+                            Exactly one of Size or MachineType must be set.
                           type: string
                         scaling:
                           description: |-
@@ -236,6 +250,24 @@ spec:
                             - max
                             - min
                           type: object
+                        size:
+                          description: |-
+                            Size is the cloud-neutral t-shirt size of each node
+                            (small=4vCPU/16Gi, medium=8vCPU/32Gi, large=16vCPU/64Gi). It is
+                            resolved to a concrete per-cloud machine type by the operator against
+                            the target KubePool's cloud, using the same table that already backs
+                            `ci` sizing (internal/operators/kubeproject/cicompute). Declaring size
+                            instead of machineType is what makes an environment portable between a
+                            GKE pool and an AKS pool without a manifest edit (#1169).
+
+                            Exactly one of Size or MachineType must be set. The rule is enforced
+                            in-controller (NodeGroupComputeInvalid condition), not by CEL, per the
+                            repo's Kyverno-not-webhooks admission model.
+                          enum:
+                            - small
+                            - medium
+                            - large
+                          type: string
                         taints:
                           description: |-
                             Taints are user-supplied taints applied to the node group. The
@@ -264,7 +296,6 @@ spec:
                           type: array
                       required:
                         - diskSizeGB
-                        - machineType
                         - scaling
                       type: object
                     overrides:
@@ -277,6 +308,16 @@ spec:
                           nodeGroup:
                             description: NodeGroup, when set, fully replaces the default node group for this environment.
                             properties:
+                              arch:
+                                default: amd64
+                                description: |-
+                                  Arch selects the node CPU architecture. Only meaningful alongside Size
+                                  — when MachineType pins a raw SKU, the architecture is whatever that
+                                  SKU is, and Arch is ignored. Defaults to amd64.
+                                enum:
+                                  - amd64
+                                  - arm64
+                                type: string
                               capacityType:
                                 default: on-demand
                                 description: |-
@@ -300,10 +341,14 @@ spec:
                                 type: object
                               machineType:
                                 description: |-
-                                  MachineType is the instance/machine type for the node group. It is
-                                  interpreted per cloud: GCP machine type (e.g. "e2-standard-4"), EC2
-                                  instance type, or Azure VM size.
-                                minLength: 1
+                                  MachineType pins a raw, cloud-specific instance/machine type,
+                                  bypassing Size resolution: a GCP machine type ("e2-standard-4"), an
+                                  Azure VM size ("Standard_D8s_v5"), or an EC2 instance type. It is the
+                                  escape hatch for a SKU the size vocabulary cannot express (a GPU or
+                                  memory-optimised family, a capacity reservation). An environment that
+                                  uses it is NOT portable across clouds — prefer Size.
+
+                                  Exactly one of Size or MachineType must be set.
                                 type: string
                               scaling:
                                 description: |-
@@ -327,6 +372,24 @@ spec:
                                   - max
                                   - min
                                 type: object
+                              size:
+                                description: |-
+                                  Size is the cloud-neutral t-shirt size of each node
+                                  (small=4vCPU/16Gi, medium=8vCPU/32Gi, large=16vCPU/64Gi). It is
+                                  resolved to a concrete per-cloud machine type by the operator against
+                                  the target KubePool's cloud, using the same table that already backs
+                                  `ci` sizing (internal/operators/kubeproject/cicompute). Declaring size
+                                  instead of machineType is what makes an environment portable between a
+                                  GKE pool and an AKS pool without a manifest edit (#1169).
+
+                                  Exactly one of Size or MachineType must be set. The rule is enforced
+                                  in-controller (NodeGroupComputeInvalid condition), not by CEL, per the
+                                  repo's Kyverno-not-webhooks admission model.
+                                enum:
+                                  - small
+                                  - medium
+                                  - large
+                                type: string
                               taints:
                                 description: |-
                                   Taints are user-supplied taints applied to the node group. The
@@ -355,7 +418,6 @@ spec:
                                 type: array
                             required:
                               - diskSizeGB
-                              - machineType
                               - scaling
                             type: object
                           resources:
