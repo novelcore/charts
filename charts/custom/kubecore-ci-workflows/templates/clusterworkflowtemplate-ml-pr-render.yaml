@@ -246,6 +246,23 @@ spec:
         spec = wft["spec"]
         params = spec.get("arguments", {}).get("parameters", [])
         names = [p["name"] for p in params]
+        # Rendered-pipeline section for the PR report comment (shared `report`
+        # template reads /workspace/report-extra.md): the step names in
+        # pipeline order with where each image comes from, so the developer
+        # sees the step they just added/renamed/removed by name — written
+        # BEFORE the gates so a failed gate's report carries it too.
+        moustache = r"\{" + r"\{workflow\.parameters\.image-(.+)\}" + r"\}"
+        rows = []
+        for t in spec["templates"]:
+            if "container" not in t:
+                continue
+            image = str(t["container"].get("image", ""))
+            m = re.fullmatch(moustache, image)
+            src = f"built from `steps/{m.group(1).replace('-', '_')}/`" if m else f"verbatim `{image}`"
+            rows.append(f"| `{t['name']}` | {src} |")
+        Path("/workspace/report-extra.md").write_text(
+            f"#### Rendered pipeline — {len(rows)} steps, {len(names)} form params\n\n"
+            "| step | image |\n|---|---|\n" + "\n".join(rows) + "\n")
         dupes = {n for n in names if names.count(n) > 1}
         if dupes:
             sys.exit(f"GATE FAIL: duplicate submit-form parameters: {sorted(dupes)}")
