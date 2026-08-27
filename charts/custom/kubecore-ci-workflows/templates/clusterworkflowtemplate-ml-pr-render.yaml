@@ -47,7 +47,8 @@ spec:
   entrypoint: ml-ci-pr-render
   onExit: exit-handler
   ttlStrategy:
-    secondsAfterCompletion: {{ .Values.workflow.ttlStrategy.secondsAfterCompletion }}
+    secondsAfterSuccess: {{ int .Values.workflow.ttlStrategy.secondsAfterSuccess }}
+    secondsAfterFailure: {{ int .Values.workflow.ttlStrategy.secondsAfterFailure }}
   podGC:
     strategy: {{ .Values.workflow.podGC.strategy }}
   volumeClaimGC:
@@ -310,7 +311,7 @@ spec:
         ARGO_BASE="{{ .Values.argo.uiBaseUrl }}"
         RUN_URL=""
         if [ -n "${ARGO_BASE}" ]; then
-          RUN_URL="${ARGO_BASE}/workflows/{{`{{workflow.namespace}}`}}/{{`{{workflow.name}}`}}"
+          RUN_URL="${ARGO_BASE}/workflows/{{`{{workflow.namespace}}`}}/{{`{{workflow.name}}`}}?uid={{`{{workflow.uid}}`}}"
         fi
         if [ -n "${RUN_URL}" ]; then
           PAYLOAD="{\"state\":\"${STATE}\",\"description\":\"${DESC}\",\"context\":\"wft-render\",\"target_url\":\"${RUN_URL}\"}"
