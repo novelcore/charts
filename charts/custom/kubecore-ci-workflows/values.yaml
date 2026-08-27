@@ -102,8 +102,19 @@ workflow:
   # Namespace where WorkflowTemplate is created
   namespace: "argo-workflows"
 
-  # TTL for completed workflows
+  # TTL for completed workflows. These runs are what every GitHub commit
+  # status / Deployment / report comment links to (argo.uiBaseUrl/workflows/
+  # {ns}/{name}) and gke-dev has no workflow archive, so a run must outlive
+  # the review it belongs to: 3 days after success, 14 days after failure
+  # (the failed run — pods kept by podGC OnWorkflowSuccess — is the thing a
+  # developer opens from the report). Was 1 h, which broke every link an hour
+  # after the run (kubecore-operator#1126).
   ttlStrategy:
+    secondsAfterSuccess: 259200
+    secondsAfterFailure: 1209600
+    # utility / reconciler runs (probes, janitor, healer, reaper, ci-reconcile,
+    # ml-ci-reconcile) — nothing links to them and they run every few
+    # minutes; keep the short TTL.
     secondsAfterCompletion: 3600
 
   # Pod garbage collection

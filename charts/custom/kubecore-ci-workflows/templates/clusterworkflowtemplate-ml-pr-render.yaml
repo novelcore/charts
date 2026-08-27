@@ -47,7 +47,8 @@ spec:
   entrypoint: ml-ci-pr-render
   onExit: exit-handler
   ttlStrategy:
-    secondsAfterCompletion: {{ .Values.workflow.ttlStrategy.secondsAfterCompletion }}
+    secondsAfterSuccess: {{ int .Values.workflow.ttlStrategy.secondsAfterSuccess }}
+    secondsAfterFailure: {{ int .Values.workflow.ttlStrategy.secondsAfterFailure }}
   podGC:
     strategy: {{ .Values.workflow.podGC.strategy }}
   volumeClaimGC:

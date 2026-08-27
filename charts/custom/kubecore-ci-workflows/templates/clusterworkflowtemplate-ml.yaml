@@ -35,7 +35,15 @@ spec:
   entrypoint: ml-ci-build
   onExit: exit-handler
   ttlStrategy:
-    secondsAfterCompletion: {{ .Values.workflow.ttlStrategy.secondsAfterCompletion }}
+    secondsAfterSuccess: {{ int .Values.workflow.ttlStrategy.secondsAfterSuccess }}
+    secondsAfterFailure: {{ int .Values.workflow.ttlStrategy.secondsAfterFailure }}
+  # One build per app at a time (kubecore-operator#1126): the project's CI
+  # pool is small (default 1 node) and consecutive pushes otherwise spawn
+  # concurrent builds of the same app that starve each other's build-push
+  # pods. Argo queues the later run until the earlier one completes.
+  synchronization:
+    mutexes:
+    - name: "{{`{{workflow.parameters.app_name}}`}}-build"
   podGC:
     strategy: {{ .Values.workflow.podGC.strategy }}
   # Release the 40Gi workspace PVC the moment the build COMPLETES, not when
@@ -3127,6 +3135,19 @@ spec:
           exit 0
         fi
         if [ "${STATE}" = "pending" ]; then
+          # Self-heal: a run killed before its exit handler leaves its
+          # Deployment in_progress forever. Before creating this run's
+          # Deployment, mark every non-terminal one in the same environment
+          # inactive (this run supersedes them).
+          curl -s -H "${AUTH}" -H "${ACCEPT}" "${API}/deployments?environment=${ENVIRONMENT}&per_page=20" \
+            | jq -r 'if type == "array" then .[].id else empty end' 2>/dev/null | while read -r OLD; do
+            OLD_STATE=$(curl -s -H "${AUTH}" -H "${ACCEPT}" "${API}/deployments/${OLD}/statuses?per_page=1" | jq -r 'if type == "array" then (.[0].state // "none") else "none" end' 2>/dev/null)
+            case "${OLD_STATE}" in pending|in_progress|queued|none)
+              curl -s -X POST -H "${AUTH}" -H "${ACCEPT}" "${API}/deployments/${OLD}/statuses" \
+                -d "{\"state\":\"inactive\",\"description\":\"superseded by {{`{{workflow.name}}`}}\"}" > /dev/null
+              echo "Inactivated stale deployment ${ENVIRONMENT}#${OLD} (${OLD_STATE})";;
+            esac
+          done
           DEP_ID=$(curl -s -X POST -H "${AUTH}" -H "${ACCEPT}" "${API}/deployments" \
             -d "{\"ref\":\"${SHA}\",\"environment\":\"${ENVIRONMENT}\",\"auto_merge\":false,\"required_contexts\":[],\"transient_environment\":true,\"description\":\"{{`{{workflow.name}}`}}\"}" \
             | jq -r 'if type == "object" then (.id // empty) else empty end' 2>/dev/null || true)
