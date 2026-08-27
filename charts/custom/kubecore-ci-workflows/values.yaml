@@ -178,3 +178,11 @@ ci:
 pendingReaper:
   pendingMaxSeconds: 2700   # 45m — a step Pending this long is capacity-stuck, not queued
   terminateGraceSeconds: 1200  # 20m — shutdown recorded but unhonored = controller desync
+
+# Platform enhancer (kubecore-operator#1161): ml-ci-build and ml-ci-pr-render run
+# kubecore.enhance from THIS pinned copy (the template repo's kubecore/), overlaid
+# on the app's vendored kubecore/ (kept for local dev only). Bump `ref` to roll
+# an enhancer fix out to every app on its next render.
+platformEnhancer:
+  repo: novelcore/hera-mlops-template
+  ref: 291e1d564fe8fe71ede7ab9093f81af2c7bb7f6e

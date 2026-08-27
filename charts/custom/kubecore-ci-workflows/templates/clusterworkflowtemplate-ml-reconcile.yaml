@@ -259,6 +259,29 @@ spec:
           exit 0
         fi
 
+        # CONTEXT DRIFT (kubecore-operator#1158): the platform rewrote the gitops
+        # pipeline-context.yaml (compute classes, ml-environment selector, …)
+        # but nothing pushed, so the live WFT still carries the old context.
+        # Compare the sha256 the last render recorded (context-sha, same raw
+        # bytes) with the file now in gitops; a reconcile-submitted build always
+        # renders (detect-steps), and with HEAD already built it rebuilds no
+        # image. A ConfigMap without context-sha (rendered before 0.12.78) is
+        # unknown, and unknown never means "submit work".
+        CTX_LAST=$(echo "$CM" | jq -r '.data["context-sha"] // empty')
+        if [ -n "$CTX_LAST" ]; then
+          GORG="{{ .Values.github.org }}"; GREPO="{{`{{workflow.parameters.gitops_repository}}`}}"; GBRANCH="{{`{{workflow.parameters.gitops_branch}}`}}"
+          CTX_REL="$(dirname "{{`{{workflow.parameters.workflow_template_path}}`}}")/pipeline-context.yaml"
+          CTX_NOW=$(curl -sf -H "Authorization: Bearer ${TOKEN}" -H "Accept: application/vnd.github.raw" \
+            "https://api.github.com/repos/${GORG}/${GREPO}/contents/${CTX_REL}?ref=${GBRANCH}" | sha256sum | cut -c1-64)
+          if [ -z "$CTX_NOW" ] || [ "$CTX_NOW" = "$(printf '' | sha256sum | cut -c1-64)" ]; then
+            echo "reconcile: gitops ${CTX_REL} unreadable — context drift unknown this poll"
+          elif [ "$CTX_NOW" != "$CTX_LAST" ]; then
+            printf 'true' > /tmp/needs_build
+            echo "reconcile: CONTEXT DRIFT — gitops ${CTX_REL} changed since the last render (${CTX_LAST:0:12} -> ${CTX_NOW:0:12}); submitting ml-ci-build to re-render"
+            exit 0
+          fi
+        fi
+
         # The commit is built — but the WFT has a SECOND input the commit says
         # nothing about: pipeline-context (compute classes, endpoints), written
         # by Crossplane from the operator into the ML namespace. When the

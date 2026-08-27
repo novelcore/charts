@@ -2798,9 +2798,53 @@ spec:
           CATALOG_ARG="--catalog $CATALOG_PATH"
         fi
 
-        # ENHANCE: run the platform enhancer (from the app repo's vendored
-        # kubecore/) on the tokenless-rendered raw WFT. Runs platform code on a
-        # data file — no developer code executes here.
+        # PLATFORM ENHANCER (kubecore-operator#1161): the enhancer is platform
+        # code, so it runs from the platform's pinned copy — the template repo's
+        # kubecore/ at .Values.platformEnhancer.ref — overlaid on the app's
+        # vendored copy (kept only for local dev). Every app renders with the
+        # same enhancer on its next render; a platform fix never again waits
+        # for a per-app re-vendor PR (live cross-tenant leak, 2026-08-27).
+        # Fails loud: rendering with unknown enhancer code is not an option.
+        python3 - <<'OVERLAYEOF'
+        import io, os, shutil, tarfile, urllib.request
+        repo, ref = "{{ .Values.platformEnhancer.repo }}", "{{ .Values.platformEnhancer.ref }}"
+        req = urllib.request.Request(f"https://api.github.com/repos/{repo}/tarball/{ref}",
+                                     headers={"Accept": "application/vnd.github+json", "User-Agent": "kubecore-ci"})
+        tok = open("/etc/github-token/token").read().strip() if os.path.exists("/etc/github-token/token") else ""
+        if tok:
+            req.add_header("Authorization", f"Bearer {tok}")
+        with urllib.request.urlopen(req, timeout=60) as r:
+            tb = tarfile.open(fileobj=io.BytesIO(r.read()), mode="r:gz")
+        dst = "/workspace/repo/kubecore"
+        keep = os.path.join(dst, "local-dev")
+        saved = "/tmp/kubecore-local-dev"
+        if os.path.isdir(keep):
+            shutil.rmtree(saved, ignore_errors=True); shutil.copytree(keep, saved)
+        shutil.rmtree(dst, ignore_errors=True); os.makedirs(dst)
+        n = 0
+        for m in tb.getmembers():
+            parts = m.name.split("/", 1)
+            if len(parts) < 2 or not parts[1].startswith("kubecore/") or "/local-dev/" in parts[1] + "/":
+                continue
+            rel = parts[1][len("kubecore/"):]
+            if not rel or "__pycache__" in rel:
+                continue
+            out = os.path.join(dst, rel)
+            if m.isdir():
+                os.makedirs(out, exist_ok=True)
+            elif m.isfile():
+                os.makedirs(os.path.dirname(out), exist_ok=True)
+                with tb.extractfile(m) as src, open(out, "wb") as f:
+                    f.write(src.read())
+                n += 1
+        if os.path.isdir(saved):
+            shutil.copytree(saved, keep, dirs_exist_ok=True)
+        if n == 0:
+            raise SystemExit(f"platform enhancer: no kubecore/ files in {repo}@{ref}")
+        print(f"platform enhancer: {repo}@{ref[:12]} ({n} files) overlaid on the app's vendored kubecore/")
+        OVERLAYEOF
+        # ENHANCE: run the platform enhancer on the tokenless-rendered raw WFT.
+        # Runs platform code on a data file — no developer code executes here.
         pip install --quiet -e /workspace/repo 2>/dev/null || pip install --quiet hydra-core omegaconf
         PYTHONPATH="/workspace/repo" python3 -m kubecore.enhance \
           --raw /workspace/out/raw-workflow-template.yaml \
@@ -2839,11 +2883,17 @@ spec:
         # replaces after build). This is what keeps D10 true on day 1.
         IMAGES_FILE="${GITOPS_DIR}/pipeline-images.yaml"
         if [ -f "$IMAGES_FILE" ]; then
-          python3 - "$WFT_FILE" "$IMAGES_FILE" "$APP_NAME" <<'IMGEOF'
+          CONTEXT_SHA=$(sha256sum "$CONTEXT_PATH" | cut -c1-64)
+          python3 - "$WFT_FILE" "$IMAGES_FILE" "$APP_NAME" "$CONTEXT_SHA" <<'IMGEOF'
         import sys, yaml, re
         wft = yaml.safe_load(open(sys.argv[1]))
         images_doc = yaml.safe_load(open(sys.argv[2]))
         app = sys.argv[3]
+        # context-sha (kubecore-operator#1158): sha256 of the gitops
+        # pipeline-context.yaml this render consumed. ml-ci-reconcile compares it
+        # with the live file and submits a render when the platform context
+        # changed without a push (compute classes, ml environment selector…).
+        context_sha = sys.argv[4]
         # collect image-<step> configMapKeyRef keys the WFT expects
         wanted = set()
         for p in wft["spec"].get("arguments", {}).get("parameters", []):
@@ -2860,9 +2910,12 @@ spec:
         # renamed step): otherwise the ConfigMap — and the image parameters the
         # submit form derives from it — keep stale entries forever
         # (kubecore-operator#1126, ml-dev-loop e2e "delete"/"rename").
-        removed = [k for k in list(data) if k != "last-built-sha" and k not in wanted]
+        removed = [k for k in list(data) if k not in ("last-built-sha", "context-sha") and k not in wanted]
         for k in removed:
             del data[k]
+        context_moved = bool(context_sha) and data.get("context-sha") != context_sha
+        if context_moved:
+            data["context-sha"] = context_sha
         # PRD-1124 D-07 (kubecore-operator#1124 AC-09): the images ConfigMap MUST
         # live in the SAME namespace the WFT renders into. The k8smlapp
         # composition seeds pipeline-images.yaml ONCE (create-only) with the ML
@@ -2879,9 +2932,9 @@ spec:
         if moved:
             print(f"pipeline-images namespace {meta.get('namespace')!r} -> {wft_ns!r} (following the rendered WFT)")
             meta["namespace"] = wft_ns
-        if added or removed or moved:
+        if added or removed or moved or context_moved:
             yaml.safe_dump(images_doc, open(sys.argv[2], "w"), sort_keys=False)
-            print(f"pipeline-images keys — added: {added} removed: {removed} moved: {moved}")
+            print(f"pipeline-images keys — added: {added} removed: {removed} moved: {moved} context-sha: {context_sha[:12] if context_moved else 'unchanged'}")
         else:
             print("pipeline-images already has exactly the image-<step> keys the WFT references")
         IMGEOF
