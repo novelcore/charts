@@ -400,6 +400,30 @@ spec:
             IMAGES_PATH=$(find /tmp/gitops -path "*/${APP_NAME}/${GITOPS_BRANCH}/pipeline-images.yaml" | head -1)
             if [ -n "$IMAGES_PATH" ] && [ -f "$IMAGES_PATH" ]; then
               echo "pipeline-images discovered at ${IMAGES_PATH}"
+              # Diff base (kubecore-operator#1126, ml-dev-loop e2e "multi"):
+              # everything since the LAST BUILT commit, not just HEAD~1 — a
+              # push of several commits (or a merge whose changes sit in an
+              # earlier commit) used to rebuild only what the final commit
+              # touched. Kept as HEAD~1 when there is no last-built-sha yet,
+              # it is not in the shallow clone, or it is not an ancestor of
+              # HEAD (force-push / rewritten history).
+              LAST_BUILT=$(yq e '.data."last-built-sha" // ""' "$IMAGES_PATH")
+              if [ -n "$LAST_BUILT" ] && git cat-file -e "${LAST_BUILT}^{commit}" 2>/dev/null \
+                 && git merge-base --is-ancestor "$LAST_BUILT" HEAD 2>/dev/null \
+                 && [ "$LAST_BUILT" != "$(git rev-parse HEAD)" ]; then
+                CHANGED_FILES=$(git diff --name-only "$LAST_BUILT" HEAD)
+                echo "Changed files vs last-built-sha ${LAST_BUILT} (supersedes the HEAD~1 diff above):"
+                echo "$CHANGED_FILES"
+                if [ "{{`{{workflow.parameters.event_type}}`}}" = "reconcile" ] \
+                   || echo "$CHANGED_FILES" | grep -qE "$WFT_SRC_RE"; then
+                  printf "true" > /tmp/wft_changed
+                else
+                  printf "false" > /tmp/wft_changed
+                fi
+                echo "wft_changed=$(cat /tmp/wft_changed) (re-evaluated against last-built-sha)"
+              else
+                echo "diff base stays HEAD~1 (last-built-sha ${LAST_BUILT:-unset} unusable in this clone)"
+              fi
             else
               echo "pipeline-images.yaml not found — treating all steps as unbuilt (first build)"
               IMAGES_PATH=""
@@ -2818,11 +2842,18 @@ spec:
             if key not in data:
                 data[key] = f":{key}-latest"  # placeholder; patch-images overwrites post-build
                 added.append(key)
-        if added:
+        # Prune keys the rendered WFT no longer references (a deleted or
+        # renamed step): otherwise the ConfigMap — and the image parameters the
+        # submit form derives from it — keep stale entries forever
+        # (kubecore-operator#1126, ml-dev-loop e2e "delete"/"rename").
+        removed = [k for k in list(data) if k != "last-built-sha" and k not in wanted]
+        for k in removed:
+            del data[k]
+        if added or removed:
             yaml.safe_dump(images_doc, open(sys.argv[2], "w"), sort_keys=False)
-            print(f"added missing pipeline-images keys: {added}")
+            print(f"pipeline-images keys — added: {added} removed: {removed}")
         else:
-            print("pipeline-images already has every image-<step> key")
+            print("pipeline-images already has exactly the image-<step> keys the WFT references")
         IMGEOF
         fi
 
