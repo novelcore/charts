@@ -218,7 +218,11 @@ spec:
         template: render-hera
         # HERA frontend only. Renders pipeline.py -> enhances -> gates -> commits.
         # Same firing rule as render-wft (WFT source = pipeline.py + config/ + kubecore/).
-        when: "{{`{{steps.detect-steps.outputs.parameters.frontend}}`}} == hera && ({{`{{steps.detect-steps.outputs.parameters.has_changes}}`}} == true || {{`{{steps.detect-steps.outputs.parameters.wft_changed}}`}} == true) && {{`{{workflow.parameters.branch_type}}`}} != chore"
+        # PRD-1124 D-07 (kubecore-operator#1124 AC-09): ALSO fire on a reconcile-
+        # submitted build. The reconciler submits one when the platform context
+        # moved (mlEnvironment / namespace drift) with NO commit; re-rendering is
+        # idempotent (hera-enhance-commit commits only when the output differs).
+        when: "{{`{{steps.detect-steps.outputs.parameters.frontend}}`}} == hera && ({{`{{steps.detect-steps.outputs.parameters.has_changes}}`}} == true || {{`{{steps.detect-steps.outputs.parameters.wft_changed}}`}} == true || {{`{{workflow.parameters.event_type}}`}} == reconcile) && {{`{{workflow.parameters.branch_type}}`}} != chore"
         arguments:
           parameters:
           - name: changed_steps
@@ -2859,9 +2863,25 @@ spec:
         removed = [k for k in list(data) if k != "last-built-sha" and k not in wanted]
         for k in removed:
             del data[k]
-        if added or removed:
+        # PRD-1124 D-07 (kubecore-operator#1124 AC-09): the images ConfigMap MUST
+        # live in the SAME namespace the WFT renders into. The k8smlapp
+        # composition seeds pipeline-images.yaml ONCE (create-only) with the ML
+        # namespace of that day; when the operator later (re)targets the app —
+        # a dedicated app environment ({project}-{app}--{env}) or a renamed
+        # env — the WFT follows the context but the ConfigMap stayed behind, so
+        # every submit in the new namespace died at "ConfigMap
+        # '{app}-pipeline-images' does not exist" and the CI reconciler
+        # self-disabled on the same NotFound (live gke-dev/prd1124yolo
+        # 2026-08-27). Pin it to the WFT's namespace on every render.
+        wft_ns = (wft.get("metadata") or {}).get("namespace") or ""
+        meta = images_doc.setdefault("metadata", {})
+        moved = bool(wft_ns) and meta.get("namespace") != wft_ns
+        if moved:
+            print(f"pipeline-images namespace {meta.get('namespace')!r} -> {wft_ns!r} (following the rendered WFT)")
+            meta["namespace"] = wft_ns
+        if added or removed or moved:
             yaml.safe_dump(images_doc, open(sys.argv[2], "w"), sort_keys=False)
-            print(f"pipeline-images keys — added: {added} removed: {removed}")
+            print(f"pipeline-images keys — added: {added} removed: {removed} moved: {moved}")
         else:
             print("pipeline-images already has exactly the image-<step> keys the WFT references")
         IMGEOF
@@ -2946,6 +2966,20 @@ spec:
           exit 1
         fi
         echo "pipeline-images discovered at ${IMAGES_PATH}"
+
+        # PRD-1124 D-07 (kubecore-operator#1124 AC-09): keep the ConfigMap in
+        # the namespace the rendered WFT lives in — the WFT sits next to it in
+        # gitops. Same rule as hera-enhance-commit; this covers builds that skip
+        # the render (images-only changes, reconcile no-ops).
+        WFT_PATH="$(dirname "${IMAGES_PATH}")/workflow-template.yaml"
+        if [ -f "${WFT_PATH}" ]; then
+          WFT_NS=$(yq e '.metadata.namespace // ""' "${WFT_PATH}")
+          CUR_NS=$(yq e '.metadata.namespace // ""' "${IMAGES_PATH}")
+          if [ -n "${WFT_NS}" ] && [ "${WFT_NS}" != "${CUR_NS}" ]; then
+            echo "pipeline-images namespace '${CUR_NS}' -> '${WFT_NS}' (following the rendered WFT)"
+            yq e -i ".metadata.namespace = \"${WFT_NS}\"" "${IMAGES_PATH}"
+          fi
+        fi
 
         # changed_steps comes in as a JSON array `[{"name":"...","path":"..."},...]`
         # Update each step's image key in the pipeline-images ConfigMap.
