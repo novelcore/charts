@@ -119,7 +119,7 @@ spec:
           - name: context
             value: "kubecore-ml-ci/rc"
           - name: environment
-            value: "ml-rc"
+            value: "argo-workflows-rc"
     - - name: clone
         templateRef:
           name: ml-ci-build
@@ -190,7 +190,7 @@ spec:
           - name: context
             value: "kubecore-ml-ci/rc"
           - name: environment
-            value: "ml-rc"
+            value: "argo-workflows-rc"
 
   - name: exit-handler
     steps:
@@ -208,7 +208,7 @@ spec:
           - name: context
             value: "kubecore-ml-ci/rc"
           - name: environment
-            value: "ml-rc"
+            value: "argo-workflows-rc"
         when: "{{`{{workflow.status}}`}} != Succeeded"
     - - name: run-report
         templateRef:
@@ -222,4 +222,4 @@ spec:
           - name: context
             value: "kubecore-ml-ci/rc"
           - name: environment
-            value: "ml-rc"
+            value: "argo-workflows-rc"
