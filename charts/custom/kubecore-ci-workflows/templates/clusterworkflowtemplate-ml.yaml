@@ -3324,6 +3324,11 @@ spec:
           echo "Ran in-cluster on Argo Workflows (\`${NS}/${WF}\`, ${DURATION}); reported back through this comment, the \`${CONTEXT}\` commit status and${ENVIRONMENT:+ the \`${ENVIRONMENT}\` Deployment and} the links below. No GitHub Actions."
           echo ""
           if [ "${PHASE}" != "Succeeded" ]; then echo "#### Why it failed"; cat /tmp/why.md; echo ""; fi
+          # Optional pipeline-specific section a run drops into the shared
+          # workspace (the PR gate writes the rendered pipeline's steps there,
+          # so a developer sees the step they added/renamed/removed named in
+          # the PR — #1126). Absent file → nothing added.
+          if [ -s /workspace/report-extra.md ]; then cat /workspace/report-extra.md; echo ""; fi
           echo "#### Steps"
           echo ""
           echo "| step | result | duration |"
@@ -3349,6 +3354,11 @@ spec:
           curl -s -X POST -H "${AUTH}" -H "${ACCEPT}" "${CREATE}" -d @/tmp/payload.json > /dev/null && echo "Posted report comment (${PR:+PR #${PR}}${PR:-commit ${SHA}})"
         fi
       volumeMounts:
+      # Every caller (ml-ci-build, ml-ci-pr-render, ml-ci-rc-build, ci-build,
+      # rc) declares a `workspace` volume, so this mount is always satisfiable;
+      # only the PR gate writes report-extra.md into it today.
+      - name: workspace
+        mountPath: /workspace
       - name: github-token
         mountPath: /etc/github-token
         readOnly: true
