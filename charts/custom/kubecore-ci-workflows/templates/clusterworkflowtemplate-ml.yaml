@@ -3110,7 +3110,7 @@ spec:
         ARGO_BASE="{{ .Values.argo.uiBaseUrl }}"
         RUN_URL=""
         if [ -n "${ARGO_BASE}" ]; then
-          RUN_URL="${ARGO_BASE}/workflows/{{`{{workflow.namespace}}`}}/{{`{{workflow.name}}`}}"
+          RUN_URL="${ARGO_BASE}/workflows/{{`{{workflow.namespace}}`}}/{{`{{workflow.name}}`}}?uid={{`{{workflow.uid}}`}}"
         fi
 
         # 1) commit status — the check on the commit / PR, linking to the run.
@@ -3226,7 +3226,7 @@ spec:
         AUTH="Authorization: token ${TOKEN}"
         ACCEPT="Accept: application/vnd.github+json"
         ARGO_BASE="{{ .Values.argo.uiBaseUrl }}"
-        RUN_URL=""; [ -n "${ARGO_BASE}" ] && RUN_URL="${ARGO_BASE}/workflows/${NS}/${WF}"
+        RUN_URL=""; [ -n "${ARGO_BASE}" ] && RUN_URL="${ARGO_BASE}/workflows/${NS}/${WF}?uid={{`{{workflow.uid}}`}}"
         MARKER="<!-- kubecore-ci-report:${CONTEXT} -->"
 
         # Argo hands the exit handler the failed nodes as JSON.

@@ -441,7 +441,7 @@ spec:
         ARGO_BASE="{{ .Values.argo.uiBaseUrl }}"
         RUN_URL=""
         if [ -n "${ARGO_BASE}" ]; then
-          RUN_URL="${ARGO_BASE}/workflows/{{`{{workflow.namespace}}`}}/{{`{{workflow.name}}`}}"
+          RUN_URL="${ARGO_BASE}/workflows/{{`{{workflow.namespace}}`}}/{{`{{workflow.name}}`}}?uid={{`{{workflow.uid}}`}}"
         fi
 
         # 1) commit status — the check on the commit / PR, linking to the run.
