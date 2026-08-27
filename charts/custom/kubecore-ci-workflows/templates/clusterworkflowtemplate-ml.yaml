@@ -44,6 +44,16 @@ spec:
   synchronization:
     mutexes:
     - name: "{{`{{workflow.parameters.app_name}}`}}-build"
+  # Bound the build-push fan-out (kubecore-operator#1124, 2026-08-27): the
+  # matrix creates one pod per changed step at once — 17 for a yolo-pipelines
+  # app — while the kaniko request is sized "one build per node" and the
+  # default per-project CI pool is ONE node. Sixteen pods sat Pending for
+  # hours, the pending-reaper (#897) read that as capacity-stuck at 45m and
+  # Stopped the build — every build, forever; the app never got its images
+  # (live: prd1124yolo, poulaki/yolotrain). With parallelism Argo holds the
+  # remaining matrix items as workflow nodes instead of Pending pods, so a
+  # pod only waits for the build ahead of it (~10m), never for the queue.
+  parallelism: {{ int (.Values.ci.mlBuildParallelism | default 2) }}
   podGC:
     strategy: {{ .Values.workflow.podGC.strategy }}
   # Release the 40Gi workspace PVC the moment the build COMPLETES, not when

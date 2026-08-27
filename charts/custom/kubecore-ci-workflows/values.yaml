@@ -167,6 +167,12 @@ ci:
   # "platform.kubecore.io/nodegroup-type" entry, preserving today's
   # single-pool behavior.
   defaultNodeClass: ""
+  # Max concurrently running/pending nodes of one ml-ci-build workflow
+  # (Argo spec.parallelism). Keeps the build-push matrix from piling Pending
+  # pods on the (default 1-node) CI pool past the pending-reaper's 45m
+  # threshold — see clusterworkflowtemplate-ml.yaml. Raise together with the
+  # project's `ci: maxNodes:`.
+  mlBuildParallelism: 2
 
 # pending-reaper (#897): bounds unschedulable-step hangs and terminate-desync.
 pendingReaper:
