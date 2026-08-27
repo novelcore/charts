@@ -3052,7 +3052,7 @@ spec:
   - name: status
     # GitHub reporting for the AUTHORITATIVE in-cluster build (#1126): ONE
     # commit status (context kubecore-ml-ci by default) with target_url into
-    # the Argo UI run, plus a Deployment rollup (environment ml-ci by default)
+    # the Argo UI run, plus a Deployment rollup (environment auto = argo-workflows-<branch|pr> by default)
     # whose log/environment URL is the same run. pending creates the
     # Deployment; success/failure resolve the Deployment created for this SHA.
     # Best-effort against the GitHub API: curl without -f never fails the
@@ -3069,7 +3069,7 @@ spec:
       - name: context
         value: "kubecore-ml-ci"
       - name: environment
-        value: "ml-ci"
+        value: "auto"
     container:
       image: alpine/curl
       command: [sh, -c]
@@ -3084,6 +3084,18 @@ spec:
         DESC=$(printf '%s' "{{`{{inputs.parameters.description}}`}}" | cut -c1-140)
         CONTEXT="{{`{{inputs.parameters.context}}`}}"
         ENVIRONMENT="{{`{{inputs.parameters.environment}}`}}"
+        # environment "auto" → named after what actually ran, so the GitHub
+        # Deployments page reads argo-workflows-dev / argo-workflows-pr /
+        # argo-workflows-rc instead of an internal pipeline id (#1126):
+        #   push to <branch>  → argo-workflows-<branch>
+        #   pull request      → argo-workflows-pr
+        if [ "${ENVIRONMENT}" = "auto" ]; then
+          BR=$(echo "{{`{{workflow.parameters.branch}}`}}" | sed 's|^refs/heads/||' | tr '/' '-')
+          case "{{`{{workflow.parameters.event_type}}`}}" in
+            pull_request) ENVIRONMENT="argo-workflows-pr" ;;
+            *) ENVIRONMENT="argo-workflows-${BR}" ;;
+          esac
+        fi
         API="https://api.github.com/repos/${OWNER_REPO}"
         AUTH="Authorization: token ${TOKEN}"
         ACCEPT="Accept: application/vnd.github+json"
@@ -3177,6 +3189,18 @@ spec:
         CONTEXT="{{`{{inputs.parameters.context}}`}}"
         ENVIRONMENT="{{`{{inputs.parameters.environment}}`}}"
         PR="{{`{{inputs.parameters.pr_number}}`}}"
+        # environment "auto" → named after what actually ran, so the GitHub
+        # Deployments page reads argo-workflows-dev / argo-workflows-pr /
+        # argo-workflows-rc instead of an internal pipeline id (#1126):
+        #   push to <branch>  → argo-workflows-<branch>
+        #   pull request      → argo-workflows-pr
+        if [ "${ENVIRONMENT}" = "auto" ]; then
+          BR=$(echo "{{`{{workflow.parameters.branch}}`}}" | sed 's|^refs/heads/||' | tr '/' '-')
+          case "{{`{{workflow.parameters.event_type}}`}}" in
+            pull_request) ENVIRONMENT="argo-workflows-pr" ;;
+            *) ENVIRONMENT="argo-workflows-${BR}" ;;
+          esac
+        fi
         API="https://api.github.com/repos/${OWNER_REPO}"
         AUTH="Authorization: token ${TOKEN}"
         ACCEPT="Accept: application/vnd.github+json"
@@ -3289,6 +3313,6 @@ spec:
           - name: context
             value: "kubecore-ml-ci"
           - name: environment
-            value: "ml-ci"
+            value: "auto"
           - name: pr_number
             value: "{{`{{workflow.parameters.pr_number}}`}}"

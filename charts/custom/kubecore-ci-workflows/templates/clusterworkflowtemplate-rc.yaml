@@ -378,7 +378,7 @@ spec:
   - name: status
     # GitHub reporting for the RC build (#1126): ONE commit status (context
     # kubecore-ci/rc) with target_url into the Argo UI run, plus a Deployment
-    # rollup (environment rc) whose log/environment URL is the same run. The
+    # rollup (environment argo-workflows-rc) whose log/environment URL is the same run. The
     # GitHub Release + tracking issue below are the RC's own artefacts; this
     # is the check + rollup the rc/* commit carries. Best-effort against the
     # GitHub API: curl without -f never fails the build over a status write.
@@ -393,7 +393,7 @@ spec:
       - name: context
         value: "kubecore-ci/rc"
       - name: environment
-        value: "rc"
+        value: "argo-workflows-rc"
     container:
       image: alpine/curl
       command: [sh, -c]
@@ -650,4 +650,4 @@ spec:
           - name: context
             value: "kubecore-ci/rc"
           - name: environment
-            value: "rc"
+            value: "argo-workflows-rc"

@@ -97,6 +97,10 @@ spec:
     # PR number: the run report is posted as a comment on the PR itself.
     - name: pr_number
       value: ""
+    # read by ml-ci-build.report (shared template); this pipeline is always a
+    # pull request and posts statuses only (no Deployment).
+    - name: event_type
+      value: "pull_request"
 
   templates:
   - name: ml-ci-pr-render
