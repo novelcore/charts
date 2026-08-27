@@ -210,7 +210,41 @@ spec:
         # read failed" (RBAC/API blip). Treating a FAILED read as no-baseline is
         # what storms: it looks like drift on every poll.
         if ! CM=$(kubectl get configmap "${APP}-pipeline-images" -n "${ML_NS}" -o json 2>&1); then
-          echo "reconcile: cannot read ${ML_NS}/${APP}-pipeline-images — skipping this poll: ${CM}"
+          # PRD-1124 D-07 (kubecore-operator#1124 AC-09): a clean NotFound is
+          # NOT "unknown state" — it is the NAMESPACE-DRIFT shape. The operator
+          # (re)targeted the app at another ML namespace (dedicated app env,
+          # renamed env) and the WFT followed the context, but the ConfigMap
+          # seeded by the composition stayed in the OLD namespace. Every submit
+          # in ML_NS then dies on the missing ConfigMap while this poll skipped
+          # forever (live gke-dev/prd1124yolo 2026-08-27). Confirm against the
+          # gitops manifest before acting: only when it declares a DIFFERENT
+          # namespace is a reconcile build (patch-images + render-hera) the
+          # cure. Any other read failure, or an unreadable gitops file, still
+          # skips — unknown must never mean "submit work".
+          case "${CM}" in
+            *NotFound*)
+              GORG="{{ .Values.github.org }}"
+              GREPO="{{`{{workflow.parameters.gitops_repository}}`}}"
+              GBRANCH="{{`{{workflow.parameters.gitops_branch}}`}}"
+              IMAGES_REL="$(dirname "{{`{{workflow.parameters.workflow_template_path}}`}}")/pipeline-images.yaml"
+              GITOPS_NS=$(curl -sf -H "Authorization: Bearer ${TOKEN}" -H "Accept: application/vnd.github.raw" \
+                "https://api.github.com/repos/${GORG}/${GREPO}/contents/${IMAGES_REL}?ref=${GBRANCH}" \
+                | sed -n 's/^  namespace: *"\{0,1\}\([^"]*\)"\{0,1\}$/\1/p' | head -1)
+              if [ -z "${GITOPS_NS}" ]; then
+                echo "reconcile: WARN ${ML_NS}/${APP}-pipeline-images absent and gitops ${IMAGES_REL} unreadable — skipping this poll"
+              elif [ "${GITOPS_NS}" != "${ML_NS}" ]; then
+                printf 'true' > /tmp/needs_build
+                printf '%s' "$HEAD_SHA" > /tmp/head_sha
+                echo "reconcile: NAMESPACE DRIFT — gitops pins ${APP}-pipeline-images to '${GITOPS_NS}' but the app now runs in '${ML_NS}'; submitting ml-ci-build to relocate it"
+                exit 0
+              else
+                echo "reconcile: ${ML_NS}/${APP}-pipeline-images absent but gitops already targets '${ML_NS}' — waiting for ArgoCD; skipping this poll"
+              fi
+              ;;
+            *)
+              echo "reconcile: cannot read ${ML_NS}/${APP}-pipeline-images — skipping this poll: ${CM}"
+              ;;
+          esac
           printf 'false' > /tmp/needs_build
           printf '' > /tmp/head_sha
           exit 0
