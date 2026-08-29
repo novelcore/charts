@@ -105,6 +105,84 @@ spec:
             spec:
               description: KubeProjectSpec defines the desired state of KubeProject
               properties:
+                ci:
+                  description: |-
+                    CI declares this project's build compute. See ProjectCI. REQUIRED
+                    (2026-08-29 owner amendment — backwards compatibility is explicitly not
+                    a goal): every project must declare spec.ci, even if empty. Both
+                    ProjectCI.KubePool and ProjectCI.NodeGroup stay optional, so the
+                    minimum viable declaration is `ci: {}` — a GitHub-only project with no
+                    environments and no pool remains expressible. When kubePool is unset,
+                    CI's pool is derived from spec.environments exactly as before (the
+                    CI_NODEGROUP_ENABLED flag that used to gate the fully-absent-spec.ci
+                    case has been retired: spec.ci being required made that guard
+                    unreachable, so it was removed rather than left as dead emergency
+                    brake; the derivation code path itself is unchanged).
+                  properties:
+                    kubePool:
+                      description: |-
+                        KubePool names the pool whose cluster runs this project's builds and
+                        whose registry receives the images. Defaults to the KubePool of the
+                        highest-priority (lowest Priority value) environment, ties broken by
+                        environment name ascending — the same rule synthesizeCIEnvironment
+                        has always used (D-03).
+
+                        It may name a pool no environment uses. That is a supported state, not
+                        an error: ConditionTypeMultiPoolExposure exists to WARN that apps on
+                        other pools cannot pull the image CI builds (D-11, Q-06).
+                      type: string
+                    nodeGroup:
+                      description: |-
+                        NodeGroup sizes the CI builder node group. When nil, the cicompute
+                        defaults apply (small/amd64/1).
+                      properties:
+                        arch:
+                          description: |-
+                            Arch selects the builder's CPU architecture. It determines the
+                            architecture of the image CI produces — an arm64 builder yields an
+                            arm64 image, which amd64 deployment nodes cannot run — so the
+                            controller validates it against the inferred architecture of this
+                            project's deployment environments on the same KubePool
+                            (checkCIArchConsistency, fails open on an unclassifiable SKU).
+                            Only meaningful alongside Size: when MachineType pins a raw SKU, the
+                            architecture is whatever that SKU is.
+                          enum:
+                            - amd64
+                            - arm64
+                          type: string
+                        capacityType:
+                          description: |-
+                            CapacityType selects on-demand vs interruptible capacity. CI builds
+                            are retryable, so spot is a reasonable choice here.
+                          enum:
+                            - on-demand
+                            - spot
+                          type: string
+                        machineType:
+                          description: |-
+                            MachineType pins a raw, cloud-specific machine type, bypassing Size
+                            resolution. Exactly one of Size or MachineType may be set; the rule is
+                            enforced in-controller via ConditionTypeNodeGroupComputeInvalid, never
+                            by CEL (house rule: admission via Kyverno, not webhooks).
+                          type: string
+                        maxNodes:
+                          description: |-
+                            MaxNodes bounds the node group's autoscaling ceiling. There is no Min
+                            or Desired: a CI node group is always min=0/desired=0.
+                          minimum: 1
+                          type: integer
+                        size:
+                          description: |-
+                            Size is the cloud-neutral t-shirt size, resolved to a concrete
+                            per-cloud machine type by cicompute.MachineType — the same table
+                            EnvironmentNodeGroup.Size resolves through (#1169).
+                          enum:
+                            - small
+                            - medium
+                            - large
+                          type: string
+                      type: object
+                  type: object
                 description:
                   description: Sets both the KubeProject description and the GitHub repository description.
                   type: string
@@ -114,52 +192,21 @@ spec:
 
                     Enhance an existing project with environments in a follow-up update.
                   items:
-                    description: ProjectEnvironment defines a single environment within a project
+                    description: |-
+                      ProjectEnvironment defines a single environment within a project.
+
+                      A user may not author environmentType "ci" here — CI compute is declared
+                      exclusively via spec.ci (ProjectCI). Rejection is enforced by the
+                      EnvironmentType enum alone (kubepool_types.go, Enum=dev;stage;prod;ml);
+                      there is deliberately no CEL rule for this. A structural/enum violation
+                      makes the whole object invalid, and the apiserver skips CEL evaluation
+                      entirely on an invalid object ("some validation rules were not checked
+                      because the object was invalid") — verified empirically against a real
+                      apiserver on both a fresh write and a pre-existing object updated after a
+                      live CRD swap with CRDValidationRatcheting (k8s 1.33). A CEL rule
+                      targeting this same condition can NEVER evaluate, on any path, so do not
+                      re-add one for a "better message" — that message can never be shown.
                     properties:
-                      ci:
-                        description: |-
-                          Ci carries the cloud-agnostic CI build-compute sizing for a `ci`-typed
-                          environment (PRD-962 F-11, D-10). It has no effect on any other
-                          environmentType — the operator ignores it there. size/arch/maxNodes
-                          declare intent only; mapping to a concrete per-cloud machine type and
-                          provisioning the node group is a later slice (F-07/F-09), not this one.
-                        properties:
-                          arch:
-                            default: amd64
-                            description: |-
-                              Arch selects the CI builder's CPU architecture. It determines the
-                              architecture of the image CI produces — an arm64 builder yields an
-                              arm64 image, which amd64 deployment nodes cannot run — so the
-                              controller validates it against the inferred architecture of this
-                              project's deployment environments on the same KubePool (Q-07: fails
-                              open, i.e. skips the comparison, on a deployment machine type it
-                              cannot classify).
-                            enum:
-                              - amd64
-                              - arm64
-                            type: string
-                          maxNodes:
-                            default: 2
-                            description: |-
-                              MaxNodes bounds the CI node group's autoscaling ceiling. There is no
-                              Min or Desired field — both are always 0 (see the type doc comment).
-                            minimum: 1
-                            type: integer
-                          size:
-                            default: medium
-                            description: |-
-                              Size selects the CI builder's t-shirt size, mapped to a concrete
-                              per-cloud machine type by the resolver (small=4vCPU/16Gi,
-                              medium=8vCPU/32Gi, large=16vCPU/64Gi). "medium" on GCP resolves to the
-                              same machine type the shared kubecorecpu pool already uses today, so
-                              the default reproduces current behaviour exactly (CON-04) — changing
-                              it is a behaviour change, not a tuning knob.
-                            enum:
-                              - small
-                              - medium
-                              - large
-                            type: string
-                        type: object
                       environmentType:
                         description: |-
                           Classifies this environment; ml uses pipeline compute, ci uses its own build compute, not nodeGroup.
@@ -179,7 +226,6 @@ spec:
                           - stage
                           - prod
                           - ml
-                          - ci
                         type: string
                       kubePool:
                         description: Names the KubePool whose cluster this environment's namespace and resources are provisioned on.
@@ -474,8 +520,8 @@ spec:
                       - priority
                     type: object
                     x-kubernetes-validations:
-                      - message: nodeGroup is required unless environmentType is 'ml' or 'ci' (an ml environment's compute comes from the ML compute classes, and a ci environment's compute comes from its own sizing block, neither uses a dedicated node group)
-                        rule: self.environmentType in ['ml','ci'] || has(self.nodeGroup)
+                      - message: nodeGroup is required unless environmentType is 'ml' (an ml environment's compute comes from the ML compute classes)
+                        rule: self.environmentType == 'ml' || has(self.nodeGroup)
                       - message: ml (pipeline compute flavours) is only valid on an environmentType 'ml' environment (PRD-1124 F-01)
                         rule: '!has(self.ml) || self.environmentType == ''ml'''
                   maxItems: 20
@@ -651,9 +697,10 @@ spec:
                     Names a registry on the target KubePool(s), not a URL; optional.
 
                     Must match an entry in the KubePool's spec.registries for every pool
-                    this project's environments reference. When unset, each pool's
-                    defaultRegistry applies. There is no fallback: a name no referenced pool
-                    declares is a hard error surfaced as RegistryResolved=False (R-08).
+                    this project's environments reference AND for spec.ci's pool. When
+                    unset, each pool's defaultRegistry applies. There is no fallback: a
+                    name no referenced pool declares is a hard error surfaced as
+                    RegistryResolved=False (R-08).
                   type: string
                 teams:
                   description: |-
@@ -684,6 +731,7 @@ spec:
                     type: object
                   type: array
               required:
+                - ci
                 - description
                 - githubConfiguration
                 - kubeOrgRef
@@ -694,6 +742,51 @@ spec:
             status:
               description: KubeProjectStatus defines the observed state of KubeProject
               properties:
+                ci:
+                  description: |-
+                    CI reports the project's EFFECTIVE CI configuration — whether declared
+                    in spec.ci or derived from spec.environments. Nil only when no CI
+                    environment is in effect at all (nothing declared and nothing to derive
+                    a KubePool from).
+
+                    Populated on every successful Reconciling pass: the computation is
+                    pure and has no cloud side effects (T-09). ciStatusDriftUnit ensures
+                    an already-Ready project reaches that writer at least once, or the
+                    field would stay nil forever on every resource that was Ready before
+                    it existed.
+
+                    It NEVER reflects a write to spec: the operator does not mutate user spec.
+                  properties:
+                    arch:
+                      description: Arch mirrors the cicompute.DefaultArch applied (amd64).
+                      type: string
+                    derivedFromEnvironment:
+                      description: |-
+                        DerivedFromEnvironment names the environment the KubePool was derived
+                        from. It is the declared-vs-derived discriminator: PRESENT means this
+                        configuration was derived from spec.environments, ABSENT means
+                        spec.ci named the pool itself.
+                      type: string
+                    kubePool:
+                      description: KubePool is the pool CI builds on.
+                      type: string
+                    maxNodes:
+                      description: MaxNodes mirrors the cicompute.DefaultMaxNodes applied (1).
+                      type: integer
+                    namespace:
+                      description: |-
+                        Namespace is always "{project}-ci" (D-05) — byte-identical to what a
+                        declared `ci` environment would render.
+                      type: string
+                    size:
+                      description: |-
+                        Size mirrors the cicompute.DefaultSize applied (small) since a
+                        synthesised environment carries no user-declared Ci block.
+                      type: string
+                  required:
+                    - kubePool
+                    - namespace
+                  type: object
                 conditions:
                   description: Conditions represent the latest available observations of the KubeProject's current state
                   items:
@@ -1244,9 +1337,16 @@ spec:
                     environments:
                       description: |-
                         Environments the project publishes for apps to deploy into. Entries are
-                        added only when the backing XKubEnv passed the fresh-Ready check (r1 §3.4),
-                        so presence == DEPLOYABLE. This list is a same-function projection of the
-                        observational status.environments[] list — see the dual-list invariant below.
+                        added only when the backing XKubEnv passed the fresh-Ready check (r1 §3.4).
+                        This list is a same-function projection of the observational
+                        status.environments[] list — see the dual-list invariant below.
+
+                        It also carries the `ci`-typed environment, which is NOT deployable:
+                        kubeapp's resolveCINodeClass reads this list to discover CI's node class
+                        and KubePool, so filtering CI out here would break CI dispatch for every
+                        app in the project. Apps are protected by EnvironmentSelector instead,
+                        which fails closed (kubeapp_types.go, MatchesEnvironment): a nil or empty
+                        selector matches nothing, so an app only ever targets CI if it names it.
                       items:
                         description: |-
                           EnvironmentOutput is the published, deployable-only projection of one
@@ -1528,61 +1628,6 @@ spec:
                     an output — no other controller may read it.
                   format: int64
                   type: integer
-                synthesizedCIEnvironment:
-                  description: |-
-                    SynthesizedCIEnvironment reports the operator's CI-environment
-                    synthesis decision (PRD-962 F-07, D-03/D-05). Populated whenever this
-                    project declares no `ci`-typed environment of its own AND has at
-                    least one other environment to derive a KubePool from; nil when a
-                    `ci` environment is declared (it always wins) or there is nothing to
-                    derive from. Written unconditionally on every Reconciling pass —
-                    regardless of the CI node-group provisioning env-var gate — because
-                    the decision itself is a cheap, pure computation with no cloud side
-                    effects (T-09). It NEVER reflects a write to spec.environments; the
-                    operator does not mutate user spec.
-                  properties:
-                    arch:
-                      description: Arch mirrors the F-11 default applied (amd64).
-                      type: string
-                    derivedFromEnvironment:
-                      description: |-
-                        DerivedFromEnvironment names the declared environment whose KubePool
-                        and priority ordering produced this decision — the environment
-                        synthesis chose from, not a target of any kind.
-                      type: string
-                    kubePool:
-                      description: |-
-                        KubePool is the KubePool this synthesised environment targets: the
-                        KubePool of the lowest-priority non-CI environment (ties broken by
-                        environment name, ascending, D-03).
-                      type: string
-                    maxNodes:
-                      description: MaxNodes mirrors the F-11 default applied (2).
-                      type: integer
-                    namespace:
-                      description: |-
-                        Namespace is always "{project}-ci" (D-05) — byte-identical to what a
-                        declared `ci` environment would render.
-                      type: string
-                    nodeGroupProvisioningEnabled:
-                      description: |-
-                        NodeGroupProvisioningEnabled reports whether the CI node-group
-                        provisioning env-var gate (T-09) was enabled on the reconcile pass
-                        that produced this status: true means this decision ALSO flows
-                        through the real environment-reconciliation pipeline (a genuine
-                        status.environments[] entry and XKubEnv exist for it); false means
-                        this projection is informational only — no node group has been
-                        provisioned.
-                      type: boolean
-                    size:
-                      description: |-
-                        Size mirrors the F-11 default applied (medium) since a synthesised
-                        environment carries no user-declared Ci block.
-                      type: string
-                  required:
-                    - kubePool
-                    - namespace
-                  type: object
               type: object
           type: object
           x-kubernetes-validations:
