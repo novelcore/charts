@@ -486,8 +486,9 @@ spec:
                     properties:
                       name:
                         description: |-
-                          Name of the KubeTeam to reference. Must exist in the same namespace
-                          as the consumer (KubeProject or KubeOrg) — i.e., the KubeOrg namespace.
+                          Names an existing KubeTeam, which must already exist in the KubeOrg namespace.
+                          The reference resolves within the consumer's own namespace (KubeProject or
+                          KubeOrg) — i.e. the KubeOrg namespace; a KubeTeam elsewhere is not found.
                         maxLength: 253
                         minLength: 1
                         pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$

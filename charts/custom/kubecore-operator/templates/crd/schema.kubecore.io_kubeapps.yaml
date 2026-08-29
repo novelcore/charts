@@ -96,13 +96,14 @@ spec:
               properties:
                 dedicatedEnvironment:
                   description: |-
-                    DedicatedEnvironment provisions an app-exclusive namespace + dedicated node
-                    group per targeted environment (PRD-KUBENV-001 Part A, D-05), instead of sharing
-                    the project environment's namespace and node group. When set, the operator creates
-                    one XKubEnv named {project}-{app}-{env} for each environment this app is selected
-                    into via environmentSelector. Pool and cloud are derived from each targeted
-                    ProjectEnvironment's kubePool (no kubePool field here). Requires at least one
-                    selected environment.
+                    Gives this app its own namespace and node group, not the project's.
+
+                    Provisions an app-exclusive namespace + dedicated node group per targeted environment
+                    (PRD-KUBENV-001 Part A, D-05), instead of sharing the project environment's namespace
+                    and node group. When set, the operator creates one XKubEnv named {project}-{app}-{env}
+                    for each environment this app is selected into via environmentSelector. Pool and cloud
+                    are derived from each targeted ProjectEnvironment's kubePool (no kubePool field here).
+                    Requires at least one selected environment.
                   properties:
                     ml:
                       description: |-
@@ -189,9 +190,9 @@ spec:
                         arch:
                           default: amd64
                           description: |-
-                            Arch selects the node CPU architecture. Only meaningful alongside Size
-                            — when MachineType pins a raw SKU, the architecture is whatever that
-                            SKU is, and Arch is ignored. Defaults to amd64.
+                            Sets the node CPU architecture; only used alongside size, ignored once machineType pins a raw SKU.
+
+                            When MachineType pins a raw SKU, the architecture is whatever that SKU is.
                           enum:
                             - amd64
                             - arm64
@@ -199,8 +200,9 @@ spec:
                         capacityType:
                           default: on-demand
                           description: |-
-                            CapacityType selects on-demand vs interruptible capacity. It maps to
-                            SPOT (AWS), preemptible/spot (GCP), or Spot priority (Azure).
+                            Chooses on-demand vs interruptible (spot) nodes; spot is cheaper but can be reclaimed at any time.
+
+                            Maps to SPOT (AWS), preemptible/spot (GCP), or Spot priority (Azure).
                           enum:
                             - on-demand
                             - spot
@@ -252,13 +254,16 @@ spec:
                           type: object
                         size:
                           description: |-
-                            Size is the cloud-neutral t-shirt size of each node
-                            (small=4vCPU/16Gi, medium=8vCPU/32Gi, large=16vCPU/64Gi). It is
-                            resolved to a concrete per-cloud machine type by the operator against
-                            the target KubePool's cloud, using the same table that already backs
-                            `ci` sizing (internal/operators/kubeproject/cicompute). Declaring size
-                            instead of machineType is what makes an environment portable between a
-                            GKE pool and an AKS pool without a manifest edit (#1169).
+                            Sets the cloud-neutral node t-shirt size (small/medium/large), resolved per-cloud by the operator.
+
+                            small=4vCPU/16Gi, medium=8vCPU/32Gi, large=16vCPU/64Gi, resolved to a concrete
+                            per-cloud machine type against the target KubePool's cloud, using the same table
+                            that already backs `ci` sizing (internal/operators/kubeproject/cicompute). Declaring
+                            size instead of machineType is what makes an environment portable between a GKE pool
+                            and an AKS pool without a manifest edit (#1169).
+
+                            On a KubeProject environment: has no effect when environmentType is "ml" (use
+                            ml.cpu/ml.gpu instead) or "ci" (buildCINodeGroup overwrites it from the ci block).
 
                             Exactly one of Size or MachineType must be set. The rule is enforced
                             in-controller (NodeGroupComputeInvalid condition), not by CEL, per the
@@ -280,8 +285,9 @@ spec:
                             properties:
                               effect:
                                 description: |-
-                                  Effect is the taint effect. Composition sets translate this to the
-                                  cloud-native enum (e.g. GKE NO_SCHEDULE) as needed.
+                                  Sets the taint effect on every node in this group, translated to the target cloud's native enum.
+
+                                  For example, composition sets translate this to GKE NO_SCHEDULE as needed.
                                 type: string
                               key:
                                 description: Key is the taint key.
@@ -311,9 +317,9 @@ spec:
                               arch:
                                 default: amd64
                                 description: |-
-                                  Arch selects the node CPU architecture. Only meaningful alongside Size
-                                  — when MachineType pins a raw SKU, the architecture is whatever that
-                                  SKU is, and Arch is ignored. Defaults to amd64.
+                                  Sets the node CPU architecture; only used alongside size, ignored once machineType pins a raw SKU.
+
+                                  When MachineType pins a raw SKU, the architecture is whatever that SKU is.
                                 enum:
                                   - amd64
                                   - arm64
@@ -321,8 +327,9 @@ spec:
                               capacityType:
                                 default: on-demand
                                 description: |-
-                                  CapacityType selects on-demand vs interruptible capacity. It maps to
-                                  SPOT (AWS), preemptible/spot (GCP), or Spot priority (Azure).
+                                  Chooses on-demand vs interruptible (spot) nodes; spot is cheaper but can be reclaimed at any time.
+
+                                  Maps to SPOT (AWS), preemptible/spot (GCP), or Spot priority (Azure).
                                 enum:
                                   - on-demand
                                   - spot
@@ -374,13 +381,16 @@ spec:
                                 type: object
                               size:
                                 description: |-
-                                  Size is the cloud-neutral t-shirt size of each node
-                                  (small=4vCPU/16Gi, medium=8vCPU/32Gi, large=16vCPU/64Gi). It is
-                                  resolved to a concrete per-cloud machine type by the operator against
-                                  the target KubePool's cloud, using the same table that already backs
-                                  `ci` sizing (internal/operators/kubeproject/cicompute). Declaring size
-                                  instead of machineType is what makes an environment portable between a
-                                  GKE pool and an AKS pool without a manifest edit (#1169).
+                                  Sets the cloud-neutral node t-shirt size (small/medium/large), resolved per-cloud by the operator.
+
+                                  small=4vCPU/16Gi, medium=8vCPU/32Gi, large=16vCPU/64Gi, resolved to a concrete
+                                  per-cloud machine type against the target KubePool's cloud, using the same table
+                                  that already backs `ci` sizing (internal/operators/kubeproject/cicompute). Declaring
+                                  size instead of machineType is what makes an environment portable between a GKE pool
+                                  and an AKS pool without a manifest edit (#1169).
+
+                                  On a KubeProject environment: has no effect when environmentType is "ml" (use
+                                  ml.cpu/ml.gpu instead) or "ci" (buildCINodeGroup overwrites it from the ci block).
 
                                   Exactly one of Size or MachineType must be set. The rule is enforced
                                   in-controller (NodeGroupComputeInvalid condition), not by CEL, per the
@@ -402,8 +412,9 @@ spec:
                                   properties:
                                     effect:
                                       description: |-
-                                        Effect is the taint effect. Composition sets translate this to the
-                                        cloud-native enum (e.g. GKE NO_SCHEDULE) as needed.
+                                        Sets the taint effect on every node in this group, translated to the target cloud's native enum.
+
+                                        For example, composition sets translate this to GKE NO_SCHEDULE as needed.
                                       type: string
                                     key:
                                       description: Key is the taint key.
@@ -501,14 +512,15 @@ spec:
                     - message: 'dedicatedEnvironment needs nodeGroup (service apps: one exclusive node group) or ml (ML pipeline apps: app-owned flavour pools, PRD-1124 D-07)'
                       rule: has(self.nodeGroup) || has(self.ml)
                 description:
-                  description: Description provides a description of the application
+                  description: Describes what this application does.
                   type: string
                 displayName:
-                  description: DisplayName is a human-readable name for the application
+                  description: Sets the human-readable name shown for this application in the UI.
                   type: string
                 environmentSelector:
                   description: |-
-                    EnvironmentSelector specifies which environments from the KubeProject this app should deploy to.
+                    Chooses project environments to deploy to; omitted deploys nowhere.
+
                     If not specified or empty, the app will NOT be deployed to any environment.
                     This is an explicit opt-in model to prevent accidental deployments.
                   properties:
@@ -546,9 +558,7 @@ spec:
                       type: array
                   type: object
                 features:
-                  description: |-
-                    Features defines optional feature configurations for the application
-                    All features default to enabled except webhooks
+                  description: 'Optional feature toggles: currently just CI/CD branch strategy.'
                   properties:
                     ciCd:
                       description: CiCd feature configuration
@@ -559,13 +569,13 @@ spec:
                             devBranch:
                               default: dev
                               description: |-
-                                DevBranch is the integration branch a push to which fires the
-                                in-cluster CI (the WorkflowEventBinding's selector). Defaults
-                                to "dev" — the gitFlow convention. Set this when the repo's
-                                integration branch is named differently (e.g. "main" for trunk-based
-                                development), otherwise pushes to that branch never trigger a build
-                                (#347). Must be a plain branch name, not a full ref — the operator
-                                prefixes "refs/heads/".
+                                Selects the branch whose pushes fire CI; the wrong value means pushes never trigger a build.
+
+                                This is the integration branch a push to which fires the in-cluster CI (the
+                                WorkflowEventBinding's selector). Defaults to "dev" — the gitFlow convention. Set this
+                                when the repo's integration branch is named differently (e.g. "main" for trunk-based
+                                development), otherwise pushes to that branch never trigger a build (#347). Must be a
+                                plain branch name, not a full ref — the operator prefixes "refs/heads/".
                               pattern: ^[a-zA-Z0-9._/-]+$
                               type: string
                             enabled:
@@ -574,37 +584,21 @@ spec:
                               type: boolean
                             type:
                               default: gitFlow
-                              description: Type specifies the type of branching strategy
+                              description: Names the branching strategy this app follows; informational, does not change controller behavior.
                               enum:
                                 - gitFlow
                                 - trunk
                                 - custom
                               type: string
                           type: object
-                        enabled:
-                          default: true
-                          description: Enabled indicates whether CI/CD is enabled
-                          type: boolean
-                      type: object
-                    repository:
-                      description: Repository feature configuration
-                      properties:
-                        enabled:
-                          default: true
-                          description: Enabled indicates whether the feature is enabled
-                          type: boolean
-                      type: object
-                    webhooks:
-                      description: Webhooks feature configuration (always disabled)
-                      properties:
-                        enabled:
-                          default: false
-                          description: Enabled indicates whether webhooks are enabled (always false)
-                          type: boolean
                       type: object
                   type: object
                 gitOpsConfig:
-                  description: GitOpsConfig defines GitOps workflow configuration
+                  description: |-
+                    GitOps settings; autoMerge defaults true for every env, prod included.
+
+                    GitOpsConfig.AutoMerge defaults to true for EVERY environment, including prod
+                    (reconciling.go:2518) — an author who declares nothing gets prod auto-merge.
                   properties:
                     autoMerge:
                       additionalProperties:
@@ -615,23 +609,10 @@ spec:
                       default: kubeapps
                       description: BasePath for GitOps files in the repository
                       type: string
-                    branchName:
-                      default: main
-                      description: BranchName for GitOps operations
-                      type: string
                   type: object
                 k8sAppConfig:
-                  description: K8sAppConfig defines Kubernetes application-specific configuration
+                  description: Kubernetes settings; the app template usually sets these already.
                   properties:
-                    autoscalingConfig:
-                      description: AutoscalingConfig configuration
-                      properties:
-                        enabled:
-                          additionalProperties:
-                            type: boolean
-                          description: Enabled indicates if autoscaling should be enabled per environment
-                          type: object
-                      type: object
                     baseResources:
                       description: BaseResources configuration
                       properties:
@@ -643,10 +624,6 @@ spec:
                                 type: string
                               description: Data for the config map
                               type: object
-                            enabled:
-                              default: true
-                              description: Enabled indicates if config map should be created
-                              type: boolean
                           type: object
                         secret:
                           description: Secret configuration
@@ -663,10 +640,6 @@ spec:
                         serviceAccount:
                           description: ServiceAccount configuration
                           properties:
-                            enabled:
-                              default: true
-                              description: Enabled indicates if service account should be created
-                              type: boolean
                             name:
                               description: Name of the service account
                               type: string
@@ -703,7 +676,7 @@ spec:
                           type: boolean
                         pathType:
                           default: Prefix
-                          description: PathType for ingress paths
+                          description: Sets the Kubernetes Ingress path-matching mode for this app's routes.
                           enum:
                             - Prefix
                             - Exact
@@ -712,33 +685,17 @@ spec:
                       type: object
                   type: object
                 kubeAppTemplateRef:
-                  description: KubeAppTemplateRef references the XKubeAppTemplate to use for this application
+                  description: Names the XKubeAppTemplate this application is built from; determines its runtime and CI/CD shape.
                   minLength: 1
                   type: string
                 kubeProjectRef:
-                  description: KubeProjectRef references the KubeProject that owns this application
+                  description: Names the KubeProject that owns this application; the app is created in that project's namespace.
                   minLength: 1
                   type: string
-                mlCompute:
-                  description: |-
-                    MLCompute overrides the per-tier ML pipeline step compute class for THIS
-                    app (PRD-858 F-05). Per-tier merge: set only gpuClass and the cpu tier
-                    keeps the environment/pool default (effective = app ?? default). Each
-                    name must exist in the active class catalog (the hardcoded ml-environment
-                    catalog when the app targets an ml-type environment via
-                    environmentSelector, else the pool's mlClasses) — an unknown name fails
-                    reconciliation rather than being silently ignored (T-02).
-                  properties:
-                    cpuClass:
-                      description: CpuClass is the class name cpu-tier steps default to (e.g. "cpu-standard").
-                      type: string
-                    gpuClass:
-                      description: GpuClass is the class name gpu-tier steps default to (e.g. "gpu-t4").
-                      type: string
-                  type: object
                 networking:
                   description: |-
-                    Networking declares application network exposure and consumption edges
+                    Declares this app's network exposure and connections to other apps.
+
                     (PRD-ARCH-002 D-14′/D-05/D-15). Optional; existing apps are unaffected.
                     NOTE: Networking.Visibility is NETWORK exposure and is DISTINCT from the
                     repo-visibility field Visibility above — do not conflate them.
@@ -812,9 +769,11 @@ spec:
                     visibility:
                       default: public
                       description: |-
-                        Visibility sets NETWORK exposure. "public" renders a public HTTPRoute on the
-                        pool gateway; "internal" renders none (reachable only via declared connections).
-                        Distinct from KubeAppSpec.Visibility (repository visibility).
+                        Controls network reachability, distinct from the repo: 'public' adds an internet-facing HTTPRoute.
+
+                        "public" renders a public HTTPRoute on the pool gateway; "internal" renders none
+                        (reachable only via declared connections). Distinct from KubeAppSpec.Visibility
+                        (repository visibility) — do not conflate them.
                       enum:
                         - public
                         - internal
@@ -822,14 +781,14 @@ spec:
                   type: object
                 profile:
                   default: small
-                  description: Profile specifies the resource profile size for the application
+                  description: Sets the compute resource profile (small/medium/large) applied to this application's workload.
                   enum:
                     - small
                     - medium
                     - large
                   type: string
                 sdlcConfig:
-                  description: SDLCConfig defines SDLC configuration
+                  description: SDLC settings; promotionsEnabled is forced false for ml-pipeline apps.
                   properties:
                     promotionsEnabled:
                       default: true
@@ -838,7 +797,7 @@ spec:
                   type: object
                 visibility:
                   default: private
-                  description: Visibility sets the repository visibility (private, public, internal)
+                  description: Sets the GitHub repository's visibility; distinct from networking.visibility (network exposure).
                   enum:
                     - private
                     - public
@@ -1110,9 +1069,6 @@ spec:
                   properties:
                     basePath:
                       description: BasePath is the base path for GitOps files in the repository
-                      type: string
-                    branchName:
-                      description: BranchName is the branch used for GitOps operations
                       type: string
                   type: object
                 inheritedTeams:

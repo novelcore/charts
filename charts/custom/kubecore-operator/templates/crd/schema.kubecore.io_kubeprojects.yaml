@@ -105,20 +105,14 @@ spec:
             spec:
               description: KubeProjectSpec defines the desired state of KubeProject
               properties:
-                contact:
-                  description: Contact provides contact information for the project
-                  type: string
                 description:
-                  description: Description serves both KubeProject AND GitHub repository description
-                  type: string
-                displayName:
-                  description: DisplayName is a human-readable name for the project
+                  description: Sets both the KubeProject description and the GitHub repository description.
                   type: string
                 environments:
                   description: |-
-                    Environments defines the list of environments to create for this project
-                    This field is optional - projects can be created without environments
-                    and enhanced with environments later
+                    Environments to create; a project may start with none, added later.
+
+                    Enhance an existing project with environments in a follow-up update.
                   items:
                     description: ProjectEnvironment defines a single environment within a project
                     properties:
@@ -168,15 +162,18 @@ spec:
                         type: object
                       environmentType:
                         description: |-
-                          EnvironmentType classifies the environment (dev/stage/prod/ml). It is the
-                          authoritative source for the priority-uniqueness validator and the status
+                          Classifies this environment; ml uses pipeline compute, ci uses its own build compute, not nodeGroup.
+
+                          It is the authoritative source for the priority-uniqueness validator and the status
                           writer; it replaces the value that was previously read from the KubePool
                           environment template (PRD-KUBENV-001 S-1/A2, D-01). The "ml" type marks a
                           compute-only ML environment (PRD-1124 CON-02): its namespace hosts the
                           project's pipeline runs on the whole-node, scale-to-zero flavour pools
                           declared in `ml`, and every run logs to the project's single MLOps stack
                           (spec.ml). It provisions no stack of its own and carries no
-                          app-promotion semantics.
+                          app-promotion semantics. On a "ci" environment, nodeGroup (if set) is
+                          silently ignored — buildCINodeGroup(env.ci) supplies the CI build compute
+                          instead (gcp/project_kubenv_params.go).
                         enum:
                           - dev
                           - stage
@@ -185,7 +182,7 @@ spec:
                           - ci
                         type: string
                       kubePool:
-                        description: KubePool references the KubePool resource to use for this environment
+                        description: Names the KubePool whose cluster this environment's namespace and resources are provisioned on.
                         minLength: 1
                         type: string
                       ml:
@@ -264,7 +261,11 @@ spec:
                             x-kubernetes-list-type: map
                         type: object
                       name:
-                        description: Name of the environment (e.g., "dev", "staging", "prod")
+                        description: |-
+                          Names the environment; cannot contain '--', reserved as the dedicated-environment separator.
+
+                          Example: "dev", "staging", "prod". The '--' restriction exists because dedicated-environment
+                          XKubEnvs are named {project}-{app}--{env} (V-14); a name containing it is rejected.
                         maxLength: 63
                         minLength: 1
                         pattern: ^[a-z0-9][a-z0-9-]*[a-z0-9]$
@@ -284,9 +285,9 @@ spec:
                           arch:
                             default: amd64
                             description: |-
-                              Arch selects the node CPU architecture. Only meaningful alongside Size
-                              — when MachineType pins a raw SKU, the architecture is whatever that
-                              SKU is, and Arch is ignored. Defaults to amd64.
+                              Sets the node CPU architecture; only used alongside size, ignored once machineType pins a raw SKU.
+
+                              When MachineType pins a raw SKU, the architecture is whatever that SKU is.
                             enum:
                               - amd64
                               - arm64
@@ -294,8 +295,9 @@ spec:
                           capacityType:
                             default: on-demand
                             description: |-
-                              CapacityType selects on-demand vs interruptible capacity. It maps to
-                              SPOT (AWS), preemptible/spot (GCP), or Spot priority (Azure).
+                              Chooses on-demand vs interruptible (spot) nodes; spot is cheaper but can be reclaimed at any time.
+
+                              Maps to SPOT (AWS), preemptible/spot (GCP), or Spot priority (Azure).
                             enum:
                               - on-demand
                               - spot
@@ -347,13 +349,16 @@ spec:
                             type: object
                           size:
                             description: |-
-                              Size is the cloud-neutral t-shirt size of each node
-                              (small=4vCPU/16Gi, medium=8vCPU/32Gi, large=16vCPU/64Gi). It is
-                              resolved to a concrete per-cloud machine type by the operator against
-                              the target KubePool's cloud, using the same table that already backs
-                              `ci` sizing (internal/operators/kubeproject/cicompute). Declaring size
-                              instead of machineType is what makes an environment portable between a
-                              GKE pool and an AKS pool without a manifest edit (#1169).
+                              Sets the cloud-neutral node t-shirt size (small/medium/large), resolved per-cloud by the operator.
+
+                              small=4vCPU/16Gi, medium=8vCPU/32Gi, large=16vCPU/64Gi, resolved to a concrete
+                              per-cloud machine type against the target KubePool's cloud, using the same table
+                              that already backs `ci` sizing (internal/operators/kubeproject/cicompute). Declaring
+                              size instead of machineType is what makes an environment portable between a GKE pool
+                              and an AKS pool without a manifest edit (#1169).
+
+                              On a KubeProject environment: has no effect when environmentType is "ml" (use
+                              ml.cpu/ml.gpu instead) or "ci" (buildCINodeGroup overwrites it from the ci block).
 
                               Exactly one of Size or MachineType must be set. The rule is enforced
                               in-controller (NodeGroupComputeInvalid condition), not by CEL, per the
@@ -375,8 +380,9 @@ spec:
                               properties:
                                 effect:
                                   description: |-
-                                    Effect is the taint effect. Composition sets translate this to the
-                                    cloud-native enum (e.g. GKE NO_SCHEDULE) as needed.
+                                    Sets the taint effect on every node in this group, translated to the target cloud's native enum.
+
+                                    For example, composition sets translate this to GKE NO_SCHEDULE as needed.
                                   type: string
                                 key:
                                   description: Key is the taint key.
@@ -398,52 +404,10 @@ spec:
                           Overrides allow minimal customization of the environment configuration.
                           Platform teams can restrict which overrides are allowed.
                         properties:
-                          costControls:
-                            description: CostControls overrides for cost management
-                            properties:
-                              maxMonthlyCost:
-                                description: MaxMonthlyCost overrides the maximum monthly cost (cannot exceed template max if set)
-                                type: string
-                              shutdownSchedule:
-                                description: ShutdownSchedule overrides the shutdown schedule
-                                type: string
-                              startupSchedule:
-                                description: StartupSchedule overrides the startup schedule
-                                type: string
-                            type: object
-                          features:
-                            description: Features overrides for feature toggles
-                            properties:
-                              autoScaling:
-                                description: AutoScaling overrides autoscaling enablement
-                                type: boolean
-                              backups:
-                                description: Backups overrides backup enablement
-                                type: boolean
-                              logging:
-                                description: Logging overrides logging enablement
-                                type: boolean
-                              monitoring:
-                                description: Monitoring overrides monitoring enablement
-                                type: boolean
-                            type: object
                           labels:
                             additionalProperties:
                               type: string
                             description: Labels to add to the environment (merged with template labels)
-                            type: object
-                          mlStack:
-                            description: MLStack overrides for ML stack toggles (within template limits; only applied when pool is ML capable)
-                            properties:
-                              mlflow:
-                                description: MLflow overrides MLflow enablement for this environment
-                                type: boolean
-                              postgres:
-                                description: Postgres overrides Postgres instance enablement for this environment
-                                type: boolean
-                              s3:
-                                description: S3 overrides S3 artifact store enablement for this environment
-                                type: boolean
                             type: object
                           scaling:
                             description: Scaling overrides for node group scaling configuration
@@ -463,11 +427,7 @@ spec:
                             type: object
                         type: object
                       priority:
-                        description: |-
-                          Priority defines the deployment order within environments of the same
-                          environmentType. Lower priority numbers indicate higher priority (deployed
-                          first). Priority must be unique within environments of the same
-                          environmentType.
+                        description: Sets deployment order among same-type environments; lower numbers go first and must be unique.
                         minimum: 1
                         type: integer
                       resources:
@@ -548,6 +508,7 @@ spec:
                           description: Existing repository configuration
                           properties:
                             repository:
+                              description: Names the pre-existing repo to attach; required when repositorySource.type is 'existing'.
                               type: string
                           required:
                             - repository
@@ -567,7 +528,12 @@ spec:
                           type: object
                         type:
                           default: template
-                          description: Type defaults to "template"
+                          description: |-
+                            Chooses 'template' to create the repo from the platform template, or 'existing' to attach one.
+
+                            Prefer leaving this whole repositorySource block unset: it is operator-managed, and an
+                            agent-set value has hung a real project on a GitHub 404 (kaos-k8pilot now strips it
+                            server-side before write). Only set it deliberately, e.g. to attach an existing repo.
                           enum:
                             - template
                             - existing
@@ -575,7 +541,7 @@ spec:
                       type: object
                     visibility:
                       default: private
-                      description: Visibility setting for the repository (defaults to private)
+                      description: Sets the GitHub repository's visibility; defaults to private if omitted.
                       enum:
                         - public
                         - private
@@ -583,11 +549,12 @@ spec:
                       type: string
                   type: object
                 kubeOrgRef:
-                  description: KubeOrgRef references the KubeOrg that owns this project
+                  description: Names the KubeOrg that owns this project; the project is created in that org's namespace.
                   type: string
                 ml:
                   description: |-
-                    ML defines project-wide ML platform configuration (MLflow, LakeFS, object storage, Postgres).
+                    Turns on the ML platform (MLflow, LakeFS, storage, Postgres) here.
+
                     When enabled, the KubeProject operator provisions a single per-project XProjectMLStack
                     composite resource. The composition router (MLCompositionSetContract) dispatches to the
                     AWS or GCP implementation based on the referenced KubePool's cloudProvider union.
@@ -605,21 +572,20 @@ spec:
                       type: object
                     dataLifecycle:
                       description: |-
-                        DataLifecycle controls whether data-bearing resources created by the
-                        per-project XProjectMLStack (object-store buckets — S3 on AWS, GCS on
-                        GCP — CNPG WAL stores, LakeFS object storage, Zot artifact buckets)
-                        force-destroy on KubeProject delete.
+                        Must be set explicitly: an omitted value wipes all ML data buckets when this KubeProject is deleted.
 
-                        "retain" is the safe production default and matches Crossplane's
+                        The composition defaults an unset value to "wipe-on-delete" (projectmlstack/gcp/composition.yaml:53,
+                        aws:57), NOT "retain" — do not assume omitting this field is the safe choice.
+
+                        "retain" is the safe production choice to declare explicitly and matches Crossplane's
                         behavior: non-empty buckets block deletion, requiring an operator to
                         manually drain. "wipe-on-delete" sets forceDestroy=true on every data
-                        resource so dev/test environments can tear down cleanly.
+                        resource (object-store buckets — S3 on AWS, GCS on GCP — CNPG WAL stores,
+                        LakeFS object storage, Zot artifact buckets) so dev/test environments can
+                        tear down cleanly.
 
-                        When unset, the operator does not force the value: the composition's
-                        own default (retain) takes effect. To opt into wipe-on-delete,
-                        declare it explicitly here. This is intentionally a project-level
-                        declaration, not per-environment, because the ML stack is one
-                        XProjectMLStack per project (CON-07).
+                        This is intentionally a project-level declaration, not per-environment,
+                        because the ML stack is one XProjectMLStack per project (CON-07).
                       enum:
                         - retain
                         - wipe-on-delete
@@ -637,96 +603,6 @@ spec:
                         project. The referenced KubePool's cloudProvider union selects the ML
                         composition set (AWS vs GCP) via the MLCompositionSetContract router.
                       type: string
-                    pipelines:
-                      description: |-
-                        Pipelines declares per-project pipeline templates. In v2, compute is
-                        autoscaler-native (D-02, CON-05) — these entries become hints consumed by
-                        ComputeProviderContract (D-05) implementations (Karpenter on AWS, GKE
-                        autoscaler on GCP). Per-app XGPUNodeGroup is forbidden (CON-05).
-                      items:
-                        description: MLPipeline defines a pipeline template with its node resource configuration.
-                        properties:
-                          cpu:
-                            description: CPU configures CPU node requirements for pipeline steps.
-                            properties:
-                              consolidateAfter:
-                                description: ConsolidateAfter is how long before removing empty nodes (e.g. "60s","5m").
-                                type: string
-                              diskSizeGi:
-                                description: DiskSizeGi is the root volume size in GiB.
-                                minimum: 20
-                                type: integer
-                              instanceFamilies:
-                                description: |-
-                                  InstanceFamilies are allowed instance families (e.g. ["g5","g6"] for GPU).
-                                  Use ["*"] to allow all families (no family constraint applied).
-                                  Provider-specific interpretation:
-                                    AWS  — EC2 instance families (g5, g6, m5, c5, ...).
-                                    GCP  — N1/N2/A2 accelerator families (ComputeProviderContract maps them).
-                                items:
-                                  type: string
-                                minItems: 1
-                                type: array
-                              instanceSizes:
-                                description: |-
-                                  InstanceSizes are allowed instance sizes (e.g. ["xlarge","2xlarge"]).
-                                  Use ["*"] to allow all sizes (no size constraint applied).
-                                items:
-                                  type: string
-                                minItems: 1
-                                type: array
-                              maxResources:
-                                description: |-
-                                  MaxResources is the autoscaler resource limit:
-                                    "nvidia.com/gpu" count for GPU pools, or vCPU count for CPU pools.
-                                type: string
-                            type: object
-                          gpu:
-                            description: GPU configures GPU node requirements for training workloads in this pipeline.
-                            properties:
-                              consolidateAfter:
-                                description: ConsolidateAfter is how long before removing empty nodes (e.g. "60s","5m").
-                                type: string
-                              diskSizeGi:
-                                description: DiskSizeGi is the root volume size in GiB.
-                                minimum: 20
-                                type: integer
-                              instanceFamilies:
-                                description: |-
-                                  InstanceFamilies are allowed instance families (e.g. ["g5","g6"] for GPU).
-                                  Use ["*"] to allow all families (no family constraint applied).
-                                  Provider-specific interpretation:
-                                    AWS  — EC2 instance families (g5, g6, m5, c5, ...).
-                                    GCP  — N1/N2/A2 accelerator families (ComputeProviderContract maps them).
-                                items:
-                                  type: string
-                                minItems: 1
-                                type: array
-                              instanceSizes:
-                                description: |-
-                                  InstanceSizes are allowed instance sizes (e.g. ["xlarge","2xlarge"]).
-                                  Use ["*"] to allow all sizes (no size constraint applied).
-                                items:
-                                  type: string
-                                minItems: 1
-                                type: array
-                              maxResources:
-                                description: |-
-                                  MaxResources is the autoscaler resource limit:
-                                    "nvidia.com/gpu" count for GPU pools, or vCPU count for CPU pools.
-                                type: string
-                            type: object
-                          name:
-                            description: |-
-                              Name identifies the pipeline (e.g. "yolo-v1"). Used in NodePool names:
-                              {project}-{name}-gpu and {project}-{name}-cpu.
-                            minLength: 1
-                            pattern: ^[a-z0-9][a-z0-9-]*[a-z0-9]$
-                            type: string
-                        required:
-                          - name
-                        type: object
-                      type: array
                     postgres:
                       description: Postgres controls resource sizing for the per-project CloudNativePG cluster.
                       properties:
@@ -754,12 +630,12 @@ spec:
                 networkPosture:
                   default: permissive
                   description: |-
-                    NetworkPosture selects whether this project's connections are subject to
-                    Istio AuthorizationPolicy enforcement (PRD-ARCH-002 F-18/F-19). "permissive"
-                    is the default and the zero-value behaviour — nothing is emitted and every
-                    pre-existing KubeProject is unaffected. "enforced" opts the project in
-                    (policy emission itself lands in a later task) and requires every
-                    KubePool this project targets to report a Ready mesh
+                    Leave as 'permissive' unless every KubePool this project targets already reports a Ready mesh.
+
+                    "permissive" is the default and the zero-value behaviour — nothing is emitted and every
+                    pre-existing KubeProject is unaffected. "enforced" opts the project into Istio
+                    AuthorizationPolicy enforcement (PRD-ARCH-002 F-18/F-19; policy emission itself lands
+                    in a later task) and requires every KubePool this project targets to report a Ready mesh
                     (KubePool.status.platformTools.mesh.status == "Ready"); the reconciling
                     phase rejects loudly with a NetworkPostureRejected condition rather than
                     silently reconciling as permissive when that is not the case (AC-19).
@@ -768,18 +644,21 @@ spec:
                     - enforced
                   type: string
                 owner:
-                  description: Owner specifies the owner or team responsible for this project
+                  description: Names the person or team responsible for this project.
                   type: string
                 registry:
                   description: |-
-                    Registry names an entry in the KubePool's spec.registries for every pool
+                    Names a registry on the target KubePool(s), not a URL; optional.
+
+                    Must match an entry in the KubePool's spec.registries for every pool
                     this project's environments reference. When unset, each pool's
                     defaultRegistry applies. There is no fallback: a name no referenced pool
                     declares is a hard error surfaced as RegistryResolved=False (R-08).
                   type: string
                 teams:
                   description: |-
-                    Teams is the list of KubeTeam references granting access to this project.
+                    KubeTeams granting access here, added to the org's org-wide teams.
+
                     Each referenced KubeTeam contributes its members and its role to the effective
                     project access. Org-wide teams declared on the parent KubeOrg are merged in by
                     the reconciler (F-05); on conflict, org-level wins (CON-04). No role override
@@ -793,8 +672,9 @@ spec:
                     properties:
                       name:
                         description: |-
-                          Name of the KubeTeam to reference. Must exist in the same namespace
-                          as the consumer (KubeProject or KubeOrg) — i.e., the KubeOrg namespace.
+                          Names an existing KubeTeam, which must already exist in the KubeOrg namespace.
+                          The reference resolves within the consumer's own namespace (KubeProject or
+                          KubeOrg) — i.e. the KubeOrg namespace; a KubeTeam elsewhere is not found.
                         maxLength: 253
                         minLength: 1
                         pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
