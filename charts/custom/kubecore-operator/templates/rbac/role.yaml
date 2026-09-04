@@ -200,6 +200,16 @@ rules:
   - container.gcp.m.upbound.io
   resources:
   - clusters
+  - nodepools
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - containerservice.azure.m.upbound.io
+  resources:
+  - kubernetesclusternodepools
+  - kubernetesclusters
   verbs:
   - get
   - list
