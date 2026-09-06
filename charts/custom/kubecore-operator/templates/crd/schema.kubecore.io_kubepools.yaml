@@ -340,6 +340,44 @@ spec:
                         cluster:
                           description: Cluster defines the AKS cluster configuration.
                           properties:
+                            autoScalerProfile:
+                              description: |-
+                                AutoScalerProfile overrides the cluster autoscaler's scale-down knobs.
+
+                                Leave unset to take the operator default (PRD-COST-001 D-07): the three
+                                scale-down settings are written explicitly for clusterMode "dev" and left
+                                entirely to the AKS RP for "production". Any field set here wins over the
+                                operator default; fields left empty in production mode are not written at
+                                all, so Azure's own defaults still apply to them.
+
+                                Unlike GKE's single autoscalingProfile enum, AKS exposes the individual
+                                autoscaler timings; only the three scale-down knobs are surfaced here.
+                              properties:
+                                scaleDownDelayAfterAdd:
+                                  description: |-
+                                    ScaleDownDelayAfterAdd is how long after a scale-up the autoscaler
+                                    resumes evaluating scale-down. A whole number plus one unit —
+                                    ms, s, m or h — e.g. "10m", "90s", "500ms", "2h".
+                                    Operator default in dev mode: 10m.
+                                  pattern: ^[0-9]+(ms|s|m|h)$
+                                  type: string
+                                scaleDownUnneeded:
+                                  description: |-
+                                    ScaleDownUnneeded is how long a node must sit unneeded before it becomes
+                                    eligible for scale-down. A whole number plus one unit —
+                                    ms, s, m or h — e.g. "10m", "90s", "500ms", "2h".
+                                    Operator default in dev mode: 10m.
+                                  pattern: ^[0-9]+(ms|s|m|h)$
+                                  type: string
+                                scaleDownUtilizationThreshold:
+                                  description: |-
+                                    ScaleDownUtilizationThreshold is the utilisation level (requested
+                                    resources / capacity) below which a node is considered for scale-down,
+                                    as a decimal fraction between 0 and 1, e.g. "0.5".
+                                    Operator default in dev mode: 0.5.
+                                  pattern: ^0\.[0-9]+$
+                                  type: string
+                              type: object
                             kubernetesVersion:
                               default: "1.35"
                               description: KubernetesVersion specifies the AKS version.
@@ -427,6 +465,26 @@ spec:
                         cluster:
                           description: Cluster defines the GKE cluster configuration.
                           properties:
+                            autoscalingProfile:
+                              description: |-
+                                AutoscalingProfile overrides the cluster-level GKE autoscaler profile.
+
+                                Leave unset to take the operator default (PRD-COST-001 D-06): BALANCED
+                                for clusterMode "dev", OPTIMIZE_UTILIZATION for "production".
+                                OPTIMIZE_UTILIZATION drains an under-utilised node in ~1-2 minutes,
+                                BALANCED after ~10 — the former reclaims quota fast but churns nodes on
+                                bursty clusters, so dev pools pay repeated cold starts for savings they
+                                never realise. Set this only to escape the default: BALANCED on a
+                                production pool that scales too aggressively, or OPTIMIZE_UTILIZATION on
+                                a dev pool that is genuinely quota-starved.
+
+                                There is deliberately no kubebuilder default — "unset" is the signal the
+                                operator uses to apply the clusterMode-derived value, and an admission
+                                default would erase it.
+                              enum:
+                                - BALANCED
+                                - OPTIMIZE_UTILIZATION
+                              type: string
                             compute:
                               description: |-
                                 Compute defines the cluster's ML compute classes (PRD-247 D-03 follow-up).
