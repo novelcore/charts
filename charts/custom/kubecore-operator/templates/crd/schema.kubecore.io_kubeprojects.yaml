@@ -134,7 +134,7 @@ spec:
                     nodeGroup:
                       description: |-
                         NodeGroup sizes the CI builder node group. When nil, the cicompute
-                        defaults apply (small/amd64/1).
+                        defaults apply (small/amd64/1 node, spot capacity).
                       properties:
                         arch:
                           description: |-
@@ -151,9 +151,20 @@ spec:
                             - arm64
                           type: string
                         capacityType:
+                          default: spot
                           description: |-
-                            CapacityType selects on-demand vs interruptible capacity. CI builds
-                            are retryable, so spot is a reasonable choice here.
+                            Chooses on-demand vs interruptible (spot) capacity for the CI builder; defaults to spot.
+
+                            CI builds are stateless, re-runnable by re-triggering the workflow, and
+                            run on a node group that is min=0/desired=0, so a preemption
+                            costs a re-run and never a running service — which is why spot is the
+                            platform default here while deployment environments still default to
+                            on-demand (PRD-COST-001 D-01). Set `on-demand` explicitly for a build
+                            that genuinely cannot tolerate a mid-run eviction; an explicit value
+                            always wins over the default.
+
+                            Maps to `spot: true` on GKE and `priority: Spot` (with
+                            `spotMaxPrice: -1`, i.e. pay up to the on-demand price) on AKS.
                           enum:
                             - on-demand
                             - spot
