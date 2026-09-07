@@ -403,6 +403,42 @@ spec:
                                     not appropriate for your subscription's quota or stability needs.
                                   type: boolean
                               type: object
+                            systemNodeGroup:
+                              description: |-
+                                SystemNodeGroup declares the capacity type of the node pool that runs the
+                                KubeCore platform addons. On AKS that is the kubecoresys tools pool, not
+                                the AKS-native default (System-mode) pool: Azure does not expose Spot
+                                priority on a cluster's default node pool at all (the provider's
+                                KubernetesCluster.spec.forProvider.defaultNodePool schema has no
+                                priority/evictionPolicy/spotMaxPrice fields), so the closest correct
+                                mapping is the tools pool that actually hosts ArgoCD/Crossplane/cert-manager.
+                                An explicit value here wins over the legacy tools.preemptible knob.
+                                Leave unset to preserve the existing per-pool defaults.
+                              properties:
+                                capacityType:
+                                  default: on-demand
+                                  description: |-
+                                    CapacityType chooses on-demand vs Spot capacity for the system node group.
+
+                                    The default is on-demand and should stay that way for anything you care
+                                    about: the system node group runs the eviction-sensitive platform addons
+                                    (ArgoCD, Crossplane, cert-manager, ESO, Envoy Gateway). A preemptible
+                                    system pool was reclaimed by GCE on 2026-06-02 and took the whole
+                                    platform (including the mlstack) down with it. "spot" is therefore
+                                    admitted ONLY on a KubePool with clusterMode "dev" — throwaway and e2e
+                                    smoke pools, where an eviction costs a re-run and never a service. A
+                                    KubePool-level CEL rule rejects the combination on production pools.
+
+                                    Maps to `nodeConfig.spot: true` on the GKE system NodePool (Spot VMs, not
+                                    legacy preemptible — `preemptible` stays false) and to
+                                    `priority: Spot` + `evictionPolicy: Delete` + `spotMaxPrice: -1` on the
+                                    AKS pool that runs the platform addons (kubecoresys; AKS forbids Spot on
+                                    a cluster's default System-mode pool).
+                                  enum:
+                                    - on-demand
+                                    - spot
+                                  type: string
+                              type: object
                             tags:
                               additionalProperties:
                                 type: string
@@ -668,6 +704,36 @@ spec:
                                 machineType:
                                   default: e2-standard-4
                                   description: MachineType specifies the GCE machine type for system nodes.
+                                  type: string
+                              type: object
+                            systemNodeGroup:
+                              description: |-
+                                SystemNodeGroup declares the capacity type of the system node pool
+                                (kubecoresys) — the pool that runs the platform control-plane addons.
+                                Leave unset for the safe default (on-demand). See SystemNodeGroupSpec.
+                              properties:
+                                capacityType:
+                                  default: on-demand
+                                  description: |-
+                                    CapacityType chooses on-demand vs Spot capacity for the system node group.
+
+                                    The default is on-demand and should stay that way for anything you care
+                                    about: the system node group runs the eviction-sensitive platform addons
+                                    (ArgoCD, Crossplane, cert-manager, ESO, Envoy Gateway). A preemptible
+                                    system pool was reclaimed by GCE on 2026-06-02 and took the whole
+                                    platform (including the mlstack) down with it. "spot" is therefore
+                                    admitted ONLY on a KubePool with clusterMode "dev" — throwaway and e2e
+                                    smoke pools, where an eviction costs a re-run and never a service. A
+                                    KubePool-level CEL rule rejects the combination on production pools.
+
+                                    Maps to `nodeConfig.spot: true` on the GKE system NodePool (Spot VMs, not
+                                    legacy preemptible — `preemptible` stays false) and to
+                                    `priority: Spot` + `evictionPolicy: Delete` + `spotMaxPrice: -1` on the
+                                    AKS pool that runs the platform addons (kubecoresys; AKS forbids Spot on
+                                    a cluster's default System-mode pool).
+                                  enum:
+                                    - on-demand
+                                    - spot
                                   type: string
                               type: object
                             type:
@@ -1026,6 +1092,8 @@ spec:
                   rule: '(has(self.cloudProvider.aws) ? 1 : 0) + (has(self.cloudProvider.gcp) ? 1 : 0) + (has(self.cloudProvider.azure) ? 1 : 0) == 1'
                 - message: kaosCloud.costExport requires features.costTracking (you can only push cost you compute)
                   rule: '!(has(self.kaosCloud) && has(self.kaosCloud.costExport) && self.kaosCloud.costExport) || (has(self.features) && has(self.features.costTracking) && self.features.costTracking)'
+                - message: 'systemNodeGroup.capacityType ''spot'' requires clusterMode ''dev'': the system node group runs eviction-sensitive platform addons (ArgoCD, Crossplane, cert-manager, ESO, Envoy Gateway) and a reclaimed Spot node takes the whole platform down (incident 2026-06-02) — Spot is only for dev/throwaway pools'
+                  rule: '!((has(self.cloudProvider.gcp) && has(self.cloudProvider.gcp.cluster.systemNodeGroup) && has(self.cloudProvider.gcp.cluster.systemNodeGroup.capacityType) && self.cloudProvider.gcp.cluster.systemNodeGroup.capacityType == ''spot'') || (has(self.cloudProvider.azure) && has(self.cloudProvider.azure.cluster.systemNodeGroup) && has(self.cloudProvider.azure.cluster.systemNodeGroup.capacityType) && self.cloudProvider.azure.cluster.systemNodeGroup.capacityType == ''spot'')) || (has(self.clusterMode) && self.clusterMode == ''dev'')'
             status:
               description: KubePoolStatus defines the observed state of KubePool
               properties:

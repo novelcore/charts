@@ -1,0 +1,47 @@
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: d3-kubepool-azure-system-node-group-capacity-type-bounded
+  annotations:
+    kubecore.io/catalog-domain: "D3"
+    kubecore.io/catalog-id: "d3-kubepool-azure-system-node-group-capacity-type-bounded"
+    kubecore.io/evidence-ref: "api/v1beta1/kubepool_types.go"
+    policies.kyverno.io/category: "KubeCore Catalog"
+    policies.kyverno.io/description: "AKS platform-addon node-pool capacity type; same cloud-neutral vocabulary as the GCP entry and the same dev-only CEL restriction on \"spot\". Lands on the kubecoresys tools pool — Azure exposes no Spot fields on a cluster's default (System-mode) node pool."
+    policies.kyverno.io/severity: "medium"
+    policies.kyverno.io/subject: "schema.kubecore.io/KubePool"
+spec:
+  validationFailureAction: Enforce
+  failurePolicy: Fail
+  background: true
+  rules:
+  - name: d3-kubepool-azure-system-node-group-capacity-type-bounded
+    match:
+      any:
+      - resources:
+          kinds:
+            - KubePool
+    preconditions:
+      all:
+      - key: "{{ request.operation }}"
+        operator: AnyIn
+        value:
+        - CREATE
+        - UPDATE
+      - key: "{{ request.object.spec.cloudProvider.azure.cluster.systemNodeGroup.capacityType || '' }}"
+        operator: NotEquals
+        value: ""
+      - key: "{{ request.object.spec.cloudProvider.azure || '' }}"
+        operator: NotEquals
+        value: ""
+    validate:
+      message: "Field spec.cloudProvider.azure.cluster.systemNodeGroup.capacityType on KubePool must lie within the bounded set (catalog: d3-kubepool-azure-system-node-group-capacity-type-bounded, domain: D3). See PRD-310."
+      deny:
+        conditions:
+          any:
+          - key: "{{ request.object.spec.cloudProvider.azure.cluster.systemNodeGroup.capacityType }}"
+            operator: AnyNotIn
+            value:
+            - "on-demand"
+            - "spot"
+

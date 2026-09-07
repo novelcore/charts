@@ -112,6 +112,11 @@ Manages cluster-level infrastructure:
 - EKS/GKE/AKS cluster provisioning with auto-scaling node groups
 - Platform system installations (ArgoCD, Crossplane, monitoring)
 - Integration with organization-level networking and IAM
+- Opt-in Spot capacity for the system node group via
+  `spec.cloudProvider.{gcp,azure}.cluster.systemNodeGroup.capacityType: spot`.
+  Defaults to `on-demand` and is admitted only when `spec.clusterMode` is `dev`
+  — the system node group runs eviction-sensitive platform addons, so
+  production pools stay on-demand.
 
 ### KubeProject
 Manages project-level resources:
