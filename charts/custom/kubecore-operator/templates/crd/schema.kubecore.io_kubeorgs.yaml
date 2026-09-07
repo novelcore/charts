@@ -369,11 +369,13 @@ spec:
                   type: object
                 meluxinaConfig:
                   description: |-
-                    MeluxinaConfig is DEPRECATED and read by nothing (PRD-HPC-1231 D-06): HPC
-                    tenancy is declared per project on KubeProject.spec.ml.hpc. Kept one
-                    release so existing manifests keep validating; removed next release.
-
-                    Deprecated: declare KubeProject.spec.ml.hpc instead.
+                    MeluxinaConfig declares this org's MeluXina (LuxProvide HPC) allocation —
+                    the org-tenancy fact (one Slurm account, one SSH key, one S3 gateway per
+                    customer), structurally mirroring awsConfig/gcpConfig. It is NOT a cloud
+                    the platform provisions a cluster in; it is an external HPC endpoint reached
+                    from a GKE KubePool when spec.features.mlConfig.hpc.enabled. Bridge plumbing
+                    (JWT CronJob, provider-helm Release) is delivered by a later PRD; this field
+                    only records the tenancy/credentials. PRD-MELUXINA-IO-001.
                   properties:
                     account:
                       description: Account is the Slurm account (e.g. "p200XXX") for job submission.
@@ -457,7 +459,7 @@ spec:
                       type: object
                       x-kubernetes-validations:
                         - message: parentZone must be set when delegationMode is 'managed', and must be empty otherwise
-                          rule: '(has(self.delegationMode) && self.delegationMode == ''managed'') ? (has(self.parentZone) && self.parentZone != ”) : !(has(self.parentZone) && self.parentZone != ”)'
+                          rule: '(has(self.delegationMode) && self.delegationMode == ''managed'') ? (has(self.parentZone) && self.parentZone != '''') : !(has(self.parentZone) && self.parentZone != '''')'
                     enabled:
                       default: false
                       description: |-

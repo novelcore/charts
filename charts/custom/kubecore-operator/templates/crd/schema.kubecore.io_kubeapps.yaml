@@ -179,20 +179,6 @@ spec:
                           x-kubernetes-list-map-keys:
                             - size
                           x-kubernetes-list-type: map
-                        hpc:
-                          description: |-
-                            HPC opts THIS ml environment into the project's HPC tenancy
-                            (PRD-HPC-1231 D-08): its namespace receives the project's rotating
-                            Slurm JWT and every WorkflowTemplate rendered into it offers the
-                            discovered HPC classes in the {step}-class dropdowns. Requires
-                            spec.ml.hpc on the KubeProject (the identity is per project; the opt-in
-                            is per environment, because each environment owns its templates).
-                            Absent ⇒ this environment never bursts, whatever the project declares.
-                          properties:
-                            enabled:
-                              description: Enabled offers the project's HPC classes in this environment.
-                              type: boolean
-                          type: object
                       type: object
                     nodeGroup:
                       description: |-

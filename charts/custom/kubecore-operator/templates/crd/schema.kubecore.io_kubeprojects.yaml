@@ -316,20 +316,6 @@ spec:
                             x-kubernetes-list-map-keys:
                               - size
                             x-kubernetes-list-type: map
-                          hpc:
-                            description: |-
-                              HPC opts THIS ml environment into the project's HPC tenancy
-                              (PRD-HPC-1231 D-08): its namespace receives the project's rotating
-                              Slurm JWT and every WorkflowTemplate rendered into it offers the
-                              discovered HPC classes in the {step}-class dropdowns. Requires
-                              spec.ml.hpc on the KubeProject (the identity is per project; the opt-in
-                              is per environment, because each environment owns its templates).
-                              Absent ⇒ this environment never bursts, whatever the project declares.
-                            properties:
-                              enabled:
-                                description: Enabled offers the project's HPC classes in this environment.
-                                type: boolean
-                            type: object
                         type: object
                       name:
                         description: |-
@@ -668,96 +654,6 @@ spec:
                         object storage, MLflow, optionally LakeFS) scheduled on system nodes of the
                         specified KubePool.
                       type: boolean
-                    hpc:
-                      description: |-
-                        HPC binds this project to an external HPC tenancy (PRD-HPC-1231). The
-                        project is the tenancy boundary: the platform mints and rotates a Slurm
-                        JWT for THIS project's HPC user, discovers the compute classes that user
-                        may run from the scheduler, reports them on status.hpc and offers them in
-                        every pipeline step's {step}-class dropdown. Absent ⇒ the project never
-                        bursts to HPC, whatever its pools permit. Endpoints (login host, REST
-                        host, host-key source) are provider knowledge in the operator, never
-                        tenant configuration.
-                      properties:
-                        account:
-                          description: |-
-                            Account is the scheduler account (Slurm allocation, e.g. "p201342") jobs
-                            are submitted under. Required: a MeluXina user's default association is
-                            the placeholder "nocredit" account (MaxJobs=0 — live 2026-09-07), so the
-                            allocation must be named explicitly. Discovery scopes the class catalog
-                            to this account.
-                          maxLength: 64
-                          minLength: 1
-                          type: string
-                        classes:
-                          description: |-
-                            Classes is an optional allow-list over the DISCOVERED class catalog
-                            (provider-prefixed names such as "meluxina-gpu"). Unset ⇒ every
-                            discovered, available class is offered. A listed name discovery does
-                            not return is reported on status.hpc.message and never rendered.
-                          items:
-                            type: string
-                          maxItems: 20
-                          type: array
-                          x-kubernetes-list-type: set
-                        limits:
-                          description: |-
-                            Limits are platform-side budgets published into the pipeline context
-                            (hpc.limits). Enforcement in the runner is a follow-up (PRD-HPC-1231 F-09).
-                          properties:
-                            maxConcurrentJobs:
-                              description: |-
-                                MaxConcurrentJobs caps how many of this project's HPC jobs may be
-                                queued or running at once.
-                              format: int32
-                              maximum: 1000
-                              minimum: 1
-                              type: integer
-                            maxTimeLimitMinutes:
-                              description: MaxTimeLimitMinutes caps the per-step Slurm time_limit a run may request.
-                              format: int32
-                              maximum: 43200
-                              minimum: 1
-                              type: integer
-                          type: object
-                        provider:
-                          description: |-
-                            Provider selects the HPC site. "meluxina" = LuxProvide MeluXina (Slurm
-                            REST + SSH-minted JWTs). The only provider implemented today.
-                          enum:
-                            - meluxina
-                          type: string
-                        sshKeySecretRef:
-                          description: |-
-                            SSHKeySecretRef names the entry in the org's cloud secret manager (read
-                            through the {org}-gcp-infrastructure-secrets SecretStore) holding the
-                            user's long-lived Ed25519 private key. The operator pulls it via an
-                            ExternalSecret into {project}-meluxina-ssh-key in the org namespace and
-                            never reads the key bytes; only short-lived JWTs leave the control plane.
-                          properties:
-                            name:
-                              description: Name of the Secret in the same namespace as the referencing resource.
-                              minLength: 1
-                              type: string
-                          required:
-                            - name
-                          type: object
-                        user:
-                          description: |-
-                            User is the HPC login user this project submits as (e.g. "u104512").
-                            One HPC user per project: Slurm job caps, fair-share, owner-only cancel
-                            and the uid on the shared filesystem all follow from it. Users are
-                            created by the provider's identity process, never by the platform.
-                          maxLength: 64
-                          minLength: 1
-                          pattern: ^[a-z][a-z0-9._-]*$
-                          type: string
-                      required:
-                        - account
-                        - provider
-                        - sshKeySecretRef
-                        - user
-                      type: object
                     kubePool:
                       description: |-
                         KubePool specifies which KubePool's system nodes host the ML stack for this
@@ -777,10 +673,17 @@ spec:
                           description: StorageSize is the PVC size for the primary Postgres instance (e.g., "20Gi").
                           type: string
                       type: object
+                    s3:
+                      description: |-
+                        S3 controls artifact-store provisioning. The field name is retained from v1
+                        for schema compatibility; the v2 StorageProviderContract returns S3 on AWS,
+                        GCS on GCP, and may return POSIX on a future HPC provider (D-06).
+                      properties:
+                        enabled:
+                          description: Enabled controls whether a per-project bucket is created for ML artifacts.
+                          type: boolean
+                      type: object
                   type: object
-                  x-kubernetes-validations:
-                    - message: spec.ml.hpc binds this project to an HPC tenancy whose pipelines log to the project's ML stack — it requires spec.ml.enabled=true (PRD-HPC-1231 D-01)
-                      rule: '!has(self.hpc) || self.enabled'
                 networkPosture:
                   default: permissive
                   description: |-
@@ -847,8 +750,6 @@ spec:
               x-kubernetes-validations:
                 - message: an environmentType 'ml' environment requires spec.ml.enabled=true — the MLOps stack (MLflow, lakeFS, Postgres) is provisioned once per project from spec.ml and every ml environment's pipelines log to it (PRD-1124 CON-01, D-03)
                   rule: '!has(self.environments) || !self.environments.exists(e, e.environmentType == ''ml'') || (has(self.ml) && self.ml.enabled)'
-                - message: an ml environment with ml.hpc.enabled=true requires the project's HPC tenancy spec.ml.hpc (provider, user, sshKeySecretRef) — the identity is per project, the opt-in per environment (PRD-HPC-1231 D-08)
-                  rule: '!has(self.environments) || !self.environments.exists(e, has(e.ml) && has(e.ml.hpc) && e.ml.hpc.enabled) || (has(self.ml) && has(self.ml.hpc))'
             status:
               description: KubeProjectStatus defines the observed state of KubeProject
               properties:
@@ -1205,121 +1106,6 @@ spec:
                   required:
                     - state
                   type: object
-                hpc:
-                  description: |-
-                    HPC reports this project's HPC tenancy (PRD-HPC-1231): the identity in
-                    use, whether its rotating JWT is minted and pushed down, and the class
-                    catalog discovered from the scheduler for that user. Mirrored verbatim
-                    under status.outputs.hpc — the cross-controller contract KubeApp reads
-                    (via parentref) to render the {step}-class dropdowns. nil when spec.ml.hpc
-                    is absent.
-                  properties:
-                    account:
-                      description: Account is the scheduler account in effect (spec.ml.hpc.account).
-                      type: string
-                    classes:
-                      description: |-
-                        Classes is the catalog discovered for the user: one entry per partition
-                        the user's associations permit, provider-prefixed, with the node shape
-                        and whether the class is currently usable. The KubeApp reconciler offers
-                        the available ones (filtered by spec.ml.hpc.classes) in the dropdowns.
-                      items:
-                        description: |-
-                          HPCDiscoveredClass is one whole-node compute class discovered from the HPC
-                          scheduler for the project's user (PRD-HPC-1231 D-05).
-                        properties:
-                          available:
-                            description: |-
-                              Available is false when the class cannot currently run a job for this
-                              user (partition down, or the association's group TRES-minutes budget is
-                              exhausted). Unavailable classes are reported but never rendered.
-                            type: boolean
-                          cpus:
-                            format: int32
-                            type: integer
-                          description:
-                            description: Description is shown next to the class in the submit form.
-                            type: string
-                          gpus:
-                            description: |-
-                              GPUs, CPUs and MemoryGiB describe one node of the partition (whole-node
-                              classes). Zero when the scheduler did not report the value.
-                            format: int32
-                            type: integer
-                          maxTimeLimitMinutes:
-                            description: |-
-                              MaxTimeLimitMinutes is the tightest wall-clock cap the partition or the
-                              QOS imposes on one job; zero when unlimited or unreported.
-                            format: int32
-                            type: integer
-                          memoryGiB:
-                            format: int32
-                            type: integer
-                          name:
-                            description: |-
-                              Name is the provider-prefixed class name offered in the {step}-class
-                              dropdown (e.g. "meluxina-gpu"). Never collides with an in-cluster class.
-                            type: string
-                          partition:
-                            description: Partition is the scheduler partition the class submits to.
-                            type: string
-                          qos:
-                            description: QOS is the quality of service used for submissions under this class.
-                            type: string
-                          reason:
-                            description: Reason explains Available=false.
-                            type: string
-                          remainingNodeHours:
-                            description: |-
-                              RemainingNodeHours is the association's remaining group budget for this
-                              partition's dominant resource, when the scheduler reports both the limit
-                              and the consumed usage. Omitted when either is unknown. Status-only:
-                              it never drives a WorkflowTemplate re-render (CON-03).
-                            format: int64
-                            type: integer
-                          tier:
-                            description: |-
-                              Tier is "gpu" when the partition's nodes carry GPUs, else "cpu"; it
-                              drives the runner's accelerator handling (--nv, gpus).
-                            type: string
-                        required:
-                          - name
-                        type: object
-                      type: array
-                      x-kubernetes-list-map-keys:
-                        - name
-                      x-kubernetes-list-type: map
-                    discoveredAt:
-                      description: |-
-                        DiscoveredAt is when the class catalog below was last refreshed from the
-                        scheduler. A discovery failure leaves it and the classes untouched.
-                      format: date-time
-                      type: string
-                    jwtReady:
-                      description: |-
-                        JWTReady is true when the four credential prerequisites hold: SSH key
-                        pulled, host key pinned, JWT Secret non-empty, PushSecret synced.
-                      type: boolean
-                    message:
-                      description: |-
-                        Message carries the last credential or discovery diagnostic (e.g. an
-                        allow-listed class that was not discovered, or the last REST error).
-                      type: string
-                    provider:
-                      description: Provider echoes spec.ml.hpc.provider.
-                      type: string
-                    ready:
-                      description: |-
-                        Ready is true when the JWT for this project's user is minted and pushed
-                        to the cloud secret manager AND discovery has produced at least one
-                        class. It is the Derive gate: dependent KubeApps render HPC classes only
-                        while it is true. Discovery failures after a successful discovery keep
-                        Ready (CON-02); only a missing JWT clears it.
-                      type: boolean
-                    user:
-                      description: User echoes spec.ml.hpc.user — the HPC login user the JWT is minted for.
-                      type: string
-                  type: object
                 identityProvider:
                   description: IdentityProvider contains Zitadel role status for this project
                   properties:
@@ -1649,117 +1435,6 @@ spec:
                           - namespace
                         type: object
                       type: array
-                    hpc:
-                      description: |-
-                        HPC is the published copy of status.hpc (PRD-HPC-1231): the Derive gate
-                        and class catalog dependent KubeApps render their HPC dropdowns from.
-                      properties:
-                        account:
-                          description: Account is the scheduler account in effect (spec.ml.hpc.account).
-                          type: string
-                        classes:
-                          description: |-
-                            Classes is the catalog discovered for the user: one entry per partition
-                            the user's associations permit, provider-prefixed, with the node shape
-                            and whether the class is currently usable. The KubeApp reconciler offers
-                            the available ones (filtered by spec.ml.hpc.classes) in the dropdowns.
-                          items:
-                            description: |-
-                              HPCDiscoveredClass is one whole-node compute class discovered from the HPC
-                              scheduler for the project's user (PRD-HPC-1231 D-05).
-                            properties:
-                              available:
-                                description: |-
-                                  Available is false when the class cannot currently run a job for this
-                                  user (partition down, or the association's group TRES-minutes budget is
-                                  exhausted). Unavailable classes are reported but never rendered.
-                                type: boolean
-                              cpus:
-                                format: int32
-                                type: integer
-                              description:
-                                description: Description is shown next to the class in the submit form.
-                                type: string
-                              gpus:
-                                description: |-
-                                  GPUs, CPUs and MemoryGiB describe one node of the partition (whole-node
-                                  classes). Zero when the scheduler did not report the value.
-                                format: int32
-                                type: integer
-                              maxTimeLimitMinutes:
-                                description: |-
-                                  MaxTimeLimitMinutes is the tightest wall-clock cap the partition or the
-                                  QOS imposes on one job; zero when unlimited or unreported.
-                                format: int32
-                                type: integer
-                              memoryGiB:
-                                format: int32
-                                type: integer
-                              name:
-                                description: |-
-                                  Name is the provider-prefixed class name offered in the {step}-class
-                                  dropdown (e.g. "meluxina-gpu"). Never collides with an in-cluster class.
-                                type: string
-                              partition:
-                                description: Partition is the scheduler partition the class submits to.
-                                type: string
-                              qos:
-                                description: QOS is the quality of service used for submissions under this class.
-                                type: string
-                              reason:
-                                description: Reason explains Available=false.
-                                type: string
-                              remainingNodeHours:
-                                description: |-
-                                  RemainingNodeHours is the association's remaining group budget for this
-                                  partition's dominant resource, when the scheduler reports both the limit
-                                  and the consumed usage. Omitted when either is unknown. Status-only:
-                                  it never drives a WorkflowTemplate re-render (CON-03).
-                                format: int64
-                                type: integer
-                              tier:
-                                description: |-
-                                  Tier is "gpu" when the partition's nodes carry GPUs, else "cpu"; it
-                                  drives the runner's accelerator handling (--nv, gpus).
-                                type: string
-                            required:
-                              - name
-                            type: object
-                          type: array
-                          x-kubernetes-list-map-keys:
-                            - name
-                          x-kubernetes-list-type: map
-                        discoveredAt:
-                          description: |-
-                            DiscoveredAt is when the class catalog below was last refreshed from the
-                            scheduler. A discovery failure leaves it and the classes untouched.
-                          format: date-time
-                          type: string
-                        jwtReady:
-                          description: |-
-                            JWTReady is true when the four credential prerequisites hold: SSH key
-                            pulled, host key pinned, JWT Secret non-empty, PushSecret synced.
-                          type: boolean
-                        message:
-                          description: |-
-                            Message carries the last credential or discovery diagnostic (e.g. an
-                            allow-listed class that was not discovered, or the last REST error).
-                          type: string
-                        provider:
-                          description: Provider echoes spec.ml.hpc.provider.
-                          type: string
-                        ready:
-                          description: |-
-                            Ready is true when the JWT for this project's user is minted and pushed
-                            to the cloud secret manager AND discovery has produced at least one
-                            class. It is the Derive gate: dependent KubeApps render HPC classes only
-                            while it is true. Discovery failures after a successful discovery keep
-                            Ready (CON-02); only a missing JWT clears it.
-                          type: boolean
-                        user:
-                          description: User echoes spec.ml.hpc.user — the HPC login user the JWT is minted for.
-                          type: string
-                      type: object
                     mlStack:
                       description: |-
                         MLStackStatus tracks the per-project ML stack (XProjectMLStack).
