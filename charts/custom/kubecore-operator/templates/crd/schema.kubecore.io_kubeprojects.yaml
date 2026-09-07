@@ -682,9 +682,12 @@ spec:
                         account:
                           description: |-
                             Account is the scheduler account (Slurm allocation, e.g. "p201342") jobs
-                            are submitted under. Optional: when unset the user's default association
-                            discovered from the scheduler is used and reported on status.hpc.account.
+                            are submitted under. Required: a MeluXina user's default association is
+                            the placeholder "nocredit" account (MaxJobs=0 — live 2026-09-07), so the
+                            allocation must be named explicitly. Discovery scopes the class catalog
+                            to this account.
                           maxLength: 64
+                          minLength: 1
                           type: string
                         classes:
                           description: |-
@@ -750,6 +753,7 @@ spec:
                           pattern: ^[a-z][a-z0-9._-]*$
                           type: string
                       required:
+                        - account
                         - provider
                         - sshKeySecretRef
                         - user
@@ -1211,9 +1215,7 @@ spec:
                     is absent.
                   properties:
                     account:
-                      description: |-
-                        Account is the scheduler account in effect: spec.ml.hpc.account when set,
-                        otherwise the user's default association discovered from the scheduler.
+                      description: Account is the scheduler account in effect (spec.ml.hpc.account).
                       type: string
                     classes:
                       description: |-
@@ -1653,9 +1655,7 @@ spec:
                         and class catalog dependent KubeApps render their HPC dropdowns from.
                       properties:
                         account:
-                          description: |-
-                            Account is the scheduler account in effect: spec.ml.hpc.account when set,
-                            otherwise the user's default association discovered from the scheduler.
+                          description: Account is the scheduler account in effect (spec.ml.hpc.account).
                           type: string
                         classes:
                           description: |-
