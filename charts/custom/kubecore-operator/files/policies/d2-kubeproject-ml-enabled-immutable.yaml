@@ -36,4 +36,7 @@ spec:
           - key: "{{ request.object.spec.ml.enabled || '' }}"
             operator: NotEquals
             value: "{{ request.oldObject.spec.ml.enabled || '' }}"
+          - key: "{{ request.oldObject.spec.ml.enabled || '' }}"
+            operator: NotEquals
+            value: ""
 

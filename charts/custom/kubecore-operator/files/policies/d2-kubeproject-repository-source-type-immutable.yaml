@@ -36,4 +36,7 @@ spec:
           - key: "{{ request.object.spec.githubConfiguration.repositorySource.type || '' }}"
             operator: NotEquals
             value: "{{ request.oldObject.spec.githubConfiguration.repositorySource.type || '' }}"
+          - key: "{{ request.oldObject.spec.githubConfiguration.repositorySource.type || '' }}"
+            operator: NotEquals
+            value: ""
 

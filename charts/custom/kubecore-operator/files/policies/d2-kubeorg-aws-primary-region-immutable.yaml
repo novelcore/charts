@@ -36,4 +36,7 @@ spec:
           - key: "{{ request.object.spec.awsConfig.primaryRegion || '' }}"
             operator: NotEquals
             value: "{{ request.oldObject.spec.awsConfig.primaryRegion || '' }}"
+          - key: "{{ request.oldObject.spec.awsConfig.primaryRegion || '' }}"
+            operator: NotEquals
+            value: ""
 

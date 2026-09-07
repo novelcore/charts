@@ -36,4 +36,7 @@ spec:
           - key: "{{ request.object.spec.operators.redis || '' }}"
             operator: NotEquals
             value: "{{ request.oldObject.spec.operators.redis || '' }}"
+          - key: "{{ request.oldObject.spec.operators.redis || '' }}"
+            operator: NotEquals
+            value: ""
 

@@ -34,4 +34,7 @@ spec:
           - key: "{{ request.object.spec.gcpConfig.projectId || '' }}"
             operator: NotEquals
             value: "{{ request.oldObject.spec.gcpConfig.projectId || '' }}"
+          - key: "{{ request.oldObject.spec.gcpConfig.projectId || '' }}"
+            operator: NotEquals
+            value: ""
 

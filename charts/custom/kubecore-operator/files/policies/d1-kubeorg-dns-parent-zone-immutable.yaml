@@ -34,4 +34,7 @@ spec:
           - key: "{{ request.object.spec.network.dns.parentZone || '' }}"
             operator: NotEquals
             value: "{{ request.oldObject.spec.network.dns.parentZone || '' }}"
+          - key: "{{ request.oldObject.spec.network.dns.parentZone || '' }}"
+            operator: NotEquals
+            value: ""
 

@@ -34,4 +34,7 @@ spec:
           - key: "{{ request.object.spec.kubeAppTemplateRef || '' }}"
             operator: NotEquals
             value: "{{ request.oldObject.spec.kubeAppTemplateRef || '' }}"
+          - key: "{{ request.oldObject.spec.kubeAppTemplateRef || '' }}"
+            operator: NotEquals
+            value: ""
 

@@ -34,4 +34,7 @@ spec:
           - key: "{{ request.object.spec.meluxinaConfig.sshKeySecretRef.name || '' }}"
             operator: NotEquals
             value: "{{ request.oldObject.spec.meluxinaConfig.sshKeySecretRef.name || '' }}"
+          - key: "{{ request.oldObject.spec.meluxinaConfig.sshKeySecretRef.name || '' }}"
+            operator: NotEquals
+            value: ""
 

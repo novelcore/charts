@@ -36,4 +36,7 @@ spec:
           - key: "{{ request.object.spec.network.dns.enabled || '' }}"
             operator: NotEquals
             value: "{{ request.oldObject.spec.network.dns.enabled || '' }}"
+          - key: "{{ request.oldObject.spec.network.dns.enabled || '' }}"
+            operator: NotEquals
+            value: ""
 

@@ -34,4 +34,7 @@ spec:
           - key: "{{ request.object.spec.githubConfig.installationId || '' }}"
             operator: NotEquals
             value: "{{ request.oldObject.spec.githubConfig.installationId || '' }}"
+          - key: "{{ request.oldObject.spec.githubConfig.installationId || '' }}"
+            operator: NotEquals
+            value: ""
 

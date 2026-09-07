@@ -34,4 +34,7 @@ spec:
           - key: "{{ request.object.spec.meluxinaConfig.account || '' }}"
             operator: NotEquals
             value: "{{ request.oldObject.spec.meluxinaConfig.account || '' }}"
+          - key: "{{ request.oldObject.spec.meluxinaConfig.account || '' }}"
+            operator: NotEquals
+            value: ""
 

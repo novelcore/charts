@@ -36,4 +36,7 @@ spec:
           - key: "{{ request.object.spec.ml.components.mlflow || '' }}"
             operator: NotEquals
             value: "{{ request.oldObject.spec.ml.components.mlflow || '' }}"
+          - key: "{{ request.oldObject.spec.ml.components.mlflow || '' }}"
+            operator: NotEquals
+            value: ""
 

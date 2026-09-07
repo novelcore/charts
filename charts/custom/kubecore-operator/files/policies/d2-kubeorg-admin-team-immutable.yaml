@@ -36,4 +36,7 @@ spec:
           - key: "{{ request.object.spec.adminTeam || '' }}"
             operator: NotEquals
             value: "{{ request.oldObject.spec.adminTeam || '' }}"
+          - key: "{{ request.oldObject.spec.adminTeam || '' }}"
+            operator: NotEquals
+            value: ""
 

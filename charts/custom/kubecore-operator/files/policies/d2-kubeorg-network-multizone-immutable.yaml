@@ -36,4 +36,7 @@ spec:
           - key: "{{ request.object.spec.network.multizone || '' }}"
             operator: NotEquals
             value: "{{ request.oldObject.spec.network.multizone || '' }}"
+          - key: "{{ request.oldObject.spec.network.multizone || '' }}"
+            operator: NotEquals
+            value: ""
 

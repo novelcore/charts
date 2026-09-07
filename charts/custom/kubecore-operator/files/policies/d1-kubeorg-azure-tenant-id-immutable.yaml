@@ -34,4 +34,7 @@ spec:
           - key: "{{ request.object.spec.azureConfig.tenantId || '' }}"
             operator: NotEquals
             value: "{{ request.oldObject.spec.azureConfig.tenantId || '' }}"
+          - key: "{{ request.oldObject.spec.azureConfig.tenantId || '' }}"
+            operator: NotEquals
+            value: ""
 

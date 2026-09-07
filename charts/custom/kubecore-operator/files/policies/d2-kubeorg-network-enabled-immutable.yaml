@@ -36,4 +36,7 @@ spec:
           - key: "{{ request.object.spec.network.enabled || '' }}"
             operator: NotEquals
             value: "{{ request.oldObject.spec.network.enabled || '' }}"
+          - key: "{{ request.oldObject.spec.network.enabled || '' }}"
+            operator: NotEquals
+            value: ""
 

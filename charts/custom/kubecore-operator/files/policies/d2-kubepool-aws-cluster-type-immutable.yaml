@@ -39,4 +39,7 @@ spec:
           - key: "{{ request.object.spec.cloudProvider.aws.cluster.type || '' }}"
             operator: NotEquals
             value: "{{ request.oldObject.spec.cloudProvider.aws.cluster.type || '' }}"
+          - key: "{{ request.oldObject.spec.cloudProvider.aws.cluster.type || '' }}"
+            operator: NotEquals
+            value: ""
 

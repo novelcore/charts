@@ -34,4 +34,7 @@ spec:
           - key: "{{ request.object.spec.identity.initialAdmin || '' }}"
             operator: NotEquals
             value: "{{ request.oldObject.spec.identity.initialAdmin || '' }}"
+          - key: "{{ request.oldObject.spec.identity.initialAdmin || '' }}"
+            operator: NotEquals
+            value: ""
 

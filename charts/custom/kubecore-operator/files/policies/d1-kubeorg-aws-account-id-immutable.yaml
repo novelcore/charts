@@ -34,4 +34,7 @@ spec:
           - key: "{{ request.object.spec.awsConfig.accountId || '' }}"
             operator: NotEquals
             value: "{{ request.oldObject.spec.awsConfig.accountId || '' }}"
+          - key: "{{ request.oldObject.spec.awsConfig.accountId || '' }}"
+            operator: NotEquals
+            value: ""
 

@@ -36,4 +36,7 @@ spec:
           - key: "{{ request.object.spec.features.ml || '' }}"
             operator: NotEquals
             value: "{{ request.oldObject.spec.features.ml || '' }}"
+          - key: "{{ request.oldObject.spec.features.ml || '' }}"
+            operator: NotEquals
+            value: ""
 

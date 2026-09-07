@@ -36,4 +36,7 @@ spec:
           - key: "{{ request.object.spec.features.zotRegistry || '' }}"
             operator: NotEquals
             value: "{{ request.oldObject.spec.features.zotRegistry || '' }}"
+          - key: "{{ request.oldObject.spec.features.zotRegistry || '' }}"
+            operator: NotEquals
+            value: ""
 
