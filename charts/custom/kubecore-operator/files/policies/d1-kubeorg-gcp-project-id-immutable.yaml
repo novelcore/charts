@@ -31,10 +31,10 @@ spec:
       deny:
         conditions:
           all:
-          - key: "{{ request.object.spec.gcpConfig.projectId || '' }}"
+          - key: "{{ contains(keys(request.oldObject.spec.gcpConfig || `{}`), 'projectId') }}"
+            operator: Equals
+            value: true
+          - key: "{{ to_string(request.object.spec.gcpConfig.projectId) }}"
             operator: NotEquals
-            value: "{{ request.oldObject.spec.gcpConfig.projectId || '' }}"
-          - key: "{{ request.oldObject.spec.gcpConfig.projectId || '' }}"
-            operator: NotEquals
-            value: ""
+            value: "{{ to_string(request.oldObject.spec.gcpConfig.projectId) }}"
 

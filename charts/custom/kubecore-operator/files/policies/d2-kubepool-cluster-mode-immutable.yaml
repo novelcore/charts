@@ -33,10 +33,10 @@ spec:
       deny:
         conditions:
           all:
-          - key: "{{ request.object.spec.clusterMode || '' }}"
+          - key: "{{ contains(keys(request.oldObject.spec || `{}`), 'clusterMode') }}"
+            operator: Equals
+            value: true
+          - key: "{{ to_string(request.object.spec.clusterMode) }}"
             operator: NotEquals
-            value: "{{ request.oldObject.spec.clusterMode || '' }}"
-          - key: "{{ request.oldObject.spec.clusterMode || '' }}"
-            operator: NotEquals
-            value: ""
+            value: "{{ to_string(request.oldObject.spec.clusterMode) }}"
 

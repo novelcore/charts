@@ -31,10 +31,10 @@ spec:
       deny:
         conditions:
           all:
-          - key: "{{ request.object.spec.kubeProjectRef || '' }}"
+          - key: "{{ contains(keys(request.oldObject.spec || `{}`), 'kubeProjectRef') }}"
+            operator: Equals
+            value: true
+          - key: "{{ to_string(request.object.spec.kubeProjectRef) }}"
             operator: NotEquals
-            value: "{{ request.oldObject.spec.kubeProjectRef || '' }}"
-          - key: "{{ request.oldObject.spec.kubeProjectRef || '' }}"
-            operator: NotEquals
-            value: ""
+            value: "{{ to_string(request.oldObject.spec.kubeProjectRef) }}"
 

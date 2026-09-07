@@ -33,10 +33,10 @@ spec:
       deny:
         conditions:
           all:
-          - key: "{{ request.object.spec.adminTeam || '' }}"
+          - key: "{{ contains(keys(request.oldObject.spec || `{}`), 'adminTeam') }}"
+            operator: Equals
+            value: true
+          - key: "{{ to_string(request.object.spec.adminTeam) }}"
             operator: NotEquals
-            value: "{{ request.oldObject.spec.adminTeam || '' }}"
-          - key: "{{ request.oldObject.spec.adminTeam || '' }}"
-            operator: NotEquals
-            value: ""
+            value: "{{ to_string(request.oldObject.spec.adminTeam) }}"
 

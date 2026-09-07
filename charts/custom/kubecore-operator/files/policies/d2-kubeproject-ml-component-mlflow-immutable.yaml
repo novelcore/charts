@@ -33,10 +33,10 @@ spec:
       deny:
         conditions:
           all:
-          - key: "{{ request.object.spec.ml.components.mlflow || '' }}"
+          - key: "{{ contains(keys(request.oldObject.spec.ml.components || `{}`), 'mlflow') }}"
+            operator: Equals
+            value: true
+          - key: "{{ to_string(request.object.spec.ml.components.mlflow) }}"
             operator: NotEquals
-            value: "{{ request.oldObject.spec.ml.components.mlflow || '' }}"
-          - key: "{{ request.oldObject.spec.ml.components.mlflow || '' }}"
-            operator: NotEquals
-            value: ""
+            value: "{{ to_string(request.oldObject.spec.ml.components.mlflow) }}"
 

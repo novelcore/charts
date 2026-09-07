@@ -31,10 +31,10 @@ spec:
       deny:
         conditions:
           all:
-          - key: "{{ request.object.spec.awsConfig.providerConfig || '' }}"
+          - key: "{{ contains(keys(request.oldObject.spec.awsConfig || `{}`), 'providerConfig') }}"
+            operator: Equals
+            value: true
+          - key: "{{ to_string(request.object.spec.awsConfig.providerConfig) }}"
             operator: NotEquals
-            value: "{{ request.oldObject.spec.awsConfig.providerConfig || '' }}"
-          - key: "{{ request.oldObject.spec.awsConfig.providerConfig || '' }}"
-            operator: NotEquals
-            value: ""
+            value: "{{ to_string(request.oldObject.spec.awsConfig.providerConfig) }}"
 

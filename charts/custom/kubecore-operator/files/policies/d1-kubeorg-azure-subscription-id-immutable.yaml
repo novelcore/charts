@@ -31,10 +31,10 @@ spec:
       deny:
         conditions:
           all:
-          - key: "{{ request.object.spec.azureConfig.subscriptionId || '' }}"
+          - key: "{{ contains(keys(request.oldObject.spec.azureConfig || `{}`), 'subscriptionId') }}"
+            operator: Equals
+            value: true
+          - key: "{{ to_string(request.object.spec.azureConfig.subscriptionId) }}"
             operator: NotEquals
-            value: "{{ request.oldObject.spec.azureConfig.subscriptionId || '' }}"
-          - key: "{{ request.oldObject.spec.azureConfig.subscriptionId || '' }}"
-            operator: NotEquals
-            value: ""
+            value: "{{ to_string(request.oldObject.spec.azureConfig.subscriptionId) }}"
 

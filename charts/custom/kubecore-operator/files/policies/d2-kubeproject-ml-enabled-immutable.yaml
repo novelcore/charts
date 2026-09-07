@@ -33,10 +33,10 @@ spec:
       deny:
         conditions:
           all:
-          - key: "{{ request.object.spec.ml.enabled || '' }}"
+          - key: "{{ contains(keys(request.oldObject.spec.ml || `{}`), 'enabled') }}"
+            operator: Equals
+            value: true
+          - key: "{{ to_string(request.object.spec.ml.enabled) }}"
             operator: NotEquals
-            value: "{{ request.oldObject.spec.ml.enabled || '' }}"
-          - key: "{{ request.oldObject.spec.ml.enabled || '' }}"
-            operator: NotEquals
-            value: ""
+            value: "{{ to_string(request.oldObject.spec.ml.enabled) }}"
 

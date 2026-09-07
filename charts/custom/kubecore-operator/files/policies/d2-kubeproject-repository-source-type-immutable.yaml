@@ -33,10 +33,10 @@ spec:
       deny:
         conditions:
           all:
-          - key: "{{ request.object.spec.githubConfiguration.repositorySource.type || '' }}"
+          - key: "{{ contains(keys(request.oldObject.spec.githubConfiguration.repositorySource || `{}`), 'type') }}"
+            operator: Equals
+            value: true
+          - key: "{{ to_string(request.object.spec.githubConfiguration.repositorySource.type) }}"
             operator: NotEquals
-            value: "{{ request.oldObject.spec.githubConfiguration.repositorySource.type || '' }}"
-          - key: "{{ request.oldObject.spec.githubConfiguration.repositorySource.type || '' }}"
-            operator: NotEquals
-            value: ""
+            value: "{{ to_string(request.oldObject.spec.githubConfiguration.repositorySource.type) }}"
 

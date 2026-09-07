@@ -31,10 +31,10 @@ spec:
       deny:
         conditions:
           all:
-          - key: "{{ request.object.spec.kubeAppTemplateRef || '' }}"
+          - key: "{{ contains(keys(request.oldObject.spec || `{}`), 'kubeAppTemplateRef') }}"
+            operator: Equals
+            value: true
+          - key: "{{ to_string(request.object.spec.kubeAppTemplateRef) }}"
             operator: NotEquals
-            value: "{{ request.oldObject.spec.kubeAppTemplateRef || '' }}"
-          - key: "{{ request.oldObject.spec.kubeAppTemplateRef || '' }}"
-            operator: NotEquals
-            value: ""
+            value: "{{ to_string(request.oldObject.spec.kubeAppTemplateRef) }}"
 

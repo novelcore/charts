@@ -31,10 +31,10 @@ spec:
       deny:
         conditions:
           all:
-          - key: "{{ request.object.spec.meluxinaConfig.sshKeySecretRef.name || '' }}"
+          - key: "{{ contains(keys(request.oldObject.spec.meluxinaConfig.sshKeySecretRef || `{}`), 'name') }}"
+            operator: Equals
+            value: true
+          - key: "{{ to_string(request.object.spec.meluxinaConfig.sshKeySecretRef.name) }}"
             operator: NotEquals
-            value: "{{ request.oldObject.spec.meluxinaConfig.sshKeySecretRef.name || '' }}"
-          - key: "{{ request.oldObject.spec.meluxinaConfig.sshKeySecretRef.name || '' }}"
-            operator: NotEquals
-            value: ""
+            value: "{{ to_string(request.oldObject.spec.meluxinaConfig.sshKeySecretRef.name) }}"
 

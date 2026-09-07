@@ -33,10 +33,10 @@ spec:
       deny:
         conditions:
           all:
-          - key: "{{ request.object.spec.features.ml || '' }}"
+          - key: "{{ contains(keys(request.oldObject.spec.features || `{}`), 'ml') }}"
+            operator: Equals
+            value: true
+          - key: "{{ to_string(request.object.spec.features.ml) }}"
             operator: NotEquals
-            value: "{{ request.oldObject.spec.features.ml || '' }}"
-          - key: "{{ request.oldObject.spec.features.ml || '' }}"
-            operator: NotEquals
-            value: ""
+            value: "{{ to_string(request.oldObject.spec.features.ml) }}"
 

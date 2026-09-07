@@ -33,10 +33,10 @@ spec:
       deny:
         conditions:
           all:
-          - key: "{{ request.object.spec.awsConfig.primaryRegion || '' }}"
+          - key: "{{ contains(keys(request.oldObject.spec.awsConfig || `{}`), 'primaryRegion') }}"
+            operator: Equals
+            value: true
+          - key: "{{ to_string(request.object.spec.awsConfig.primaryRegion) }}"
             operator: NotEquals
-            value: "{{ request.oldObject.spec.awsConfig.primaryRegion || '' }}"
-          - key: "{{ request.oldObject.spec.awsConfig.primaryRegion || '' }}"
-            operator: NotEquals
-            value: ""
+            value: "{{ to_string(request.oldObject.spec.awsConfig.primaryRegion) }}"
 

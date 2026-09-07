@@ -31,10 +31,10 @@ spec:
       deny:
         conditions:
           all:
-          - key: "{{ request.object.spec.awsConfig.accountId || '' }}"
+          - key: "{{ contains(keys(request.oldObject.spec.awsConfig || `{}`), 'accountId') }}"
+            operator: Equals
+            value: true
+          - key: "{{ to_string(request.object.spec.awsConfig.accountId) }}"
             operator: NotEquals
-            value: "{{ request.oldObject.spec.awsConfig.accountId || '' }}"
-          - key: "{{ request.oldObject.spec.awsConfig.accountId || '' }}"
-            operator: NotEquals
-            value: ""
+            value: "{{ to_string(request.oldObject.spec.awsConfig.accountId) }}"
 

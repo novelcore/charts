@@ -33,10 +33,10 @@ spec:
       deny:
         conditions:
           all:
-          - key: "{{ request.object.spec.operators.redis || '' }}"
+          - key: "{{ contains(keys(request.oldObject.spec.operators || `{}`), 'redis') }}"
+            operator: Equals
+            value: true
+          - key: "{{ to_string(request.object.spec.operators.redis) }}"
             operator: NotEquals
-            value: "{{ request.oldObject.spec.operators.redis || '' }}"
-          - key: "{{ request.oldObject.spec.operators.redis || '' }}"
-            operator: NotEquals
-            value: ""
+            value: "{{ to_string(request.oldObject.spec.operators.redis) }}"
 
