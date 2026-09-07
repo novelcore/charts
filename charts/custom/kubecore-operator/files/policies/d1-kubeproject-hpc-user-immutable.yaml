@@ -1,0 +1,40 @@
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: d1-kubeproject-hpc-user-immutable
+  annotations:
+    kubecore.io/catalog-domain: "D1"
+    kubecore.io/catalog-id: "d1-kubeproject-hpc-user-immutable"
+    kubecore.io/evidence-ref: "api/v1beta1/kubeproject_types.go"
+    policies.kyverno.io/category: "KubeCore Catalog"
+    policies.kyverno.io/description: "The HPC login user is the project's HPC identity. The rotating-JWT chain and every ml environment's meluxina-jwt are keyed to it; switching it on a live project strands the running token. Unbind and rebind instead."
+    policies.kyverno.io/severity: "high"
+    policies.kyverno.io/subject: "schema.kubecore.io/KubeProject"
+spec:
+  validationFailureAction: Enforce
+  failurePolicy: Fail
+  background: true
+  rules:
+  - name: d1-kubeproject-hpc-user-immutable
+    match:
+      any:
+      - resources:
+          kinds:
+            - KubeProject
+    preconditions:
+      all:
+      - key: "{{ request.operation }}"
+        operator: Equals
+        value: UPDATE
+    validate:
+      message: "Field spec.ml.hpc.user on KubeProject is immutable (catalog: d1-kubeproject-hpc-user-immutable, domain: D1). See PRD-310."
+      deny:
+        conditions:
+          all:
+          - key: "{{ contains(keys(request.oldObject.spec.ml.hpc || `{}`), 'user') }}"
+            operator: Equals
+            value: true
+          - key: "{{ to_string(request.object.spec.ml.hpc.user) }}"
+            operator: NotEquals
+            value: "{{ to_string(request.oldObject.spec.ml.hpc.user) }}"
+

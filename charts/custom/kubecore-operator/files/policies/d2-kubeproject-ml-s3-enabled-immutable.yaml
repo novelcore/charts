@@ -9,7 +9,7 @@ metadata:
     kubecore.io/migration-issue: "#344"
     kubecore.io/migration-status: "unimplemented"
     policies.kyverno.io/category: "KubeCore Catalog"
-    policies.kyverno.io/description: "Toggling S3 artifact store off destroys per-environment buckets (and the data they hold); not implemented (#344)."
+    policies.kyverno.io/description: "Deprecated no-op field (the artifact store is always provisioned, PRD-HPC-1231); kept immutable and installed until the field is removed so live manifests keep applying."
     policies.kyverno.io/severity: "medium"
     policies.kyverno.io/subject: "schema.kubecore.io/KubeProject"
 spec:

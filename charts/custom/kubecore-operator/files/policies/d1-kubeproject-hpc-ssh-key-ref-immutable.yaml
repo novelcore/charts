@@ -1,0 +1,40 @@
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: d1-kubeproject-hpc-ssh-key-ref-immutable
+  annotations:
+    kubecore.io/catalog-domain: "D1"
+    kubecore.io/catalog-id: "d1-kubeproject-hpc-ssh-key-ref-immutable"
+    kubecore.io/evidence-ref: "api/v1beta1/kubeproject_types.go"
+    policies.kyverno.io/category: "KubeCore Catalog"
+    policies.kyverno.io/description: "The HPC SSH-key secret reference anchors the credential the project's mint CronJob uses. Re-pointing it mid-flight breaks token minting; the key source is fixed at HPC onboarding."
+    policies.kyverno.io/severity: "high"
+    policies.kyverno.io/subject: "schema.kubecore.io/KubeProject"
+spec:
+  validationFailureAction: Enforce
+  failurePolicy: Fail
+  background: true
+  rules:
+  - name: d1-kubeproject-hpc-ssh-key-ref-immutable
+    match:
+      any:
+      - resources:
+          kinds:
+            - KubeProject
+    preconditions:
+      all:
+      - key: "{{ request.operation }}"
+        operator: Equals
+        value: UPDATE
+    validate:
+      message: "Field spec.ml.hpc.sshKeySecretRef.name on KubeProject is immutable (catalog: d1-kubeproject-hpc-ssh-key-ref-immutable, domain: D1). See PRD-310."
+      deny:
+        conditions:
+          all:
+          - key: "{{ contains(keys(request.oldObject.spec.ml.hpc.sshKeySecretRef || `{}`), 'name') }}"
+            operator: Equals
+            value: true
+          - key: "{{ to_string(request.object.spec.ml.hpc.sshKeySecretRef.name) }}"
+            operator: NotEquals
+            value: "{{ to_string(request.oldObject.spec.ml.hpc.sshKeySecretRef.name) }}"
+
