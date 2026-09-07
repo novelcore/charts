@@ -772,27 +772,6 @@ spec:
                         MLConfig fine-tunes which ML components are provisioned when ML is true.
                         When nil, all default to true (backward compatible). Set to false to skip provisioning a component.
                       properties:
-                        hpc:
-                          description: |-
-                            HPC declares that this pool can burst ML pipeline steps to an external HPC
-                            target (e.g. MeluXina). Absent ⇒ no HPC, ever. When enabled, the operator
-                            deploys the bridge cross-cluster (later PRD) and flips status.hpc.ready;
-                            KubeApp WorkflowTemplates then render the HPC target step (Derive gating).
-                            PRD-MELUXINA-IO-001.
-                          properties:
-                            enabled:
-                              description: |-
-                                Enabled turns on HPC bursting for this pool. Absent/false ⇒ no HPC step is
-                                ever rendered into dependent WorkflowTemplates.
-                              type: boolean
-                            provider:
-                              description: |-
-                                Provider selects which org-level HPC tenancy to use. "meluxina" maps to
-                                KubeOrg.spec.meluxinaConfig. Only one provider is implemented today.
-                              enum:
-                                - meluxina
-                              type: string
-                          type: object
                         mlflow:
                           description: Mlflow deploys MLflow (Postgres backend, optional S3 artifacts). Default true.
                           type: boolean
@@ -1306,31 +1285,6 @@ spec:
                       description: SecretName is the AWS Secrets Manager key name for OIDC credentials
                       type: string
                   type: object
-                hpc:
-                  description: |-
-                    HPC reports readiness of the external HPC burst bridge (e.g. MeluXina) when
-                    spec.features.mlConfig.hpc.enabled. Source of truth for Derive-gated
-                    WorkflowTemplate rendering: dependent KubeApps render the HPC target step
-                    only when HPC.Ready is true. PRD-MELUXINA-IO-001.
-                    RETAINED (not moved to Outputs) despite being a §3.2 MOVE candidate: the
-                    own Ready phase (phases/ready.go) gates on this field directly before
-                    Reporting necessarily reflects the same generation, and a cross-CR reader
-                    in kubeapp/phases/reconciling.go already carries a documented
-                    deliberate-non-migration rationale (the caller holds the identical
-                    non-Ready-gated *KubePool object in-memory for a different reason —
-                    the admin compute-class catalog read from Spec.Features — and a second,
-                    Ready-gated parentref call would split one object's trust model across
-                    two different gating rules). Outputs.HPCReady still mirrors HPC.Ready.
-                  properties:
-                    endpoint:
-                      description: |-
-                        Endpoint is the in-cluster address pipeline steps use to reach the bridge
-                        (e.g. "slurm-proxy-svc:8888").
-                      type: string
-                    ready:
-                      description: Ready is true once the bridge Release and rotating-JWT secret are healthy.
-                      type: boolean
-                  type: object
                 kubernetesVersion:
                   description: KubernetesVersion is the requested Kubernetes version for this cluster
                   type: string
@@ -1570,9 +1524,6 @@ spec:
                         registryref.endpointsFor rather than producing an image path with an
                         empty project segment.
                       type: string
-                    hpcReady:
-                      description: Feature-conditional — validated only when the corresponding feature is enabled.
-                      type: boolean
                     kubernetesProviderConfig:
                       description: KubernetesProviderConfig is required; Ready outputs must have Name != "" && Ready.
                       properties:
