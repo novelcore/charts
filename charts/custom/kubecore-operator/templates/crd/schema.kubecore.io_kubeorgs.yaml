@@ -457,7 +457,7 @@ spec:
                       type: object
                       x-kubernetes-validations:
                         - message: parentZone must be set when delegationMode is 'managed', and must be empty otherwise
-                          rule: '(has(self.delegationMode) && self.delegationMode == ''managed'') ? (has(self.parentZone) && self.parentZone != '''') : !(has(self.parentZone) && self.parentZone != '''')'
+                          rule: '(has(self.delegationMode) && self.delegationMode == ''managed'') ? (has(self.parentZone) && size(self.parentZone) > 0) : !(has(self.parentZone) && size(self.parentZone) > 0)'
                     enabled:
                       default: false
                       description: |-
