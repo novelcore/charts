@@ -11,11 +11,14 @@ metadata:
     policies.kyverno.io/severity: "high"
     policies.kyverno.io/subject: "schema.kubecore.io/KubeProject"
 spec:
+  admission: true
+  emitWarning: false
   validationFailureAction: Enforce
   failurePolicy: Fail
   background: false
   rules:
   - name: d4-kubeproject-visibility-platform-admin-only
+    skipBackgroundRequests: true
     match:
       any:
       - resources:
@@ -30,6 +33,7 @@ spec:
         operator: NotEquals
         value: "{{ request.oldObject.spec.githubConfiguration.visibility || '' }}"
     validate:
+      allowExistingViolations: true
       message: "Changing spec.githubConfiguration.visibility on KubeProject requires membership in one of [platform-admin] (catalog: d4-kubeproject-visibility-platform-admin-only, domain: D4). See PRD-310."
       deny:
         conditions:

@@ -11,11 +11,14 @@ metadata:
     policies.kyverno.io/severity: "high"
     policies.kyverno.io/subject: "schema.kubecore.io/KubePool"
 spec:
+  admission: true
+  emitWarning: false
   validationFailureAction: Enforce
   failurePolicy: Fail
   background: false
   rules:
   - name: d4-kubepool-aws-kubernetes-version-platform-admin-only
+    skipBackgroundRequests: true
     match:
       any:
       - resources:
@@ -33,6 +36,7 @@ spec:
         operator: NotEquals
         value: "{{ request.oldObject.spec.cloudProvider.aws.cluster.kubernetesVersion || '' }}"
     validate:
+      allowExistingViolations: true
       message: "Changing spec.cloudProvider.aws.cluster.kubernetesVersion on KubePool requires membership in one of [platform-admin] (catalog: d4-kubepool-aws-kubernetes-version-platform-admin-only, domain: D4). See PRD-310."
       deny:
         conditions:

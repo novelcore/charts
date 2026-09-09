@@ -13,11 +13,14 @@ metadata:
     policies.kyverno.io/severity: "medium"
     policies.kyverno.io/subject: "schema.kubecore.io/KubePool"
 spec:
+  admission: true
+  emitWarning: false
   validationFailureAction: Enforce
   failurePolicy: Fail
   background: true
   rules:
   - name: d3-kubepool-azure-kubernetes-version-bounded
+    skipBackgroundRequests: true
     match:
       any:
       - resources:
@@ -37,6 +40,7 @@ spec:
         operator: NotEquals
         value: ""
     validate:
+      allowExistingViolations: true
       message: "Field spec.cloudProvider.azure.cluster.kubernetesVersion on KubePool must lie within the bounded set (catalog: d3-kubepool-azure-kubernetes-version-bounded, domain: D3). See PRD-310."
       deny:
         conditions:

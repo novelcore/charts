@@ -11,11 +11,14 @@ metadata:
     policies.kyverno.io/severity: "high"
     policies.kyverno.io/subject: "schema.kubecore.io/KubeOrg"
 spec:
+  admission: true
+  emitWarning: false
   validationFailureAction: Enforce
   failurePolicy: Fail
   background: false
   rules:
   - name: d4-kubeorg-identity-github-idp-platform-admin-only
+    skipBackgroundRequests: true
     match:
       any:
       - resources:
@@ -30,6 +33,7 @@ spec:
         operator: NotEquals
         value: "{{ request.oldObject.spec.identity.githubIDP.enabled || '' }}"
     validate:
+      allowExistingViolations: true
       message: "Changing spec.identity.githubIDP.enabled on KubeOrg requires membership in one of [platform-admin] (catalog: d4-kubeorg-identity-github-idp-platform-admin-only, domain: D4). See PRD-310."
       deny:
         conditions:

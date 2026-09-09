@@ -11,11 +11,14 @@ metadata:
     policies.kyverno.io/severity: "medium"
     policies.kyverno.io/subject: "schema.kubecore.io/KubeApp"
 spec:
+  admission: true
+  emitWarning: false
   validationFailureAction: Enforce
   failurePolicy: Fail
   background: true
   rules:
   - name: d3-kubeapp-ingress-path-type-bounded
+    skipBackgroundRequests: true
     match:
       any:
       - resources:
@@ -32,6 +35,7 @@ spec:
         operator: NotEquals
         value: ""
     validate:
+      allowExistingViolations: true
       message: "Field spec.k8sAppConfig.ingressConfig.pathType on KubeApp must lie within the bounded set (catalog: d3-kubeapp-ingress-path-type-bounded, domain: D3). See PRD-310."
       deny:
         conditions:

@@ -11,11 +11,14 @@ metadata:
     policies.kyverno.io/severity: "high"
     policies.kyverno.io/subject: "schema.kubecore.io/KubeProject"
 spec:
+  admission: true
+  emitWarning: false
   validationFailureAction: Enforce
   failurePolicy: Fail
   background: true
   rules:
   - name: d1-kubeproject-existing-repository-immutable
+    skipBackgroundRequests: true
     match:
       any:
       - resources:
@@ -27,6 +30,7 @@ spec:
         operator: Equals
         value: UPDATE
     validate:
+      allowExistingViolations: true
       message: "Field spec.githubConfiguration.repositorySource.existing.repository on KubeProject is immutable (catalog: d1-kubeproject-existing-repository-immutable, domain: D1). See PRD-310."
       deny:
         conditions:

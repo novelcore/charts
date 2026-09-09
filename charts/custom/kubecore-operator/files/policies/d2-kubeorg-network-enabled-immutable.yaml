@@ -13,11 +13,14 @@ metadata:
     policies.kyverno.io/severity: "medium"
     policies.kyverno.io/subject: "schema.kubecore.io/KubeOrg"
 spec:
+  admission: true
+  emitWarning: false
   validationFailureAction: Enforce
   failurePolicy: Fail
   background: true
   rules:
   - name: d2-kubeorg-network-enabled-immutable
+    skipBackgroundRequests: true
     match:
       any:
       - resources:
@@ -29,6 +32,7 @@ spec:
         operator: Equals
         value: UPDATE
     validate:
+      allowExistingViolations: true
       message: "Field spec.network.enabled on KubeOrg is immutable (catalog: d2-kubeorg-network-enabled-immutable, domain: D2). See PRD-310."
       deny:
         conditions:
