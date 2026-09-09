@@ -1,15 +1,15 @@
 apiVersion: kyverno.io/v1
 kind: ClusterPolicy
 metadata:
-  name: d2-kubepool-operators-postgres-immutable
+  name: d2-kubepool-features-observability-monotonic
   annotations:
     kubecore.io/catalog-domain: "D2"
-    kubecore.io/catalog-id: "d2-kubepool-operators-postgres-immutable"
+    kubecore.io/catalog-id: "d2-kubepool-features-observability-monotonic"
     kubecore.io/evidence-ref: "knowledge/prds/310-kyverno-admission-policy-layer.md"
     kubecore.io/migration-issue: "#344"
     kubecore.io/migration-status: "unimplemented"
     policies.kyverno.io/category: "KubeCore Catalog"
-    policies.kyverno.io/description: "Toggling postgres off destroys the shared CNPG cluster (and every database hosted in it: MLflow, lakeFS, cost-tracking). Migration unimplemented (#344)."
+    policies.kyverno.io/description: "Observability may only be turned ON: enabling installs the VictoriaMetrics stack (additive, the day-2 path); disabling uninstalls it and loses all metrics history (#1236)."
     policies.kyverno.io/severity: "medium"
     policies.kyverno.io/subject: "schema.kubecore.io/KubePool"
 spec:
@@ -19,7 +19,7 @@ spec:
   failurePolicy: Fail
   background: true
   rules:
-  - name: d2-kubepool-operators-postgres-immutable
+  - name: d2-kubepool-features-observability-monotonic
     skipBackgroundRequests: true
     match:
       any:
@@ -33,14 +33,14 @@ spec:
         value: UPDATE
     validate:
       allowExistingViolations: true
-      message: "Field spec.operators.postgres on KubePool is immutable (catalog: d2-kubepool-operators-postgres-immutable, domain: D2). See PRD-310."
+      message: "Field spec.features.observability on KubePool may only be turned on (catalog: d2-kubepool-features-observability-monotonic, domain: D2): disabling it uninstalls the capability and the state it holds. See PRD-310."
       deny:
         conditions:
           all:
-          - key: "{{ contains(keys(request.oldObject.spec.operators || `{}`), 'postgres') }}"
+          - key: "{{ to_string(request.oldObject.spec.features.observability) }}"
             operator: Equals
-            value: true
-          - key: "{{ to_string(request.object.spec.operators.postgres) }}"
+            value: "true"
+          - key: "{{ to_string(request.object.spec.features.observability) }}"
             operator: NotEquals
-            value: "{{ to_string(request.oldObject.spec.operators.postgres) }}"
+            value: "true"
 

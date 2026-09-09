@@ -1,15 +1,15 @@
 apiVersion: kyverno.io/v1
 kind: ClusterPolicy
 metadata:
-  name: d2-kubepool-features-observability-immutable
+  name: d2-kubepool-operators-redis-monotonic
   annotations:
     kubecore.io/catalog-domain: "D2"
-    kubecore.io/catalog-id: "d2-kubepool-features-observability-immutable"
+    kubecore.io/catalog-id: "d2-kubepool-operators-redis-monotonic"
     kubecore.io/evidence-ref: "knowledge/prds/310-kyverno-admission-policy-layer.md"
     kubecore.io/migration-issue: "#344"
     kubecore.io/migration-status: "unimplemented"
     policies.kyverno.io/category: "KubeCore Catalog"
-    policies.kyverno.io/description: "Toggling observability off uninstalls the VictoriaMetrics stack — losing all metrics history. Toggling on requires re-install + dashboard re-creation. Migration unimplemented (#344)."
+    policies.kyverno.io/description: "Redis may only be turned ON: enabling installs the shared instance; disabling tears down the Release and every KubeApp with a bound redis tool connection goes CapabilityMissing (Ready-blocking since F-13, #987) (#1236)."
     policies.kyverno.io/severity: "medium"
     policies.kyverno.io/subject: "schema.kubecore.io/KubePool"
 spec:
@@ -19,7 +19,7 @@ spec:
   failurePolicy: Fail
   background: true
   rules:
-  - name: d2-kubepool-features-observability-immutable
+  - name: d2-kubepool-operators-redis-monotonic
     skipBackgroundRequests: true
     match:
       any:
@@ -33,14 +33,14 @@ spec:
         value: UPDATE
     validate:
       allowExistingViolations: true
-      message: "Field spec.features.observability on KubePool is immutable (catalog: d2-kubepool-features-observability-immutable, domain: D2). See PRD-310."
+      message: "Field spec.operators.redis on KubePool may only be turned on (catalog: d2-kubepool-operators-redis-monotonic, domain: D2): disabling it uninstalls the capability and the state it holds. See PRD-310."
       deny:
         conditions:
           all:
-          - key: "{{ contains(keys(request.oldObject.spec.features || `{}`), 'observability') }}"
+          - key: "{{ to_string(request.oldObject.spec.operators.redis) }}"
             operator: Equals
-            value: true
-          - key: "{{ to_string(request.object.spec.features.observability) }}"
+            value: "true"
+          - key: "{{ to_string(request.object.spec.operators.redis) }}"
             operator: NotEquals
-            value: "{{ to_string(request.oldObject.spec.features.observability) }}"
+            value: "true"
 

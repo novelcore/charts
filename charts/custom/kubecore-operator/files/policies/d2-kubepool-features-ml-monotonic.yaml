@@ -1,15 +1,15 @@
 apiVersion: kyverno.io/v1
 kind: ClusterPolicy
 metadata:
-  name: d2-kubepool-features-ml-immutable
+  name: d2-kubepool-features-ml-monotonic
   annotations:
     kubecore.io/catalog-domain: "D2"
-    kubecore.io/catalog-id: "d2-kubepool-features-ml-immutable"
+    kubecore.io/catalog-id: "d2-kubepool-features-ml-monotonic"
     kubecore.io/evidence-ref: "api/v1beta1/kubepool_types.go"
     kubecore.io/migration-issue: "#344"
     kubecore.io/migration-status: "unimplemented"
     policies.kyverno.io/category: "KubeCore Catalog"
-    policies.kyverno.io/description: "Toggling features.ml off uninstalls XMLSystem (MLflow + lakeFS + Postgres backends) and the data they hold. Toggling on requires a controlled bootstrap. Migration unimplemented (#344)."
+    policies.kyverno.io/description: "ML may only be turned ON: enabling installs XMLSystem (MLflow + lakeFS + Postgres backends), the day-2 path when a project needs spec.ml; disabling uninstalls it and the data it holds (#1236)."
     policies.kyverno.io/severity: "medium"
     policies.kyverno.io/subject: "schema.kubecore.io/KubePool"
 spec:
@@ -19,7 +19,7 @@ spec:
   failurePolicy: Fail
   background: true
   rules:
-  - name: d2-kubepool-features-ml-immutable
+  - name: d2-kubepool-features-ml-monotonic
     skipBackgroundRequests: true
     match:
       any:
@@ -33,14 +33,14 @@ spec:
         value: UPDATE
     validate:
       allowExistingViolations: true
-      message: "Field spec.features.ml on KubePool is immutable (catalog: d2-kubepool-features-ml-immutable, domain: D2). See PRD-310."
+      message: "Field spec.features.ml on KubePool may only be turned on (catalog: d2-kubepool-features-ml-monotonic, domain: D2): disabling it uninstalls the capability and the state it holds. See PRD-310."
       deny:
         conditions:
           all:
-          - key: "{{ contains(keys(request.oldObject.spec.features || `{}`), 'ml') }}"
+          - key: "{{ to_string(request.oldObject.spec.features.ml) }}"
             operator: Equals
-            value: true
+            value: "true"
           - key: "{{ to_string(request.object.spec.features.ml) }}"
             operator: NotEquals
-            value: "{{ to_string(request.oldObject.spec.features.ml) }}"
+            value: "true"
 

@@ -1,15 +1,15 @@
 apiVersion: kyverno.io/v1
 kind: ClusterPolicy
 metadata:
-  name: d2-kubepool-operators-redis-immutable
+  name: d2-kubepool-operators-postgres-monotonic
   annotations:
     kubecore.io/catalog-domain: "D2"
-    kubecore.io/catalog-id: "d2-kubepool-operators-redis-immutable"
+    kubecore.io/catalog-id: "d2-kubepool-operators-postgres-monotonic"
     kubecore.io/evidence-ref: "knowledge/prds/310-kyverno-admission-policy-layer.md"
     kubecore.io/migration-issue: "#344"
     kubecore.io/migration-status: "unimplemented"
     policies.kyverno.io/category: "KubeCore Catalog"
-    policies.kyverno.io/description: "Toggling redis off tears down the shared Redis Release, which any KubeApp connection depends on via ToolBinding — every bound consumer goes CapabilityMissing (Ready-blocking since F-13, #987). Migration unimplemented (#344)."
+    policies.kyverno.io/description: "Postgres may only be turned ON: enabling installs the shared CNPG cluster; disabling destroys it and every database in it (MLflow, lakeFS, cost-tracking) (#1236)."
     policies.kyverno.io/severity: "medium"
     policies.kyverno.io/subject: "schema.kubecore.io/KubePool"
 spec:
@@ -19,7 +19,7 @@ spec:
   failurePolicy: Fail
   background: true
   rules:
-  - name: d2-kubepool-operators-redis-immutable
+  - name: d2-kubepool-operators-postgres-monotonic
     skipBackgroundRequests: true
     match:
       any:
@@ -33,14 +33,14 @@ spec:
         value: UPDATE
     validate:
       allowExistingViolations: true
-      message: "Field spec.operators.redis on KubePool is immutable (catalog: d2-kubepool-operators-redis-immutable, domain: D2). See PRD-310."
+      message: "Field spec.operators.postgres on KubePool may only be turned on (catalog: d2-kubepool-operators-postgres-monotonic, domain: D2): disabling it uninstalls the capability and the state it holds. See PRD-310."
       deny:
         conditions:
           all:
-          - key: "{{ contains(keys(request.oldObject.spec.operators || `{}`), 'redis') }}"
+          - key: "{{ to_string(request.oldObject.spec.operators.postgres) }}"
             operator: Equals
-            value: true
-          - key: "{{ to_string(request.object.spec.operators.redis) }}"
+            value: "true"
+          - key: "{{ to_string(request.object.spec.operators.postgres) }}"
             operator: NotEquals
-            value: "{{ to_string(request.oldObject.spec.operators.redis) }}"
+            value: "true"
 
