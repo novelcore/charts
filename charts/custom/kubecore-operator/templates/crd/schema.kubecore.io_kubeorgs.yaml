@@ -367,45 +367,6 @@ spec:
                   required:
                     - initialAdmin
                   type: object
-                meluxinaConfig:
-                  description: |-
-                    MeluxinaConfig is DEPRECATED and read by nothing (PRD-HPC-1231 D-06): HPC
-                    tenancy is declared per project on KubeProject.spec.ml.hpc. Kept one
-                    release so existing manifests keep validating; removed next release.
-
-                    Deprecated: declare KubeProject.spec.ml.hpc instead.
-                  properties:
-                    account:
-                      description: Account is the Slurm account (e.g. "p200XXX") for job submission.
-                      minLength: 1
-                      type: string
-                    s3Gateway:
-                      description: |-
-                        S3Gateway is the MeluXina object-storage S3 gateway host (e.g. "s3.lxp.lu")
-                        used to stage datasets/checkpoints. Optional; data delivery strategy is
-                        finalized in the MeluXina PRD.
-                      type: string
-                    slurmEndpoint:
-                      description: SlurmEndpoint is the MeluXina Slurm REST API host (e.g. "slurm-api.lxp.lu").
-                      minLength: 1
-                      type: string
-                    sshKeySecretRef:
-                      description: |-
-                        SSHKeySecretRef names the Secret in this KubeOrg's namespace holding the
-                        long-lived Ed25519 SSH key used by the management-plane token-rotation job
-                        to mint short-lived Slurm JWTs. The key never leaves KAOS cloud.
-                      properties:
-                        name:
-                          description: Name of the Secret in the same namespace as the referencing resource.
-                          minLength: 1
-                          type: string
-                      required:
-                        - name
-                      type: object
-                  required:
-                    - account
-                    - slurmEndpoint
-                  type: object
                 network:
                   default:
                     enabled: false

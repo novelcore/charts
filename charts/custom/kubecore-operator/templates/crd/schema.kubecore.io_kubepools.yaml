@@ -838,28 +838,6 @@ spec:
                         MLConfig fine-tunes which ML components are provisioned when ML is true.
                         When nil, all default to true (backward compatible). Set to false to skip provisioning a component.
                       properties:
-                        hpc:
-                          description: |-
-                            HPC is the LEGACY pool-level MeluXina switch (PRD-585). DEPRECATED by
-                            PRD-HPC-1231 (tenancy is per project, KubeProject.spec.ml.hpc) and read
-                            only by the migration bridge (D-09): while it is true and a project on
-                            this pool has NOT declared spec.ml.hpc, that project keeps the pool-keyed
-                            JWT and the static class list it had before the upgrade. Removed in the
-                            train after every project on the pool is bound.
-
-                            Deprecated: bind projects with KubeProject.spec.ml.hpc instead.
-                          properties:
-                            enabled:
-                              description: |-
-                                Enabled keeps the legacy pool-keyed MeluXina path alive for unbound
-                                projects during the PRD-HPC-1231 migration.
-                              type: boolean
-                            provider:
-                              description: Provider is ignored (kept so existing manifests validate).
-                              enum:
-                                - meluxina
-                              type: string
-                          type: object
                         mlflow:
                           description: Mlflow deploys MLflow (Postgres backend, optional S3 artifacts). Default true.
                           type: boolean

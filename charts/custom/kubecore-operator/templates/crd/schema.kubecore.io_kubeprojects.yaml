@@ -777,19 +777,6 @@ spec:
                           description: StorageSize is the PVC size for the primary Postgres instance (e.g., "20Gi").
                           type: string
                       type: object
-                    s3:
-                      description: |-
-                        S3 is DEPRECATED and read by nothing (2026-09-07): the artifact store is a
-                        prerequisite of every ML component and is always provisioned;
-                        status.mlStack.features.s3 keeps reporting it. Kept one train so
-                        existing manifests validate; removed next.
-
-                        Deprecated: the bucket is always provisioned.
-                      properties:
-                        enabled:
-                          description: 'Enabled is ignored: the bucket is always provisioned.'
-                          type: boolean
-                      type: object
                   type: object
                   x-kubernetes-validations:
                     - message: spec.ml.hpc binds this project to an HPC tenancy whose pipelines log to the project's ML stack — it requires spec.ml.enabled=true (PRD-HPC-1231 D-01)
