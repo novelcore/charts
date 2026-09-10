@@ -61,6 +61,16 @@ spec:
   - name: registry-auth
     secret:
       secretName: ci-registry-auth
+      # Zot-only. A GAR-backed project authenticates keylessly through GKE
+      # Workload Identity and never creates this Secret, and the build-push
+      # script's `registry_type = gar` branch never reads the mount. Without
+      # `optional` the kubelet still refuses to start the pod, so every
+      # GAR project's build hung in Init:0/1 forever with
+      #   FailedMount ... secret "ci-registry-auth" not found
+      # (kubecore-operator#1057 investigation, 2026-09-10). The Zot path is
+      # unchanged: the Secret exists there and mounts exactly as before,
+      # and the else-branch below fails loudly if it is genuinely absent.
+      optional: true
   arguments:
     parameters:
     - name: repo_url
@@ -159,6 +169,21 @@ spec:
         when: "{{`{{workflow.parameters.pr_merged}}`}} == true && {{`{{workflow.parameters.branch_type}}`}} != chore && {{`{{workflow.parameters.branch_type}}`}} != rc"
 
   - name: clone
+    # A hung or infra-killed step used to wedge the whole run forever: these
+    # templates had neither a retry nor a deadline, so a pod stuck in Init or
+    # lost to a spot preemption simply never ended. activeDeadlineSeconds kills
+    # it, retryStrategy re-runs it. limit 2 = 3 attempts total.
+    # retryPolicy=OnError (not OnFailure) so a legitimate build failure — a
+    # Dockerfile syntax error, a failing test — is NOT retried. Mirrors the
+    # pattern already proven in clusterworkflowtemplate-ml.yaml.
+    retryStrategy:
+      limit: "2"
+      retryPolicy: OnError
+      backoff:
+        duration: "30s"
+        factor: "2"
+        maxDuration: "5m"
+    activeDeadlineSeconds: 600
     container:
       image: alpine/git:latest
       command: [sh, -c]
@@ -181,6 +206,21 @@ spec:
         readOnly: true
 
   - name: version
+    # A hung or infra-killed step used to wedge the whole run forever: these
+    # templates had neither a retry nor a deadline, so a pod stuck in Init or
+    # lost to a spot preemption simply never ended. activeDeadlineSeconds kills
+    # it, retryStrategy re-runs it. limit 2 = 3 attempts total.
+    # retryPolicy=OnError (not OnFailure) so a legitimate build failure — a
+    # Dockerfile syntax error, a failing test — is NOT retried. Mirrors the
+    # pattern already proven in clusterworkflowtemplate-ml.yaml.
+    retryStrategy:
+      limit: "2"
+      retryPolicy: OnError
+      backoff:
+        duration: "30s"
+        factor: "2"
+        maxDuration: "5m"
+    activeDeadlineSeconds: 600
     outputs:
       parameters:
       - name: new_version
@@ -270,6 +310,21 @@ spec:
   # note ml-ci-build had to use a TOP-LEVEL {app}-buildcache repo because a
   # nested cache path silently failed to persist in Zot.
   - name: build-push
+    # A hung or infra-killed step used to wedge the whole run forever: these
+    # templates had neither a retry nor a deadline, so a pod stuck in Init or
+    # lost to a spot preemption simply never ended. activeDeadlineSeconds kills
+    # it, retryStrategy re-runs it. limit 2 = 3 attempts total.
+    # retryPolicy=OnError (not OnFailure) so a legitimate build failure — a
+    # Dockerfile syntax error, a failing test — is NOT retried. Mirrors the
+    # pattern already proven in clusterworkflowtemplate-ml.yaml.
+    retryStrategy:
+      limit: "2"
+      retryPolicy: OnError
+      backoff:
+        duration: "30s"
+        factor: "2"
+        maxDuration: "5m"
+    activeDeadlineSeconds: 1800
     inputs:
       parameters:
       - name: image_tag
@@ -325,6 +380,15 @@ spec:
           # Registry auth for kaniko. Uses the base64 "auth" form rather than
           # username/password so a password containing shell-special or JSON
           # characters cannot corrupt the file (the API key is opaque).
+          # `optional: true` on the volume means a missing Secret now yields an
+          # empty dir instead of blocking pod start. For Zot that is a real
+          # misconfiguration, so fail here — in-step, where the exit handler
+          # reports kubecore-ci=failure — rather than dying later on a
+          # confusing `cat: no such file`.
+          if [ ! -f /etc/registry-auth/username ]; then
+            echo "FATAL: registry_type=${REGISTRY_TYPE} requires the ci-registry-auth Secret, which is not mounted" >&2
+            exit 1
+          fi
           REG_USER=$(cat /etc/registry-auth/username)
           REG_PASS=$(cat /etc/registry-auth/password)
           AUTH=$(printf '%s:%s' "${REG_USER}" "${REG_PASS}" | base64 | tr -d '\n')
@@ -356,6 +420,21 @@ spec:
         mountPath: /kaniko/.docker
 
   - name: tag
+    # A hung or infra-killed step used to wedge the whole run forever: these
+    # templates had neither a retry nor a deadline, so a pod stuck in Init or
+    # lost to a spot preemption simply never ended. activeDeadlineSeconds kills
+    # it, retryStrategy re-runs it. limit 2 = 3 attempts total.
+    # retryPolicy=OnError (not OnFailure) so a legitimate build failure — a
+    # Dockerfile syntax error, a failing test — is NOT retried. Mirrors the
+    # pattern already proven in clusterworkflowtemplate-ml.yaml.
+    retryStrategy:
+      limit: "2"
+      retryPolicy: OnError
+      backoff:
+        duration: "30s"
+        factor: "2"
+        maxDuration: "5m"
+    activeDeadlineSeconds: 600
     inputs:
       parameters:
       - name: image_tag
@@ -391,6 +470,21 @@ spec:
         readOnly: true
 
   - name: status
+    # A hung or infra-killed step used to wedge the whole run forever: these
+    # templates had neither a retry nor a deadline, so a pod stuck in Init or
+    # lost to a spot preemption simply never ended. activeDeadlineSeconds kills
+    # it, retryStrategy re-runs it. limit 2 = 3 attempts total.
+    # retryPolicy=OnError (not OnFailure) so a legitimate build failure — a
+    # Dockerfile syntax error, a failing test — is NOT retried. Mirrors the
+    # pattern already proven in clusterworkflowtemplate-ml.yaml.
+    retryStrategy:
+      limit: "2"
+      retryPolicy: OnError
+      backoff:
+        duration: "30s"
+        factor: "2"
+        maxDuration: "5m"
+    activeDeadlineSeconds: 600
     # GitHub reporting for the service build (#1126): ONE commit status
     # (context kubecore-ci) with target_url into the Argo UI run, plus a
     # Deployment rollup (environment auto = argo-workflows-<branch|pr>) whose log/environment URL is the
@@ -505,6 +599,21 @@ spec:
         readOnly: true
 
   - name: gitops-notify
+    # A hung or infra-killed step used to wedge the whole run forever: these
+    # templates had neither a retry nor a deadline, so a pod stuck in Init or
+    # lost to a spot preemption simply never ended. activeDeadlineSeconds kills
+    # it, retryStrategy re-runs it. limit 2 = 3 attempts total.
+    # retryPolicy=OnError (not OnFailure) so a legitimate build failure — a
+    # Dockerfile syntax error, a failing test — is NOT retried. Mirrors the
+    # pattern already proven in clusterworkflowtemplate-ml.yaml.
+    retryStrategy:
+      limit: "2"
+      retryPolicy: OnError
+      backoff:
+        duration: "30s"
+        factor: "2"
+        maxDuration: "5m"
+    activeDeadlineSeconds: 600
     inputs:
       parameters:
       - name: image_tag
