@@ -1234,6 +1234,25 @@ spec:
                               user (partition down, or the association's group TRES-minutes budget is
                               exhausted). Unavailable classes are reported but never rendered.
                             type: boolean
+                          budgetLimitMinutes:
+                            description: |-
+                              BudgetLimitMinutes is the association's GrpTRESMins allowance for
+                              BudgetResource, and BudgetUsedMinutes the consumed rollup against it.
+                              Both are reported so a dashboard can show usage against the allowance
+                              rather than only what is left; RemainingNodeHours stays the node-hour
+                              view of the same budget. Omitted when the scheduler reports neither.
+                              Status-only, exactly like RemainingNodeHours (CON-03).
+                            format: int64
+                            type: integer
+                          budgetResource:
+                            description: |-
+                              BudgetResource names the dominant TRES the budget below is denominated in:
+                              "gres/gpu" on GPU partitions, "cpu" otherwise. Empty when the scheduler
+                              reported no group budget for the class.
+                            type: string
+                          budgetUsedMinutes:
+                            format: int64
+                            type: integer
                           cpus:
                             format: int32
                             type: integer
@@ -1674,6 +1693,25 @@ spec:
                                   user (partition down, or the association's group TRES-minutes budget is
                                   exhausted). Unavailable classes are reported but never rendered.
                                 type: boolean
+                              budgetLimitMinutes:
+                                description: |-
+                                  BudgetLimitMinutes is the association's GrpTRESMins allowance for
+                                  BudgetResource, and BudgetUsedMinutes the consumed rollup against it.
+                                  Both are reported so a dashboard can show usage against the allowance
+                                  rather than only what is left; RemainingNodeHours stays the node-hour
+                                  view of the same budget. Omitted when the scheduler reports neither.
+                                  Status-only, exactly like RemainingNodeHours (CON-03).
+                                format: int64
+                                type: integer
+                              budgetResource:
+                                description: |-
+                                  BudgetResource names the dominant TRES the budget below is denominated in:
+                                  "gres/gpu" on GPU partitions, "cpu" otherwise. Empty when the scheduler
+                                  reported no group budget for the class.
+                                type: string
+                              budgetUsedMinutes:
+                                format: int64
+                                type: integer
                               cpus:
                                 format: int32
                                 type: integer
