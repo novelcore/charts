@@ -685,7 +685,11 @@ spec:
           FULL_IMAGE="${REGISTRY}/${PROJECT}/${APP_NAME}"
         fi
 
-        curl -s -X POST \
+        # --fail: without it this was `curl -s`, so a 404 from a non-existent ops repo was
+        # swallowed, the step exited 0 and the whole RC pipeline reported success while the
+        # staging overlay was never bumped. A promotion that silently does nothing is worse
+        # than one that errors. `set -e` above turns a non-zero curl into a failed step.
+        curl -sS --fail-with-body -X POST \
           -H "Authorization: token ${TOKEN}" \
           -H "Accept: application/vnd.github+json" \
           "https://api.github.com/repos/${OPS_REPO}/dispatches" \
