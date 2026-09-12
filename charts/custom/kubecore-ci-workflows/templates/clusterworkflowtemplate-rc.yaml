@@ -402,6 +402,16 @@ spec:
         IMAGE_TAG="{{`{{inputs.parameters.image_tag}}`}}"
         IMAGE_REPO="{{`{{workflow.parameters.image_repo}}`}}"
         REGISTRY_TYPE="{{`{{workflow.parameters.registry_type}}`}}"
+        # Read the submitted workflow parameters instead of the Helm values
+        # they default from. Helm values are evaluated at chart-render time,
+        # so a submitter's dockerfile_path/build_context were always ignored
+        # and the kaniko invocation silently used whatever this chart was
+        # rendered with — a non-root Dockerfile could never be found. Both
+        # parameters are already declared in this template's
+        # arguments.parameters block above, so this mirrors ci-build's
+        # working build-push step (templates/workflowtemplate.yaml).
+        DOCKERFILE_PATH="{{`{{workflow.parameters.dockerfile_path}}`}}"
+        BUILD_CONTEXT="{{`{{workflow.parameters.build_context}}`}}"
 
         # image_repo is the registry-kind-aware path resolved by the operator.
         # Empty means a submitter predating PRD-994 CI threading — fall back
@@ -442,8 +452,8 @@ spec:
         fi
 
         /kaniko/executor \
-          --context="dir:///workspace/repo/{{ .Values.buildkit.buildContext }}" \
-          --dockerfile="/workspace/repo/{{ .Values.buildkit.dockerfilePath }}" \
+          --context="dir:///workspace/repo/${BUILD_CONTEXT}" \
+          --dockerfile="/workspace/repo/${DOCKERFILE_PATH}" \
           --destination="${FULL_IMAGE}" \
           --build-arg="REGISTRY_URL=${REGISTRY}" \
           --build-arg="VERSION=${IMAGE_TAG}" \
