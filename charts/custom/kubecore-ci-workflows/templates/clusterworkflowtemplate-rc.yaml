@@ -73,6 +73,27 @@ spec:
     - name: repo_url
     - name: commit_sha
     - name: branch
+    # REQUIRED by the template this one borrows, not by any step defined here.
+    # `exit-handler` calls ml-ci-build's `report` by templateRef, and a
+    # templateRef borrows the template BODY without its parameter declarations:
+    # {{`{{workflow.parameters.*}}`}} always resolves against the SUBMITTED
+    # workflow, which is this one. `report` reads branch, commit_sha, repo_url
+    # and event_type; the first three were already declared above, event_type
+    # was not, so Argo rejected every ci-rc-build submission at validation:
+    #   invalid spec: templates.exit-handler.steps[1].run-report
+    #   templates.report: failed to resolve {{`{{workflow.parameters.event_type}}`}}
+    # No pod ever started, so the `status` step never posted kubecore-ci/rc and
+    # every RC promotion hung on a status that could not arrive. Broken for all
+    # service apps on every pool from the chart that added run-report until this
+    # one.
+    #
+    # The value is never read on this path: `report` uses event_type only to
+    # derive a deployment environment when `environment` is "auto", and
+    # exit-handler passes "argo-workflows-rc" explicitly. It is declared so the
+    # placeholder resolves. scripts/check-borrowed-template-params.py keeps this
+    # in step with what the borrowed templates read.
+    - name: event_type
+      value: ""
     - name: app_name
     - name: project_name
     - name: dockerfile_path

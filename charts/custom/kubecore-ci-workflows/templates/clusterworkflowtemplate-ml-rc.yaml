@@ -85,6 +85,16 @@ spec:
       value: ""
     - name: registry_url
       value: ""
+    # REQUIRED by the borrowed ml-ci-build templates, not by anything defined
+    # here: `build-push` and `patch-images` are pulled in by templateRef, and a
+    # templateRef borrows the body without its parameter declarations, so their
+    # {{`{{workflow.parameters.build_registry_url}}`}} resolves against THIS
+    # workflow. Undeclared, it made every ml-ci-rc-build submission invalid --
+    # the same defect that broke ci-rc-build, and latent only because k8smlapp
+    # declares no rc/* Sensor binding, so nothing submits this template today.
+    # Empty is the same default ml-ci-build uses and falls back to registry_url.
+    - name: build_registry_url
+      value: ""
     - name: gitops_repository
     - name: gitops_branch
       value: "main"
