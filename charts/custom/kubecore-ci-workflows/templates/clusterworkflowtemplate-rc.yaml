@@ -43,9 +43,34 @@ spec:
   tolerations:
     {{- toYaml . | nindent 4 }}
   {{- end }}
+  # An emptyDir is PER-POD, and every DAG task here runs in its own pod: `clone`
+  # wrote the repository into its own scratch volume and `version` started with an
+  # empty one, so `cd /workspace/repo` failed and dash exited 2 — the RC build
+  # could never get past its second step. This was invisible until 0.12.86 let the
+  # workflow start at all (before that it was rejected at spec validation), and
+  # ci-rc-build was the ONLY one of the four CI templates not using a claim:
+  # ci-build, ml-ci-build and ml-ci-rc-build all declare volumeClaimTemplates.
+  #
+  # volumeClaimGC is set explicitly rather than inherited: Argo's default is
+  # OnWorkflowSuccess, so a FAILED build keeps its claim — and because
+  # standard-rwo reclaims with Delete, the underlying PD lives exactly as long as
+  # the PVC. On a long-lived project that is a retained disk per failed build.
+  # ml-ci-build already sets OnWorkflowCompletion; this follows it, not ci-build,
+  # which leaves it unset and carries the same leak.
+  volumeClaimGC:
+    strategy: OnWorkflowCompletion
+  volumeClaimTemplates:
+  - metadata:
+      name: workspace
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      resources:
+        requests:
+          storage: {{ .Values.workspace.size | default "5Gi" }}
+      {{- with .Values.workspace.storageClassName }}
+      storageClassName: {{ . }}
+      {{- end }}
   volumes:
-  - name: workspace
-    emptyDir: {}
   - name: github-token
     secret:
       secretName: {{ .Values.github.tokenSecretName }}
