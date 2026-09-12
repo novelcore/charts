@@ -30,7 +30,12 @@ github:
 # GitOps configuration
 gitops:
   # Suffix for the project ops repository (e.g., "my-project" + "-ops" = "my-project-ops")
-  projectRepoSuffix: "-ops"
+  # EMPTY, not "-ops". This has exactly one consumer — ci-rc-build's gitops-notify — and it
+  # disagreed with the dev path: workflowtemplate.yaml (ci-build) uses "${ORG}/${PROJECT}"
+  # with no suffix. No "<project>-ops" repository exists in the org (checked 2026-09-12:
+  # 0 of 4), so every RC stage promotion POSTed a dispatch to a repository that is not
+  # there. The knob is kept for an installation that genuinely separates its ops repo.
+  projectRepoSuffix: ""
 
 # Kaniko configuration (build-push runs kaniko, not BuildKit).
 # Use the :debug variant — it bundles /busybox/sh which Argo Workflows
