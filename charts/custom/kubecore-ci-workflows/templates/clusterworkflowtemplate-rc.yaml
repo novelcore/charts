@@ -635,6 +635,23 @@ spec:
         mountPath: /etc/github-token
         readOnly: true
 
+  # gitops-notify bumps the STAGE overlay by COMMITTING to the ops repo —
+  # clone, kustomize edit, commit, push — the same mechanism ci-build's
+  # gitops-notify uses for dev in workflowtemplate.yaml.
+  #
+  # It used to POST a repository_dispatch (the staging environment update event)
+  # to the ops repo and rely on a GitHub Actions workflow there to do the commit.
+  # That handler does not exist: platform-created project repos carry no
+  # .github/workflows directory and have never had a single workflow run, so
+  # GitHub accepted every dispatch with 202 Accepted and nothing happened. The
+  # stage overlay was never bumped, stage never received the RC image, and the
+  # pipeline reported success anyway — RC promotion to stage has therefore never
+  # worked once. The intended handler exists only as a copy-by-hand reference
+  # (kubecore-operator compositions/apis/kubeapp/k8sapp/docs/workflows-reference/
+  # stage-release-promote-reference.yml) that no provisioned repo ever receives;
+  # this step is that workflow inlined into the pipeline that already holds the
+  # installation token. Nothing here is novel — the dev path has committed
+  # directly all along and is the only image-bump path measured to work.
   - name: gitops-notify
     # A hung or infra-killed step used to wedge the whole run forever: these
     # templates had neither a retry nor a deadline, so a pod stuck in Init or
@@ -656,7 +673,10 @@ spec:
       - name: image_tag
       - name: semantic_version
     container:
-      image: alpine/curl
+      # alpine/git, not the alpine/curl this step used while it only POSTed a
+      # dispatch: it clones and pushes now. Same image as ci-build's
+      # gitops-notify; its busybox wget/tar also fetch the kustomize binary.
+      image: alpine/git:latest
       command: [sh, -c]
       args:
       - |
@@ -685,26 +705,56 @@ spec:
           FULL_IMAGE="${REGISTRY}/${PROJECT}/${APP_NAME}"
         fi
 
-        # --fail: without it this was `curl -s`, so a 404 from a non-existent ops repo was
-        # swallowed, the step exited 0 and the whole RC pipeline reported success while the
-        # staging overlay was never bumped. A promotion that silently does nothing is worse
-        # than one that errors. `set -e` above turns a non-zero curl into a failed step.
-        curl -sS --fail-with-body -X POST \
-          -H "Authorization: token ${TOKEN}" \
-          -H "Accept: application/vnd.github+json" \
-          "https://api.github.com/repos/${OPS_REPO}/dispatches" \
-          -d "{
-            \"event_type\": \"staging-environment-update\",
-            \"client_payload\": {
-              \"version\": \"${IMAGE_TAG}\",
-              \"image\": \"${FULL_IMAGE}:${IMAGE_TAG}\",
-              \"app_name\": \"${APP_NAME}\",
-              \"semantic_version\": \"v${SEMANTIC_VERSION}\",
-              \"plain_image_name\": \"${FULL_IMAGE}\"
-            }
-          }"
+        APP_DIR="kubeapps/${PROJECT}-${APP_NAME}"
 
-        echo "Dispatched staging-environment-update to ${OPS_REPO}"
+        # Clone ops repo
+        REPO_URL="https://x-access-token:${TOKEN}@github.com/${OPS_REPO}.git"
+        git clone --depth=1 "${REPO_URL}" /tmp/ops-repo
+        cd /tmp/ops-repo
+
+        # Install kustomize (direct binary download — alpine sh doesn't support the bash install script)
+        KUSTOMIZE_VERSION="v5.6.0"
+        wget -q "https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2F${KUSTOMIZE_VERSION}/kustomize_${KUSTOMIZE_VERSION}_linux_amd64.tar.gz" -O /tmp/kustomize.tar.gz
+        tar -xzf /tmp/kustomize.tar.gz -C /usr/local/bin/
+        chmod +x /usr/local/bin/kustomize
+
+        if [ ! -d "${APP_DIR}" ]; then
+          echo "app dir ${APP_DIR} not found in ${OPS_REPO}"; exit 1
+        fi
+
+        # k8sapp composition names an overlay "{type}" when the env name IS the
+        # type, else "{type}-{envName}" (composition.yaml $overlayName), so every
+        # stage-type environment lands on "stage" or "stage-*" — match both
+        # tokens. Identical glob pair to ci-build's dev loop, and to the one the
+        # never-installed stage-release-promote reference workflow used.
+        UPDATED=0
+        for OVERLAY_DIR in ${APP_DIR}/overlays/stage ${APP_DIR}/overlays/stage-*; do
+          if [ -d "$OVERLAY_DIR" ]; then
+            echo "Updating $OVERLAY_DIR"
+            cd "$OVERLAY_DIR"
+            kustomize edit set image "${FULL_IMAGE}=${FULL_IMAGE}:${IMAGE_TAG}"
+            cd /tmp/ops-repo
+            UPDATED=$((UPDATED + 1))
+          fi
+        done
+
+        # exit 1, where ci-build's dev loop exits 0: an RC build exists solely to
+        # put its image on stage, so zero stage overlays means the promotion did
+        # nothing — reporting success there is exactly the silence the dispatch
+        # produced for its entire life. The reference stage workflow fails here too.
+        if [ $UPDATED -eq 0 ]; then echo "ERROR: no stage overlays found under ${APP_DIR}"; exit 1; fi
+
+        # Commit and push. set -e above means a rejected push fails the step, so
+        # a promotion that does not land can no longer be reported as a success.
+        git config user.name "KubeCore CI"
+        git config user.email "ci@kubecore.io"
+        git add .
+        if git diff --cached --quiet; then echo "No changes to commit"; exit 0; fi
+        git commit -m "ci: promote ${APP_NAME} to stage — image ${IMAGE_TAG} (v${SEMANTIC_VERSION})"
+        git pull --rebase
+        git push
+
+        echo "Updated ${UPDATED} stage overlay(s) to ${FULL_IMAGE}:${IMAGE_TAG}, pushed to ${OPS_REPO}"
       volumeMounts:
       - name: github-token
         mountPath: /etc/github-token
