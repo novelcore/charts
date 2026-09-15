@@ -238,12 +238,27 @@ spec:
     # templates had neither a retry nor a deadline, so a pod stuck in Init or
     # lost to a spot preemption simply never ended. activeDeadlineSeconds kills
     # it, retryStrategy re-runs it. limit 2 = 3 attempts total.
-    # retryPolicy=OnError (not OnFailure) so a legitimate build failure — a
-    # Dockerfile syntax error, a failing test — is NOT retried. Mirrors the
-    # pattern already proven in clusterworkflowtemplate-ml.yaml.
+    #
+    # retryPolicy=Always + expression (not a bare OnError) because OnError only
+    # retries Argo's Error phase (controller-level faults) — a pod killed by
+    # node shutdown lands in Failed, so OnError never caught it. Measured on
+    # 2026-09-15: an e2e release-train run failed twice at this build step with
+    # "Pod was terminated in response to imminent node shutdown." on the
+    # all-Spot KAOS tenant pool, and OnError did not retry it.
+    #
+    # The expression is the only thing that widens the retry set — Argo ANDs
+    # the expression result with retryPolicy, so Always just means "consult
+    # the expression". Clause 1 (lastRetry.status == "Error") preserves
+    # today's OnError behaviour exactly, so if lastRetry.message ever turns
+    # out unpopulated this degrades to today's behaviour rather than silently
+    # disabling retries. Clause 2 is the only widening: it matches GKE's own
+    # preemption wording and nothing else, so a legitimate build failure — a
+    # Dockerfile syntax error, a failing test — still lands in Failed with a
+    # non-matching message and is NOT retried.
     retryStrategy:
       limit: "2"
-      retryPolicy: OnError
+      retryPolicy: Always
+      expression: 'lastRetry.status == "Error" or lastRetry.message matches "imminent node shutdown"'
       backoff:
         duration: "30s"
         factor: "2"
@@ -279,12 +294,27 @@ spec:
     # templates had neither a retry nor a deadline, so a pod stuck in Init or
     # lost to a spot preemption simply never ended. activeDeadlineSeconds kills
     # it, retryStrategy re-runs it. limit 2 = 3 attempts total.
-    # retryPolicy=OnError (not OnFailure) so a legitimate build failure — a
-    # Dockerfile syntax error, a failing test — is NOT retried. Mirrors the
-    # pattern already proven in clusterworkflowtemplate-ml.yaml.
+    #
+    # retryPolicy=Always + expression (not a bare OnError) because OnError only
+    # retries Argo's Error phase (controller-level faults) — a pod killed by
+    # node shutdown lands in Failed, so OnError never caught it. Measured on
+    # 2026-09-15: an e2e release-train run failed twice at this build step with
+    # "Pod was terminated in response to imminent node shutdown." on the
+    # all-Spot KAOS tenant pool, and OnError did not retry it.
+    #
+    # The expression is the only thing that widens the retry set — Argo ANDs
+    # the expression result with retryPolicy, so Always just means "consult
+    # the expression". Clause 1 (lastRetry.status == "Error") preserves
+    # today's OnError behaviour exactly, so if lastRetry.message ever turns
+    # out unpopulated this degrades to today's behaviour rather than silently
+    # disabling retries. Clause 2 is the only widening: it matches GKE's own
+    # preemption wording and nothing else, so a legitimate build failure — a
+    # Dockerfile syntax error, a failing test — still lands in Failed with a
+    # non-matching message and is NOT retried.
     retryStrategy:
       limit: "2"
-      retryPolicy: OnError
+      retryPolicy: Always
+      expression: 'lastRetry.status == "Error" or lastRetry.message matches "imminent node shutdown"'
       backoff:
         duration: "30s"
         factor: "2"
@@ -359,12 +389,27 @@ spec:
     # templates had neither a retry nor a deadline, so a pod stuck in Init or
     # lost to a spot preemption simply never ended. activeDeadlineSeconds kills
     # it, retryStrategy re-runs it. limit 2 = 3 attempts total.
-    # retryPolicy=OnError (not OnFailure) so a legitimate build failure — a
-    # Dockerfile syntax error, a failing test — is NOT retried. Mirrors the
-    # pattern already proven in clusterworkflowtemplate-ml.yaml.
+    #
+    # retryPolicy=Always + expression (not a bare OnError) because OnError only
+    # retries Argo's Error phase (controller-level faults) — a pod killed by
+    # node shutdown lands in Failed, so OnError never caught it. Measured on
+    # 2026-09-15: an e2e release-train run failed twice at this build step with
+    # "Pod was terminated in response to imminent node shutdown." on the
+    # all-Spot KAOS tenant pool, and OnError did not retry it.
+    #
+    # The expression is the only thing that widens the retry set — Argo ANDs
+    # the expression result with retryPolicy, so Always just means "consult
+    # the expression". Clause 1 (lastRetry.status == "Error") preserves
+    # today's OnError behaviour exactly, so if lastRetry.message ever turns
+    # out unpopulated this degrades to today's behaviour rather than silently
+    # disabling retries. Clause 2 is the only widening: it matches GKE's own
+    # preemption wording and nothing else, so a legitimate build failure — a
+    # Dockerfile syntax error, a failing test — still lands in Failed with a
+    # non-matching message and is NOT retried.
     retryStrategy:
       limit: "2"
-      retryPolicy: OnError
+      retryPolicy: Always
+      expression: 'lastRetry.status == "Error" or lastRetry.message matches "imminent node shutdown"'
       backoff:
         duration: "30s"
         factor: "2"
@@ -476,12 +521,27 @@ spec:
     # templates had neither a retry nor a deadline, so a pod stuck in Init or
     # lost to a spot preemption simply never ended. activeDeadlineSeconds kills
     # it, retryStrategy re-runs it. limit 2 = 3 attempts total.
-    # retryPolicy=OnError (not OnFailure) so a legitimate build failure — a
-    # Dockerfile syntax error, a failing test — is NOT retried. Mirrors the
-    # pattern already proven in clusterworkflowtemplate-ml.yaml.
+    #
+    # retryPolicy=Always + expression (not a bare OnError) because OnError only
+    # retries Argo's Error phase (controller-level faults) — a pod killed by
+    # node shutdown lands in Failed, so OnError never caught it. Measured on
+    # 2026-09-15: an e2e release-train run failed twice at this build step with
+    # "Pod was terminated in response to imminent node shutdown." on the
+    # all-Spot KAOS tenant pool, and OnError did not retry it.
+    #
+    # The expression is the only thing that widens the retry set — Argo ANDs
+    # the expression result with retryPolicy, so Always just means "consult
+    # the expression". Clause 1 (lastRetry.status == "Error") preserves
+    # today's OnError behaviour exactly, so if lastRetry.message ever turns
+    # out unpopulated this degrades to today's behaviour rather than silently
+    # disabling retries. Clause 2 is the only widening: it matches GKE's own
+    # preemption wording and nothing else, so a legitimate build failure — a
+    # Dockerfile syntax error, a failing test — still lands in Failed with a
+    # non-matching message and is NOT retried.
     retryStrategy:
       limit: "2"
-      retryPolicy: OnError
+      retryPolicy: Always
+      expression: 'lastRetry.status == "Error" or lastRetry.message matches "imminent node shutdown"'
       backoff:
         duration: "30s"
         factor: "2"
@@ -523,12 +583,27 @@ spec:
     # templates had neither a retry nor a deadline, so a pod stuck in Init or
     # lost to a spot preemption simply never ended. activeDeadlineSeconds kills
     # it, retryStrategy re-runs it. limit 2 = 3 attempts total.
-    # retryPolicy=OnError (not OnFailure) so a legitimate build failure — a
-    # Dockerfile syntax error, a failing test — is NOT retried. Mirrors the
-    # pattern already proven in clusterworkflowtemplate-ml.yaml.
+    #
+    # retryPolicy=Always + expression (not a bare OnError) because OnError only
+    # retries Argo's Error phase (controller-level faults) — a pod killed by
+    # node shutdown lands in Failed, so OnError never caught it. Measured on
+    # 2026-09-15: an e2e release-train run failed twice at this build step with
+    # "Pod was terminated in response to imminent node shutdown." on the
+    # all-Spot KAOS tenant pool, and OnError did not retry it.
+    #
+    # The expression is the only thing that widens the retry set — Argo ANDs
+    # the expression result with retryPolicy, so Always just means "consult
+    # the expression". Clause 1 (lastRetry.status == "Error") preserves
+    # today's OnError behaviour exactly, so if lastRetry.message ever turns
+    # out unpopulated this degrades to today's behaviour rather than silently
+    # disabling retries. Clause 2 is the only widening: it matches GKE's own
+    # preemption wording and nothing else, so a legitimate build failure — a
+    # Dockerfile syntax error, a failing test — still lands in Failed with a
+    # non-matching message and is NOT retried.
     retryStrategy:
       limit: "2"
-      retryPolicy: OnError
+      retryPolicy: Always
+      expression: 'lastRetry.status == "Error" or lastRetry.message matches "imminent node shutdown"'
       backoff:
         duration: "30s"
         factor: "2"
@@ -657,12 +732,27 @@ spec:
     # templates had neither a retry nor a deadline, so a pod stuck in Init or
     # lost to a spot preemption simply never ended. activeDeadlineSeconds kills
     # it, retryStrategy re-runs it. limit 2 = 3 attempts total.
-    # retryPolicy=OnError (not OnFailure) so a legitimate build failure — a
-    # Dockerfile syntax error, a failing test — is NOT retried. Mirrors the
-    # pattern already proven in clusterworkflowtemplate-ml.yaml.
+    #
+    # retryPolicy=Always + expression (not a bare OnError) because OnError only
+    # retries Argo's Error phase (controller-level faults) — a pod killed by
+    # node shutdown lands in Failed, so OnError never caught it. Measured on
+    # 2026-09-15: an e2e release-train run failed twice at this build step with
+    # "Pod was terminated in response to imminent node shutdown." on the
+    # all-Spot KAOS tenant pool, and OnError did not retry it.
+    #
+    # The expression is the only thing that widens the retry set — Argo ANDs
+    # the expression result with retryPolicy, so Always just means "consult
+    # the expression". Clause 1 (lastRetry.status == "Error") preserves
+    # today's OnError behaviour exactly, so if lastRetry.message ever turns
+    # out unpopulated this degrades to today's behaviour rather than silently
+    # disabling retries. Clause 2 is the only widening: it matches GKE's own
+    # preemption wording and nothing else, so a legitimate build failure — a
+    # Dockerfile syntax error, a failing test — still lands in Failed with a
+    # non-matching message and is NOT retried.
     retryStrategy:
       limit: "2"
-      retryPolicy: OnError
+      retryPolicy: Always
+      expression: 'lastRetry.status == "Error" or lastRetry.message matches "imminent node shutdown"'
       backoff:
         duration: "30s"
         factor: "2"
@@ -768,12 +858,27 @@ spec:
     # templates had neither a retry nor a deadline, so a pod stuck in Init or
     # lost to a spot preemption simply never ended. activeDeadlineSeconds kills
     # it, retryStrategy re-runs it. limit 2 = 3 attempts total.
-    # retryPolicy=OnError (not OnFailure) so a legitimate build failure — a
-    # Dockerfile syntax error, a failing test — is NOT retried. Mirrors the
-    # pattern already proven in clusterworkflowtemplate-ml.yaml.
+    #
+    # retryPolicy=Always + expression (not a bare OnError) because OnError only
+    # retries Argo's Error phase (controller-level faults) — a pod killed by
+    # node shutdown lands in Failed, so OnError never caught it. Measured on
+    # 2026-09-15: an e2e release-train run failed twice at this build step with
+    # "Pod was terminated in response to imminent node shutdown." on the
+    # all-Spot KAOS tenant pool, and OnError did not retry it.
+    #
+    # The expression is the only thing that widens the retry set — Argo ANDs
+    # the expression result with retryPolicy, so Always just means "consult
+    # the expression". Clause 1 (lastRetry.status == "Error") preserves
+    # today's OnError behaviour exactly, so if lastRetry.message ever turns
+    # out unpopulated this degrades to today's behaviour rather than silently
+    # disabling retries. Clause 2 is the only widening: it matches GKE's own
+    # preemption wording and nothing else, so a legitimate build failure — a
+    # Dockerfile syntax error, a failing test — still lands in Failed with a
+    # non-matching message and is NOT retried.
     retryStrategy:
       limit: "2"
-      retryPolicy: OnError
+      retryPolicy: Always
+      expression: 'lastRetry.status == "Error" or lastRetry.message matches "imminent node shutdown"'
       backoff:
         duration: "30s"
         factor: "2"
@@ -822,12 +927,27 @@ spec:
     # templates had neither a retry nor a deadline, so a pod stuck in Init or
     # lost to a spot preemption simply never ended. activeDeadlineSeconds kills
     # it, retryStrategy re-runs it. limit 2 = 3 attempts total.
-    # retryPolicy=OnError (not OnFailure) so a legitimate build failure — a
-    # Dockerfile syntax error, a failing test — is NOT retried. Mirrors the
-    # pattern already proven in clusterworkflowtemplate-ml.yaml.
+    #
+    # retryPolicy=Always + expression (not a bare OnError) because OnError only
+    # retries Argo's Error phase (controller-level faults) — a pod killed by
+    # node shutdown lands in Failed, so OnError never caught it. Measured on
+    # 2026-09-15: an e2e release-train run failed twice at this build step with
+    # "Pod was terminated in response to imminent node shutdown." on the
+    # all-Spot KAOS tenant pool, and OnError did not retry it.
+    #
+    # The expression is the only thing that widens the retry set — Argo ANDs
+    # the expression result with retryPolicy, so Always just means "consult
+    # the expression". Clause 1 (lastRetry.status == "Error") preserves
+    # today's OnError behaviour exactly, so if lastRetry.message ever turns
+    # out unpopulated this degrades to today's behaviour rather than silently
+    # disabling retries. Clause 2 is the only widening: it matches GKE's own
+    # preemption wording and nothing else, so a legitimate build failure — a
+    # Dockerfile syntax error, a failing test — still lands in Failed with a
+    # non-matching message and is NOT retried.
     retryStrategy:
       limit: "2"
-      retryPolicy: OnError
+      retryPolicy: Always
+      expression: 'lastRetry.status == "Error" or lastRetry.message matches "imminent node shutdown"'
       backoff:
         duration: "30s"
         factor: "2"
