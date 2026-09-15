@@ -620,15 +620,34 @@ spec:
     nodeSelector:
       platform.kubecore.io/nodegroup-type: "{{`{{workflow.parameters.node_class}}`}}"
       platform.kubecore.io/project: "{{`{{workflow.parameters.project_name}}`}}"
-    # Retry once on transient failures. The dominant historical failure
-    # mode was GCE preemption mid-snapshot on the kubecorecpu pool (now
-    # on-demand, see profiles.go). Keeping a single retry handles other
-    # transient cases — registry 500s, network blips, kubelet evictions.
-    # retryPolicy=OnError (not OnFailure) so we don't retry on legitimate
-    # build failures like a Dockerfile syntax error.
+    # A pod killed by an infra-level fault (e.g. spot preemption) used to end
+    # the build without a retry. retryStrategy re-runs it. limit 2 = 3
+    # attempts total.
+    #
+    # retryPolicy=Always + expression (not a bare OnError) because OnError only
+    # retries Argo's Error phase (controller-level faults) — a pod killed by
+    # node shutdown lands in Failed, so OnError never caught it. Measured on
+    # 2026-09-15: an e2e release-train run failed twice at this build step with
+    # "Pod was terminated in response to imminent node shutdown." on the
+    # all-Spot KAOS tenant pool, and OnError did not retry it.
+    #
+    # The expression is the only thing that widens the retry set — Argo ANDs
+    # the expression result with retryPolicy, so Always just means "consult
+    # the expression". Clause 1 (lastRetry.status == "Error") preserves
+    # today's OnError behaviour exactly, so if lastRetry.message ever turns
+    # out unpopulated this degrades to today's behaviour rather than silently
+    # disabling retries. Clause 2 is the only widening: it matches GKE's own
+    # preemption wording and nothing else, so a legitimate build failure — a
+    # Dockerfile syntax error, a failing test — still lands in Failed with a
+    # non-matching message and is NOT retried.
     retryStrategy:
-      limit: "1"
-      retryPolicy: OnError
+      limit: "2"
+      retryPolicy: Always
+      expression: 'lastRetry.status == "Error" or lastRetry.message matches "imminent node shutdown"'
+      backoff:
+        duration: "30s"
+        factor: "2"
+        maxDuration: "5m"
     volumes:
     - name: build-workspace
       emptyDir: {}
