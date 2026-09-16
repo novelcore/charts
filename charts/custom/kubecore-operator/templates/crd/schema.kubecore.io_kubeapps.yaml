@@ -1020,12 +1020,15 @@ spec:
                         type: object
                       state:
                         description: |-
-                          State is one of: Ready | AwaitingCompile | Pending | BindingUnverified |
-                          CapabilityMissing | Drifted | TargetAbsent | Error.
+                          State is one of: Ready | AwaitingCompile | AwaitingRollout | Pending |
+                          BindingUnverified | CapabilityMissing | Drifted | TargetAbsent | Error.
 
                           AwaitingCompile (#1112) means the XConnection XR does not exist yet;
                           Pending means it exists but has no Ready verdict. Only the latter blocks
                           the KubeApp's health gate — see phases.connectionsBlockHealth.
+                          AwaitingRollout (#1319) means the XConnection is Ready but the consumer
+                          Deployment observed on the pool does not reference the connection's
+                          ConfigMap/Secret yet; non-blocking, surfaced as ConnectionsSynced=False.
                         type: string
                     required:
                       - environment
