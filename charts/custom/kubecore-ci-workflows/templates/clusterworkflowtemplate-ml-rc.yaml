@@ -56,6 +56,20 @@ spec:
   tolerations:
     {{- toYaml . | nindent 4 }}
   {{- end }}
+  # Argo's default is OnWorkflowSuccess, so a FAILED build KEEPS its workspace
+  # claim for the workflow's TTL — and because the CI workspace storage class is
+  # Delete-reclaim (standard-rwo on GKE, gp3 on AWS) the underlying disk lives
+  # exactly as long as the PVC. At the 40Gi this chart asks for, that is a
+  # retained disk per failed build, on pd-balanced, which counts toward GCP's
+  # SSD_TOTAL_GB — the binding quota on kaos-dev-gcp. The leak was called out in
+  # clusterworkflowtemplate-rc.yaml when that template was fixed ("ci-build ...
+  # leaves it unset and carries the same leak") and never carried back here.
+  #
+  # It was survivable while every build ran on a throwaway pool destroyed 40
+  # minutes later. It is not survivable on a durable pool or a real tenant
+  # project, where the disks accumulate for the whole TTL.
+  volumeClaimGC:
+    strategy: OnWorkflowCompletion
   volumeClaimTemplates:
   - metadata:
       name: workspace
