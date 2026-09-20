@@ -46,13 +46,24 @@ controllerManager:
       # CONSOLE_DOMAIN: "console.platform.kaos-labs.org"       # prod
       # CONSOLE_DOMAIN: "console.dev.platform.kaos-labs.org"   # dev
 
+      # GitHub App staging RBAC (Task 7, onboarding owner-link plan)
+      # GATEWAY_SERVICE_ACCOUNT and BROKER_SERVICE_ACCOUNT are "namespace/name"
+      # refs the KubeOrg syncing phase binds, per org namespace and only for the
+      # onboarding window, to a Role that lets the gateway stage the GitHub App
+      # key ({org}-github-app-staging) and lets the token-broker read it. Either
+      # empty skips that binding (logged, non-fatal). Both already default to the
+      # real deployed identities below, so these lines are documentation only —
+      # uncomment only to point at a non-default ServiceAccount.
+      # GATEWAY_SERVICE_ACCOUNT: "kubecore-apps/kaos-gitops-gateway-sa"           # dev + prod (kaos/kubeapps/kaos-gitops-gateway)
+      # BROKER_SERVICE_ACCOUNT: "kubecore-system/kubecore-operator-token-broker" # this chart's own token-broker
+
       # MeluXina token-mint image (PRD-585). The operator stamps this into the
       # per-pool token-mint CronJob. CI overwrites it at release with
       # {REGISTRY_URL}/{PROJECT_REGISTRY}/meluxina-tokenmint:{version} — the same
       # GAR registry + version as the operator image, pulled keylessly by the GKE
       # node SA. The v2-branch placeholder below mirrors the operator image path so
       # even an unstamped chart resolves to a keyless-pullable image.
-      MELUXINA_TOKENMINT_IMAGE: "europe-west1-docker.pkg.dev/kaos-dev-gcp/kaos-images/platform/meluxina-tokenmint:0.92.0"
+      MELUXINA_TOKENMINT_IMAGE: "europe-west1-docker.pkg.dev/kaos-dev-gcp/kaos-images/platform/meluxina-tokenmint:0.93.0"
     resources:
       limits:
         cpu: 500m
@@ -321,7 +332,7 @@ compositions:
   # OCI image for the kubecore-compositions Configuration package.
   # CI overwrites this with <REGISTRY_URL>/<PROJECT_REGISTRY>/kubecore-compositions:vX.Y.Z
   # at release. Required (must be non-empty) when compositions.enabled=true.
-  package: "europe-west1-docker.pkg.dev/kaos-dev-gcp/kaos-images/platform/kubecore-compositions:v0.92.0"
+  package: "europe-west1-docker.pkg.dev/kaos-dev-gcp/kaos-images/platform/kubecore-compositions:v0.93.0"
   # pullPolicy controls when Crossplane downloads the package.
   # Options: IfNotPresent (default), Always, Never
   pullPolicy: IfNotPresent

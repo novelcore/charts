@@ -15,6 +15,18 @@
 #
 # What the broker no longer needs:
 #   - secrets get/list (""): removed; no per-org machine-key Secret is read.
+#
+# SINGLE, TIME-BOXED EXCEPTION (Task 7, onboarding owner-link plan, 2026-09-20):
+# the broker still needs to read exactly one Secret per org during onboarding —
+# {org}-github-app-staging, to verify the GitHub App installation and push its
+# key to the customer's own secret store. That access does NOT come from this
+# ClusterRole and never should: the KubeOrg syncing phase
+# (internal/operators/kubeorg/phases/syncing_github_staging.go) grants it via a
+# per-org namespaced Role ("github-app-staging-read", verb get, resourceNames
+# limited to that one Secret name), bound only to this ServiceAccount, and both
+# the Role and the RoleBinding are deleted again once the org's ESO-owned
+# {org}-github-app Secret exists and GitHub App discovery has succeeded. This
+# ClusterRole stays exactly as reduced by T-09 above — do not add secrets here.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
