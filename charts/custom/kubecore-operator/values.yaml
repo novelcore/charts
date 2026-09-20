@@ -46,6 +46,18 @@ controllerManager:
       # CONSOLE_DOMAIN: "console.platform.kaos-labs.org"       # prod
       # CONSOLE_DOMAIN: "console.dev.platform.kaos-labs.org"   # dev
 
+      # Org Login Policy Default Redirect
+      # POST_AUTH_URL is the kaos-app /post-auth landing. The KubeOrg syncing phase
+      # sets it, with the org name appended as a path segment, as the org's Zitadel
+      # login policy default redirect: the destination for flows that finish with no
+      # authorization request behind them (invite verification, password reset).
+      # That page checks for an in-progress onboarding in the browser and otherwise
+      # forwards to the org's own console host, where sign-in is org-scoped. Must be
+      # empty (feature off, no Zitadel call made) or an absolute https URL with no
+      # query string and no fragment.
+      # POST_AUTH_URL: "https://kaos-app.platform.kaos-labs.org/post-auth"       # prod
+      # POST_AUTH_URL: "https://kaos-app.dev.kaos-labs.org/post-auth"           # dev
+
       # GitHub App staging RBAC (Task 7, onboarding owner-link plan)
       # GATEWAY_SERVICE_ACCOUNT and BROKER_SERVICE_ACCOUNT are "namespace/name"
       # refs the KubeOrg syncing phase binds, per org namespace and only for the
@@ -63,7 +75,7 @@ controllerManager:
       # GAR registry + version as the operator image, pulled keylessly by the GKE
       # node SA. The v2-branch placeholder below mirrors the operator image path so
       # even an unstamped chart resolves to a keyless-pullable image.
-      MELUXINA_TOKENMINT_IMAGE: "europe-west1-docker.pkg.dev/kaos-dev-gcp/kaos-images/platform/meluxina-tokenmint:0.93.0"
+      MELUXINA_TOKENMINT_IMAGE: "europe-west1-docker.pkg.dev/kaos-dev-gcp/kaos-images/platform/meluxina-tokenmint:0.94.0"
     resources:
       limits:
         cpu: 500m
@@ -332,7 +344,7 @@ compositions:
   # OCI image for the kubecore-compositions Configuration package.
   # CI overwrites this with <REGISTRY_URL>/<PROJECT_REGISTRY>/kubecore-compositions:vX.Y.Z
   # at release. Required (must be non-empty) when compositions.enabled=true.
-  package: "europe-west1-docker.pkg.dev/kaos-dev-gcp/kaos-images/platform/kubecore-compositions:v0.93.0"
+  package: "europe-west1-docker.pkg.dev/kaos-dev-gcp/kaos-images/platform/kubecore-compositions:v0.94.0"
   # pullPolicy controls when Crossplane downloads the package.
   # Options: IfNotPresent (default), Always, Never
   pullPolicy: IfNotPresent
