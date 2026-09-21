@@ -9,7 +9,7 @@ metadata:
     kubecore.io/migration-issue: "#343"
     kubecore.io/migration-status: "unimplemented"
     policies.kyverno.io/category: "KubeCore Catalog"
-    policies.kyverno.io/description: "Toggling networking off would orphan VPCs/subnets used by every KubePool; flipping on requires re-bootstrap of the org's network foundation. Migration tracked with the regions work (#343)."
+    policies.kyverno.io/description: "Toggling networking off would orphan VPCs/subnets used by every KubePool; flipping on requires re-bootstrap of the org's network foundation. Immutable once a cloud config exists; freely settable during the identity-only bootstrap window. Migration tracked with the regions work (#343)."
     policies.kyverno.io/severity: "medium"
     policies.kyverno.io/subject: "schema.kubecore.io/KubeOrg"
 spec:
@@ -31,9 +31,12 @@ spec:
       - key: "{{ request.operation }}"
         operator: Equals
         value: UPDATE
+      - key: "{{ length(keys(request.oldObject.spec.gcpConfig || `{}`)) > `0` || length(keys(request.oldObject.spec.azureConfig || `{}`)) > `0` || length(keys(request.oldObject.spec.awsConfig || `{}`)) > `0` }}"
+        operator: Equals
+        value: true
     validate:
       allowExistingViolations: true
-      message: "Field spec.network.enabled on KubeOrg is immutable (catalog: d2-kubeorg-network-enabled-immutable, domain: D2). See PRD-310."
+      message: "Field spec.network.enabled on KubeOrg becomes immutable once a cloud config (awsConfig/gcpConfig/azureConfig) is set (catalog: d2-kubeorg-network-enabled-immutable, domain: D2); it is freely settable during the identity-only bootstrap window. See PRD-310."
       deny:
         conditions:
           all:
