@@ -2591,7 +2591,8 @@ spec:
 
         # ── Write .kubecore/dataset-config.yaml into the APP repo ─────────────
         # The kubecore-dataset CLI (in each app repo) auto-discovers its lakeFS
-        # URL/repo/namespace/probe from this file, so NOTHING is hardcoded per app
+        # URL/repo/namespace/probe AND its device-flow OIDC settings from this
+        # file, so NOTHING is hardcoded per app
         # — every kubeapp gets its OWN correct values. Sourced from the same
         # pipeline-context the WFT is rendered from. Idempotent: only commits when
         # the content changes. Skipped silently if the app repo has no external URL
@@ -2619,6 +2620,18 @@ spec:
                 'namespace': ctx.get('namespace', 'ml-%s' % os.environ['PROJECT_NAME']),
                 'probeCron': lakefs.get('datasetProbeCron', '%s-dataset-catalog-probe' % os.environ['APP_NAME']),
             }
+            # Device-flow login (#1347). Without these the CLI has no client_id,
+            # cannot start a device flow, and falls back to the manual cookie
+            # paste — so this is the link that actually removes the paste.
+            # Only emitted when the operator has provisioned the public OIDC app
+            # (the composition omits lakefs.cli until then); half-written config
+            # would strand the CLI worse than no config.
+            cli = lakefs.get('cli', {}) or {}
+            if cli.get('oidcIssuer') and cli.get('oidcClientId'):
+                cfg['oidcIssuer'] = cli['oidcIssuer']
+                cfg['oidcClientId'] = cli['oidcClientId']
+                if cli.get('oidcProjectId'):
+                    cfg['oidcProjectId'] = cli['oidcProjectId']
             print('# Per-app dataset config — read by the kubecore-dataset CLI (nothing hardcoded).')
             print('# Rendered by render-wft from this app pipeline-context. Do not edit by hand.')
             print(yaml.safe_dump(cfg, default_flow_style=False, sort_keys=True).rstrip())
@@ -2635,7 +2648,7 @@ spec:
             if git diff --cached --quiet; then
               echo "render-wft: .kubecore/dataset-config.yaml already current in app repo"
             else
-              git commit -m "chore(dataset): sync .kubecore/dataset-config.yaml (lakeFS URL/repo)" >/dev/null 2>&1 || true
+              git commit -m "chore(dataset): sync .kubecore/dataset-config.yaml (lakeFS URL/repo, CLI OIDC)" >/dev/null 2>&1 || true
               git pull --rebase origin "${BRANCH}" >/dev/null 2>&1 || true
               if git push origin "HEAD:${BRANCH}" 2>/dev/null; then
                 echo "render-wft: pushed .kubecore/dataset-config.yaml to the app repo"
