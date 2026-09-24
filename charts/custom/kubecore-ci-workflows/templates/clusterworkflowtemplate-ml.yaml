@@ -2591,7 +2591,7 @@ spec:
 
         # ── Write .kubecore/dataset-config.yaml into the APP repo ─────────────
         # The kubecore-dataset CLI (in each app repo) auto-discovers its lakeFS
-        # URL/repo/namespace/probe AND its device-flow OIDC settings from this
+        # URL/repo/namespace/probe AND its browser-login OIDC settings from this
         # file, so NOTHING is hardcoded per app
         # — every kubeapp gets its OWN correct values. Sourced from the same
         # pipeline-context the WFT is rendered from. Idempotent: only commits when
@@ -2620,8 +2620,8 @@ spec:
                 'namespace': ctx.get('namespace', 'ml-%s' % os.environ['PROJECT_NAME']),
                 'probeCron': lakefs.get('datasetProbeCron', '%s-dataset-catalog-probe' % os.environ['APP_NAME']),
             }
-            # Device-flow login (#1347). Without these the CLI has no client_id,
-            # cannot start a device flow, and falls back to the manual cookie
+            # PKCE browser login (#1347). Without these the CLI has no client_id,
+            # cannot start a browser login, and falls back to the manual cookie
             # paste — so this is the link that actually removes the paste.
             # Only emitted when the operator has provisioned the public OIDC app
             # (the composition omits lakefs.cli until then); half-written config
