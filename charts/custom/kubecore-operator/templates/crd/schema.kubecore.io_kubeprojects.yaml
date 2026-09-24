@@ -1397,6 +1397,49 @@ spec:
                     fields — Track 1e MOVE-pass fix closed a producer desync where only the
                     OIDC subset ever reached Outputs). Track 1e MOVE-pass deviation.
                   properties:
+                    datasetCLIOIDC:
+                      description: |-
+                        DatasetCLIOIDC tracks the PUBLIC Zitadel app the kubecore-dataset CLI uses
+                        for its PKCE browser login (#1347). It is deliberately separate from LakeFSOIDC:
+                        that app is confidential and its client_secret belongs to oauth2-proxy,
+                        server-side. This one has NO client secret, so its ClientID is safe to
+                        publish here for the CLI to read — which is how the CLI discovers what to
+                        authenticate with, replacing the manual cookie paste.
+                      properties:
+                        appId:
+                          description: AppID is the Zitadel application ID.
+                          type: string
+                        clientId:
+                          description: ClientID is the OIDC client ID.
+                          type: string
+                        discoveryUrl:
+                          description: DiscoveryURL is the Zitadel OIDC issuer's discovery endpoint.
+                          type: string
+                        projectId:
+                          description: ProjectID is the Zitadel project the app belongs to.
+                          type: string
+                        rbacSeeded:
+                          description: |-
+                            RBACSeeded indicates the operator has seeded MLflow group permissions for
+                            this project's (project,role) groups via the mlflow-oidc-auth plugin API
+                            (KubeTeam role → MLflow permission: admin=MANAGE, ops/dev=EDIT, business=READ).
+                            MLflow-only; LakeFS OSS has no per-user RBAC. PRD-240 KubeTeam→MLflow RBAC.
+                          type: boolean
+                        ready:
+                          description: |-
+                            Ready indicates the OIDC app is created and credentials are pushed
+                            to the cloud Secret Manager.
+                          type: boolean
+                        secretName:
+                          description: SecretName is the cloud Secret Manager key holding OIDC credentials.
+                          type: string
+                        serviceUserSecretName:
+                          description: |-
+                            ServiceUserSecretName is the cloud Secret Manager key holding the minted
+                            pipeline service-user credentials (username + access token) for the MLflow
+                            basic-auth protocol. Empty until the operator provisions the service user.
+                          type: string
+                      type: object
                     features:
                       description: Features records which ML stack components are enabled.
                       properties:
@@ -1805,6 +1848,49 @@ spec:
                         cloud-specific composition set has materialised the workloads in the
                         client KubePool.
                       properties:
+                        datasetCLIOIDC:
+                          description: |-
+                            DatasetCLIOIDC tracks the PUBLIC Zitadel app the kubecore-dataset CLI uses
+                            for its PKCE browser login (#1347). It is deliberately separate from LakeFSOIDC:
+                            that app is confidential and its client_secret belongs to oauth2-proxy,
+                            server-side. This one has NO client secret, so its ClientID is safe to
+                            publish here for the CLI to read — which is how the CLI discovers what to
+                            authenticate with, replacing the manual cookie paste.
+                          properties:
+                            appId:
+                              description: AppID is the Zitadel application ID.
+                              type: string
+                            clientId:
+                              description: ClientID is the OIDC client ID.
+                              type: string
+                            discoveryUrl:
+                              description: DiscoveryURL is the Zitadel OIDC issuer's discovery endpoint.
+                              type: string
+                            projectId:
+                              description: ProjectID is the Zitadel project the app belongs to.
+                              type: string
+                            rbacSeeded:
+                              description: |-
+                                RBACSeeded indicates the operator has seeded MLflow group permissions for
+                                this project's (project,role) groups via the mlflow-oidc-auth plugin API
+                                (KubeTeam role → MLflow permission: admin=MANAGE, ops/dev=EDIT, business=READ).
+                                MLflow-only; LakeFS OSS has no per-user RBAC. PRD-240 KubeTeam→MLflow RBAC.
+                              type: boolean
+                            ready:
+                              description: |-
+                                Ready indicates the OIDC app is created and credentials are pushed
+                                to the cloud Secret Manager.
+                              type: boolean
+                            secretName:
+                              description: SecretName is the cloud Secret Manager key holding OIDC credentials.
+                              type: string
+                            serviceUserSecretName:
+                              description: |-
+                                ServiceUserSecretName is the cloud Secret Manager key holding the minted
+                                pipeline service-user credentials (username + access token) for the MLflow
+                                basic-auth protocol. Empty until the operator provisions the service user.
+                              type: string
+                          type: object
                         features:
                           description: Features records which ML stack components are enabled.
                           properties:
