@@ -9,7 +9,7 @@ metadata:
     kubecore.io/migration-issue: "#344"
     kubecore.io/migration-status: "unimplemented"
     policies.kyverno.io/category: "KubeCore Catalog"
-    policies.kyverno.io/description: "ML may only be turned ON: enabling installs XMLSystem (MLflow + lakeFS + Postgres backends), the day-2 path when a project needs spec.ml; disabling uninstalls it and the data it holds (#1236)."
+    policies.kyverno.io/description: "ML may only be turned ON. It gates the pool-level ML class node pools (compute.mlClasses), the ML cost/GPU exporters and Zot's larger ML volume; disabling deletes the class pools under running steps and cannot shrink the Zot PVC back (#1236). Project MLOps stacks run on per-project node groups, not on this flag."
     policies.kyverno.io/severity: "medium"
     policies.kyverno.io/subject: "schema.kubecore.io/KubePool"
 spec:

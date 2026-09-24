@@ -833,20 +833,6 @@ spec:
                         ML enables the ML platform tools (MLflow, lakeFS, pricing cache).
                         When true, creates an XMLSystem claim; requires Operators.Postgres when using shared Postgres.
                       type: boolean
-                    mlConfig:
-                      description: |-
-                        MLConfig fine-tunes which ML components are provisioned when ML is true.
-                        When nil, all default to true (backward compatible). Set to false to skip provisioning a component.
-                      properties:
-                        mlflow:
-                          description: Mlflow deploys MLflow (Postgres backend, optional S3 artifacts). Default true.
-                          type: boolean
-                        s3:
-                          description: |-
-                            S3 creates an S3 bucket and configures MLflow to use it for artifacts. Default true.
-                            When false, MLflow uses the default artifact store (no S3 bucket or IRSA).
-                          type: boolean
-                      type: object
                     observability:
                       description: Observability enables VictoriaMetrics observability stack
                       type: boolean
