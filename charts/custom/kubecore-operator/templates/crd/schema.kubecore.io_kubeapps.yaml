@@ -697,6 +697,32 @@ spec:
                             - ImplementationSpecific
                           type: string
                       type: object
+                    secretBindings:
+                      additionalProperties:
+                        items:
+                          description: |-
+                            SecretRef names a user-managed secret (kaos PRD-695). The GSM secret it
+                            resolves to is fixed by the C1 naming contract (internal/secrets).
+                          pattern: ^(org/)?[a-z0-9]([-a-z0-9]{0,38}[a-z0-9])?$
+                          type: string
+                        type: array
+                      description: |-
+                        Binds user-managed secrets (kaos PRD-695) to this app, per environment.
+
+                        Keys are "global" (every deployment environment), "ci" (this app's CI
+                        builds) or the name of an environment of the owning KubeProject — the
+                        controller rejects any other key with SecretBindingInvalid (environment
+                        names are not visible to CEL). Values are refs: "name" (a secret of the
+                        owning project) or "org/name" (an org secret). Later refs win on key
+                        collisions; an environment's own value beats the secret's default.
+                        Each entry lists at most 32 refs (mirrors KubeProject spec.ci).
+                      maxProperties: 32
+                      type: object
+                      x-kubernetes-validations:
+                        - message: each secretBindings entry may list at most 32 refs
+                          rule: self.all(k, size(self[k]) <= 32)
+                        - message: secretBindings keys must be 'global', 'ci' or an environment name (DNS-1123 label)
+                          rule: self.all(k, size(k) <= 63 && k.matches('^[a-z0-9]([-a-z0-9]*[a-z0-9])?$'))
                   type: object
                 kubeAppTemplateRef:
                   description: Names the XKubeAppTemplate this application is built from; determines its runtime and CI/CD shape.
@@ -1293,6 +1319,40 @@ spec:
                 repositoryUrl:
                   description: RepositoryUrl contains the URL of the created GitHub repository
                   type: string
+                secrets:
+                  description: |-
+                    Secrets reports the sync state of every user-managed secret binding
+                    (kaos PRD-695 §6.5): one entry per (environment, ref); env "ci" is CI,
+                    env "hpc" the MeluXina key. Never carries a value.
+                  items:
+                    description: |-
+                      SecretBindingStatus is the observed sync state of one (environment, ref)
+                      binding. Env is an environment name, "ci" or "hpc". Never carries a value.
+                    properties:
+                      env:
+                        type: string
+                      lastSyncTime:
+                        format: date-time
+                        type: string
+                      reason:
+                        description: |-
+                          Reason is one of Synced, Pending, SecretNotFound, OverridePending,
+                          BlockedByOtherRef, SyncError (internal/secrets).
+                        type: string
+                      ref:
+                        description: |-
+                          SecretRef names a user-managed secret (kaos PRD-695). The GSM secret it
+                          resolves to is fixed by the C1 naming contract (internal/secrets).
+                        pattern: ^(org/)?[a-z0-9]([-a-z0-9]{0,38}[a-z0-9])?$
+                        type: string
+                      synced:
+                        type: boolean
+                    required:
+                      - env
+                      - ref
+                      - synced
+                    type: object
+                  type: array
                 selectedEnvironments:
                   description: |-
                     SelectedEnvironments tracks the environments currently selected by the environmentSelector
