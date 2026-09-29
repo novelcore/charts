@@ -31,7 +31,7 @@ for wf in ci-build ci-rc-build; do
   expect_eq "$(q "$wf" '.volumes[] | select(.name == "ci-secrets-project") | .secret.secretName + " optional=" + (.secret.optional | tostring)')" \
     '{{workflow.parameters.project_name}}-ci-secrets optional=true' "$wf: optional {project}-ci-secrets volume"
   expect_eq "$(q "$wf" '.volumes[] | select(.name == "ci-secrets-app") | .secret.secretName + " optional=" + (.secret.optional | tostring)')" \
-    '{{workflow.parameters.app_name}}-ci-secrets optional=true' "$wf: optional {app}-ci-secrets volume"
+    '{{workflow.parameters.project_name}}-{{workflow.parameters.app_name}}-ci-secrets optional=true' "$wf: optional {project}-{app}-ci-secrets volume"
   expect_eq "$(q "$wf" '.volumes[] | select(.name == "kaniko-secrets") | .emptyDir.medium')" \
     Memory "$wf: kaniko-secrets is memory-backed"
   expect_eq "$(q "$wf" '.initContainers | map(.name) | join(",")')" \
