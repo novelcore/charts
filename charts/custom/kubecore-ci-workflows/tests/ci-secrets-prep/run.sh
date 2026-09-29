@@ -21,9 +21,16 @@ ZOT_AUTH=$(printf '%s' 'probe:zot-api-key' | base64 | tr -d '\n')
 pass() { PASSED=$((PASSED + 1)); echo "PASS: $1"; }
 fail() { FAILED=$((FAILED + 1)); echo "FAIL: $1"; }
 
+# All sandboxes live under one base dir so a single trap removes them all,
+# including test values, on exit (normal or not).
+BASE_TMP=$(mktemp -d)
+trap 'rm -rf "$BASE_TMP"' EXIT
+CASE_N=0
+
 # new_case: fresh sandbox; sets T and the script's path variables.
 new_case() {
-  T=$(mktemp -d)
+  CASE_N=$((CASE_N + 1))
+  T="${BASE_TMP}/case-${CASE_N}"
   mkdir -p "$T/project" "$T/app" "$T/registry-auth" "$T/docker"
   printf '%s' probe > "$T/registry-auth/username"
   printf '%s' zot-api-key > "$T/registry-auth/password"
@@ -196,6 +203,37 @@ else
   fail "app registry override: config=$(cat "$T/docker/config.json")"
 fi
 
+# 9b. App registry credential fully replaces project's, even when they use
+# different docker config fields (auth vs username/password): no leftover
+# "auth" key survives alongside the new "username"/"password" ones.
+new_case
+put_key "$T/project" p_ghcr_dockerconfigjson '{"auths":{"ghcr.io":{"auth":"b2xk"}}}'
+put_key "$T/app" p_ghcr_dockerconfigjson '{"auths":{"ghcr.io":{"username":"u","password":"newpass"}}}'
+run_prep
+if [ "$(rc)" = 0 ] \
+  && [ "$(json '.auths["ghcr.io"].username')" = '"u"' ] \
+  && [ "$(json '.auths["ghcr.io"] | has("auth")')" = 'false' ] \
+  && never_printed newpass; then
+  pass "app registry credential fully replaces project's (no stale auth field)"
+else
+  fail "mixed-field override: config=$(cat "$T/docker/config.json" 2>/dev/null)"
+fi
+
+# 9c. Merge order is deterministic by scope tier (org, then project, then
+# app), not alphabetical path order: "appreg" < "org" < "projreg"
+# alphabetically, which would make the project-level secret win under a
+# naive path sort even though app-level should be most specific.
+new_case
+put_key "$T/project" o_orgreg_dockerconfigjson '{"auths":{"conflict.io":{"auth":"org-cred"}}}'
+put_key "$T/project" p_projreg_dockerconfigjson '{"auths":{"conflict.io":{"auth":"proj-cred"}}}'
+put_key "$T/app" p_appreg_dockerconfigjson '{"auths":{"conflict.io":{"auth":"app-cred"}}}'
+run_prep
+if [ "$(rc)" = 0 ] && [ "$(json '.auths["conflict.io"].auth')" = '"app-cred"' ]; then
+  pass "merge order is org < project < app, not alphabetical by path"
+else
+  fail "tier order: config=$(cat "$T/docker/config.json" 2>/dev/null)"
+fi
+
 # 10. GAR + user registry: user auths plus a gcr credHelper for the push host.
 new_case
 put_key "$T/project" p_ghcr_dockerconfigjson '{"auths":{"ghcr.io":{"auth":"Z2hjcjp0b2s="},"europe-west3-docker.pkg.dev":{"auth":"eDp5"}}}'
@@ -217,6 +255,31 @@ if [ "$(rc)" != 0 ] && grep -q "ghcr/dockerconfigjson is not a docker config JSO
   pass "invalid dockerconfigjson: FATAL naming the secret, value not printed"
 else
   fail "invalid dockerconfigjson: rc=$(rc) out=$(cat "$T/out")"
+fi
+
+# 11b. A dockerconfigjson holding more than one JSON document fails by NAME
+# only; values from either document are never printed.
+new_case
+put_key "$T/project" p_multidoc_dockerconfigjson '{"auths":{"ghcr.io":{"auth":"secret1val"}}}
+{"auths":{"evil.io":{"auth":"secret2val"}}}'
+run_prep
+if [ "$(rc)" != 0 ] && grep -q "multidoc/dockerconfigjson is not a docker config JSON" "$T/out" \
+  && never_printed secret1val && never_printed secret2val; then
+  pass "multi-document dockerconfigjson: FATAL naming the secret, values not printed"
+else
+  fail "multi-document dockerconfigjson: rc=$(rc) out=$(cat "$T/out")"
+fi
+
+# 11c. A dockerconfigjson whose "auths" entry is not itself a map (a bare
+# string, not a credentials object) fails by NAME only.
+new_case
+put_key "$T/project" p_badauths_dockerconfigjson '{"auths":{"ghcr.io":"not-a-map-topsecret"}}'
+run_prep
+if [ "$(rc)" != 0 ] && grep -q "badauths/dockerconfigjson is not a docker config JSON" "$T/out" \
+  && never_printed topsecret; then
+  pass "non-map auths entry: FATAL naming the secret, value not printed"
+else
+  fail "non-map auths entry: rc=$(rc) out=$(cat "$T/out")"
 fi
 
 # 12. The script can be inlined into an Argo template.

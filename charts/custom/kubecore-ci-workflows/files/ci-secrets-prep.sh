@@ -34,12 +34,24 @@ IMAGE_REPO="${IMAGE_REPO:-}"
 NAME_RE='^[a-z0-9]([-a-z0-9]{0,38}[a-z0-9])?$'
 KEY_RE='^[A-Za-z_][A-Za-z0-9_]*$'
 
-# lay_out SRC_DIR: copy every p_/o_ file of one mounted Secret into OUT.
-# A Secret volume holds one symlink per key plus hidden ..data entries; the
-# glob skips the hidden ones. A missing optional Secret is an empty or
+# lay_out SRC_DIR LEVEL: copy every p_/o_ file of one mounted Secret into
+# OUT. A Secret volume holds one symlink per key plus hidden ..data entries;
+# the glob skips the hidden ones. A missing optional Secret is an empty or
 # absent directory.
+#
+# LEVEL ("project" or "app") records, for every destination file, which
+# lay_out call last wrote it, in three newline-separated lists (ORG_ORDER,
+# PROJECT_ORDER, APP_ORDER, org/project/app tier respectively). These lists
+# fix the registry-credential merge order below: org-scoped configs are
+# least specific, project-level next, app-level most specific, so a host
+# collision between two differently-named user secrets resolves the same
+# way "app overrides project" already does for identically-named ones. A
+# path can appear in more than one list (e.g. a name defined at both
+# project and app level); re-merging the same final file content twice is
+# harmless.
 lay_out() {
   src="$1"
+  level="$2"
   [ -d "$src" ] || return 0
   for f in "$src"/*; do
     [ -e "$f" ] || continue
@@ -63,16 +75,28 @@ lay_out() {
         continue
       fi
       dest="${OUT}/${name}"
+      if [ "$level" = app ]; then
+        APP_ORDER="${APP_ORDER}${dest}/${key}
+"
+      else
+        PROJECT_ORDER="${PROJECT_ORDER}${dest}/${key}
+"
+      fi
     else
       dest="${OUT}/org/${name}"
+      ORG_ORDER="${ORG_ORDER}${dest}/${key}
+"
     fi
     mkdir -p "$dest"
     cat "$f" > "${dest}/${key}"
   done
 }
 
-lay_out "$PROJECT_SRC"
-lay_out "$APP_SRC"
+ORG_ORDER=""
+PROJECT_ORDER=""
+APP_ORDER=""
+lay_out "$PROJECT_SRC" project
+lay_out "$APP_SRC" app
 
 LAID_OUT=0
 SECRET_NAMES=""
@@ -82,14 +106,25 @@ if [ -d "$OUT" ]; then
 fi
 echo "ci-secrets: ${LAID_OUT} file(s) under ${OUT} from secret(s): ${SECRET_NAMES:-none}"
 
-# Registry credentials: every laid-out dockerconfigjson, in sorted path order
-# (org/... sorts among project names deterministically).
+# Registry credentials: every laid-out dockerconfigjson, in deterministic
+# scope-tier order (org, then project, then app: see lay_out above), not
+# alphabetical path order, so a host collision between two differently
+# named user secrets resolves the same way app-overrides-project already
+# does for identically named ones.
+ALL_ORDER="${ORG_ORDER}${PROJECT_ORDER}${APP_ORDER}"
 USER_CONFIGS=""
-if [ -d "$OUT" ]; then
-  USER_CONFIGS=$(find "$OUT" -type f -name dockerconfigjson | sort)
+if [ -n "$ALL_ORDER" ]; then
+  USER_CONFIGS=$(printf '%s' "$ALL_ORDER" | grep '/dockerconfigjson$' || true)
 fi
 for c in $USER_CONFIGS; do
-  if ! yq -p json -e '.auths | tag == "!!map"' "$c" >/dev/null 2>&1; then
+  # Exactly one document, "auths" a map, and every auths entry a map. Built
+  # as a select() pipeline rather than a single chained `and` expression:
+  # in yq 4.44.3, `A and (B | C)` evaluates B|C against A's result instead
+  # of the original input, silently producing a wrong `false` (verified
+  # against this exact image) - select() has no such problem.
+  if ! yq -p json -o json eval-all -e \
+    '[.] | select(length == 1) | .[0].auths | select(tag == "!!map") | select(to_entries | map(.value) | all_c(tag == "!!map"))' \
+    "$c" >/dev/null 2>&1; then
     echo "FATAL: ${c#"${OUT}"/} is not a docker config JSON with an \"auths\" object" >&2
     exit 1
   fi
@@ -131,10 +166,15 @@ EOF
   exit 0
 fi
 
-# Later files win on a host collision; only "auths" is taken from user files.
+# Later files win on a host collision, replacing the whole host entry
+# (shallow merge) rather than deep-merging fields - otherwise a later file
+# using "username"/"password" for a host an earlier file set via "auth"
+# would leave the stale "auth" key alongside the new fields, and docker
+# prefers "auth" when both are present. Only "auths" is taken from user
+# files.
 # shellcheck disable=SC2016,SC2086 # yq expression, not shell; paths have no spaces
 MERGED=$(yq -p json -o json -I0 eval-all \
-  '. as $item ireduce ({}; . * $item) | {"auths": (.auths // {})}' \
+  '. as $item ireduce ({}; .auths = ((.auths // {}) + ($item.auths // {})))' \
   $USER_CONFIGS)
 # Drop every user entry for the push host, in any spelling docker accepts
 # (scheme and path are ignored when docker matches a host).
