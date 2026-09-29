@@ -743,11 +743,15 @@ spec:
                           type: string
                         sshKeySecretRef:
                           description: |-
-                            SSHKeySecretRef names the entry in the org's cloud secret manager (read
-                            through the {org}-gcp-infrastructure-secrets SecretStore) holding the
-                            user's long-lived Ed25519 private key. The operator pulls it via an
-                            ExternalSecret into {project}-meluxina-ssh-key in the org namespace and
+                            SSHKeySecretRef names a KAOS project secret of type ssh-key (kaos
+                            PRD-695 §6.4) holding the user's long-lived Ed25519 private key under
+                            key privateKey. The operator pulls GSM secret kaos_p_{project}_{name}
+                            (property privateKey) through the {org}-gcp-infrastructure-secrets
+                            SecretStore into {project}-meluxina-ssh-key in the org namespace and
                             never reads the key bytes; only short-lived JWTs leave the control plane.
+                            Immutable (Kyverno d1-kubeproject-hpc-ssh-key-ref-immutable): set at
+                            KubeProject creation; rotate the key by writing a new value to the
+                            project secret, never by re-pointing the ref.
                           properties:
                             name:
                               description: Name of the Secret in the same namespace as the referencing resource.
