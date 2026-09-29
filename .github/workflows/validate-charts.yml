@@ -26,6 +26,19 @@ jobs:
         with:
           version: 'v3.13.0'
 
+      - name: Test kubecore-ci-workflows ci-secrets-prep (kaos PRD 695)
+        # Unit tests for files/ci-secrets-prep.sh and render assertions for the
+        # ci-build / ci-rc-build wiring. The script runs in mikefarah/yq:4.44.3
+        # in production; here it runs under the runner's sh with the same yq
+        # release, which the tests were verified against as well.
+        run: |
+          curl -fsSL https://github.com/mikefarah/yq/releases/download/v4.44.3/yq_linux_amd64 -o "$RUNNER_TEMP/yq"
+          chmod +x "$RUNNER_TEMP/yq"
+          export PATH="$RUNNER_TEMP:$PATH"
+          sh charts/custom/kubecore-ci-workflows/tests/ci-secrets-prep/run.sh
+          helm template t charts/custom/kubecore-ci-workflows > "$RUNNER_TEMP/ci-workflows.yaml"
+          sh charts/custom/kubecore-ci-workflows/tests/render/run.sh "$RUNNER_TEMP/ci-workflows.yaml"
+
       - name: Set up Python
         uses: actions/setup-python@v4
         with:

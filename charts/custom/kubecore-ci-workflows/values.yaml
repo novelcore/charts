@@ -68,6 +68,14 @@ kaniko:
       cpu: "4"
       memory: "11Gi"
 
+# ci-secrets-prep init container of ci-build / ci-rc-build build-push (kaos
+# PRD 695): lays out the user's CI secrets under /kaniko/secrets and writes
+# kaniko's docker config. Needs a POSIX sh and yq v4; the kaniko debug image has
+# no JSON tool, which is why this is a separate container. Same image and tag
+# ml-ci-build's patch-images step already pulls.
+ciSecretsPrep:
+  image: "mikefarah/yq:4.44.3"
+
 # Build paths for the service-app (non-ML) CWTs.
 #
 # NO BuildKit anywhere in this chart. Every build-push — ml-ci-build,
