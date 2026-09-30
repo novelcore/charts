@@ -744,11 +744,136 @@ spec:
           echo "app dir ${APP_DIR} not found in ${OPS_REPO}"; exit 1
         fi
 
+        # STALE-DEPLOY GUARD. Builds of one app are serialized (the mutex above)
+        # but not ordered by commit: a build of an OLDER commit can start after
+        # a newer one's, and this step used to deploy whatever it built — last
+        # writer wins. Measured on dev 2026-09-30 (e2e run e2e-suite-rsqzm):
+        # 6767e5c (13:16:34Z) built and deployed, then an image of the repo's
+        # older initial commit 97388a6 (tag dev-v0.3.0-20260930-132427-97388a6)
+        # was deployed over it and the dev overlay went back in time.
+        #
+        # The only thing this guard may do is refuse a PROVABLY older commit.
+        # Per overlay: read the tag it deploys for this image; if it ends in
+        # the CI's -<sha7> and names another commit, ask GitHub to compare
+        # deployed...built in the app repo. The overlay is skipped only when
+        # BOTH hold: compare says "behind" (built is an ancestor of what is
+        # deployed, ahead_by 0) AND the built commit is not the current head of
+        # the branch it was built for. The second condition keeps a deliberate
+        # rollback working: force-pushing the branch back to an older commit
+        # builds a commit that is behind the deployed one but IS the head, and
+        # it must deploy. The incident's 97388a6 was behind 6767e5c and no
+        # longer the head, so it is refused. No tag, a tag of another shape,
+        # the same commit, a built sha that is not 40 hex, "ahead",
+        # "identical", "diverged", an API failure, an unreadable answer or an
+        # unknown branch head all deploy exactly as before — an unknown must
+        # never block a deploy.
+        BUILT_SHA=$(printf '%s' "{{`{{workflow.parameters.commit_sha}}`}}" | tr 'A-F' 'a-f')
+        BUILT7=$(printf '%s' "${BUILT_SHA}" | cut -c1-7)
+        APP_SLUG=$(printf '%s' "{{`{{workflow.parameters.repo_url}}`}}" | sed 's|^https://github.com/||; s|\.git$||')
+        # the branch this build was for: payload.ref from the push binding,
+        # refs/heads/<branch> from ci-reconcile (a required parameter on both)
+        BUILD_BRANCH=$(printf '%s' "{{`{{workflow.parameters.branch}}`}}" | sed 's|^refs/heads/||')
+
+        # branch_head: the 40-hex sha BUILD_BRANCH points at now; fails (prints
+        # nothing) on any error or an answer that is not exactly one sha.
+        branch_head() {
+          [ -n "${BUILD_BRANCH}" ] || return 1
+          rm -f /tmp/head.json /tmp/head.err
+          wget -q -T 30 -O /tmp/head.json \
+            --header "Authorization: Bearer ${TOKEN}" \
+            --header "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${APP_SLUG}/git/ref/heads/${BUILD_BRANCH}" 2>/tmp/head.err || return 1
+          H=$(grep -o '"sha": *"[0-9a-f]\{40\}"' /tmp/head.json | sed 's/.*"\([0-9a-f]*\)"$/\1/' | sort -u)
+          [ -n "${H}" ] && [ "$(printf '%s\n' "${H}" | wc -l | tr -d ' ')" = "1" ] || return 1
+          printf '%s' "${H}"
+        }
+
+        # deployed_tag DIR: the newTag DIR's kustomization sets for FULL_IMAGE
+        # (block-style images: list, as kustomize writes it); empty if none.
+        deployed_tag() {
+          for KF in "$1/kustomization.yaml" "$1/kustomization.yml" "$1/Kustomization"; do
+            [ -f "$KF" ] || continue
+            awk -v img="${FULL_IMAGE}" -v q="'" '
+              function val(s) { sub(/^[^:]*:/, "", s); sub(/[ \t]+#.*$/, "", s)
+                gsub(/"/, "", s); gsub(q, "", s); gsub(/^[ \t]+|[ \t]+$/, "", s); return s }
+              function flush() { if (name != "" && name == img && !done) { print tag; done = 1 }
+                name = ""; tag = "" }
+              /^[^ \t#-]/ { flush(); inimg = ($0 ~ /^images:[ \t]*$/); next }
+              !inimg { next }
+              /^[ \t]*- / { flush(); sub(/^[ \t]*- /, "") }
+              /^[ \t]*name:/ { name = val($0) }
+              /^[ \t]*newTag:/ { tag = val($0) }
+              END { flush() }' "$KF"
+            return 0
+          done
+        }
+
+        # older_than_deployed DIR: succeeds ONLY when the built commit is
+        # provably older than the one DIR deploys (and logs the skip).
+        older_than_deployed() {
+          D_TAG=$(deployed_tag "$1" 2>/dev/null) || D_TAG=""
+          D7=$(printf '%s' "${D_TAG}" | sed -n 's/^.*-\([0-9a-f]\{7\}\)$/\1/p')
+          [ -n "${D7}" ] || return 1
+          [ "${D7}" != "${BUILT7}" ] || return 1
+          if [ -z "${APP_SLUG}" ] || [ -z "${BUILT_SHA}" ]; then
+            echo "WARN: stale-deploy guard: app repo or commit unknown; deploying to $1 as before"; return 1
+          fi
+          case "${BUILT_SHA}" in
+            *[!0-9a-f]*) echo "WARN: stale-deploy guard: built commit '${BUILT_SHA}' is not a sha; deploying to $1 as before"; return 1 ;;
+          esac
+          if [ "${#BUILT_SHA}" -ne 40 ]; then
+            echo "WARN: stale-deploy guard: built commit '${BUILT_SHA}' is not a 40-hex sha; deploying to $1 as before"; return 1
+          fi
+          rm -f /tmp/compare.json /tmp/compare.err
+          if ! wget -q -T 30 -O /tmp/compare.json \
+              --header "Authorization: Bearer ${TOKEN}" \
+              --header "Accept: application/vnd.github+json" \
+              "https://api.github.com/repos/${APP_SLUG}/compare/${D7}...${BUILT_SHA}?per_page=1" 2>/tmp/compare.err; then
+            echo "WARN: stale-deploy guard: cannot compare ${D7}...${BUILT7} in ${APP_SLUG} ($(head -c 200 /tmp/compare.err 2>/dev/null | tr '\n' ' ')); deploying to $1 as before"
+            return 1
+          fi
+          # files[] entries carry a "status" too, but from a disjoint vocabulary
+          # (added/modified/...); a body naming more than one compare status is
+          # unreadable, not an answer.
+          CMP=$(grep -o '"status": *"[a-z]*"' /tmp/compare.json | sed 's/.*"\([a-z]*\)"$/\1/' \
+            | grep -E '^(ahead|behind|identical|diverged)$' | sort -u | tr '\n' ' ' | sed 's/ $//')
+          AHEAD_BY=$(grep -o '"ahead_by": *[0-9]*' /tmp/compare.json | head -n 1 | sed 's/.*: *//')
+          case "${CMP}" in
+            ahead|identical) return 1 ;;
+            behind)
+              if [ "${AHEAD_BY}" != "0" ]; then
+                echo "WARN: stale-deploy guard: compare ${D7}...${BUILT7} says behind but ahead_by=${AHEAD_BY:-?}; deploying to $1 as before"
+                return 1
+              fi
+              HEAD_NOW=$(branch_head) || HEAD_NOW=""
+              if [ -z "${HEAD_NOW}" ]; then
+                echo "WARN: stale-deploy guard: ${BUILT7} is behind the deployed ${D7} but the head of '${BUILD_BRANCH}' in ${APP_SLUG} is unknown ($(head -c 200 /tmp/head.err 2>/dev/null | tr '\n' ' ')); deploying to $1 as before"
+                return 1
+              fi
+              if [ "${HEAD_NOW}" = "${BUILT_SHA}" ]; then
+                echo "deploy $1: ${BUILT7} is older than the deployed ${D7} but is the head of ${BUILD_BRANCH} (rollback)"
+                return 1
+              fi
+              echo "skip $1: ${BUILT7} is older than the deployed ${D7}"; return 0 ;;
+            diverged)
+              echo "WARN: stale-deploy guard: ${BUILT7} and the deployed ${D7} have diverged; deploying to $1 as before"
+              return 1 ;;
+            *)
+              echo "WARN: stale-deploy guard: unreadable compare answer for ${D7}...${BUILT7} (status='${CMP}'); deploying to $1 as before"
+              return 1 ;;
+          esac
+        }
+
         # k8sapp composition names an overlay "{type}" when the env name IS the type,
         # else "{type}-{envName}" — match both tokens to cover a plain "dev" overlay
         UPDATED=0
+        SKIPPED=0
         for OVERLAY_DIR in ${APP_DIR}/overlays/dev ${APP_DIR}/overlays/dev-*; do
           if [ -d "$OVERLAY_DIR" ]; then
+            if older_than_deployed "$OVERLAY_DIR"; then
+              SKIPPED=$((SKIPPED + 1))
+              continue
+            fi
             echo "Updating $OVERLAY_DIR"
             cd "$OVERLAY_DIR"
             kustomize edit set image "${FULL_IMAGE}=${FULL_IMAGE}:${IMAGE_TAG}"
@@ -757,6 +882,10 @@ spec:
           fi
         done
 
+        if [ $UPDATED -eq 0 ] && [ $SKIPPED -gt 0 ]; then
+          echo "Nothing to deploy: every dev overlay (${SKIPPED}) already runs a newer commit than ${BUILT7}; the build itself succeeded"
+          exit 0
+        fi
         if [ $UPDATED -eq 0 ]; then echo "No dev overlays found under ${APP_DIR}"; exit 0; fi
 
         # Commit and push
