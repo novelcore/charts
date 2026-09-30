@@ -39,6 +39,17 @@ jobs:
           helm template t charts/custom/kubecore-ci-workflows > "$RUNNER_TEMP/ci-workflows.yaml"
           sh charts/custom/kubecore-ci-workflows/tests/render/run.sh "$RUNNER_TEMP/ci-workflows.yaml"
 
+      - name: Test kubecore-ci-workflows gitops-notify stale-deploy guard
+        # Executes ci-build's gitops-notify against stub git/wget/kustomize: a
+        # build of a provably OLDER commit never moves a dev overlay back, and
+        # every unknown (no tag, diverged, API failure) deploys as before. The
+        # step runs under the alpine image's busybox sh in production; the
+        # suite also passes there (NOTIFY_SHELL=sh in an alpine container).
+        run: |
+          export PATH="$RUNNER_TEMP:$PATH"
+          helm template t charts/custom/kubecore-ci-workflows > "$RUNNER_TEMP/ci-workflows.yaml"
+          sh charts/custom/kubecore-ci-workflows/tests/stale-deploy/run.sh "$RUNNER_TEMP/ci-workflows.yaml"
+
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
