@@ -195,7 +195,9 @@ pendingReaper:
 # Platform enhancer (kubecore-operator#1161): ml-ci-build and ml-ci-pr-render run
 # kubecore.enhance from THIS pinned copy (the template repo's kubecore/), overlaid
 # on the app's vendored kubecore/ (kept for local dev only). Bump `ref` to roll
-# an enhancer fix out to every app on its next render.
+# an enhancer fix out to every app: each app's ml-ci-reconcile sees its recorded
+# enhancer-ref differ and re-renders it within a poll, no push needed
+# (kubecore-operator#1199). Must be a full 40-character commit sha.
 platformEnhancer:
   repo: novelcore/hera-mlops-template
   ref: ea1aa7aaf427c5461e0db99c115ce3cba1fdd2f0

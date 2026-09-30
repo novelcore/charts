@@ -44,6 +44,19 @@ jobs:
         with:
           python-version: '3.10'
 
+      - name: Test kubecore-ci-workflows enhancer-drift re-render (kubecore-operator#1199)
+        # Executes ml-ci-reconcile's check-drift against stub kubectl/curl and
+        # ml-ci-build's pipeline-images writer on fixtures. Production runs the
+        # drift script under the alpine image's busybox sh; it passes under
+        # both (DRIFT_SHELL=sh in an alpine container).
+        run: |
+          curl -fsSL https://github.com/jqlang/jq/releases/download/jq-1.7.1/jq-linux-amd64 -o "$RUNNER_TEMP/jq"
+          chmod +x "$RUNNER_TEMP/jq"
+          export PATH="$RUNNER_TEMP:$PATH"
+          python3 -m pip install --quiet pyyaml
+          helm template t charts/custom/kubecore-ci-workflows > "$RUNNER_TEMP/ci-workflows.yaml"
+          bash charts/custom/kubecore-ci-workflows/tests/enhancer-drift/run.sh "$RUNNER_TEMP/ci-workflows.yaml"
+
       - name: Check borrowed-template parameter contracts
         # A templateRef borrows a template's body but not its parameter
         # declarations, so a template reading {{ workflow.parameters.X }}

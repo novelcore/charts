@@ -2916,7 +2916,7 @@ spec:
         IMAGES_FILE="${GITOPS_DIR}/pipeline-images.yaml"
         if [ -f "$IMAGES_FILE" ]; then
           CONTEXT_SHA=$(sha256sum "$CONTEXT_PATH" | cut -c1-64)
-          python3 - "$WFT_FILE" "$IMAGES_FILE" "$APP_NAME" "$CONTEXT_SHA" <<'IMGEOF'
+          python3 - "$WFT_FILE" "$IMAGES_FILE" "$APP_NAME" "$CONTEXT_SHA" "{{ include "kubecore-ci-workflows.enhancerRef" . }}" <<'IMGEOF'
         import sys, yaml, re
         wft = yaml.safe_load(open(sys.argv[1]))
         images_doc = yaml.safe_load(open(sys.argv[2]))
@@ -2926,6 +2926,10 @@ spec:
         # with the live file and submits a render when the platform context
         # changed without a push (compute classes, ml environment selector…).
         context_sha = sys.argv[4]
+        # enhancer-ref (kubecore-operator#1199): the platform enhancer this render
+        # ran — the pin overlaid above. ml-ci-reconcile compares it with the
+        # chart's pin and re-renders when the pin moved without a push.
+        enhancer_ref = sys.argv[5]
         # collect image-<step> configMapKeyRef keys the WFT expects
         wanted = set()
         for p in wft["spec"].get("arguments", {}).get("parameters", []):
@@ -2942,12 +2946,15 @@ spec:
         # renamed step): otherwise the ConfigMap — and the image parameters the
         # submit form derives from it — keep stale entries forever
         # (kubecore-operator#1126, ml-dev-loop e2e "delete"/"rename").
-        removed = [k for k in list(data) if k not in ("last-built-sha", "context-sha") and k not in wanted]
+        removed = [k for k in list(data) if k not in ("last-built-sha", "context-sha", "enhancer-ref") and k not in wanted]
         for k in removed:
             del data[k]
         context_moved = bool(context_sha) and data.get("context-sha") != context_sha
         if context_moved:
             data["context-sha"] = context_sha
+        enhancer_moved = bool(enhancer_ref) and data.get("enhancer-ref") != enhancer_ref
+        if enhancer_moved:
+            data["enhancer-ref"] = enhancer_ref
         # PRD-1124 D-07 (kubecore-operator#1124 AC-09): the images ConfigMap MUST
         # live in the SAME namespace the WFT renders into. The k8smlapp
         # composition seeds pipeline-images.yaml ONCE (create-only) with the ML
@@ -2964,9 +2971,9 @@ spec:
         if moved:
             print(f"pipeline-images namespace {meta.get('namespace')!r} -> {wft_ns!r} (following the rendered WFT)")
             meta["namespace"] = wft_ns
-        if added or removed or moved or context_moved:
+        if added or removed or moved or context_moved or enhancer_moved:
             yaml.safe_dump(images_doc, open(sys.argv[2], "w"), sort_keys=False)
-            print(f"pipeline-images keys — added: {added} removed: {removed} moved: {moved} context-sha: {context_sha[:12] if context_moved else 'unchanged'}")
+            print(f"pipeline-images keys — added: {added} removed: {removed} moved: {moved} context-sha: {context_sha[:12] if context_moved else 'unchanged'} enhancer-ref: {enhancer_ref[:12] if enhancer_moved else 'unchanged'}")
         else:
             print("pipeline-images already has exactly the image-<step> keys the WFT references")
         IMGEOF
@@ -3113,6 +3120,7 @@ spec:
           }
           for KEY in $(yq e '.data | keys | .[]' "${IMAGES_PATH}"); do
             [ "${KEY}" = "last-built-sha" ] && continue
+            [ "${KEY}" = "enhancer-ref" ] && continue
             CUR_VALUE=$(yq e ".data.\"${KEY}\"" "${IMAGES_PATH}")
             BASE="${CUR_VALUE%%@*}"
             TAG="${BASE##*:}"

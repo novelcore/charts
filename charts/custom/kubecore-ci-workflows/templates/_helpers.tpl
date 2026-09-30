@@ -140,3 +140,19 @@ so the files it writes carry the same ownership kaniko (root) had before.
   - name: kaniko-config
     mountPath: /kaniko/.docker
 {{- end }}
+
+{{/*
+The platform enhancer pin (platformEnhancer.ref), refused unless it is a full
+commit sha (kubecore-operator#1199). ml-ci-build records it as the enhancer an
+app was rendered with, and ml-ci-reconcile re-renders an app whose record
+differs from it, labelling the build with it. A branch or tag would move under
+the same name, so drift could never be seen, and a "/" in it is not a valid
+label value, which would reject every reconcile-submitted build.
+*/}}
+{{- define "kubecore-ci-workflows.enhancerRef" -}}
+{{- $ref := toString .Values.platformEnhancer.ref -}}
+{{- if not (regexMatch "^[0-9a-f]{40}$" $ref) -}}
+{{- fail (printf "platformEnhancer.ref must be a full 40-character commit sha, got %q" $ref) -}}
+{{- end -}}
+{{- $ref -}}
+{{- end }}
