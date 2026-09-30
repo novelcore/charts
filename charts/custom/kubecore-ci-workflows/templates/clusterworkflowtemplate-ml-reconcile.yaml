@@ -282,6 +282,45 @@ spec:
           fi
         fi
 
+        # ENHANCER DRIFT (kubecore-operator#1199): the enhancer is platform code
+        # pinned by this chart, and moving the pin is how a fix reaches every app
+        # — with no push, so neither check above sees it. Compare the enhancer the
+        # last render recorded (enhancer-ref) with the pin. Only for an app whose
+        # renders record context-sha: those run the Hera render, which records
+        # enhancer-ref, so the build submitted here clears the drift. Any other
+        # app has no platform enhancer to drift. context-sha without enhancer-ref
+        # is a render from before the record existed, by an unknown enhancer —
+        # drift, cleared by one render.
+        ENH_PIN="{{ include "kubecore-ci-workflows.enhancerRef" . }}"
+        ENH_LAST=$(echo "$CM" | jq -r '.data["enhancer-ref"] // empty')
+        if [ -n "$CTX_LAST" ] && [ "$ENH_LAST" != "$ENH_PIN" ]; then
+          # A pin bump reaches every app at once, so it must never become a
+          # build per app per poll. Any reconcile build at THIS pin that ended
+          # within the hour means the re-render was tried: a failure would fail
+          # again (a bad pin), and a success is still reaching the pool through
+          # ArgoCD. Wait — at most one attempt per app per pin per hour. An
+          # unreadable attempt is unknown, and unknown never submits work.
+          LAST_TRY=$(echo "$INFLIGHT" | jq -r --arg app "$APP" --arg pin "$ENH_PIN" '
+            [.items[]
+             | select((.metadata.labels // {})["platform.kubecore.io/app"] == $app
+                      and (.metadata.labels // {})["platform.kubecore.io/submitted-by"] == "ml-ci-reconcile"
+                      and (.metadata.labels // {})["platform.kubecore.io/enhancer-ref"] == $pin
+                      and (.status.phase == "Succeeded" or .status.phase == "Failed" or .status.phase == "Error"))
+             | {name: .metadata.name, phase: .status.phase,
+                age: (now - ((.status.finishedAt // .metadata.creationTimestamp // "")
+                             | try fromdateiso8601 catch now))}
+             | select(.age < 3600)]
+            | sort_by(.age) | first
+            | if . == null then "" else "\(.name) (\(.phase), \(.age | floor)s ago)" end' 2>&1) || LAST_TRY="unreadable: ${LAST_TRY}"
+          if [ -n "$LAST_TRY" ]; then
+            echo "reconcile: ENHANCER DRIFT (${ENH_LAST:-<unrecorded>} -> ${ENH_PIN}) — not re-rendering this poll: an attempt at this pin ended within the hour: ${LAST_TRY}"
+          else
+            printf 'true' > /tmp/needs_build
+            echo "reconcile: ENHANCER DRIFT — the live WFT was rendered by enhancer ${ENH_LAST:-<unrecorded>} but the platform pins ${ENH_PIN}; submitting ml-ci-build to re-render"
+            exit 0
+          fi
+        fi
+
         # The commit is built — but the WFT has a SECOND input the commit says
         # nothing about: pipeline-context (compute classes, endpoints), written
         # by Crossplane from the operator into the ML namespace. When the
@@ -368,6 +407,8 @@ spec:
           labels:
             platform.kubecore.io/app: {{`{{workflow.parameters.app_name}}`}}
             platform.kubecore.io/submitted-by: ml-ci-reconcile
+            # The enhancer this build renders with: ENHANCER DRIFT's attempt guard.
+            platform.kubecore.io/enhancer-ref: "{{ include "kubecore-ci-workflows.enhancerRef" . }}"
         spec:
           workflowTemplateRef:
             name: ml-ci-build
