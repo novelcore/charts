@@ -99,15 +99,29 @@ done
 echo "\$URL \$HDRS" >> "$T/wget.log"
 case "\$URL" in
   *kustomize_*) cp "${BASE_TMP}/kustomize.tar.gz" "\$OUT" ;;
-  *api.github.com*)
+  *api.github.com*/compare/*)
     if [ -f "$T/compare-fail" ]; then
       echo "wget: server returned error: HTTP/1.1 404 Not Found" >&2; exit 1
     fi
     cp "$T/compare-body" "\$OUT" ;;
+  *api.github.com*/git/ref/heads/*)
+    if [ -f "$T/head-fail" ]; then
+      echo "wget: server returned error: HTTP/1.1 401 Unauthorized" >&2; exit 1
+    fi
+    cp "$T/head-body" "\$OUT" ;;
   *) echo "stub wget: unexpected \$URL" >&2; exit 1 ;;
 esac
 EOF
   chmod +x "$T/bin/git" "$T/bin/wget"
+  # the branch head at notify time defaults to the NEWER commit, as in the
+  # incident (dev had moved on to 6767e5c when 97388a6's build notified)
+  set_head "$NEW_SHA"
+}
+
+# set_head SHA: the GitHub git/ref body for the branch (one sha, as the API returns).
+set_head() {
+  printf '{"ref":"refs/heads/dev","node_id":"n","url":"u","object":{"sha":"%s","type":"commit","url":"u"}}' \
+    "$1" > "$T/head-body"
 }
 
 # overlay NAME [IMAGE_NAME TAG [QUOTE]]: a dev overlay in the fixture; with a
@@ -142,13 +156,15 @@ run_notify() {
       -e "s#{{workflow.parameters.deploy_image_repo}}#${IMAGE}#g" \
       -e "s#{{workflow.parameters.commit_sha}}#${BUILT}#g" \
       -e "s#{{workflow.parameters.repo_url}}#https://github.com/kaos-io/proj-app1.git#g" \
+      -e "s#{{workflow.parameters.branch}}#refs/heads/dev#g" \
       -e "s#/usr/local/bin/#${T}/bin/#g" \
       -e "s#/etc/github-token/token#${T}/token#g" \
       "$SRC" > "$T/notify.sh"
   OUT=$(cd "$T" && STUB_LOG_DIR="$T" PATH="$T/bin:$PATH" "${NOTIFY_SHELL:-sh}" "$T/notify.sh" 2>&1); RC=$?
   EDITS=$(cut -d' ' -f1 "$T/kustomize.log" | sort | tr '\n' ' ' | sed 's/ $//')
   PUSHED=$(grep -c '^push' "$T/git.log")
-  COMPARES=$(grep -c 'api.github.com' "$T/wget.log")
+  COMPARES=$(grep -c 'api.github.com.*/compare/' "$T/wget.log")
+  HEADS=$(grep -c 'api.github.com.*/git/ref/heads/' "$T/wget.log")
 }
 
 # ── no guard input: exactly today's behaviour, no API call ───────────────────
@@ -186,6 +202,38 @@ expect_eq "$RC/$EDITS/$PUSHED" "0//0" "built is BEHIND deployed (the incident): 
 expect_has "$OUT" "skip ${APP_DIR}/overlays/dev: 97388a6 is older than the deployed 6767e5c" "behind: logs the skip line"
 expect_has "$OUT" "Nothing to deploy" "every overlay skipped: says there is nothing to deploy"
 expect_not_has "$OUT" "No changes to commit" "every overlay skipped: exits before the commit path"
+expect_eq "$HEADS" "1" "behind: the branch head is looked up once"
+expect_has "$(cat "$T/wget.log")" "https://api.github.com/repos/kaos-io/proj-app1/git/ref/heads/dev [Authorization: Bearer token]" "head lookup: the build's branch (refs/heads/ stripped) in the APP repo, same token"
+
+# A deliberate rollback: dev force-pushed back to 97388a6, so the build of it is
+# behind the deployed 6767e5c but IS the branch head — it must deploy.
+new_case "$OLD_SHA"; overlay dev "$IMAGE" "$NEW_TAG"; compare behind 0 1; set_head "$OLD_SHA"; run_notify
+expect_eq "$RC/$EDITS/$PUSHED" "0/dev/1" "rollback (behind but the branch head): edit + push"
+expect_has "$OUT" "deploy ${APP_DIR}/overlays/dev: 97388a6 is older than the deployed 6767e5c but is the head of dev (rollback)" "rollback: says why it deploys"
+expect_not_has "$OUT" "skip " "rollback: no skip line"
+
+new_case "$OLD_SHA"; overlay dev "$IMAGE" "$NEW_TAG"; compare behind 0 1; touch "$T/head-fail"; run_notify
+expect_eq "$RC/$EDITS/$PUSHED" "0/dev/1" "behind but the head lookup fails (401): edit + push"
+expect_has "$OUT" "WARN: stale-deploy guard: 97388a6 is behind the deployed 6767e5c but the head of 'dev' in kaos-io/proj-app1 is unknown" "head lookup failure: warns"
+expect_has "$OUT" "401" "head lookup failure: the warning carries the HTTP error"
+
+new_case "$OLD_SHA"; overlay dev "$IMAGE" "$NEW_TAG"; compare behind 0 1; printf '{"message":"Not Found"}' > "$T/head-body"; run_notify
+expect_eq "$RC/$EDITS/$PUSHED" "0/dev/1" "behind but the head answer names no sha: edit + push"
+
+new_case "$OLD_SHA"; overlay dev "$IMAGE" "$NEW_TAG"; compare behind 0 1
+printf '[{"object":{"sha":"%s"}},{"object":{"sha":"%s"}}]' "$NEW_SHA" "$OLD_SHA" > "$T/head-body"; run_notify
+expect_eq "$RC/$EDITS/$PUSHED" "0/dev/1" "behind but the head answer names two shas: edit + push"
+
+new_case "97388a6"; overlay dev "$IMAGE" "$NEW_TAG"; compare behind 0 1; run_notify
+expect_eq "$RC/$EDITS/$PUSHED/$COMPARES" "0/dev/1/0" "built sha is not 40 hex (short): edit + push, no API call"
+expect_has "$OUT" "is not a 40-hex sha" "short built sha: warns"
+
+new_case "97388a6z123456789abcdef0123456789abcdef0"; overlay dev "$IMAGE" "$NEW_TAG"; compare behind 0 1; run_notify
+expect_eq "$RC/$EDITS/$PUSHED/$COMPARES" "0/dev/1/0" "built sha has a non-hex char: edit + push, no API call"
+expect_has "$OUT" "is not a sha" "non-hex built sha: warns"
+
+new_case "$NEW_SHA"; overlay dev "$IMAGE" "$OLD_TAG"; compare ahead 1 0; run_notify
+expect_eq "$HEADS" "0" "ahead: no head lookup (only a behind answer needs it)"
 
 new_case "$OLD_SHA"; overlay dev "$IMAGE" "$NEW_TAG" '"'; compare behind 0 1; run_notify
 expect_eq "$RC/$EDITS/$PUSHED" "0//0" "a quoted newTag is read too: behind still skips"
@@ -198,6 +246,9 @@ new_case "$NEW_SHA"; overlay dev "$IMAGE" "$OLD_TAG"; touch "$T/compare-fail"; r
 expect_eq "$RC/$EDITS/$PUSHED" "0/dev/1" "compare API fails (non-2xx): edit + push"
 expect_has "$OUT" "WARN: stale-deploy guard: cannot compare 97388a6...6767e5c in kaos-io/proj-app1" "API failure: warns with the reason"
 expect_has "$OUT" "404" "API failure: the warning carries the HTTP error"
+
+new_case "$NEW_SHA"; overlay dev "$IMAGE" "$OLD_TAG"; : > "$T/token"; touch "$T/compare-fail"; run_notify
+expect_eq "$RC/$EDITS/$PUSHED" "0/dev/1" "empty token (compare rejected): edit + push"
 
 new_case "$NEW_SHA"; overlay dev "$IMAGE" "$OLD_TAG"; printf '<html>rate limited</html>' > "$T/compare-body"; run_notify
 expect_eq "$RC/$EDITS/$PUSHED" "0/dev/1" "unreadable compare body: edit + push"
