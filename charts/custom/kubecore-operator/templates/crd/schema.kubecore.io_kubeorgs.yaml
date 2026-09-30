@@ -759,6 +759,21 @@ spec:
                           format: date-time
                           type: string
                       type: object
+                    gitHubRulesets:
+                      description: |-
+                        GitHubRulesets: consumed by KubeApp, which only asks for a CI-gate
+                        ruleset on its repository when Supported is true. Nil = not probed yet,
+                        treated as unsupported (a KubeApp never waits on it).
+                      properties:
+                        reason:
+                          description: Reason explains Supported=false (GitHub's own refusal when it gave one).
+                          type: string
+                        supported:
+                          description: |-
+                            Supported is true when GitHub accepted a ruleset read on the org's
+                            private platform repository.
+                          type: boolean
+                      type: object
                     identityProvider:
                       description: Required for Ready.
                       properties:
