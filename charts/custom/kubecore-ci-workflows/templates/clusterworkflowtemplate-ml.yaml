@@ -655,7 +655,9 @@ spec:
       backoff:
         duration: "30s"
         factor: "2"
-        maxDuration: "5m"
+        # No maxDuration: Argo counts it from the FIRST attempt's start, so a
+        # 5m cap cancelled the retry of any step that ran past 5m — every
+        # real build (kubecore-operator#1377). limit bounds the retries.
     volumes:
     - name: build-workspace
       emptyDir: {}
@@ -1783,7 +1785,10 @@ spec:
                         # retries for genuine infra errors (node lost, eviction, image-pull)
                         # but stops immediately on an OOM so the user sees it and raises {step}-mem.
                         'expression': 'lastRetry.exitCode != "137"',
-                        'backoff': {'duration': '30s', 'factor': '2', 'maxDuration': '5m'},
+                        # No maxDuration: Argo counts it from the FIRST attempt's start, so a
+                        # 5m cap cancelled the retry of any step that ran past 5m — including
+                        # one killed at activeDeadlineSeconds below (kubecore-operator#1377).
+                        'backoff': {'duration': '30s', 'factor': '2'},
                     },
                     'activeDeadlineSeconds': 10800 if (is_gpu_default or is_quant_step) else 1800,
                     'container': container,
@@ -2451,7 +2456,10 @@ spec:
                     # not a transient error — fail fast so the user sees it. Genuine infra
                     # errors (node lost, eviction, image-pull) still retry.
                     'expression': 'lastRetry.exitCode != "137"',
-                    'backoff': {'duration': '30s', 'factor': '2', 'maxDuration': '5m'},
+                    # No maxDuration: Argo counts it from the FIRST attempt's start, so a
+                    # 5m cap cancelled the retry of any step that ran past 5m — including
+                    # one killed at activeDeadlineSeconds below (kubecore-operator#1377).
+                    'backoff': {'duration': '30s', 'factor': '2'},
                 },
                 # activeDeadlineSeconds is a generous ceiling that only catches a genuine
                 # multi-hour wedge (a hung S3/dataloader stall, a stuck node) — NOT normal
