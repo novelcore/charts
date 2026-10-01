@@ -502,7 +502,6 @@ spec:
       args:
       - |
         set -e
-        cd /workspace/repo
         TOKEN=$(cat /etc/github-token/token)
         NEW_VERSION="{{`{{inputs.parameters.new_version}}`}}"
         IMAGE_TAG="{{`{{inputs.parameters.image_tag}}`}}"
@@ -510,15 +509,11 @@ spec:
         TIMESTAMP=$(echo "$IMAGE_TAG" | sed -E 's/dev-v[0-9]+\.[0-9]+\.[0-9]+-([0-9]+-[0-9]+)-.*/\1/')
         DEV_TAG="dev-v${NEW_VERSION}-${TIMESTAMP}"
 
-        git config user.name "KubeCore CI"
-        git config user.email "ci@kubecore.io"
-
-        REPO_URL=$(echo "{{`{{workflow.parameters.repo_url}}`}}" | sed "s|https://|https://x-access-token:${TOKEN}@|")
-        git remote set-url origin "${REPO_URL}"
-
-        git tag -a "${DEV_TAG}" -m "Dev release v${NEW_VERSION}"
-        git push origin "${DEV_TAG}"
-        echo "Tagged: ${DEV_TAG}"
+        TAG="${DEV_TAG}"
+        TAG_MESSAGE="Dev release v${NEW_VERSION}"
+        # From a fresh repo, never /workspace/repo: see
+        # kubecore-ci-workflows.pushTag (kubecore-operator#1375).
+{{ include "kubecore-ci-workflows.pushTag" . | indent 8 }}
       volumeMounts:
       - name: workspace
         mountPath: /workspace

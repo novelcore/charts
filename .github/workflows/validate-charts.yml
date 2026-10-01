@@ -78,6 +78,16 @@ jobs:
           export PATH="$RUNNER_TEMP:$PATH"
           bash charts/custom/kubecore-ci-workflows/tests/dataset-config/run.sh
 
+      - name: Test kubecore-ci-workflows token steps never run workspace code (kubecore-operator#1375)
+        # Executes the tag steps (ml-ci-build, ci-build, ci-rc-build), the Hera
+        # enhancer (hera-enhance-commit, hera-enhance-gate) and the PR gate
+        # against a booby-trapped /workspace/repo: planted git hooks, a
+        # .git/config fsmonitor, and yaml.py / sitecustomize.py / a vendored
+        # kubecore.enhance. Every trap writes a marker if it ever runs.
+        run: |
+          export PATH="$RUNNER_TEMP:$PATH"
+          bash charts/custom/kubecore-ci-workflows/tests/untrusted-workspace/run.sh
+
       - name: Check borrowed-template parameter contracts
         # A templateRef borrows a template's body but not its parameter
         # declarations, so a template reading {{ workflow.parameters.X }}
