@@ -539,19 +539,14 @@ spec:
       args:
       - |
         set -e
-        cd /workspace/repo
         TOKEN=$(cat /etc/github-token/token)
         RC_TAG="{{`{{inputs.parameters.rc_tag}}`}}"
 
-        git config user.name "KubeCore CI"
-        git config user.email "ci@kubecore.io"
-
-        REPO_URL=$(echo "{{`{{workflow.parameters.repo_url}}`}}" | sed "s|https://|https://x-access-token:${TOKEN}@|")
-        git remote set-url origin "${REPO_URL}"
-
-        git tag -a "$RC_TAG" -m "Release candidate $RC_TAG"
-        git push origin "$RC_TAG"
-        echo "Tagged: ${RC_TAG}"
+        TAG="${RC_TAG}"
+        TAG_MESSAGE="Release candidate $RC_TAG"
+        # From a fresh repo, never /workspace/repo: see
+        # kubecore-ci-workflows.pushTag (kubecore-operator#1375).
+{{ include "kubecore-ci-workflows.pushTag" . | indent 8 }}
       volumeMounts:
       - name: workspace
         mountPath: /workspace
