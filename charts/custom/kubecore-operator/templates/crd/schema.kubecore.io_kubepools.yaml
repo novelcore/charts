@@ -830,8 +830,12 @@ spec:
                       type: boolean
                     ml:
                       description: |-
-                        ML enables the ML platform tools (MLflow, lakeFS, pricing cache).
-                        When true, creates an XMLSystem claim; requires Operators.Postgres when using shared Postgres.
+                        ML marks the pool for pool-level ML capabilities: the ML class node pools
+                        (compute.mlClasses) and the ML cost/GPU exporters. Project MLOps stacks
+                        (MLflow, lakeFS, Postgres) are per project and do not need it. The Zot
+                        registry's ML size does not need it either: a pool gets it whenever a
+                        KubeProject puts ML on the pool (kubecore-operator#1383). May only be
+                        turned on.
                       type: boolean
                     observability:
                       description: Observability enables VictoriaMetrics observability stack

@@ -39,6 +39,13 @@ rules:
 - apiGroups:
   - apiextensions.crossplane.io
   resources:
+  - compositionrevisions
+  - environmentconfigs/status
+  verbs:
+  - get
+- apiGroups:
+  - apiextensions.crossplane.io
+  resources:
   - environmentconfigs
   verbs:
   - create
@@ -48,12 +55,6 @@ rules:
   - patch
   - update
   - watch
-- apiGroups:
-  - apiextensions.crossplane.io
-  resources:
-  - environmentconfigs/status
-  verbs:
-  - get
 - apiGroups:
   - artifact.gcp.m.upbound.io
   resources:
