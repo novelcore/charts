@@ -105,6 +105,14 @@ jobs:
           export PATH="$RUNNER_TEMP:$PATH"
           bash charts/custom/kubecore-ci-workflows/tests/untrusted-workspace/run.sh
 
+      - name: Test kubecore-ci-workflows retry safety (kubecore-operator#1379)
+        # Every ML step retries a pod lost to a spot preemption; executes the
+        # clone (over a killed attempt's partial checkout) and tag (after its
+        # predecessor's push) steps twice against a local bare repo.
+        run: |
+          export PATH="$RUNNER_TEMP:$PATH"
+          bash charts/custom/kubecore-ci-workflows/tests/retry-safety/run.sh
+
       - name: Check borrowed-template parameter contracts
         # A templateRef borrows a template's body but not its parameter
         # declarations, so a template reading {{ workflow.parameters.X }}

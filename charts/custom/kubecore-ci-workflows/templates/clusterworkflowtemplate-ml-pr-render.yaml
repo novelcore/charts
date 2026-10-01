@@ -148,6 +148,7 @@ spec:
   # so the entrypoint can route: only Hera apps have a PR-time render. Seeds
   # the kubeline success description; hera-enhance-gate overwrites it.
   - name: detect-frontend
+{{ include "kubecore-ci-workflows.preemptionRetry" . | indent 4 }}
     outputs:
       parameters:
       - name: frontend
@@ -170,6 +171,7 @@ spec:
   # hera-render; this step only runs the vendored platform enhancer on the raw
   # WFT it produced, then gates. It never writes to any repo.
   - name: hera-enhance-gate
+{{ include "kubecore-ci-workflows.preemptionRetry" . | indent 4 }}
     securityContext:
       runAsUser: 0
       runAsGroup: 0
@@ -302,6 +304,7 @@ spec:
   # this Argo run. Best-effort against the GitHub API (curl without -f): a
   # status write must never be what fails the gate.
   - name: status
+{{ include "kubecore-ci-workflows.preemptionRetry" . | indent 4 }}
     inputs:
       parameters:
       - name: state

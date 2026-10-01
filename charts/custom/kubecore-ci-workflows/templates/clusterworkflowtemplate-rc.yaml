@@ -275,6 +275,8 @@ spec:
         TOKEN=$(cat /etc/github-token/token)
         AUTH_URL=$(echo "{{`{{workflow.parameters.repo_url}}`}}" | sed "s|https://|https://x-access-token:${TOKEN}@|")
         BRANCH=$(echo "{{`{{workflow.parameters.branch}}`}}" | sed 's|refs/heads/||')
+        # A retried attempt finds its predecessor's partial clone (#1379).
+        rm -rf /workspace/repo
         git clone --branch "${BRANCH}" "${AUTH_URL}" /workspace/repo
         cd /workspace/repo
         git fetch --tags --force

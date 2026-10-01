@@ -271,6 +271,7 @@ spec:
             value: "ML build succeeded"
 
   - name: clone
+{{ include "kubecore-ci-workflows.preemptionRetry" . | indent 4 }}
     container:
       image: alpine/git:latest
       command: [sh, -c]
@@ -281,6 +282,8 @@ spec:
         REPO_URL=$(echo "{{`{{workflow.parameters.repo_url}}`}}" | sed "s|https://|https://x-access-token:${TOKEN}@|")
         BRANCH=$(echo "{{`{{workflow.parameters.branch}}`}}" | sed 's|^refs/heads/||')
         # Need at least 2 commits for change detection (HEAD~1 vs HEAD)
+        # A retried attempt finds its predecessor's partial clone (#1379).
+        rm -rf /workspace/repo
         git clone --depth=50 --branch "${BRANCH}" "${REPO_URL}" /workspace/repo
         cd /workspace/repo
         # Explicitly fetch the target commit before checkout. A shallow clone of
@@ -318,6 +321,7 @@ spec:
         readOnly: true
 
   - name: detect-steps
+{{ include "kubecore-ci-workflows.preemptionRetry" . | indent 4 }}
     outputs:
       parameters:
       - name: changed_steps
@@ -531,6 +535,7 @@ spec:
         readOnly: true
 
   - name: version
+{{ include "kubecore-ci-workflows.preemptionRetry" . | indent 4 }}
     outputs:
       parameters:
       - name: new_version
@@ -831,6 +836,7 @@ spec:
         readOnly: true
 
   - name: render-wft
+{{ include "kubecore-ci-workflows.preemptionRetry" . | indent 4 }}
     inputs:
       parameters:
       - name: image_tag
@@ -2681,6 +2687,7 @@ spec:
   # sidecar an SA token for the pod-patch it needs (required by Argo when
   # automount is off — the whole point of the split: executor yes, client no).
   - name: hera-render
+{{ include "kubecore-ci-workflows.preemptionRetry" . | indent 4 }}
     automountServiceAccountToken: false
     executor:
       # Locked-down executor SA (workflowtaskresults only, NO secret-reader) —
@@ -2718,6 +2725,7 @@ spec:
 
   # STEP 2 (TOKEN-HOLDING, platform code only): enhance -> gate -> commit.
   - name: hera-enhance-commit
+{{ include "kubecore-ci-workflows.preemptionRetry" . | indent 4 }}
     inputs:
       parameters: []
     securityContext:
@@ -2918,6 +2926,7 @@ spec:
         readOnly: true
 
   - name: patch-images
+{{ include "kubecore-ci-workflows.preemptionRetry" . | indent 4 }}
     inputs:
       parameters:
       - name: image_tag
@@ -3102,6 +3111,7 @@ spec:
         readOnly: true
 
   - name: tag
+{{ include "kubecore-ci-workflows.preemptionRetry" . | indent 4 }}
     inputs:
       parameters:
       - name: image_tag
@@ -3131,6 +3141,7 @@ spec:
         readOnly: true
 
   - name: status
+{{ include "kubecore-ci-workflows.preemptionRetry" . | indent 4 }}
     # GitHub reporting for the AUTHORITATIVE in-cluster build (#1126): ONE
     # commit status (context kubecore-ml-ci by default) with target_url into
     # the Argo UI run, plus a Deployment rollup (environment auto = argo-workflows-<branch|pr> by default)
@@ -3258,6 +3269,7 @@ spec:
   # status (the check) and the Deployment (the rollup): together they are
   # the full GitHub-native report — no GitHub Actions anywhere.
   - name: report
+{{ include "kubecore-ci-workflows.preemptionRetry" . | indent 4 }}
     inputs:
       parameters:
       - name: pipeline
