@@ -9,7 +9,7 @@ metadata:
     kubecore.io/migration-issue: "#344"
     kubecore.io/migration-status: "unimplemented"
     policies.kyverno.io/category: "KubeCore Catalog"
-    policies.kyverno.io/description: "ML may only be turned ON. It gates the pool-level ML class node pools (compute.mlClasses) and the ML cost/GPU exporters; disabling deletes the class pools under running steps (#1236). Zot's larger ML volume no longer needs it: the pool gets it whenever a project puts ML on the pool (#1383). Project MLOps stacks run on per-project node groups, not on this flag."
+    policies.kyverno.io/description: "ML may only be turned ON. It gates the pool-level ML class node pools (compute.mlClasses); disabling deletes the class pools under running steps (#1236). Zot's ML volume (#1383) and the ML cost rules and exporters (#1386) no longer need it: they follow whether a project puts ML on the pool. Project MLOps stacks run on per-project node groups, not on this flag."
     policies.kyverno.io/severity: "medium"
     policies.kyverno.io/subject: "schema.kubecore.io/KubePool"
 spec:
