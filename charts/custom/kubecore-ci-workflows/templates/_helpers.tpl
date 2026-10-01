@@ -314,8 +314,38 @@ git init -q /tmp/tagrepo
 cd /tmp/tagrepo
 git config user.name "KubeCore CI"
 git config user.email "ci@kubecore.io"
-git fetch -q --depth=1 "${REPO_URL}" "${COMMIT}"
-git tag -a "${TAG}" -m "${TAG_MESSAGE}" "${COMMIT}"
-git push -q "${REPO_URL}" "refs/tags/${TAG}"
-echo "Tagged: ${TAG}"
+# A retried attempt may find the tag its predecessor already pushed (#1379):
+# the same commit is success, another commit is a real conflict.
+EXISTING=$(git ls-remote "${REPO_URL}" "refs/tags/${TAG}^{}" "refs/tags/${TAG}" | head -1 | cut -f1)
+if [ -n "${EXISTING}" ]; then
+  git fetch -q --depth=1 "${REPO_URL}" "refs/tags/${TAG}:refs/tags/${TAG}"
+  if [ "$(git rev-parse "refs/tags/${TAG}^{commit}")" != "${COMMIT}" ]; then
+    echo "Tag ${TAG} already exists on another commit"; exit 1
+  fi
+  echo "Tagged: ${TAG} (already present on ${COMMIT})"
+else
+  git fetch -q --depth=1 "${REPO_URL}" "${COMMIT}"
+  git tag -a "${TAG}" -m "${TAG_MESSAGE}" "${COMMIT}"
+  git push -q "${REPO_URL}" "refs/tags/${TAG}"
+  echo "Tagged: ${TAG}"
+fi
 {{- end }}
+
+{{/*
+Retry a step whose pod was lost to the infrastructure (kubecore-operator#1379):
+an Argo Error, or a pod killed by a spot preemption ("imminent node shutdown").
+Same policy as ci-build's steps; a genuine failure (non-zero exit with any
+other message) is NOT retried. No backoff.maxDuration: Argo counts it from the
+first attempt's start, so a cap cancels the retry of any step that ran past it
+(kubecore-operator#1377). Every step using it must be safe to re-run.
+*/}}
+{{- define "kubecore-ci-workflows.preemptionRetry" -}}
+retryStrategy:
+  limit: "2"
+  retryPolicy: Always
+  expression: 'lastRetry.status == "Error" or lastRetry.message matches "imminent node shutdown"'
+  backoff:
+    duration: "30s"
+    factor: "2"
+{{- end }}
+
