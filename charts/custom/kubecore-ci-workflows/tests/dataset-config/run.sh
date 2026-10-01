@@ -68,7 +68,8 @@ CLI_CTX='    lakefs:
 # gitops pipeline-context ConfigMap carrying CONTEXT under data.context.yaml.
 new_case() {
   T=$(mktemp -d "${BASE_TMP}/case-XXXX")
-  git init -q --bare -b dev "$T/origin.git"
+  # No `git init -b`: the CI runner's git predates it (< 2.28).
+  git init -q --bare "$T/origin.git" && git --git-dir="$T/origin.git" symbolic-ref HEAD refs/heads/dev
   git clone -q "$T/origin.git" "$T/seed" 2>/dev/null
   ( cd "$T/seed" && git checkout -q -b dev && echo app > README.md && git add README.md \
       && git -c user.name=t -c user.email=t@t commit -qm init && git push -q origin dev )
