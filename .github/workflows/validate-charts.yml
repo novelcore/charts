@@ -50,6 +50,15 @@ jobs:
           helm template t charts/custom/kubecore-ci-workflows > "$RUNNER_TEMP/ci-workflows.yaml"
           sh charts/custom/kubecore-ci-workflows/tests/stale-deploy/run.sh "$RUNNER_TEMP/ci-workflows.yaml"
 
+      - name: Test kubecore-ci-workflows render-order (kubecore-operator#1374)
+        # With workflow parallelism, Argo gives each free slot to the step
+        # group's first unstarted step: the renders must be listed before the
+        # build-push matrix or they wait for every build.
+        run: |
+          export PATH="$RUNNER_TEMP:$PATH"
+          helm template t charts/custom/kubecore-ci-workflows > "$RUNNER_TEMP/ci-workflows.yaml"
+          sh charts/custom/kubecore-ci-workflows/tests/render-order/run.sh "$RUNNER_TEMP/ci-workflows.yaml"
+
       - name: Set up Python
         uses: actions/setup-python@v4
         with:

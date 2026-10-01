@@ -186,21 +186,15 @@ spec:
     # hours, or never under node pressure). Running them in parallel lands the
     # config + form immediately while the images build alongside. patch-images
     # (next group) still correctly waits for build-push.
-    - - name: build-push
-        template: build-push
-        when: "{{`{{steps.detect-steps.outputs.parameters.has_changes}}`}} == true"
-        arguments:
-          parameters:
-          - name: step_name
-            value: "{{`{{item.name}}`}}"
-          - name: step_path
-            value: "{{`{{item.path}}`}}"
-          - name: image_tag
-            value: "{{`{{steps.version.outputs.parameters.image_tag}}`}}"
-          - name: new_version
-            value: "{{`{{steps.version.outputs.parameters.new_version}}`}}"
-        withParam: "{{`{{steps.detect-steps.outputs.parameters.changed_steps}}`}}"
-      - name: render-wft
+    #
+    # The renders are listed BEFORE build-push (kubecore-operator#1374). The
+    # workflow's `parallelism` (mlBuildParallelism, default 2) caps running
+    # pods, and Argo hands each free slot to the group's first unstarted step
+    # in list order. With build-push first, every slot went to the next of its
+    # N matrix items, so the render started only after the LAST build had
+    # (live, poolaki 2026-10-01: ~12 min behind 8 builds). Listed first, the
+    # render takes a slot at once and the builds share the rest.
+    - - name: render-wft
         template: render-wft
         # KUBELINE frontend only. Fire when a step image changed OR the WFT source
         # changed (wft_changed): kubeline.yaml IS the WFT source, so a kubeline-only
@@ -227,6 +221,20 @@ spec:
           parameters:
           - name: changed_steps
             value: "{{`{{steps.detect-steps.outputs.parameters.changed_steps}}`}}"
+      - name: build-push
+        template: build-push
+        when: "{{`{{steps.detect-steps.outputs.parameters.has_changes}}`}} == true"
+        arguments:
+          parameters:
+          - name: step_name
+            value: "{{`{{item.name}}`}}"
+          - name: step_path
+            value: "{{`{{item.path}}`}}"
+          - name: image_tag
+            value: "{{`{{steps.version.outputs.parameters.image_tag}}`}}"
+          - name: new_version
+            value: "{{`{{steps.version.outputs.parameters.new_version}}`}}"
+        withParam: "{{`{{steps.detect-steps.outputs.parameters.changed_steps}}`}}"
     - - name: patch-images
         template: patch-images
         # Also runs on a reconcile-submitted build even when nothing changed:
