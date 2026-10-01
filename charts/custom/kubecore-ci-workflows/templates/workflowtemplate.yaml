@@ -211,7 +211,9 @@ spec:
       backoff:
         duration: "30s"
         factor: "2"
-        maxDuration: "5m"
+        # No maxDuration: Argo counts it from the FIRST attempt's start, so a
+        # 5m cap cancelled the retry of any step that ran past 5m — every
+        # real build (kubecore-operator#1377). limit bounds the retries.
     activeDeadlineSeconds: 600
     container:
       image: alpine/git:latest
@@ -263,7 +265,9 @@ spec:
       backoff:
         duration: "30s"
         factor: "2"
-        maxDuration: "5m"
+        # No maxDuration: Argo counts it from the FIRST attempt's start, so a
+        # 5m cap cancelled the retry of any step that ran past 5m — every
+        # real build (kubecore-operator#1377). limit bounds the retries.
     activeDeadlineSeconds: 600
     outputs:
       parameters:
@@ -382,7 +386,9 @@ spec:
       backoff:
         duration: "30s"
         factor: "2"
-        maxDuration: "5m"
+        # No maxDuration: Argo counts it from the FIRST attempt's start, so a
+        # 5m cap cancelled the retry of any step that ran past 5m — every
+        # real build (kubecore-operator#1377). limit bounds the retries.
     activeDeadlineSeconds: 1800
     inputs:
       parameters:
@@ -490,7 +496,9 @@ spec:
       backoff:
         duration: "30s"
         factor: "2"
-        maxDuration: "5m"
+        # No maxDuration: Argo counts it from the FIRST attempt's start, so a
+        # 5m cap cancelled the retry of any step that ran past 5m — every
+        # real build (kubecore-operator#1377). limit bounds the retries.
     activeDeadlineSeconds: 600
     inputs:
       parameters:
@@ -550,7 +558,9 @@ spec:
       backoff:
         duration: "30s"
         factor: "2"
-        maxDuration: "5m"
+        # No maxDuration: Argo counts it from the FIRST attempt's start, so a
+        # 5m cap cancelled the retry of any step that ran past 5m — every
+        # real build (kubecore-operator#1377). limit bounds the retries.
     activeDeadlineSeconds: 600
     # GitHub reporting for the service build (#1126): ONE commit status
     # (context kubecore-ci) with target_url into the Argo UI run, plus a
@@ -694,7 +704,9 @@ spec:
       backoff:
         duration: "30s"
         factor: "2"
-        maxDuration: "5m"
+        # No maxDuration: Argo counts it from the FIRST attempt's start, so a
+        # 5m cap cancelled the retry of any step that ran past 5m — every
+        # real build (kubecore-operator#1377). limit bounds the retries.
     activeDeadlineSeconds: 600
     inputs:
       parameters:

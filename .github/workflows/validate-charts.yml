@@ -59,6 +59,14 @@ jobs:
           helm template t charts/custom/kubecore-ci-workflows > "$RUNNER_TEMP/ci-workflows.yaml"
           sh charts/custom/kubecore-ci-workflows/tests/render-order/run.sh "$RUNNER_TEMP/ci-workflows.yaml"
 
+      - name: Test kubecore-ci-workflows retry window (kubecore-operator#1377)
+        # Argo counts backoff.maxDuration from the first attempt's start, so a
+        # short cap silently cancels the retry of any step that ran past it.
+        run: |
+          export PATH="$RUNNER_TEMP:$PATH"
+          helm template t charts/custom/kubecore-ci-workflows > "$RUNNER_TEMP/ci-workflows.yaml"
+          sh charts/custom/kubecore-ci-workflows/tests/retry-window/run.sh "$RUNNER_TEMP/ci-workflows.yaml"
+
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
