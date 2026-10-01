@@ -68,6 +68,16 @@ jobs:
           helm template t charts/custom/kubecore-ci-workflows > "$RUNNER_TEMP/ci-workflows.yaml"
           bash charts/custom/kubecore-ci-workflows/tests/enhancer-drift/run.sh "$RUNNER_TEMP/ci-workflows.yaml"
 
+      - name: Test kubecore-ci-workflows dataset CLI config write (kubecore-operator#1347)
+        # Executes hera-enhance-commit's .kubecore/dataset-config.yaml write
+        # against a local bare repo standing in for the app repo, and
+        # ml-ci-reconcile's check-drift against stub kubectl/curl to pin the
+        # app repo to the chart's GitHub org. Reuses the jq and PyYAML installed
+        # by the step above.
+        run: |
+          export PATH="$RUNNER_TEMP:$PATH"
+          bash charts/custom/kubecore-ci-workflows/tests/dataset-config/run.sh
+
       - name: Check borrowed-template parameter contracts
         # A templateRef borrows a template's body but not its parameter
         # declarations, so a template reading {{ workflow.parameters.X }}

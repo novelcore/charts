@@ -156,3 +156,86 @@ label value, which would reject every reconcile-submitted build.
 {{- end -}}
 {{- $ref -}}
 {{- end }}
+
+{{/*
+Write .kubecore/dataset-config.yaml into the APP repo (kubecore-operator#1347).
+Shared by BOTH ML render frontends: render-wft (kubeline) and
+hera-enhance-commit (Hera). It lived only in render-wft, so no Hera app ever
+got the file and the kubecore-dataset CLI had no lakeFS URL and no browser
+login client_id. The caller must set CONTEXT_PATH (the gitops
+pipeline-context.yaml), APP_NAME, PROJECT_NAME and BRANCH, and have the app
+repo cloned with a push-capable token at /tmp/apprepo.
+*/}}
+{{- define "kubecore-ci-workflows.datasetConfigWrite" -}}
+# ── Write .kubecore/dataset-config.yaml into the APP repo ─────────────
+# The kubecore-dataset CLI (in each app repo) auto-discovers its lakeFS
+# URL/repo/namespace/probe AND its browser-login OIDC settings from this
+# file, so NOTHING is hardcoded per app
+# — every kubeapp gets its OWN correct values. Sourced from the same
+# pipeline-context the WFT is rendered from. Idempotent: only commits when
+# the content changes. Skipped silently if the app repo has no external URL
+# yet (baseDns absent) so a partially-configured pool never fails the render.
+DATASET_CFG=$(CONTEXT_PATH="$CONTEXT_PATH" APP_NAME="$APP_NAME" PROJECT_NAME="$PROJECT_NAME" python3 - <<'CFGEOF'
+import os, yaml
+# pipeline-context.yaml is a ConfigMap; the real context is a YAML STRING
+# under data['context.yaml'] — unwrap it exactly like the main render does
+# (render_wft.py: ctx = yaml.safe_load(raw_cm['data']['context.yaml'])).
+# Reading the ConfigMap top-level finds no 'lakefs' key → the config-write
+# was silently skipping on EVERY app, so no app ever got its real config.
+raw = yaml.safe_load(open(os.environ['CONTEXT_PATH'])) or {}
+if isinstance(raw, dict) and 'data' in raw and 'context.yaml' in (raw.get('data') or {}):
+    ctx = yaml.safe_load(raw['data']['context.yaml']) or {}
+else:
+    ctx = raw  # already-unwrapped context (defensive)
+lakefs = ctx.get('lakefs', {}) or {}
+url = lakefs.get('externalUrl', '') or ''
+if not url:
+    print('')  # no external URL yet — skip
+else:
+    cfg = {
+        'lakefsUrl': url,
+        'repo': lakefs.get('repository', os.environ['PROJECT_NAME']),
+        'namespace': ctx.get('namespace', 'ml-%s' % os.environ['PROJECT_NAME']),
+        'probeCron': lakefs.get('datasetProbeCron', '%s-dataset-catalog-probe' % os.environ['APP_NAME']),
+    }
+    # PKCE browser login (#1347). Without these the CLI has no client_id,
+    # cannot start a browser login, and falls back to the manual cookie
+    # paste — so this is the link that actually removes the paste.
+    # Only emitted when the operator has provisioned the public OIDC app
+    # (the composition omits lakefs.cli until then); half-written config
+    # would strand the CLI worse than no config.
+    cli = lakefs.get('cli', {}) or {}
+    if cli.get('oidcIssuer') and cli.get('oidcClientId'):
+        cfg['oidcIssuer'] = cli['oidcIssuer']
+        cfg['oidcClientId'] = cli['oidcClientId']
+        if cli.get('oidcProjectId'):
+            cfg['oidcProjectId'] = cli['oidcProjectId']
+    print('# Per-app dataset config — read by the kubecore-dataset CLI (nothing hardcoded).')
+    print('# Rendered by render-wft from this app pipeline-context. Do not edit by hand.')
+    print(yaml.safe_dump(cfg, default_flow_style=False, sort_keys=True).rstrip())
+CFGEOF
+)
+if [ -n "$DATASET_CFG" ] && [ -d /tmp/apprepo ]; then
+  mkdir -p /tmp/apprepo/.kubecore
+  printf '%s\n' "$DATASET_CFG" > /tmp/apprepo/.kubecore/dataset-config.yaml
+  ( cd /tmp/apprepo
+    git config user.email "ci@kubecore.io" 2>/dev/null || true
+    git config user.name "kubecore-ci" 2>/dev/null || true
+    git checkout -B "${BRANCH}" 2>/dev/null || git checkout "${BRANCH}" 2>/dev/null || true
+    git add .kubecore/dataset-config.yaml
+    if git diff --cached --quiet; then
+      echo "dataset-config: .kubecore/dataset-config.yaml already current in app repo"
+    else
+      git commit -m "chore(dataset): sync .kubecore/dataset-config.yaml (lakeFS URL/repo, CLI OIDC)" >/dev/null 2>&1 || true
+      git pull --rebase origin "${BRANCH}" >/dev/null 2>&1 || true
+      if git push origin "HEAD:${BRANCH}" 2>/dev/null; then
+        echo "dataset-config: pushed .kubecore/dataset-config.yaml to the app repo"
+      else
+        echo "dataset-config: could not push dataset-config to app repo (non-fatal)"
+      fi
+    fi
+  )
+else
+  echo "dataset-config: skipping dataset-config write (no external lakeFS URL in pipeline-context yet)"
+fi
+{{- end }}
