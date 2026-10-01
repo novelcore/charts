@@ -1159,6 +1159,71 @@ spec:
                   description: ObservedGeneration is the most recent generation observed by the controller
                   format: int64
                   type: integer
+                outputs:
+                  description: |-
+                    Outputs is the deliberate cross-service contract of this KubeApp (app
+                    links, kaos spec 2026-10-01 §4.3). Controllers read it ONLY through
+                    parentref.GetKubeAppOutputs (Ready + observedGeneration gate); services
+                    (dashboard-api via kaos-graph) apply the same gate. Everything else in
+                    this status is observational.
+                  properties:
+                    environments:
+                      description: |-
+                        One entry per selected environment that has a workload: each service
+                        environment (not ci, not ml) for service apps; the ml environment for
+                        ml-pipeline apps.
+                      items:
+                        description: |-
+                          AppEnvironmentOutput is where one environment of the app runs and how to
+                          open it.
+                        properties:
+                          argoCD:
+                            description: ArgoCD is present for every app type.
+                            properties:
+                              application:
+                                type: string
+                              url:
+                                description: URL is empty when the pool publishes no ArgoCD URL.
+                                type: string
+                            required:
+                              - application
+                            type: object
+                          kubePool:
+                            type: string
+                          name:
+                            type: string
+                          namespace:
+                            type: string
+                          pipeline:
+                            description: Pipeline is present only for ml-pipeline apps.
+                            properties:
+                              ciBuildsURL:
+                                description: |-
+                                  CIBuildsURL lists the Workflows in the project's ci namespace (the
+                                  app's CI builds). Empty when the pool publishes no Argo Workflows URL
+                                  or the project publishes no ci environment.
+                                type: string
+                              submitURL:
+                                description: SubmitURL is empty when the pool publishes no Argo Workflows URL.
+                                type: string
+                              workflowTemplate:
+                                type: string
+                            required:
+                              - workflowTemplate
+                            type: object
+                        required:
+                          - kubePool
+                          - name
+                          - namespace
+                        type: object
+                      type: array
+                    observedGeneration:
+                      description: |-
+                        Stamped by the SAME Reporting write that fills the rest of this struct,
+                        from GetGeneration() at render time. Never defaulted elsewhere.
+                      format: int64
+                      type: integer
+                  type: object
                 phase:
                   description: Phase indicates the current reconciliation phase
                   enum:

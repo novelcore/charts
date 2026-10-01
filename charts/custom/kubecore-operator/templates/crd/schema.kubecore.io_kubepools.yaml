@@ -1630,6 +1630,19 @@ spec:
                         parentref.GetKubePoolOutputs mirrors the same enable/default logic the operator's
                         own syncing phase uses before gating on it (plan r2 remediation Defect 2).
                       type: string
+                    toolURLs:
+                      description: |-
+                        ToolURLs are the browser-facing https:// URLs of the pool's operator UIs
+                        (app links, kaos spec 2026-10-01 §4.1). Stamped in the same Reporting
+                        write as the rest of outputs, from tools whose status is Ready. NOT
+                        required for Ready: an empty field means "no link" and consumers omit
+                        the link — they never guess a host.
+                      properties:
+                        argoCD:
+                          type: string
+                        argoWorkflows:
+                          type: string
+                      type: object
                     xKubeSystemRef:
                       description: ResourceReference contains a reference to a Kubernetes resource
                       properties:
