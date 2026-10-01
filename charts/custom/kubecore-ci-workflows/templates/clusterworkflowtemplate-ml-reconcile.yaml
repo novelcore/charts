@@ -179,14 +179,17 @@ spec:
         NS="{{`{{workflow.parameters.ci_namespace}}`}}"
 
         # The app's source repo is named the way the githubapp composition names
-        # it: {project}-{app}. repo_url is empty on the CronWorkflow (the webhook
-        # path fills it from the event payload), so derive owner/repo here.
-        ORG=$(echo "{{`{{workflow.parameters.gitops_repository}}`}}" | cut -d/ -f1)
+        # it: {project}-{app}, in this cluster's GitHub org. repo_url is empty on
+        # the CronWorkflow (the webhook path fills it from the event payload), so
+        # derive owner/repo here. The owner was hardcoded to novelcore, so in any
+        # other org every poll read a repo that does not exist and skipped: the
+        # reconciler silently never ran (kubecore-operator#1347, kaos-io).
+        ORG="{{ .Values.github.org }}"
         case "{{`{{workflow.parameters.repo_url}}`}}" in
           https://*)
             SLUG=$(echo "{{`{{workflow.parameters.repo_url}}`}}" | sed -E 's|https://github.com/||; s|\.git$||') ;;
           *)
-            SLUG="novelcore/${PROJECT}-${APP}" ;;
+            SLUG="${ORG}/${PROJECT}-${APP}" ;;
         esac
         echo "reconcile: polling ${SLUG}@${BRANCH}"
 
@@ -416,7 +419,7 @@ spec:
           arguments:
             parameters:
             - name: repo_url
-              value: "https://github.com/novelcore/{{`{{workflow.parameters.project_name}}`}}-{{`{{workflow.parameters.app_name}}`}}.git"
+              value: "https://github.com/{{ .Values.github.org }}/{{`{{workflow.parameters.project_name}}`}}-{{`{{workflow.parameters.app_name}}`}}.git"
             - name: commit_sha
               value: "{{`{{inputs.parameters.commit_sha}}`}}"
             - name: branch
