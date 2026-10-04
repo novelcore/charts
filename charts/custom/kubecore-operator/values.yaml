@@ -75,7 +75,7 @@ controllerManager:
       # GAR registry + version as the operator image, pulled keylessly by the GKE
       # node SA. The v2-branch placeholder below mirrors the operator image path so
       # even an unstamped chart resolves to a keyless-pullable image.
-      MELUXINA_TOKENMINT_IMAGE: "europe-west1-docker.pkg.dev/kaos-dev-gcp/kaos-images/platform/meluxina-tokenmint:0.100.0"
+      MELUXINA_TOKENMINT_IMAGE: "europe-west1-docker.pkg.dev/kaos-dev-gcp/kaos-images/platform/meluxina-tokenmint:0.101.0"
     resources:
       limits:
         cpu: 500m
@@ -287,6 +287,17 @@ tokenBroker:
     # pod selector can be narrowed here once sub-provider labels are confirmed stable.
     crossplanePodSelector: {}
 
+    # crossplanePodSelectorExpressions: optional matchExpressions ANDed with
+    # crossplanePodSelector (PRD 738 F-06). Empty (default) renders no
+    # matchExpressions, i.e. today's behaviour. matchLabels cannot express "any
+    # provider pod", so narrow crossplane-system to provider pods with:
+    #   - key: pkg.crossplane.io/provider
+    #     operator: Exists
+    # Every Crossplane provider pod carries that label (each GCP sub-provider has
+    # its own value, so `Exists` keeps them all); Crossplane core, rbac-manager
+    # and function pods (pkg.crossplane.io/function) do not, and never call the broker.
+    crossplanePodSelectorExpressions: []
+
     # Onboarding dashboard namespace allowed to call POST /federation/verify/{org}.
     # Set to `null` to disable the dashboard ingress rule. Note: overriding with
     # `{}` in a values file does NOT disable it — Helm deep-merges the empty map
@@ -344,7 +355,7 @@ compositions:
   # OCI image for the kubecore-compositions Configuration package.
   # CI overwrites this with <REGISTRY_URL>/<PROJECT_REGISTRY>/kubecore-compositions:vX.Y.Z
   # at release. Required (must be non-empty) when compositions.enabled=true.
-  package: "europe-west1-docker.pkg.dev/kaos-dev-gcp/kaos-images/platform/kubecore-compositions:v0.100.0"
+  package: "europe-west1-docker.pkg.dev/kaos-dev-gcp/kaos-images/platform/kubecore-compositions:v0.101.0"
   # pullPolicy controls when Crossplane downloads the package.
   # Options: IfNotPresent (default), Always, Never
   pullPolicy: IfNotPresent

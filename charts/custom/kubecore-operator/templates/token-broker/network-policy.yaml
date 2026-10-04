@@ -73,6 +73,13 @@ spec:
           podSelector:
             matchLabels:
               {{- toYaml .Values.tokenBroker.networkPolicy.crossplanePodSelector | nindent 14 }}
+            {{- with .Values.tokenBroker.networkPolicy.crossplanePodSelectorExpressions }}
+            # PRD 738 F-06: e.g. `pkg.crossplane.io/provider Exists` admits every
+            # provider pod (GCP sub-providers, AWS/Azure token-refresher sidecars)
+            # while excluding Crossplane core, rbac-manager, and function pods.
+            matchExpressions:
+              {{- toYaml . | nindent 14 }}
+            {{- end }}
       ports:
         - port: 8080
           protocol: TCP
