@@ -1,0 +1,47 @@
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: d3-kubepool-zot-storage-size-grow-only
+  annotations:
+    kubecore.io/catalog-domain: "D3"
+    kubecore.io/catalog-id: "d3-kubepool-zot-storage-size-grow-only"
+    kubecore.io/evidence-ref: "https://github.com/novelcore/kubecore-operator/issues/1400"
+    policies.kyverno.io/category: "KubeCore Catalog"
+    policies.kyverno.io/description: "spec.zotStorageSize may only grow: it sizes the Zot registry PVC, and a PVC cannot shrink. Leaving it unset or dropping it is allowed — the operator never asks the volume for less than it has."
+    policies.kyverno.io/severity: "medium"
+    policies.kyverno.io/subject: "schema.kubecore.io/KubePool"
+spec:
+  admission: true
+  emitWarning: false
+  validationFailureAction: Enforce
+  failurePolicy: Fail
+  background: true
+  rules:
+  - name: d3-kubepool-zot-storage-size-grow-only
+    skipBackgroundRequests: true
+    match:
+      any:
+      - resources:
+          kinds:
+            - KubePool
+    preconditions:
+      all:
+      - key: "{{ request.operation }}"
+        operator: Equals
+        value: UPDATE
+      - key: "{{ request.oldObject.spec.zotStorageSize || '' }}"
+        operator: NotEquals
+        value: ""
+      - key: "{{ request.object.spec.zotStorageSize || '' }}"
+        operator: NotEquals
+        value: ""
+    validate:
+      allowExistingViolations: true
+      message: "Field spec.zotStorageSize on KubePool may only grow (catalog: d3-kubepool-zot-storage-size-grow-only, domain: D3): the volume behind it cannot shrink. See PRD-310."
+      deny:
+        conditions:
+          all:
+          - key: "{{ request.object.spec.zotStorageSize }}"
+            operator: LessThan
+            value: "{{ request.oldObject.spec.zotStorageSize }}"
+

@@ -1041,6 +1041,20 @@ spec:
                         - enabled
                       type: object
                   type: object
+                zotStorageSize:
+                  anyOf:
+                    - type: integer
+                    - type: string
+                  description: |-
+                    ZotStorageSize is the size of the pool's in-cluster Zot registry volume
+                    (features.zotRegistry). It is managed here and nowhere else: no project,
+                    ML environment or feature flag changes it (#1400). It can only grow — a
+                    volume cannot shrink, so a decrease is denied at admission — and the
+                    registry never asks for less than it already has. Unset: 50Gi for a new
+                    pool; an existing pool keeps its current size. status.zotStorage shows
+                    what is requested and what the volume actually has.
+                  pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                  x-kubernetes-int-or-string: true
               required:
                 - cloudProvider
                 - kubeOrgRef
@@ -2173,6 +2187,20 @@ spec:
                         type: string
                     type: object
                   type: array
+                zotStorage:
+                  description: ZotStorage reports the Zot registry volume size (#1400).
+                  properties:
+                    capacity:
+                      description: |-
+                        Capacity is the size the volume actually has, as reported by the
+                        workload cluster. Below Requested while a grow is in progress.
+                      type: string
+                    requested:
+                      description: |-
+                        Requested is the size the operator asks the volume for: spec.zotStorageSize
+                        (or the 50Gi default), never below what the volume already has.
+                      type: string
+                  type: object
               type: object
           type: object
       served: true
