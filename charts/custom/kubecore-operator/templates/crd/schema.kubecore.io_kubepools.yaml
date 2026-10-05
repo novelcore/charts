@@ -139,11 +139,8 @@ spec:
                           properties:
                             compute:
                               description: |-
-                                Compute defines the catalog of CPU/GPU compute classes available to ML
-                                KubeApps on this cluster. See MLComputeConfig for semantics. AWS-side
-                                per-class Karpenter NodePool emission is a follow-up; the field is
-                                honoured by the type system today so KubeApp validation can pin
-                                classes that exist in the cluster catalog.
+                                Compute is DEPRECATED and ignored (kubecore-operator#1398); see the GCP
+                                field. ML compute comes from KubeProject ml environments.
                               properties:
                                 mlClasses:
                                   description: |-
@@ -151,11 +148,10 @@ spec:
                                     The operator provisions one NodePool per class; idle classes scale
                                     to zero nodes.
 
-                                    DEPRECATED (PRD-1124): pool-level ML compute is superseded by each ml
-                                    environment's declared flavours (KubeProject environments[].ml sizes,
-                                    rendered per environment by kubenv). Leave this empty on new pools.
-                                    An empty list provisions NO pool-level ML step pools — the former
-                                    kubecorecpu/kubecoregpu fallback pair is retired (#1134).
+                                    DEPRECATED and ignored (PRD-1124, kubecore-operator#1398): ML compute is
+                                    each ml environment's declared flavours (KubeProject environments[].ml,
+                                    rendered per environment by kubenv). Nothing is provisioned from this
+                                    list; leave it empty.
                                   items:
                                     description: |-
                                       MLComputeClass declares one named compute class in the cluster catalog.
@@ -523,14 +519,10 @@ spec:
                               type: string
                             compute:
                               description: |-
-                                Compute defines the cluster's ML compute classes (PRD-247 D-03 follow-up).
-                                Declare exactly one cpu-tier and one gpu-tier class; each becomes a
-                                dedicated GKE NodePool that autoscales from 0 — no nodes when idle.
-                                These two classes are the SINGLE source of truth for ML pipeline compute:
-                                the operator projects the cpu+gpu pair into each ML KubeApp's pipeline
-                                context. A pipeline step routes to the gpu class iff its {step}-gpu submit
-                                param is >0, else the cpu class — the engineer sets the request on the
-                                Argo Submit form. KubeApps declare no class selection.
+                                Compute is DEPRECATED and ignored (kubecore-operator#1398). ML compute
+                                comes from each KubeProject ml environment's declared flavours (PRD-1124);
+                                no pool-level ML node pools are rendered and ML KubeApps never read this
+                                catalog. Kept only so existing manifests still apply; leave it unset.
                               properties:
                                 mlClasses:
                                   description: |-
@@ -538,11 +530,10 @@ spec:
                                     The operator provisions one NodePool per class; idle classes scale
                                     to zero nodes.
 
-                                    DEPRECATED (PRD-1124): pool-level ML compute is superseded by each ml
-                                    environment's declared flavours (KubeProject environments[].ml sizes,
-                                    rendered per environment by kubenv). Leave this empty on new pools.
-                                    An empty list provisions NO pool-level ML step pools — the former
-                                    kubecorecpu/kubecoregpu fallback pair is retired (#1134).
+                                    DEPRECATED and ignored (PRD-1124, kubecore-operator#1398): ML compute is
+                                    each ml environment's declared flavours (KubeProject environments[].ml,
+                                    rendered per environment by kubenv). Nothing is provisioned from this
+                                    list; leave it empty.
                                   items:
                                     description: |-
                                       MLComputeClass declares one named compute class in the cluster catalog.
@@ -830,12 +821,11 @@ spec:
                       type: boolean
                     ml:
                       description: |-
-                        ML marks the pool for the pool-level ML class node pools
-                        (compute.mlClasses). Nothing else needs it: project MLOps stacks (MLflow,
-                        lakeFS, Postgres) are per project, and the Zot registry's ML size
-                        (kubecore-operator#1383) and the ML cost recording rules and exporters
-                        (#1386) follow whether a KubeProject puts ML on the pool. May only be
-                        turned on.
+                        ML is DEPRECATED and ignored (kubecore-operator#1398). Everything it once
+                        switched follows the projects: MLOps stacks and ML compute are per
+                        KubeProject (PRD-1124), and the Zot registry's ML size (#1383) and the ML
+                        cost rules and exporters (#1386) follow whether a project puts ML on the
+                        pool. Kept only so existing manifests still apply; leave it unset.
                       type: boolean
                     observability:
                       description: Observability enables VictoriaMetrics observability stack
