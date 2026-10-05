@@ -1,0 +1,19 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kubecore-kyverno-catalog-reader
+  labels:
+    rbac.kyverno.io/aggregate-to-admission-controller: "true"
+rules:
+- apiGroups:
+  - platform.kubecore.io
+  resources:
+  - xkubeapptemplates
+  verbs:
+  - get
+- apiGroups:
+  - schema.kubecore.io
+  resources:
+  - kubeprojects
+  verbs:
+  - get

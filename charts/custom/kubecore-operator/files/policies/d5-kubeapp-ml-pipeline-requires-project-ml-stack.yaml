@@ -1,0 +1,79 @@
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: d5-kubeapp-ml-pipeline-requires-project-ml-stack
+  annotations:
+    kubecore.io/catalog-domain: "D5"
+    kubecore.io/catalog-id: "d5-kubeapp-ml-pipeline-requires-project-ml-stack"
+    kubecore.io/evidence-ref: "https://github.com/novelcore/kubecore-operator/issues/1401"
+    policies.kyverno.io/category: "KubeCore Catalog"
+    policies.kyverno.io/description: "An ml-pipeline KubeApp is admitted only into a KubeProject with spec.ml.enabled=true; an unreadable template denies too, so a missing object or missing Kyverno RBAC never silently admits."
+    policies.kyverno.io/severity: "medium"
+    policies.kyverno.io/subject: "schema.kubecore.io/KubeApp"
+spec:
+  admission: true
+  emitWarning: false
+  validationFailureAction: Enforce
+  failurePolicy: Fail
+  background: false
+  rules:
+  - name: d5-kubeapp-ml-pipeline-requires-project-ml-stack-unresolved
+    skipBackgroundRequests: true
+    match:
+      any:
+      - resources:
+          kinds:
+            - KubeApp
+          operations:
+            - CREATE
+    context:
+    - name: relatedwhen
+      apiCall:
+        urlPath: "/apis/platform.kubecore.io/v1alpha1/xkubeapptemplates/{{ request.object.spec.kubeAppTemplateRef }}"
+        method: GET
+        jmesPath: "to_string(spec.type)"
+        default: __unresolved__
+    validate:
+      allowExistingViolations: true
+      message: "Cannot create KubeApp {{ request.object.metadata.name }}: xkubeapptemplates {{ request.object.spec.kubeAppTemplateRef }} cannot be read, so it is unknown whether catalog rule d5-kubeapp-ml-pipeline-requires-project-ml-stack applies (domain: D5). See PRD-310."
+      deny:
+        conditions:
+          all:
+          - key: "{{ relatedwhen }}"
+            operator: Equals
+            value: __unresolved__
+  - name: d5-kubeapp-ml-pipeline-requires-project-ml-stack
+    skipBackgroundRequests: true
+    match:
+      any:
+      - resources:
+          kinds:
+            - KubeApp
+          operations:
+            - CREATE
+    context:
+    - name: relatedwhen
+      apiCall:
+        urlPath: "/apis/platform.kubecore.io/v1alpha1/xkubeapptemplates/{{ request.object.spec.kubeAppTemplateRef }}"
+        method: GET
+        jmesPath: "to_string(spec.type)"
+        default: __unresolved__
+    - name: relatedrequire
+      apiCall:
+        urlPath: "/apis/schema.kubecore.io/v1beta1/namespaces/{{ request.namespace }}/kubeprojects/{{ request.object.spec.kubeProjectRef }}"
+        method: GET
+        jmesPath: "to_string(spec.ml.enabled)"
+        default: __unresolved__
+    validate:
+      allowExistingViolations: true
+      message: "KubeApp {{ request.object.metadata.name }} uses the ml-pipeline template {{ request.object.spec.kubeAppTemplateRef }}, but KubeProject {{ request.object.spec.kubeProjectRef }} has no ML stack: set spec.ml.enabled=true on the project first (catalog: d5-kubeapp-ml-pipeline-requires-project-ml-stack, domain: D5). See PRD-310."
+      deny:
+        conditions:
+          all:
+          - key: "{{ relatedwhen }}"
+            operator: Equals
+            value: "ml-pipeline"
+          - key: "{{ relatedrequire }}"
+            operator: NotEquals
+            value: "true"
+
