@@ -540,17 +540,6 @@ rules:
   - watch
 - apiGroups:
   - rbac.authorization.k8s.io
-  resourceNames:
-  - admin
-  - cluster-admin
-  - edit
-  - view
-  resources:
-  - clusterroles
-  verbs:
-  - bind
-- apiGroups:
-  - rbac.authorization.k8s.io
   resources:
   - rolebindings
   verbs:
