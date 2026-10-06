@@ -14,6 +14,12 @@ rules:
 - apiGroups:
   - schema.kubecore.io
   resources:
+  - kubepools
+  verbs:
+  - get
+- apiGroups:
+  - schema.kubecore.io
+  resources:
   - kubeprojects
   verbs:
   - get

@@ -1,0 +1,55 @@
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: d5-kubeproject-hpc-environment-requires-gar
+  annotations:
+    kubecore.io/catalog-domain: "D5"
+    kubecore.io/catalog-id: "d5-kubeproject-hpc-environment-requires-gar"
+    kubecore.io/evidence-ref: "https://github.com/novelcore/kubecore-operator/issues/1408"
+    policies.kyverno.io/category: "KubeCore Catalog"
+    policies.kyverno.io/description: "An ml environment with ml.hpc.enabled=true must resolve, on its KubePool, to a gar registry (spec.registry, else the pool's defaultRegistry); Zot, an undeclared name or an unreadable pool is denied."
+    policies.kyverno.io/severity: "medium"
+    policies.kyverno.io/subject: "schema.kubecore.io/KubeProject"
+spec:
+  admission: true
+  emitWarning: false
+  validationFailureAction: Enforce
+  failurePolicy: Fail
+  background: false
+  rules:
+  - name: d5-kubeproject-hpc-environment-requires-gar
+    skipBackgroundRequests: true
+    match:
+      any:
+      - resources:
+          kinds:
+            - KubeProject
+          operations:
+            - CREATE
+            - UPDATE
+    preconditions:
+      all:
+      - key: "{{ length(request.object.spec.environments[?ml.hpc.enabled == `true`] || `[]`) }}"
+        operator: GreaterThan
+        value: 0
+    validate:
+      allowExistingViolations: true
+      message: "KubeProject {{ request.object.metadata.name }} enables HPC (MeluXina) on an ml environment, but the registry it resolves on that environment's KubePool is not gar: MeluXina pulls step images from outside the cluster and cannot reach the in-cluster Zot. Set spec.registry to a gar registry declared in the pool's spec.registries (catalog: d5-kubeproject-hpc-environment-requires-gar, domain: D5). See PRD-310."
+      foreach:
+      - list: "request.object.spec.environments[?ml.hpc.enabled == `true`]"
+        context:
+        - name: pool
+          apiCall:
+            urlPath: "/apis/schema.kubecore.io/v1beta1/namespaces/{{ request.namespace }}/kubepools/{{ element.kubePool }}"
+            method: GET
+            jmesPath: "{registries: spec.registries || `[]`, defaultRegistry: spec.defaultRegistry || ''}"
+            default:
+              registries: []
+              defaultRegistry: ""
+        deny:
+          conditions:
+            any:
+            - key: "{{ pool.registries[?name=='{{ request.object.spec.registry || pool.defaultRegistry || pool.registries[0].name || 'default' }}'].type | [0] || 'none' }}"
+              operator: NotEquals
+              value: "gar"
+
