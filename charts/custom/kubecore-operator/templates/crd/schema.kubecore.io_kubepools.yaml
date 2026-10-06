@@ -959,7 +959,9 @@ spec:
                     Registries declares the container registries workloads on this pool may
                     use. When empty, the operator synthesises a single "default" entry of
                     type zot iff features.zotRegistry resolves true — so existing pools
-                    behave identically without declaring anything (R-11).
+                    behave identically without declaring anything (R-11). A pool runs one
+                    Zot server, so at most one entry may be of type zot; its zot block sizes
+                    that server's volume (#1400).
                   items:
                     description: |-
                       RegistrySpec declares one container registry that workloads on this pool may
@@ -1000,14 +1002,40 @@ spec:
                           - ecr
                           - acr
                         type: string
+                      zot:
+                        description: |-
+                          Zot configures the pool's in-cluster Zot server; only valid when Type
+                          is "zot".
+                        properties:
+                          storageSize:
+                            anyOf:
+                              - type: integer
+                              - type: string
+                            description: |-
+                              StorageSize is the size of the Zot registry volume. It is managed here
+                              and nowhere else: no project, ML environment or feature flag changes it
+                              (#1400). It can only grow — a volume cannot shrink, so a decrease is
+                              denied at admission — and the registry never asks for less than it
+                              already has. Unset (or no zot entry declared): 50Gi for a new pool; an
+                              existing pool keeps its current size. status.zotStorage shows what is
+                              requested and what the volume actually has.
+                            pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                            x-kubernetes-int-or-string: true
+                        type: object
                     required:
                       - name
                       - type
                     type: object
+                    x-kubernetes-validations:
+                      - message: zot is only valid on a registry of type zot
+                        rule: '!has(self.zot) || self.type == ''zot'''
                   type: array
                   x-kubernetes-list-map-keys:
                     - name
                   x-kubernetes-list-type: map
+                  x-kubernetes-validations:
+                    - message: 'at most one registry may be of type zot: a pool runs a single Zot server'
+                      rule: self.filter(r, r.type == 'zot').size() <= 1
                 systemProfile:
                   description: |-
                     SystemProfile controls the sizing of the platform system node group.
@@ -1041,20 +1069,6 @@ spec:
                         - enabled
                       type: object
                   type: object
-                zotStorageSize:
-                  anyOf:
-                    - type: integer
-                    - type: string
-                  description: |-
-                    ZotStorageSize is the size of the pool's in-cluster Zot registry volume
-                    (features.zotRegistry). It is managed here and nowhere else: no project,
-                    ML environment or feature flag changes it (#1400). It can only grow — a
-                    volume cannot shrink, so a decrease is denied at admission — and the
-                    registry never asks for less than it already has. Unset: 50Gi for a new
-                    pool; an existing pool keeps its current size. status.zotStorage shows
-                    what is requested and what the volume actually has.
-                  pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
-                  x-kubernetes-int-or-string: true
               required:
                 - cloudProvider
                 - kubeOrgRef
@@ -2197,7 +2211,8 @@ spec:
                       type: string
                     requested:
                       description: |-
-                        Requested is the size the operator asks the volume for: spec.zotStorageSize
+                        Requested is the size the operator asks the volume for: the zot entry's
+                        zot.storageSize in spec.registries
                         (or the 50Gi default), never below what the volume already has.
                       type: string
                   type: object

@@ -7,7 +7,7 @@ metadata:
     kubecore.io/catalog-id: "d3-kubepool-zot-storage-size-grow-only"
     kubecore.io/evidence-ref: "https://github.com/novelcore/kubecore-operator/issues/1400"
     policies.kyverno.io/category: "KubeCore Catalog"
-    policies.kyverno.io/description: "spec.zotStorageSize may only grow: it sizes the Zot registry PVC, and a PVC cannot shrink. Leaving it unset or dropping it is allowed — the operator never asks the volume for less than it has."
+    policies.kyverno.io/description: "The zot registry's zot.storageSize may only grow: it sizes the Zot registry PVC, and a PVC cannot shrink. Leaving it unset or dropping it is allowed — the operator never asks the volume for less than it has."
     policies.kyverno.io/severity: "medium"
     policies.kyverno.io/subject: "schema.kubecore.io/KubePool"
 spec:
@@ -29,19 +29,19 @@ spec:
       - key: "{{ request.operation }}"
         operator: Equals
         value: UPDATE
-      - key: "{{ request.oldObject.spec.zotStorageSize || '' }}"
+      - key: "{{ request.oldObject.spec.registries[?type=='zot'] | [0].zot.storageSize || '' }}"
         operator: NotEquals
         value: ""
-      - key: "{{ request.object.spec.zotStorageSize || '' }}"
+      - key: "{{ request.object.spec.registries[?type=='zot'] | [0].zot.storageSize || '' }}"
         operator: NotEquals
         value: ""
     validate:
       allowExistingViolations: true
-      message: "Field spec.zotStorageSize on KubePool may only grow (catalog: d3-kubepool-zot-storage-size-grow-only, domain: D3): the volume behind it cannot shrink. See PRD-310."
+      message: "Field spec.registries[].zot.storageSize on KubePool may only grow (catalog: d3-kubepool-zot-storage-size-grow-only, domain: D3): the volume behind it cannot shrink. See PRD-310."
       deny:
         conditions:
           all:
-          - key: "{{ request.object.spec.zotStorageSize }}"
+          - key: "{{ request.object.spec.registries[?type=='zot'] | [0].zot.storageSize }}"
             operator: LessThan
-            value: "{{ request.oldObject.spec.zotStorageSize }}"
+            value: "{{ request.oldObject.spec.registries[?type=='zot'] | [0].zot.storageSize }}"
 
