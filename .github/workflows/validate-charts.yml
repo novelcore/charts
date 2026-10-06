@@ -175,15 +175,7 @@ jobs:
 
       - name: Create kind cluster
         if: steps.list-changed.outputs.changed == 'true'
-        # kind-action v1.8.0's default kind (v0.20, kindest/node v1.27.3) no
-        # longer boots on the self-hosted runner: kubeadm init times out in
-        # wait-control-plane on every attempt (charts PR 153, 2026-10-06,
-        # three runs). Newer kind-action releases download with a curl flag
-        # the runner's curl lacks, so pin a newer kind through v1.8.0. Not
-        # v0.27.0: the runner's tool cache holds a broken kubectl under it.
         uses: helm/kind-action@v1.8.0
-        with:
-          version: v0.26.0
 
       # Custom charts ship Argo Workflows resources (ClusterWorkflowTemplate,
       # WorkflowTemplate, CronWorkflow). A vanilla kind cluster has none of
