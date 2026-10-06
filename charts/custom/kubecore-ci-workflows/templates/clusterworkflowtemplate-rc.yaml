@@ -273,7 +273,8 @@ spec:
       - |
         set -e
         TOKEN=$(cat /etc/github-token/token)
-        AUTH_URL=$(echo "{{`{{workflow.parameters.repo_url}}`}}" | sed "s|https://|https://x-access-token:${TOKEN}@|")
+{{ include "kubecore-ci-workflows.gitAuth" . | indent 8 }}
+        AUTH_URL="{{`{{workflow.parameters.repo_url}}`}}"
         BRANCH=$(echo "{{`{{workflow.parameters.branch}}`}}" | sed 's|refs/heads/||')
         # A retried attempt finds its predecessor's partial clone (#1379).
         rm -rf /workspace/repo
@@ -281,6 +282,8 @@ spec:
         cd /workspace/repo
         git fetch --tags --force
         git checkout "{{`{{workflow.parameters.commit_sha}}`}}"
+        # /workspace/repo is the kaniko build context: no token may persist in it.
+        git_assert_no_token /workspace/repo
         echo "Cloned at $(git rev-parse HEAD)"
       volumeMounts:
       - name: workspace
@@ -391,6 +394,9 @@ spec:
   # pool chart's values, so they are left in place rather than renamed in a
   # correctness fix. The key name is now a misnomer.
   - name: build-push
+    # The build container runs the tenant Dockerfile: no Kubernetes SA token
+    # in it, only in Argo's executor containers (kaos PRD 738 F-20).
+    {{- include "kubecore-ci-workflows.buildPodSpecPatch" . | nindent 4 }}
     # A hung or infra-killed step used to wedge the whole run forever: these
     # templates had neither a retry nor a deadline, so a pod stuck in Init or
     # lost to a spot preemption simply never ended. activeDeadlineSeconds kills
@@ -764,6 +770,7 @@ spec:
       - |
         set -e
         TOKEN=$(cat /etc/github-token/token)
+{{ include "kubecore-ci-workflows.gitAuth" . | indent 8 }}
         ORG="{{ .Values.github.org }}"
         PROJECT="{{`{{workflow.parameters.project_name}}`}}"
         OPS_REPO="${ORG}/${PROJECT}{{ .Values.gitops.projectRepoSuffix }}"
@@ -790,8 +797,9 @@ spec:
         APP_DIR="kubeapps/${PROJECT}-${APP_NAME}"
 
         # Clone ops repo
-        REPO_URL="https://x-access-token:${TOKEN}@github.com/${OPS_REPO}.git"
+        REPO_URL="https://github.com/${OPS_REPO}.git"
         git clone --depth=1 "${REPO_URL}" /tmp/ops-repo
+        git_assert_no_token /tmp/ops-repo
         cd /tmp/ops-repo
 
         # Install kustomize (direct binary download — alpine sh doesn't support the bash install script)

@@ -304,10 +304,12 @@ ran developer code with write access to that checkout (pipeline.py in
 hera-render, Dockerfile RUN in the image build), and a hook or .git/config
 entry planted there would run on this push, next to the token.
 
-Caller: TOKEN, TAG and TAG_MESSAGE set; image has git.
+Caller: TOKEN, TAG and TAG_MESSAGE set; image has git; gitAuth included (the
+token reaches git as a header, the URL below carries none).
 */}}
 {{- define "kubecore-ci-workflows.pushTag" -}}
-REPO_URL=$(echo "{{`{{workflow.parameters.repo_url}}`}}" | sed "s|https://|https://x-access-token:${TOKEN}@|")
+{{ include "kubecore-ci-workflows.gitAuth" . }}
+REPO_URL="{{`{{workflow.parameters.repo_url}}`}}"
 COMMIT="{{`{{workflow.parameters.commit_sha}}`}}"
 rm -rf /tmp/tagrepo
 git init -q /tmp/tagrepo
@@ -329,6 +331,109 @@ else
   git push -q "${REPO_URL}" "refs/tags/${TAG}"
   echo "Tagged: ${TAG}"
 fi
+{{- end }}
+
+{{/*
+GitHub auth for git that never writes the token to disk (kaos PRD 738 F-20).
+
+The token used to ride in the clone URL (https://x-access-token:TOKEN@github.com/…),
+and git persists a clone URL as remote.origin.url in .git/config. /workspace/repo
+is the kaniko build context, so a Dockerfile `RUN cat .git/config` read a live
+org GitHub App token, and `COPY . .` baked it into an image layer pushed to the
+registry. Every step that cloned that way left the token behind.
+
+Now every URL is token-free and `git` is a shell function that hands the token
+to the one git process it starts, as an HTTP Authorization header in
+GIT_CONFIG_* environment variables (git >= 2.31; every CI image ships 2.45+).
+Nothing reaches .git/config, nothing is exported to the script's other
+children, and fetch/push from a clone keep working because each call
+re-authenticates. The header is scoped to https://github.com/ only.
+
+git_assert_no_token DIR fails the step if DIR/.git/config holds a credential
+of any form — a guard against a future edit reintroducing the URL form.
+
+Caller: TOKEN set (empty = unauthenticated git, as before).
+*/}}
+{{- define "kubecore-ci-workflows.gitAuth" -}}
+# git with the GitHub App token as a per-process header (PRD 738 F-20): the
+# token never lands in .git/config. URLs below are plain https://github.com/…
+git() {
+  if [ -n "${TOKEN:-}" ]; then
+    env GIT_CONFIG_COUNT=1 \
+      GIT_CONFIG_KEY_0="http.https://github.com/.extraheader" \
+      GIT_CONFIG_VALUE_0="Authorization: Basic $(printf 'x-access-token:%s' "${TOKEN}" | base64 | tr -d '\n')" \
+      git "$@"
+  else
+    env git "$@"
+  fi
+}
+git_assert_no_token() {
+  _gcfg="$1/.git/config"
+  [ -f "${_gcfg}" ] || return 0
+  if grep -qiE 'x-access-token|extraheader|://[^/@[:space:]]+@' "${_gcfg}" \
+     || { [ -n "${TOKEN:-}" ] && grep -qF -- "${TOKEN}" "${_gcfg}"; }; then
+    echo "FATAL: ${_gcfg} holds a GitHub credential (PRD 738 F-20)" >&2
+    exit 1
+  fi
+}
+{{- end }}
+
+{{/*
+Build pods: no Kubernetes ServiceAccount token in the build container
+(kaos PRD 738 F-20).
+
+The kaniko container runs the tenant's Dockerfile, so whatever it can read, a
+`RUN` step can read. It needs no Kubernetes API access: its registry auth is a
+docker config file, GAR auth is GKE Workload Identity (the metadata server,
+not a token mount). Argo's own executor still needs the pod SA's token — the
+`init` container and the `wait` sidecar create/patch WorkflowTaskResults; the
+emissary in the main container talks to no API.
+
+Argo's built-in route (template automountServiceAccountToken: false +
+executor.serviceAccountName) needs a long-lived `<sa>.service-account-token`
+Secret for the executor SA in every project CI namespace — the operator creates
+one only for ML apps' hera-render-exec. So instead this patch turns automount
+off for the whole pod and mounts a projected, short-lived token of the SAME
+pod ServiceAccount into Argo's `init` and `wait` containers only, at the
+standard path: exactly the volume the kubelet would have mounted everywhere.
+The main (build) container gets nothing. No Secret, no new SA, no new RBAC.
+*/}}
+{{- define "kubecore-ci-workflows.buildPodSpecPatch" -}}
+{{- if .Values.buildPods.isolateServiceAccountToken }}
+podSpecPatch: |
+  automountServiceAccountToken: false
+  volumes:
+  - name: kubecore-executor-sa-token
+    projected:
+      defaultMode: 420
+      sources:
+      - serviceAccountToken:
+          path: token
+          expirationSeconds: 3607
+      - configMap:
+          name: kube-root-ca.crt
+          items:
+          - key: ca.crt
+            path: ca.crt
+      - downwardAPI:
+          items:
+          - path: namespace
+            fieldRef:
+              apiVersion: v1
+              fieldPath: metadata.namespace
+  initContainers:
+  - name: init
+    volumeMounts:
+    - name: kubecore-executor-sa-token
+      mountPath: /var/run/secrets/kubernetes.io/serviceaccount
+      readOnly: true
+  containers:
+  - name: wait
+    volumeMounts:
+    - name: kubecore-executor-sa-token
+      mountPath: /var/run/secrets/kubernetes.io/serviceaccount
+      readOnly: true
+{{- end }}
 {{- end }}
 
 {{/*
