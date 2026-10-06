@@ -175,7 +175,10 @@ jobs:
 
       - name: Create kind cluster
         if: steps.list-changed.outputs.changed == 'true'
-        uses: helm/kind-action@v1.8.0
+        # v1.8.0 (kind v0.20, kindest/node v1.27.3) no longer boots on the
+        # self-hosted runner: kubeadm init times out in wait-control-plane on
+        # every attempt (charts PR 153, 2026-10-06, three runs).
+        uses: helm/kind-action@v1.15.1
 
       # Custom charts ship Argo Workflows resources (ClusterWorkflowTemplate,
       # WorkflowTemplate, CronWorkflow). A vanilla kind cluster has none of
