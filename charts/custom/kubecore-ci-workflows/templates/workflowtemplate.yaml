@@ -222,14 +222,20 @@ spec:
       - |
         set -e
         TOKEN=$(cat /etc/github-token/token)
-        REPO_URL=$(echo "{{`{{workflow.parameters.repo_url}}`}}" | sed "s|https://|https://x-access-token:${TOKEN}@|")
+{{ include "kubecore-ci-workflows.gitAuth" . | indent 8 }}
+        REPO_URL="{{`{{workflow.parameters.repo_url}}`}}"
         # Strip refs/heads/ prefix if present (push events send full ref, PR events send branch name)
         BRANCH=$(echo "{{`{{workflow.parameters.branch}}`}}" | sed 's|^refs/heads/||')
         # A retried attempt finds its predecessor's partial clone (#1379).
         rm -rf /workspace/repo
         git clone --depth=50 --branch "${BRANCH}" "${REPO_URL}" /workspace/repo
         cd /workspace/repo
+        # Tags for the version step, fetched HERE while the token is at hand:
+        # the checkout keeps no credential, so the version step cannot fetch.
+        git fetch --tags --force
         git checkout "{{`{{workflow.parameters.commit_sha}}`}}"
+        # /workspace/repo is the kaniko build context: no token may persist in it.
+        git_assert_no_token /workspace/repo
         echo "Cloned at $(git rev-parse HEAD)"
       volumeMounts:
       - name: workspace
@@ -286,7 +292,8 @@ spec:
       - |
         set -e
         cd /workspace/repo
-        git fetch --tags --force
+        # Tags were fetched by the clone step: the checkout holds no credential
+        # (kaos PRD 738 F-20), so this step cannot fetch from the private repo.
 
         BRANCH_TYPE="{{`{{workflow.parameters.branch_type}}`}}"
 
@@ -360,6 +367,9 @@ spec:
   # note ml-ci-build had to use a TOP-LEVEL {app}-buildcache repo because a
   # nested cache path silently failed to persist in Zot.
   - name: build-push
+    # The build container runs the tenant Dockerfile: no Kubernetes SA token
+    # in it, only in Argo's executor containers (kaos PRD 738 F-20).
+    {{- include "kubecore-ci-workflows.buildPodSpecPatch" . | nindent 4 }}
     # A hung or infra-killed step used to wedge the whole run forever: these
     # templates had neither a retry nor a deadline, so a pod stuck in Init or
     # lost to a spot preemption simply never ended. activeDeadlineSeconds kills
@@ -721,6 +731,7 @@ spec:
       - |
         set -e
         TOKEN=$(cat /etc/github-token/token)
+{{ include "kubecore-ci-workflows.gitAuth" . | indent 8 }}
         ORG="{{ .Values.github.org }}"
         PROJECT="{{`{{workflow.parameters.project_name}}`}}"
         APP_NAME="{{`{{workflow.parameters.app_name}}`}}"
@@ -739,8 +750,9 @@ spec:
         APP_DIR="kubeapps/${PROJECT}-${APP_NAME}"
 
         # Clone ops repo
-        REPO_URL="https://x-access-token:${TOKEN}@github.com/${OPS_REPO}.git"
+        REPO_URL="https://github.com/${OPS_REPO}.git"
         git clone --depth=1 "${REPO_URL}" /tmp/ops-repo
+        git_assert_no_token /tmp/ops-repo
         cd /tmp/ops-repo
 
         # Install kustomize (direct binary download — alpine sh doesn't support the bash install script)

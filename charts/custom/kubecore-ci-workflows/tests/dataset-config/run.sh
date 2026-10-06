@@ -53,6 +53,14 @@ yq 'select(.kind == "ClusterWorkflowTemplate" and .metadata.name == "ml-ci-build
                      on {print}
                      on && /skipping dataset-config write/ {getline; print; exit}' > "$HERA_SRC"
 
+# The section calls the step's gitAuth functions (git, git_assert_no_token;
+# kaos PRD 738 F-20), defined at the top of the same script.
+GITAUTH_SRC="${BASE_TMP}/gitauth.src"
+yq 'select(.kind == "ClusterWorkflowTemplate" and .metadata.name == "ml-ci-build")
+    | .spec.templates[] | select(.name == "hera-enhance-commit") | .container.args[0]' \
+  "$RENDERED" | awk '/^git\(\) \{/ {on=1} on {print} on && /^}/ {n++; if (n == 2) exit}' > "$GITAUTH_SRC"
+expect_eq "$(grep -c '^git_assert_no_token() {' "$GITAUTH_SRC")" "1" "hera-enhance-commit defines the gitAuth functions"
+
 expect_lacks "$(grep -v '^[[:space:]]*#' "$HERA_SRC")" "/workspace/repo" \
   "hera write never touches /workspace/repo (untrusted checkout) in the token-holding step"
 
@@ -81,6 +89,7 @@ run_write() {
   {
     echo 'set -e'
     echo "TOKEN=token APP_NAME=app1 CONTEXT_PATH=$T/pipeline-context.yaml"
+    cat "$GITAUTH_SRC"
     sed -e "s#{{workflow.parameters.project_name}}#proj#g" \
         -e "s#{{workflow.parameters.branch}}#refs/heads/dev#g" \
         -e "s#{{workflow.parameters.repo_url}}#$T/origin.git#g" \

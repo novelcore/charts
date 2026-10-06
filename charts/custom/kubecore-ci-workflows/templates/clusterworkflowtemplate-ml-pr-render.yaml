@@ -188,6 +188,7 @@ spec:
         pip install --quiet pyyaml
 
         TOKEN=$(cat /etc/github-token/token)
+{{ include "kubecore-ci-workflows.gitAuth" . | indent 8 }}
         ORG="{{ .Values.github.org }}"
         GITOPS_REPO="{{`{{workflow.parameters.gitops_repository}}`}}"
         GITOPS_BRANCH="{{`{{workflow.parameters.gitops_branch}}`}}"
@@ -196,8 +197,9 @@ spec:
         # Real platform context: the app's pipeline-context.yaml (+ optional
         # dataset-catalog.yaml) from the gitops repo — identical discovery to
         # hera-enhance-commit so a PR renders exactly as the merge build will.
-        REPO_URL="https://x-access-token:${TOKEN}@github.com/${ORG}/${GITOPS_REPO}.git"
+        REPO_URL="https://github.com/${ORG}/${GITOPS_REPO}.git"
         git clone --quiet --depth=1 --branch "${GITOPS_BRANCH}" "${REPO_URL}" /tmp/gitops
+        git_assert_no_token /tmp/gitops
         CONTEXT_PATH=$(find /tmp/gitops -path "*/${APP_NAME}/${GITOPS_BRANCH}/pipeline-context.yaml" | head -1)
         if [ -z "$CONTEXT_PATH" ] || [ ! -f "$CONTEXT_PATH" ]; then
           echo "ERROR: pipeline-context.yaml not found under */${APP_NAME}/${GITOPS_BRANCH}/ in ${ORG}/${GITOPS_REPO}@${GITOPS_BRANCH}"

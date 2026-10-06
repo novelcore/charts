@@ -113,6 +113,16 @@ jobs:
           export PATH="$RUNNER_TEMP:$PATH"
           bash charts/custom/kubecore-ci-workflows/tests/retry-safety/run.sh
 
+      - name: Test kubecore-ci-workflows git token never persists (kaos PRD 738 F-20)
+        # No rendered script builds a token-bearing git URL; every networked git
+        # step uses the per-process header wrapper; the clone steps, EXECUTED
+        # against a local bare repo, leave no token anywhere in the build
+        # context; build pods mount the SA token into Argo's init/wait only;
+        # no chart Role grants Secret access.
+        run: |
+          export PATH="$RUNNER_TEMP:$PATH"
+          bash charts/custom/kubecore-ci-workflows/tests/git-token/run.sh
+
       - name: Check borrowed-template parameter contracts
         # A templateRef borrows a template's body but not its parameter
         # declarations, so a template reading {{ workflow.parameters.X }}

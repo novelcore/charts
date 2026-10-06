@@ -279,7 +279,8 @@ spec:
       - |
         set -e
         TOKEN=$(cat /etc/github-token/token)
-        REPO_URL=$(echo "{{`{{workflow.parameters.repo_url}}`}}" | sed "s|https://|https://x-access-token:${TOKEN}@|")
+{{ include "kubecore-ci-workflows.gitAuth" . | indent 8 }}
+        REPO_URL="{{`{{workflow.parameters.repo_url}}`}}"
         BRANCH=$(echo "{{`{{workflow.parameters.branch}}`}}" | sed 's|^refs/heads/||')
         # Need at least 2 commits for change detection (HEAD~1 vs HEAD)
         # A retried attempt finds its predecessor's partial clone (#1379).
@@ -293,7 +294,13 @@ spec:
         # longer in the shallow window → "fatal: unable to read tree <sha>" →
         # exit 128). Fetching the SHA directly makes the checkout deterministic.
         git fetch --depth=50 origin "{{`{{workflow.parameters.commit_sha}}`}}" || true
+        # Tags for the version step, fetched HERE while the token is at hand:
+        # the checkout keeps no credential, so the version step cannot fetch.
+        git fetch --tags --force
         git checkout "{{`{{workflow.parameters.commit_sha}}`}}"
+        # /workspace/repo is the build context and hera-render's input: no
+        # token may persist in it (kaos PRD 738 F-20).
+        git_assert_no_token /workspace/repo
         echo "Cloned at $(git rev-parse HEAD)"
         # Frontend detection: the ML app is authored EITHER as a Hera pipeline
         # (pipeline.py + config/ tree, Hydra params) OR the legacy kubeline.yaml
@@ -344,6 +351,7 @@ spec:
       args:
       - |
         set -e
+{{ include "kubecore-ci-workflows.gitAuth" . | indent 8 }}
         # detect-steps needs both git and yq; alpine/git ships with git but no yq.
         # Drop the yq binary in /usr/local/bin (~10MB, no-cache, idempotent).
         if ! command -v yq >/dev/null 2>&1; then
@@ -418,9 +426,12 @@ spec:
         GITOPS_BRANCH="{{`{{workflow.parameters.gitops_branch}}`}}"
         APP_NAME="{{`{{workflow.parameters.app_name}}`}}"
         if [ -f /etc/github-token/token ] && [ -n "$GITOPS_REPO" ]; then
-          GH_TOKEN=$(cat /etc/github-token/token)
-          GITOPS_URL="https://x-access-token:${GH_TOKEN}@github.com/{{ .Values.github.org }}/${GITOPS_REPO}.git"
-          if git clone --depth=1 --branch "${GITOPS_BRANCH}" "${GITOPS_URL}" /tmp/gitops 2>/dev/null; then
+          GITOPS_URL="https://github.com/{{ .Values.github.org }}/${GITOPS_REPO}.git"
+          # The token lives only in this subshell: the git calls below run in
+          # the app checkout and need none.
+          if ( TOKEN=$(cat /etc/github-token/token)
+               git clone --depth=1 --branch "${GITOPS_BRANCH}" "${GITOPS_URL}" /tmp/gitops 2>/dev/null ); then
+            git_assert_no_token /tmp/gitops
             # basePath is operator-configured (default "kubeapps") and not passed
             # here, so discover the file (same pattern as render-wft/patch-images).
             IMAGES_PATH=$(find /tmp/gitops -path "*/${APP_NAME}/${GITOPS_BRANCH}/pipeline-images.yaml" | head -1)
@@ -551,7 +562,8 @@ spec:
       - |
         set -e
         cd /workspace/repo
-        git fetch --tags --force
+        # Tags were fetched by the clone step: the checkout holds no credential
+        # (kaos PRD 738 F-20), so this step cannot fetch from the private repo.
 
         BRANCH_TYPE="{{`{{workflow.parameters.branch_type}}`}}"
 
@@ -607,6 +619,9 @@ spec:
   # layers" indefinitely. Kaniko's flat tar-based layer model handles
   # large images consistently.
   - name: build-push
+    # The build container runs the tenant Dockerfile: no Kubernetes SA token
+    # in it, only in Argo's executor containers (kaos PRD 738 F-20).
+    {{- include "kubecore-ci-workflows.buildPodSpecPatch" . | nindent 4 }}
     inputs:
       parameters:
       - name: step_name
@@ -676,7 +691,8 @@ spec:
       - |
         set -e
         TOKEN=$(cat /etc/github-token/token)
-        REPO_URL=$(echo "{{`{{workflow.parameters.repo_url}}`}}" | sed "s|https://|https://x-access-token:${TOKEN}@|")
+{{ include "kubecore-ci-workflows.gitAuth" . | indent 8 }}
+        REPO_URL="{{`{{workflow.parameters.repo_url}}`}}"
         BRANCH=$(echo "{{`{{workflow.parameters.branch}}`}}" | sed 's|^refs/heads/||')
         git clone --depth=1 --branch "${BRANCH}" "${REPO_URL}" /workspace/repo
         cd /workspace/repo
@@ -687,6 +703,8 @@ spec:
         # deterministically regardless of later pushes to the branch.
         git fetch --depth=1 origin "{{`{{workflow.parameters.commit_sha}}`}}" || true
         git checkout "{{`{{workflow.parameters.commit_sha}}`}}"
+        # This checkout is the kaniko build context: no token may persist in it.
+        git_assert_no_token /workspace/repo
         echo "Cloned at $(git rev-parse HEAD) for step {{`{{inputs.parameters.step_name}}`}}"
       volumeMounts:
       - name: build-workspace
@@ -857,6 +875,7 @@ spec:
         pip install pyyaml --quiet
 
         TOKEN=$(cat /etc/github-token/token)
+{{ include "kubecore-ci-workflows.gitAuth" . | indent 8 }}
         ORG="{{ .Values.github.org }}"
         GITOPS_REPO="{{`{{workflow.parameters.gitops_repository}}`}}"
         GITOPS_BRANCH="{{`{{workflow.parameters.gitops_branch}}`}}"
@@ -870,8 +889,9 @@ spec:
         IMAGE_TAG="{{`{{inputs.parameters.image_tag}}`}}"
         BRANCH=$(echo "{{`{{workflow.parameters.branch}}`}}" | sed 's|^refs/heads/||')
 
-        REPO_URL="https://x-access-token:${TOKEN}@github.com/${ORG}/${GITOPS_REPO}.git"
+        REPO_URL="https://github.com/${ORG}/${GITOPS_REPO}.git"
         git clone --depth=1 --branch "${GITOPS_BRANCH}" "${REPO_URL}" /tmp/gitops
+        git_assert_no_token /tmp/gitops
         git config --global user.name "KubeCore CI"
         git config --global user.email "ci@kubecore.io"
 
@@ -895,12 +915,13 @@ spec:
         # and in the built commit, yet the render dropped it because /workspace/repo
         # held a pre-fix kubeline). A self-contained clone at commit_sha makes the
         # render deterministic: the WFT always reflects the commit that was built.
-        APP_REPO_URL=$(echo "{{`{{workflow.parameters.repo_url}}`}}" | sed "s|https://|https://x-access-token:${TOKEN}@|")
+        APP_REPO_URL="{{`{{workflow.parameters.repo_url}}`}}"
         APP_COMMIT="{{`{{workflow.parameters.commit_sha}}`}}"
         rm -rf /tmp/apprepo
         git clone --depth=50 --branch "${BRANCH}" "${APP_REPO_URL}" /tmp/apprepo
         git -C /tmp/apprepo fetch --depth=1 origin "${APP_COMMIT}" || true
         git -C /tmp/apprepo checkout "${APP_COMMIT}"
+        git_assert_no_token /tmp/apprepo
         KUBELINE_PATH="/tmp/apprepo/kubeline.yaml"
         echo "render-wft: reading kubeline from fresh clone at ${APP_COMMIT}"
         # Source-commit committer epoch for the monotonic anti-churn guard below;
@@ -2744,6 +2765,7 @@ spec:
         pip install --quiet pyyaml
 
         TOKEN=$(cat /etc/github-token/token)
+{{ include "kubecore-ci-workflows.gitAuth" . | indent 8 }}
         ORG="{{ .Values.github.org }}"
         GITOPS_REPO="{{`{{workflow.parameters.gitops_repository}}`}}"
         GITOPS_BRANCH="{{`{{workflow.parameters.gitops_branch}}`}}"
@@ -2751,8 +2773,9 @@ spec:
 
         git config --global user.name "KubeCore CI"
         git config --global user.email "ci@kubecore.io"
-        REPO_URL="https://x-access-token:${TOKEN}@github.com/${ORG}/${GITOPS_REPO}.git"
+        REPO_URL="https://github.com/${ORG}/${GITOPS_REPO}.git"
         git clone --depth=1 --branch "${GITOPS_BRANCH}" "${REPO_URL}" /tmp/gitops
+        git_assert_no_token /tmp/gitops
 
         # Discover the app's gitops dir by locating pipeline-context.yaml — the
         # same discovery render-wft uses (basePath is operator-configured and not
@@ -2785,10 +2808,11 @@ spec:
         # would run here, in the step that holds the token.
         PROJECT_NAME="{{`{{workflow.parameters.project_name}}`}}"
         BRANCH=$(echo "{{`{{workflow.parameters.branch}}`}}" | sed 's|^refs/heads/||')
-        APP_REPO_URL=$(echo "{{`{{workflow.parameters.repo_url}}`}}" | sed "s|https://|https://x-access-token:${TOKEN}@|")
+        APP_REPO_URL="{{`{{workflow.parameters.repo_url}}`}}"
         rm -rf /tmp/apprepo
         git clone --depth=1 --branch "${BRANCH}" "${APP_REPO_URL}" /tmp/apprepo \
           || echo "dataset-config: could not clone the app repo (non-fatal)"
+        git_assert_no_token /tmp/apprepo
 {{ include "kubecore-ci-workflows.datasetConfigWrite" . | indent 8 }}
 
         # Optional dataset-catalog probe output (for the data-ref enum). Best-effort.
@@ -2944,6 +2968,7 @@ spec:
       - |
         set -e
         TOKEN=$(cat /etc/github-token/token)
+{{ include "kubecore-ci-workflows.gitAuth" . | indent 8 }}
         ORG="{{ .Values.github.org }}"
         GITOPS_REPO="{{`{{workflow.parameters.gitops_repository}}`}}"
         GITOPS_BRANCH="{{`{{workflow.parameters.gitops_branch}}`}}"
@@ -2961,8 +2986,9 @@ spec:
 
         apk add --no-cache git curl >/dev/null
 
-        REPO_URL="https://x-access-token:${TOKEN}@github.com/${ORG}/${GITOPS_REPO}.git"
+        REPO_URL="https://github.com/${ORG}/${GITOPS_REPO}.git"
         git clone --depth=1 --branch "${GITOPS_BRANCH}" "${REPO_URL}" /tmp/gitops
+        git_assert_no_token /tmp/gitops
         cd /tmp/gitops
 
         # pipeline-images.yaml is written by Crossplane at

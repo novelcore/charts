@@ -160,6 +160,15 @@ gcp:
 rbac:
   create: true
 
+# Build (kaniko) pods: the build container runs the tenant's Dockerfile, so it
+# gets no Kubernetes ServiceAccount token. A podSpecPatch turns automount off
+# for the pod and mounts a short-lived projected token of the same SA into
+# Argo's init/wait containers only (the executor needs it for
+# WorkflowTaskResults). See _helpers.tpl buildPodSpecPatch (kaos PRD 738 F-20).
+# false restores the kubelet's default mount in every container.
+buildPods:
+  isolateServiceAccountToken: true
+
 # Workspace volume (shared across all workflow steps via PVC)
 workspace:
   size: "5Gi"

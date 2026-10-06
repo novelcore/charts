@@ -1,15 +1,21 @@
 {{- if .Values.rbac.create }}
+# Role of the chart's own workflow SA in the argo-workflows namespace. It was
+# "<fullname>-secret-reader" and granted secrets:get; that rule is gone (kaos
+# PRD 738 F-20). No template reads a Secret through the API: github-token,
+# ci-registry-auth and the CI secrets reach pods as kubelet volumes or
+# secretKeyRef, which need no RBAC on the pod's SA, and pools configure no Argo
+# artifact repository. CI builds themselves run in each project's -ci
+# namespace as the operator's ci-build-sa (kubecore-operator #1413 removed
+# secrets there too); this SA only backs workflows submitted into
+# argo-workflows. Renamed so the name stops advertising a permission it lacks.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
-  name: {{ include "kubecore-ci-workflows.fullname" . }}-secret-reader
+  name: {{ include "kubecore-ci-workflows.fullname" . }}-workflow
   namespace: {{ include "kubecore-ci-workflows.namespace" . }}
   labels:
     {{- include "kubecore-ci-workflows.labels" . | nindent 4 }}
 rules:
-- apiGroups: [""]
-  resources: ["secrets"]
-  verbs: ["get"]
 # render-wft (live-compute path) reads the pool-scoped compute-catalog ConfigMap
 # (kubecore-ml-compute-catalog, written by the ml-compute-catalog-probe
 # CronWorkflow) to render the per-step class dropdowns. The render-wft pod runs
@@ -30,14 +36,14 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: {{ include "kubecore-ci-workflows.fullname" . }}-secret-reader
+  name: {{ include "kubecore-ci-workflows.fullname" . }}-workflow
   namespace: {{ include "kubecore-ci-workflows.namespace" . }}
   labels:
     {{- include "kubecore-ci-workflows.labels" . | nindent 4 }}
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
-  name: {{ include "kubecore-ci-workflows.fullname" . }}-secret-reader
+  name: {{ include "kubecore-ci-workflows.fullname" . }}-workflow
 subjects:
 - kind: ServiceAccount
   name: {{ include "kubecore-ci-workflows.serviceAccountName" . }}
