@@ -52,5 +52,19 @@ done
 ml_hits=$(yq 'select(.kind == "ClusterWorkflowTemplate" and (.metadata.name | test("^ml-")))' "$RENDERED" | grep -c 'ci-secrets')
 expect_eq "$ml_hits" 0 "ml-* templates carry no ci-secrets wiring"
 
+# A Zot-less pool never renders ci-registry-auth; every template that mounts it must
+# tolerate its absence or the kubelet never starts the pod (#1057 for ci-*, and the ML
+# templates on 2026-10-07, e2e-suite-ml-jq4vp).
+for wf in ci-build ci-rc-build ml-ci-build ml-ci-rc-build; do
+  expect_eq "$(yq "select(.kind == \"ClusterWorkflowTemplate\" and .metadata.name == \"$wf\") | .spec.volumes[] | select(.name == \"registry-auth\") | .secret.optional" "$RENDERED")" \
+    true "$wf: registry-auth (ci-registry-auth) volume is optional"
+done
+# ml-ci-build's docker-config step: GAR without the Secret is a keyless no-op, not a crash.
+dc=$(yq 'select(.kind == "ClusterWorkflowTemplate" and .metadata.name == "ml-ci-build") | .spec.templates[] | select(.name == "build-push") | .initContainers[] | select(.name == "docker-config") | .args[0]' "$RENDERED")
+expect_eq "$(printf '%s' "$dc" | grep -c 'cat /etc/registry-auth/username 2>/dev/null || true')" 1 \
+  "ml-ci-build docker-config: a missing ci-registry-auth does not abort under set -e"
+expect_eq "$(printf '%s' "$dc" | grep -c '\*-docker.pkg.dev\*)')" 1 \
+  "ml-ci-build docker-config: GAR without the Secret takes the keyless branch"
+
 echo "render: ${PASSED} passed, ${FAILED} failed"
 exit "$FAILED"

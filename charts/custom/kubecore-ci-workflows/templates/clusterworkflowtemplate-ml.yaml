@@ -101,6 +101,11 @@ spec:
   - name: registry-auth
     secret:
       secretName: ci-registry-auth
+      # Zot-only, as for ci-build (#1057): a GAR project pushes keylessly through
+      # Workload Identity (#1088) and a pool without Zot never renders this Secret.
+      # Without `optional` the kubelet refuses to start the pod and every ML build on
+      # a Zot-less pool hangs in PodInitializing (e2e-suite-ml-jq4vp, 2026-10-07).
+      optional: true
   arguments:
     parameters:
     - name: repo_url
@@ -723,12 +728,25 @@ spec:
         # back to registry_url for pre-0.9.7 callers that only pass one.
         REGISTRY="{{`{{workflow.parameters.build_registry_url}}`}}"
         if [ -z "$REGISTRY" ]; then REGISTRY="{{`{{workflow.parameters.registry_url}}`}}"; fi
-        REG_USER=$(cat /etc/registry-auth/username)
-        REG_PASS=$(cat /etc/registry-auth/password)
+        REG_USER=$(cat /etc/registry-auth/username 2>/dev/null || true)
+        REG_PASS=$(cat /etc/registry-auth/password 2>/dev/null || true)
+        mkdir -p /kaniko/.docker
+        if [ -z "${REG_USER}" ]; then
+          case "$REGISTRY" in
+            *-docker.pkg.dev*)
+              # GAR: no ci-registry-auth (optional mount above); the build-push
+              # container authenticates through the gcr helper (#1088).
+              echo '{"auths":{}}' > /kaniko/.docker/config.json
+              echo "GAR ${REGISTRY}: keyless push via Workload Identity, no Zot creds"
+              exit 0
+              ;;
+          esac
+          echo "FATAL: ${REGISTRY} requires the ci-registry-auth Secret, which is not mounted" >&2
+          exit 1
+        fi
         AUTH=$(printf '%s:%s' "${REG_USER}" "${REG_PASS}" | base64 -w0)
         # Kaniko reads /kaniko/.docker/config.json. Write the auth entry
         # for the in-cluster Zot URL kaniko pushes to.
-        mkdir -p /kaniko/.docker
         cat > /kaniko/.docker/config.json <<EOF
         {"auths":{"${REGISTRY}":{"auth":"${AUTH}"}}}
         EOF

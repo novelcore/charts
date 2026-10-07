@@ -88,6 +88,11 @@ spec:
   - name: registry-auth
     secret:
       secretName: ci-registry-auth
+      # Zot-only, as for ci-build (#1057): a GAR project pushes keylessly through
+      # Workload Identity (#1088) and a pool without Zot never renders this Secret.
+      # Without `optional` the kubelet refuses to start the pod and every ML build on
+      # a Zot-less pool hangs in PodInitializing (e2e-suite-ml-jq4vp, 2026-10-07).
+      optional: true
   arguments:
     parameters:
     - name: repo_url
