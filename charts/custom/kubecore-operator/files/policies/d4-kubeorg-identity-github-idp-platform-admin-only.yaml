@@ -34,7 +34,7 @@ spec:
         value: "{{ request.oldObject.spec.identity.githubIDP.enabled || '' }}"
     validate:
       allowExistingViolations: true
-      message: "Changing spec.identity.githubIDP.enabled on KubeOrg requires membership in one of [platform-admin] (catalog: d4-kubeorg-identity-github-idp-platform-admin-only, domain: D4). See PRD-310."
+      message: "Only a platform administrator can change GitHub sign-in, because it changes who can log in. Changing spec.identity.githubIDP.enabled on KubeOrg requires membership in one of [platform-admin] (catalog: d4-kubeorg-identity-github-idp-platform-admin-only, domain: D4). See PRD-310."
       deny:
         conditions:
           all:

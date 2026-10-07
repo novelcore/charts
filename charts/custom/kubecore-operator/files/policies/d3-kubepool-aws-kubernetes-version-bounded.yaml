@@ -41,7 +41,7 @@ spec:
         value: ""
     validate:
       allowExistingViolations: true
-      message: "Field spec.cloudProvider.aws.cluster.kubernetesVersion on KubePool must lie within the bounded set (catalog: d3-kubepool-aws-kubernetes-version-bounded, domain: D3). See PRD-310."
+      message: "Kubernetes version must be one the platform supports. Field spec.cloudProvider.aws.cluster.kubernetesVersion on KubePool must lie within the bounded set (catalog: d3-kubepool-aws-kubernetes-version-bounded, domain: D3). See PRD-310."
       deny:
         conditions:
           any:

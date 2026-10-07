@@ -37,7 +37,7 @@ spec:
         value: ""
     validate:
       allowExistingViolations: true
-      message: "Field spec.registries[].zot.storageSize on KubePool may only grow (catalog: d3-kubepool-zot-storage-size-grow-only, domain: D3): the volume behind it cannot shrink. See PRD-310."
+      message: "Registry storage can only grow; a disk cannot shrink. Field spec.registries[].zot.storageSize on KubePool may only grow (catalog: d3-kubepool-zot-storage-size-grow-only, domain: D3): the volume behind it cannot shrink. See PRD-310."
       deny:
         conditions:
           all:

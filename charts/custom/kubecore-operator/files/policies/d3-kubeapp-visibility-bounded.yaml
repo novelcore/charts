@@ -36,7 +36,7 @@ spec:
         value: ""
     validate:
       allowExistingViolations: true
-      message: "Field spec.visibility on KubeApp must lie within the bounded set (catalog: d3-kubeapp-visibility-bounded, domain: D3). See PRD-310."
+      message: "Repository visibility must be private, public or internal. Field spec.visibility on KubeApp must lie within the bounded set (catalog: d3-kubeapp-visibility-bounded, domain: D3). See PRD-310."
       deny:
         conditions:
           any:

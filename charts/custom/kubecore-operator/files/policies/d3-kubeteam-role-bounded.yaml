@@ -36,7 +36,7 @@ spec:
         value: ""
     validate:
       allowExistingViolations: true
-      message: "Field spec.role on KubeTeam must lie within the bounded set (catalog: d3-kubeteam-role-bounded, domain: D3). See PRD-310."
+      message: "A team's role must be dev, ops, business or admin. Field spec.role on KubeTeam must lie within the bounded set (catalog: d3-kubeteam-role-bounded, domain: D3). See PRD-310."
       deny:
         conditions:
           any:

@@ -36,7 +36,7 @@ spec:
         value: ""
     validate:
       allowExistingViolations: true
-      message: "Field spec.features.ciCd.branchStrategy.type on KubeApp must lie within the bounded set (catalog: d3-kubeapp-branch-strategy-type-bounded, domain: D3). See PRD-310."
+      message: "Branching model must be gitFlow, trunk or custom. Field spec.features.ciCd.branchStrategy.type on KubeApp must lie within the bounded set (catalog: d3-kubeapp-branch-strategy-type-bounded, domain: D3). See PRD-310."
       deny:
         conditions:
           any:

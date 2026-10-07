@@ -36,7 +36,7 @@ spec:
         value: ""
     validate:
       allowExistingViolations: true
-      message: "Field spec.profile on KubeApp must lie within the bounded set (catalog: d3-kubeapp-profile-bounded, domain: D3). See PRD-310."
+      message: "App size must be small, medium or large. Field spec.profile on KubeApp must lie within the bounded set (catalog: d3-kubeapp-profile-bounded, domain: D3). See PRD-310."
       deny:
         conditions:
           any:

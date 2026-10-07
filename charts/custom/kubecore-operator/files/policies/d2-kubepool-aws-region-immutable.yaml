@@ -36,7 +36,7 @@ spec:
         value: ""
     validate:
       allowExistingViolations: true
-      message: "Field spec.cloudProvider.aws.region on KubePool is immutable (catalog: d2-kubepool-aws-region-immutable, domain: D2). See PRD-310."
+      message: "A cluster's region is fixed once it exists. Field spec.cloudProvider.aws.region on KubePool is immutable (catalog: d2-kubepool-aws-region-immutable, domain: D2). See PRD-310."
       deny:
         conditions:
           all:

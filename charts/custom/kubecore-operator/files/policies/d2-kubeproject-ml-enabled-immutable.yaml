@@ -33,7 +33,7 @@ spec:
         value: UPDATE
     validate:
       allowExistingViolations: true
-      message: "Field spec.ml.enabled on KubeProject is immutable (catalog: d2-kubeproject-ml-enabled-immutable, domain: D2). See PRD-310."
+      message: "The ML platform cannot be switched on or off after the project is created. Field spec.ml.enabled on KubeProject is immutable (catalog: d2-kubeproject-ml-enabled-immutable, domain: D2). See PRD-310."
       deny:
         conditions:
           all:

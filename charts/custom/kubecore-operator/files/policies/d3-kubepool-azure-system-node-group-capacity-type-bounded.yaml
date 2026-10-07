@@ -39,7 +39,7 @@ spec:
         value: ""
     validate:
       allowExistingViolations: true
-      message: "Field spec.cloudProvider.azure.cluster.systemNodeGroup.capacityType on KubePool must lie within the bounded set (catalog: d3-kubepool-azure-system-node-group-capacity-type-bounded, domain: D3). See PRD-310."
+      message: "System node capacity must be on-demand or spot. Field spec.cloudProvider.azure.cluster.systemNodeGroup.capacityType on KubePool must lie within the bounded set (catalog: d3-kubepool-azure-system-node-group-capacity-type-bounded, domain: D3). See PRD-310."
       deny:
         conditions:
           any:

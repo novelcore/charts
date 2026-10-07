@@ -31,7 +31,7 @@ spec:
         value: UPDATE
     validate:
       allowExistingViolations: true
-      message: "Field spec.kubeProjectRef on KubeApp is immutable (catalog: d1-kubeapp-kube-project-ref-immutable, domain: D1). See PRD-310."
+      message: "An app cannot move to another project. Field spec.kubeProjectRef on KubeApp is immutable (catalog: d1-kubeapp-kube-project-ref-immutable, domain: D1). See PRD-310."
       deny:
         conditions:
           all:

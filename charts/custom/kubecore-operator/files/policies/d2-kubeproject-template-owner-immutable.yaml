@@ -33,7 +33,7 @@ spec:
         value: UPDATE
     validate:
       allowExistingViolations: true
-      message: "Field spec.githubConfiguration.repositorySource.template.owner on KubeProject is immutable (catalog: d2-kubeproject-template-owner-immutable, domain: D2). See PRD-310."
+      message: "The repository template is fixed once the project exists. Field spec.githubConfiguration.repositorySource.template.owner on KubeProject is immutable (catalog: d2-kubeproject-template-owner-immutable, domain: D2). See PRD-310."
       deny:
         conditions:
           all:

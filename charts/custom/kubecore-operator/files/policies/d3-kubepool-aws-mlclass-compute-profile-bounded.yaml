@@ -36,7 +36,7 @@ spec:
         value: ""
     validate:
       allowExistingViolations: true
-      message: "Field spec.cloudProvider.aws.cluster.compute.mlClasses[].computeProfile on KubePool must lie within the bounded set (catalog: d3-kubepool-aws-mlclass-compute-profile-bounded, domain: D3). See PRD-310."
+      message: "Compute profile must be ephemeral-training, stateful-serving or stateful-database. Field spec.cloudProvider.aws.cluster.compute.mlClasses[].computeProfile on KubePool must lie within the bounded set (catalog: d3-kubepool-aws-mlclass-compute-profile-bounded, domain: D3). See PRD-310."
       foreach:
       - list: "request.object.spec.cloudProvider.aws.cluster.compute.mlClasses"
         preconditions:

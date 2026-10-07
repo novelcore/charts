@@ -33,7 +33,7 @@ spec:
         value: UPDATE
     validate:
       allowExistingViolations: true
-      message: "Field spec.operators.redis on KubePool may only be turned on (catalog: d2-kubepool-operators-redis-monotonic, domain: D2): disabling it uninstalls the capability and the state it holds. See PRD-310."
+      message: "Shared Redis can be turned on but not off; turning it off would delete its data. Field spec.operators.redis on KubePool may only be turned on (catalog: d2-kubepool-operators-redis-monotonic, domain: D2): disabling it uninstalls the capability and the state it holds. See PRD-310."
       deny:
         conditions:
           all:

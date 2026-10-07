@@ -36,7 +36,7 @@ spec:
         value: ""
     validate:
       allowExistingViolations: true
-      message: "Field spec.k8sAppConfig.ingressConfig.pathType on KubeApp must lie within the bounded set (catalog: d3-kubeapp-ingress-path-type-bounded, domain: D3). See PRD-310."
+      message: "Path matching must be Prefix, Exact or ImplementationSpecific. Field spec.k8sAppConfig.ingressConfig.pathType on KubeApp must lie within the bounded set (catalog: d3-kubeapp-ingress-path-type-bounded, domain: D3). See PRD-310."
       deny:
         conditions:
           any:

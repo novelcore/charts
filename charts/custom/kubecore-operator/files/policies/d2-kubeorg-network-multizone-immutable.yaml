@@ -36,7 +36,7 @@ spec:
         value: true
     validate:
       allowExistingViolations: true
-      message: "Field spec.network.multizone on KubeOrg becomes immutable once a cloud config (awsConfig/gcpConfig/azureConfig) is set (catalog: d2-kubeorg-network-multizone-immutable, domain: D2); it is freely settable during the identity-only bootstrap window. See PRD-310."
+      message: "Single-zone or multi-zone networking is fixed once the organization has a cloud account. Field spec.network.multizone on KubeOrg becomes immutable once a cloud config (awsConfig/gcpConfig/azureConfig) is set (catalog: d2-kubeorg-network-multizone-immutable, domain: D2); it is freely settable during the identity-only bootstrap window. See PRD-310."
       deny:
         conditions:
           all:

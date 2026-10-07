@@ -33,7 +33,7 @@ spec:
         value: UPDATE
     validate:
       allowExistingViolations: true
-      message: "Field spec.ml.kubePool on KubeProject is immutable (catalog: d2-kubeproject-ml-kubepool-immutable, domain: D2). See PRD-310."
+      message: "The ML services cannot move to another cluster; that would need a data migration. Field spec.ml.kubePool on KubeProject is immutable (catalog: d2-kubeproject-ml-kubepool-immutable, domain: D2). See PRD-310."
       deny:
         conditions:
           all:

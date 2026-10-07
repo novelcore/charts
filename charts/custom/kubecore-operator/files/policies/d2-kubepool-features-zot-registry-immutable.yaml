@@ -33,7 +33,7 @@ spec:
         value: UPDATE
     validate:
       allowExistingViolations: true
-      message: "Field spec.features.zotRegistry on KubePool is immutable (catalog: d2-kubepool-features-zot-registry-immutable, domain: D2). See PRD-310."
+      message: "The built-in registry is fixed once set; turning it off would delete stored images. Field spec.features.zotRegistry on KubePool is immutable (catalog: d2-kubepool-features-zot-registry-immutable, domain: D2). See PRD-310."
       deny:
         conditions:
           all:

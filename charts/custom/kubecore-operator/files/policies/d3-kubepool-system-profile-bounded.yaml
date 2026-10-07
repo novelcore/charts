@@ -36,7 +36,7 @@ spec:
         value: ""
     validate:
       allowExistingViolations: true
-      message: "Field spec.systemProfile on KubePool must lie within the bounded set (catalog: d3-kubepool-system-profile-bounded, domain: D3). See PRD-310."
+      message: "System node size must be small, medium or ha. Field spec.systemProfile on KubePool must lie within the bounded set (catalog: d3-kubepool-system-profile-bounded, domain: D3). See PRD-310."
       deny:
         conditions:
           any:

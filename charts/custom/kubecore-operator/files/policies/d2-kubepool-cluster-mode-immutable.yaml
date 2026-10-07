@@ -33,7 +33,7 @@ spec:
         value: UPDATE
     validate:
       allowExistingViolations: true
-      message: "Field spec.clusterMode on KubePool is immutable (catalog: d2-kubepool-cluster-mode-immutable, domain: D2). See PRD-310."
+      message: "Cluster mode is fixed; switching between dev and production needs a new cluster. Field spec.clusterMode on KubePool is immutable (catalog: d2-kubepool-cluster-mode-immutable, domain: D2). See PRD-310."
       deny:
         conditions:
           all:

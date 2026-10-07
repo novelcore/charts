@@ -36,7 +36,7 @@ spec:
         value: ""
     validate:
       allowExistingViolations: true
-      message: "Field spec.ml.dataLifecycle on KubeProject must lie within the bounded set (catalog: d3-kubeproject-ml-data-lifecycle-bounded, domain: D3). See PRD-310."
+      message: "ML data lifecycle must be retain or wipe-on-delete. Field spec.ml.dataLifecycle on KubeProject must lie within the bounded set (catalog: d3-kubeproject-ml-data-lifecycle-bounded, domain: D3). See PRD-310."
       deny:
         conditions:
           any:

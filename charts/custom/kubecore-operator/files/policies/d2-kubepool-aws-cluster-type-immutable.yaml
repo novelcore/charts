@@ -36,7 +36,7 @@ spec:
         value: ""
     validate:
       allowExistingViolations: true
-      message: "Field spec.cloudProvider.aws.cluster.type on KubePool is immutable (catalog: d2-kubepool-aws-cluster-type-immutable, domain: D2). See PRD-310."
+      message: "Shared or dedicated is fixed once the cluster exists. Field spec.cloudProvider.aws.cluster.type on KubePool is immutable (catalog: d2-kubepool-aws-cluster-type-immutable, domain: D2). See PRD-310."
       deny:
         conditions:
           all:

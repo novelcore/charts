@@ -37,7 +37,7 @@ spec:
         value: "{{ request.oldObject.spec.cloudProvider.gcp.cluster.kubernetesVersion || '' }}"
     validate:
       allowExistingViolations: true
-      message: "Changing spec.cloudProvider.gcp.cluster.kubernetesVersion on KubePool requires membership in one of [platform-admin] (catalog: d4-kubepool-gcp-kubernetes-version-platform-admin-only, domain: D4). See PRD-310."
+      message: "Only a platform administrator can change the Kubernetes version. Changing spec.cloudProvider.gcp.cluster.kubernetesVersion on KubePool requires membership in one of [platform-admin] (catalog: d4-kubepool-gcp-kubernetes-version-platform-admin-only, domain: D4). See PRD-310."
       deny:
         conditions:
           all:
