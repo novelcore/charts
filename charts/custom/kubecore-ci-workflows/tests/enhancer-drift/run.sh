@@ -116,6 +116,7 @@ reconcile_build() {
                            labels: {"platform.kubecore.io/app": $app,
                                     "platform.kubecore.io/submitted-by": "ml-ci-reconcile",
                                     "platform.kubecore.io/enhancer-ref": $pin}},
+                spec: {arguments: {parameters: [{name: "app_name", value: $app}]}},
                 status: {phase: $phase, finishedAt: $fin}}]' \
     "$T/workflows.json" > "$T/w.tmp" && mv "$T/w.tmp" "$T/workflows.json"
 }
@@ -184,6 +185,13 @@ new_case; cm "$OLD_PIN"; reconcile_build b1 Running "" "$PIN"
 jq '.items[0].status = {phase: "Running"} | .items[0].metadata.name = "ml-ci-build-reconciled-x"' \
   "$T/workflows.json" > "$T/w.tmp" && mv "$T/w.tmp" "$T/workflows.json"; run_drift
 expect_eq "$RC/$NEEDS" "0/false" "a build in flight: the existing in-flight guard still wins"
+
+# Another app's build in the shared {project}-ci namespace must not block this app
+# (e2e-suite-ml-jq4vp: yolo never built behind mlci's stuck build).
+new_case; cm "$OLD_PIN"; reconcile_build b1 Running "" "$PIN" other-app
+jq '.items[0].status = {phase: "Running"} | .items[0].metadata.name = "ml-ci-build-x"' \
+  "$T/workflows.json" > "$T/w.tmp" && mv "$T/w.tmp" "$T/workflows.json"; run_drift
+expect_eq "$RC/$NEEDS" "0/true" "another app's build in flight does not block this app's reconcile"
 
 new_case; cm "$OLD_PIN"
 jq '.data["last-built-sha"] = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"' "$T/cm.json" > "$T/c.tmp" \
