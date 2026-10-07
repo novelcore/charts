@@ -159,9 +159,14 @@ spec:
           printf '' > /tmp/head_sha
           exit 0
         fi
-        ACTIVE=$(echo "$INFLIGHT" | jq -r '[.items[] | select((.metadata.name|startswith("ml-ci-build")) and (.status.phase=="Running" or .status.phase=="Pending" or .status.phase==null))] | length')
+        # Scoped to THIS app (as ci-reconcile is): every app of a project shares
+        # {project}-ci, so a namespace-wide count let one app's stuck build starve
+        # every other app's reconcile (e2e-suite-ml-jq4vp, 2026-10-07: yolo never
+        # built behind mlci's). app_name is on webhook and reconciled builds alike.
+        APP="{{`{{workflow.parameters.app_name}}`}}"
+        ACTIVE=$(echo "$INFLIGHT" | jq -r --arg app "$APP" '[.items[] | select((.metadata.name|startswith("ml-ci-build")) and (.status.phase=="Running" or .status.phase=="Pending" or .status.phase==null) and ([.spec.arguments.parameters[]? | select(.name=="app_name") | .value] | index($app)))] | length')
         if [ "${ACTIVE:-0}" != "0" ]; then
-          echo "reconcile: build already in flight (${ACTIVE} active ml-ci-build workflow(s)) - skipping submit this poll"
+          echo "reconcile: build already in flight (${ACTIVE} active ml-ci-build workflow(s) for ${APP}) - skipping submit this poll"
           printf 'false' > /tmp/needs_build
           printf '' > /tmp/head_sha
           exit 0
