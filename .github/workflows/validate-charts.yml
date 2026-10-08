@@ -66,6 +66,8 @@ jobs:
           export PATH="$RUNNER_TEMP:$PATH"
           helm template t charts/custom/kubecore-ci-workflows > "$RUNNER_TEMP/ci-workflows.yaml"
           sh charts/custom/kubecore-ci-workflows/tests/retry-window/run.sh "$RUNNER_TEMP/ci-workflows.yaml"
+          # report-observable runs the report step's shell, which uses jq (the step image has it).
+          command -v jq >/dev/null || { curl -sSL -o "$RUNNER_TEMP/jq" https://github.com/jqlang/jq/releases/download/jq-1.7.1/jq-linux-amd64 && chmod +x "$RUNNER_TEMP/jq"; }
           sh charts/custom/kubecore-ci-workflows/tests/report-observable/run.sh "$RUNNER_TEMP/ci-workflows.yaml"
 
       - name: Set up Python
