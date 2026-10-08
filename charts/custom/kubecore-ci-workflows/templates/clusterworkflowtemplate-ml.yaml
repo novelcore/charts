@@ -3435,12 +3435,28 @@ spec:
         else
           LIST="${API}/commits/${SHA}/comments?per_page=100"; CREATE="${API}/commits/${SHA}/comments"; EDIT="${API}/comments"
         fi
-        CID=$(curl -s -H "${AUTH}" -H "${ACCEPT}" "${LIST}" | jq -r --arg m "${MARKER}" '[.[]? | select(.body | startswith($m))] | .[0].id // empty')
-        if [ -n "${CID}" ]; then
-          curl -s -X PATCH -H "${AUTH}" -H "${ACCEPT}" "${EDIT}/${CID}" -d @/tmp/payload.json > /dev/null && echo "Updated report comment ${CID}"
-        else
-          curl -s -X POST -H "${AUTH}" -H "${ACCEPT}" "${CREATE}" -d @/tmp/payload.json > /dev/null && echo "Posted report comment (${PR:+PR #${PR}}${PR:-commit ${SHA}})"
+        # Every GitHub answer is checked and a failure is LOGGED with GitHub's own message:
+        # this used to print "Posted" whatever came back, and a PR report that never landed
+        # was invisible (e2e-suite-ml-xwrpm, 2026-10-08). Still best-effort (set +e): the
+        # report must never fail the run it reports on.
+        TARGET="${PR:+PR #${PR}}"; TARGET="${TARGET:-commit ${SHA}}"
+        LIST_CODE=$(curl -s -o /tmp/list.json -w '%{http_code}' -H "${AUTH}" -H "${ACCEPT}" "${LIST}")
+        if [ "${LIST_CODE}" != "200" ]; then
+          echo "report: listing comments on ${TARGET} answered ${LIST_CODE}: $(jq -r '.message // .' /tmp/list.json 2>/dev/null | head -c 300)"
+          echo '[]' > /tmp/list.json
         fi
+        CID=$(jq -r --arg m "${MARKER}" '[.[]? | objects | select((.body // "") | startswith($m))] | .[0].id // empty' /tmp/list.json)
+        if [ -n "${CID}" ]; then
+          CODE=$(curl -s -o /tmp/post.json -w '%{http_code}' -X PATCH -H "${AUTH}" -H "${ACCEPT}" "${EDIT}/${CID}" -d @/tmp/payload.json)
+          VERB="Updated report comment ${CID} on"
+        else
+          CODE=$(curl -s -o /tmp/post.json -w '%{http_code}' -X POST -H "${AUTH}" -H "${ACCEPT}" "${CREATE}" -d @/tmp/payload.json)
+          VERB="Posted report comment on"
+        fi
+        case "${CODE}" in
+          2*) echo "${VERB} ${TARGET}" ;;
+          *)  echo "report: comment on ${TARGET} FAILED, GitHub answered ${CODE}: $(jq -r '.message // .' /tmp/post.json 2>/dev/null | head -c 300)" ;;
+        esac
       volumeMounts:
       # Every caller (ml-ci-build, ml-ci-pr-render, ml-ci-rc-build, ci-build,
       # rc) declares a `workspace` volume, so this mount is always satisfiable;
