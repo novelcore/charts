@@ -88,15 +88,16 @@ jobs:
           helm template t charts/custom/kubecore-ci-workflows > "$RUNNER_TEMP/ci-workflows.yaml"
           bash charts/custom/kubecore-ci-workflows/tests/enhancer-drift/run.sh "$RUNNER_TEMP/ci-workflows.yaml"
 
-      - name: Test kubecore-ci-workflows dataset CLI config write (kubecore-operator#1347)
-        # Executes hera-enhance-commit's .kubecore/dataset-config.yaml write
-        # against a local bare repo standing in for the app repo, and
-        # ml-ci-reconcile's check-drift against stub kubectl/curl to pin the
-        # app repo to the chart's GitHub org. Reuses the jq and PyYAML installed
-        # by the step above.
+      - name: Test kubecore-ci-workflows reconcile trigger (kubecore-operator#1439, #1347)
+        # Executes ml-ci-reconcile's check-drift against stub kubectl/curl:
+        # force mode (the composition's creation/context-change trigger) retries
+        # "not yet" instead of skipping, the backstop is unchanged, the app repo
+        # is polled in the chart's GitHub org, and no ml-ci-build step writes
+        # the app repo's dataset config any more. Reuses the jq installed by
+        # the step above.
         run: |
           export PATH="$RUNNER_TEMP:$PATH"
-          bash charts/custom/kubecore-ci-workflows/tests/dataset-config/run.sh
+          bash charts/custom/kubecore-ci-workflows/tests/reconcile-trigger/run.sh
 
       - name: Test kubecore-ci-workflows token steps never run workspace code (kubecore-operator#1375)
         # Executes the tag steps (ml-ci-build, ci-build, ci-rc-build), the Hera

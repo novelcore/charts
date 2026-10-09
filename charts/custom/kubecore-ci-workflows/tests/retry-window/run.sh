@@ -37,9 +37,16 @@ EMBEDDED=$(yq 'select(.metadata.name == "ml-ci-build") | .spec.templates[] | sel
   | grep -v '^\s*#' | grep -c "maxDuration")
 expect_eq "$EMBEDDED" "0" "render-wft's pipeline-step retryStrategy has no maxDuration"
 
+# ml-ci-reconcile's check-drift is the one exception: its retry is not a
+# preemption retry but the force-mode "not yet" wait (exit 3 only,
+# kubecore-operator#1439), bounded by its own limit instead.
 LIMITS=$(yq 'select(.kind == "ClusterWorkflowTemplate" or .kind == "WorkflowTemplate")
+  | select(.metadata.name != "ml-ci-reconcile")
   | .spec.templates[] | select(.retryStrategy) | .retryStrategy.limit' "$RENDERED" | grep -v '^---$' | sort -u | tr '\n' ' ')
 expect_eq "$LIMITS" "2 " "every retryStrategy is still bounded by limit 2"
+WAIT=$(yq 'select(.metadata.name == "ml-ci-reconcile") | .spec.templates[] | select(.name == "check-drift")
+  | .retryStrategy.expression' "$RENDERED")
+expect_eq "$WAIT" "asInt(lastRetry.exitCode) == 3" "ml-ci-reconcile's longer retry fires only on its force-mode wait"
 
 echo "retry-window: ${PASSED} passed, ${FAILED} failed"
 exit "$FAILED"

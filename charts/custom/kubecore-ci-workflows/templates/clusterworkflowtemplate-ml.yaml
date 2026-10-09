@@ -242,15 +242,16 @@ spec:
         withParam: "{{`{{steps.detect-steps.outputs.parameters.changed_steps}}`}}"
     - - name: patch-images
         template: patch-images
-        # Also runs on a reconcile-submitted build even when nothing changed:
-        # patch-images is what records last-built-sha, and the CI reconciler
-        # (#459) polls HEAD against it. Gated on has_changes alone, a commit that
-        # legitimately builds nothing (docs, a README) would never update the
-        # baseline — so the reconciler would resubmit the same no-op build every
-        # 3 minutes forever (live 2026-07-16: 12 builds in ~12 min across 3
-        # apps). The step is a no-op when no image tag changed: it exits early on
-        # "No changes to commit".
-        when: "({{`{{steps.detect-steps.outputs.parameters.has_changes}}`}} == true || {{`{{workflow.parameters.event_type}}`}} == reconcile) && {{`{{workflow.parameters.branch_type}}`}} != chore"
+        # Runs on EVERY build, changed steps or not: patch-images is what records
+        # last-built-sha, and the CI reconciler (#459) polls HEAD against it.
+        # Gated on has_changes, a commit that legitimately builds nothing (docs,
+        # a README, a config file) never updated the baseline — first the
+        # reconciler resubmitted the same no-op build every 3 minutes (live
+        # 2026-07-16: 12 builds in ~12 min across 3 apps), and with the
+        # reconcile exception it still rebuilt every such SHA once more
+        # (charts#158). The step is a no-op when neither an image tag nor
+        # last-built-sha moved: it exits early on "No changes to commit".
+        when: "{{`{{workflow.parameters.branch_type}}`}} != chore"
         arguments:
           parameters:
           - name: image_tag
@@ -2650,7 +2651,9 @@ spec:
           SRC_COMMIT_TIME="$SRC_COMMIT_TIME" NODE_CLASS="$NODE_CLASS" \
           python3 /tmp/render_wft.py
 
-{{ include "kubecore-ci-workflows.datasetConfigWrite" . | indent 8 }}
+        # .kubecore/dataset-config.yaml is no longer written here: the k8smlapp
+        # composition owns it in the app repo from creation on (one writer, no
+        # chore(dataset) commit re-triggering builds — charts#158).
 
         cd /tmp/gitops
 
@@ -2817,21 +2820,6 @@ spec:
         else:
             yaml.safe_dump(doc, sys.stdout, sort_keys=False)
         CTXEOF
-
-        # Dataset CLI config (kubecore-operator#1347): Hera apps need
-        # .kubecore/dataset-config.yaml exactly like kubeline apps, or the
-        # kubecore-dataset CLI has no lakeFS URL and no browser-login client_id.
-        # Fresh token clone, NOT /workspace/repo: hera-render just ran untrusted
-        # developer code against that checkout, and a git hook planted there
-        # would run here, in the step that holds the token.
-        PROJECT_NAME="{{`{{workflow.parameters.project_name}}`}}"
-        BRANCH=$(echo "{{`{{workflow.parameters.branch}}`}}" | sed 's|^refs/heads/||')
-        APP_REPO_URL="{{`{{workflow.parameters.repo_url}}`}}"
-        rm -rf /tmp/apprepo
-        git clone --depth=1 --branch "${BRANCH}" "${APP_REPO_URL}" /tmp/apprepo \
-          || echo "dataset-config: could not clone the app repo (non-fatal)"
-        git_assert_no_token /tmp/apprepo
-{{ include "kubecore-ci-workflows.datasetConfigWrite" . | indent 8 }}
 
         # Optional dataset-catalog probe output (for the data-ref enum). Best-effort.
         CATALOG_ARG=""
