@@ -761,6 +761,15 @@ spec:
                           format: date-time
                           type: string
                       type: object
+                    gitHubAppPermissions:
+                      additionalProperties:
+                        type: string
+                      description: |-
+                        GitHubAppPermissions: the permissions the org granted its GitHub App
+                        installation, as GitHub reports them. Consumed by KubeProject, whose CI
+                        token asks only for what is granted (#1440). Nil = not probed yet; the
+                        CI token then keeps its default request.
+                      type: object
                     gitHubRulesets:
                       description: |-
                         GitHubRulesets: consumed by KubeApp, which only asks for a CI-gate
