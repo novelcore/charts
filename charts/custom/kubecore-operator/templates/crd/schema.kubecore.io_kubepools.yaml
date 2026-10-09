@@ -1104,6 +1104,22 @@ spec:
                       description: SecretName is the AWS Secrets Manager key name for OIDC credentials
                       type: string
                   type: object
+                argocd:
+                  description: |-
+                    Argocd reports what the pool's ArgoCD SSO policy has actually applied.
+                    Absent when the pool's ArgoCD has no SSO policy (no OIDC), so nothing
+                    project-scoped is managed there.
+                  properties:
+                    projectAccess:
+                      description: |-
+                        ProjectAccess lists the KubeProjects the APPLIED ArgoCD RBAC policy
+                        grants project-scoped access to, sorted by name. It moves only after the
+                        argocd Helm release has rolled the policy out, so a project listed here
+                        can use ArgoCD on this pool now.
+                      items:
+                        type: string
+                      type: array
+                  type: object
                 argocdOIDC:
                   description: ArgocdOIDC contains the Zitadel OIDC app status for ArgoCD SSO
                   properties:
