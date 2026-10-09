@@ -354,6 +354,48 @@ podSpecPatch: |
 {{- end }}
 
 {{/*
+The clone of a just-created app repository can run before the project's CI
+token covers it (kaos PRD 738 F-59): the token is scoped to the project's
+repositories that already exist, and the re-scope reaches the pool ~1 min after
+the repository does — while its push webhook is already live. GitHub answers
+that clone "Repository not found" (kaos e2e-suite-mn8rc, 2026-10-09: the first
+push's clone ran 4s before the re-scoped token landed, and the build failed).
+
+git_clone exits 75 (EX_TEMPFAIL) on exactly that answer so cloneRetry retries
+it in a NEW pod, which mounts the re-scoped token; every other clone failure
+keeps git's own exit code and is not retried. GitHub's answer is always logged.
+
+Caller: the gitAuth wrapper defined (git_clone calls git through it).
+*/}}
+{{- define "kubecore-ci-workflows.gitClone" -}}
+git_clone() {
+  _rc=0
+  _out=$(git clone "$@" 2>&1) || _rc=$?
+  printf '%s\n' "${_out}"
+  if [ "${_rc}" -ne 0 ] && printf '%s' "${_out}" | grep -q "Repository not found"; then
+    echo "The CI token does not reach this repository yet: a new app's repository joins the project's CI token scope about a minute after it is created. Exiting 75 so the step retries with the re-scoped token." >&2
+    exit 75
+  fi
+  return "${_rc}"
+}
+{{- end }}
+
+{{/*
+preemptionRetry plus exit 75: git_clone's "the CI token does not reach this
+repository yet" (see gitClone). Same limit and backoff (30s, then 60s), so the
+clone gets ~90s for the token to catch up.
+*/}}
+{{- define "kubecore-ci-workflows.cloneRetry" -}}
+retryStrategy:
+  limit: "2"
+  retryPolicy: Always
+  expression: 'lastRetry.status == "Error" or lastRetry.message matches "imminent node shutdown" or lastRetry.exitCode == "75"'
+  backoff:
+    duration: "30s"
+    factor: "2"
+{{- end }}
+
+{{/*
 Retry a step whose pod was lost to the infrastructure (kubecore-operator#1379):
 an Argo Error, or a pod killed by a spot preemption ("imminent node shutdown").
 Same policy as ci-build's steps; a genuine failure (non-zero exit with any
