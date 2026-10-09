@@ -102,6 +102,14 @@ spec:
                     type: object
                   minItems: 0
                   type: array
+                project:
+                  description: |-
+                    Owning KubeProject. Set: a project team, bound only to that project.
+                    Unset: an organization team. Immutable.
+                  maxLength: 63
+                  minLength: 1
+                  pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                  type: string
                 role:
                   description: |-
                     Role is the single role assigned to every member of this team.
@@ -117,6 +125,9 @@ spec:
                 - members
                 - role
               type: object
+              x-kubernetes-validations:
+                - message: spec.project is immutable
+                  rule: has(self.project) == has(oldSelf.project) && (!has(self.project) || self.project == oldSelf.project)
             status:
               description: status defines the observed state of KubeTeam
               properties:
