@@ -1,8 +1,11 @@
 {{/*
-ml-ci-reconcile — the level-triggered CI backstop (#459).
+ml-ci-reconcile — the level-triggered CI backstop (#459), and (force=true) the
+event-driven trigger the k8smlapp composition fires at creation and on every
+platform-context change.
 
 The k8smlapp composition creates a per-app CronWorkflow ({app}-ci-reconciler,
-every 3 min, concurrencyPolicy: Forbid) that invokes THIS template. Until it
+hourly since kubecore-operator#1439, concurrencyPolicy: Forbid) that invokes THIS
+template. Until it
 existed, every one of those CronWorkflows referenced a missing
 ClusterWorkflowTemplate and therefore NEVER FIRED (lastScheduledTime unset on
 every app, verified live 2026-07-16) — so the backstop the composition documents
@@ -92,6 +95,15 @@ spec:
     # Per-submission CI node pool (PRD-962 F-09), threaded into the
     # ml-ci-build Workflow this template submits below via
     # workflowTemplateRef — ml-ci-reconcile has no build pod of its own.
+    # force: submit a re-rendering build even when nothing drifted. Set by the
+    # k8smlapp composition's {app}-ci-sync-{hash} Workflow, which it renders at
+    # app creation and again whenever the app's platform context changes — the
+    # event-driven trigger; the CronWorkflow (force=false) is only the backstop.
+    # In force mode "not yet" (repo or pipeline-images not there, a build in
+    # flight) is retried (exit 3, see check-drift's retryStrategy) instead of
+    # skipped: skipping would drop the event, and there is no next poll.
+    - name: force
+      value: "false"
     - name: node_class
       value: {{ .Values.ci.defaultNodeClass | default (dig "platform.kubecore.io/nodegroup-type" "kubecorecpu" .Values.nodeSelector) | quote }}
 
@@ -115,6 +127,19 @@ spec:
             value: "{{`{{steps.check-drift.outputs.parameters.head_sha}}`}}"
 
   - name: check-drift
+    # Only force mode exits 3 ("not yet, retry"); every other outcome exits 0
+    # or fails for real, so the backstop poll is unchanged. A new app's repo,
+    # first commit and pipeline-images arrive within minutes, and a build in
+    # flight finishes within its own runtime: retry every minute for up to ~45
+    # minutes. No maxDuration (Argo counts it from the first attempt; see
+    # tests/retry-window).
+    retryStrategy:
+      limit: 45
+      retryPolicy: OnFailure
+      expression: "asInt(lastRetry.exitCode) == 3"
+      backoff:
+        duration: "60s"
+        factor: 1
     outputs:
       parameters:
       - name: needs_build
@@ -153,7 +178,21 @@ spec:
         # skip LOUDLY (never silently - the self-disabling class this template
         # documents). A read failure also skips: unknown state must never mean
         # "submit more work".
+        FORCE="{{`{{workflow.parameters.force}}`}}"
+        # not_yet MSG: in force mode, retry later (exit 3); otherwise skip this
+        # poll as before.
+        not_yet() {
+          if [ "$FORCE" = "true" ]; then
+            echo "reconcile: force: $1 — retrying"
+            exit 3
+          fi
+          echo "reconcile: $1 — skipping this poll"
+          printf 'false' > /tmp/needs_build
+          printf '' > /tmp/head_sha
+          exit 0
+        }
         if ! INFLIGHT=$(kubectl get workflows -n "{{`{{workflow.namespace}}`}}"               -o json 2>&1); then
+          [ "$FORCE" = "true" ] && not_yet "cannot list workflows (${INFLIGHT})"
           echo "reconcile: WARN cannot list workflows - in-flight state unknown, skipping this poll: ${INFLIGHT}"
           printf 'false' > /tmp/needs_build
           printf '' > /tmp/head_sha
@@ -166,6 +205,8 @@ spec:
         APP="{{`{{workflow.parameters.app_name}}`}}"
         ACTIVE=$(echo "$INFLIGHT" | jq -r --arg app "$APP" '[.items[] | select((.metadata.name|startswith("ml-ci-build")) and (.status.phase=="Running" or .status.phase=="Pending" or .status.phase==null) and ([.spec.arguments.parameters[]? | select(.name=="app_name") | .value] | index($app)))] | length')
         if [ "${ACTIVE:-0}" != "0" ]; then
+          # force: the running build may predate the change this run is for.
+          [ "$FORCE" = "true" ] && not_yet "build already in flight (${ACTIVE} active ml-ci-build workflow(s) for ${APP})"
           echo "reconcile: build already in flight (${ACTIVE} active ml-ci-build workflow(s) for ${APP}) - skipping submit this poll"
           printf 'false' > /tmp/needs_build
           printf '' > /tmp/head_sha
@@ -203,6 +244,8 @@ spec:
           "https://api.github.com/repos/${SLUG}/commits/${BRANCH}" | jq -r '.sha // empty')
         if [ -z "$HEAD_SHA" ]; then
           # A transient API failure must NOT look like drift and storm builds.
+          # force: at app creation the repo may not exist yet.
+          [ "$FORCE" = "true" ] && not_yet "could not read HEAD for ${SLUG}@${BRANCH}"
           echo "reconcile: could not read HEAD for ${SLUG}@${BRANCH} — skipping this poll"
           printf 'false' > /tmp/needs_build
           printf '' > /tmp/head_sha
@@ -246,6 +289,8 @@ spec:
                 echo "reconcile: NAMESPACE DRIFT — gitops pins ${APP}-pipeline-images to '${GITOPS_NS}' but the app now runs in '${ML_NS}'; submitting ml-ci-build to relocate it"
                 exit 0
               else
+                # force: a new app's pipeline-images is still syncing.
+                [ "$FORCE" = "true" ] && not_yet "${ML_NS}/${APP}-pipeline-images absent, gitops already targets '${ML_NS}' (ArgoCD sync pending)"
                 echo "reconcile: ${ML_NS}/${APP}-pipeline-images absent but gitops already targets '${ML_NS}' — waiting for ArgoCD; skipping this poll"
               fi
               ;;
@@ -260,6 +305,12 @@ spec:
         LAST=$(echo "$CM" | jq -r '.data["last-built-sha"] // empty')
         echo "reconcile: ${ML_NS}/${APP}-pipeline-images head=${HEAD_SHA} last-built=${LAST:-<none>}"
         printf '%s' "$HEAD_SHA" > /tmp/head_sha
+
+        if [ "$FORCE" = "true" ]; then
+          printf 'true' > /tmp/needs_build
+          echo "reconcile: FORCED — app created or its platform context changed; submitting ml-ci-build to (re)render"
+          exit 0
+        fi
 
         if [ "$LAST" != "$HEAD_SHA" ]; then
           printf 'true' > /tmp/needs_build

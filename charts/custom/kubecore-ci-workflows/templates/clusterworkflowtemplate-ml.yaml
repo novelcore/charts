@@ -2650,7 +2650,9 @@ spec:
           SRC_COMMIT_TIME="$SRC_COMMIT_TIME" NODE_CLASS="$NODE_CLASS" \
           python3 /tmp/render_wft.py
 
-{{ include "kubecore-ci-workflows.datasetConfigWrite" . | indent 8 }}
+        # .kubecore/dataset-config.yaml is no longer written here: the k8smlapp
+        # composition owns it in the app repo from creation on (one writer, no
+        # chore(dataset) commit re-triggering builds — charts#158).
 
         cd /tmp/gitops
 
@@ -2817,21 +2819,6 @@ spec:
         else:
             yaml.safe_dump(doc, sys.stdout, sort_keys=False)
         CTXEOF
-
-        # Dataset CLI config (kubecore-operator#1347): Hera apps need
-        # .kubecore/dataset-config.yaml exactly like kubeline apps, or the
-        # kubecore-dataset CLI has no lakeFS URL and no browser-login client_id.
-        # Fresh token clone, NOT /workspace/repo: hera-render just ran untrusted
-        # developer code against that checkout, and a git hook planted there
-        # would run here, in the step that holds the token.
-        PROJECT_NAME="{{`{{workflow.parameters.project_name}}`}}"
-        BRANCH=$(echo "{{`{{workflow.parameters.branch}}`}}" | sed 's|^refs/heads/||')
-        APP_REPO_URL="{{`{{workflow.parameters.repo_url}}`}}"
-        rm -rf /tmp/apprepo
-        git clone --depth=1 --branch "${BRANCH}" "${APP_REPO_URL}" /tmp/apprepo \
-          || echo "dataset-config: could not clone the app repo (non-fatal)"
-        git_assert_no_token /tmp/apprepo
-{{ include "kubecore-ci-workflows.datasetConfigWrite" . | indent 8 }}
 
         # Optional dataset-catalog probe output (for the data-ref enum). Best-effort.
         CATALOG_ARG=""
