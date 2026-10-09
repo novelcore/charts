@@ -1599,6 +1599,17 @@ spec:
                         operator); consumed by kubeapp/phases' F-13 CapabilityMissing check via
                         parentref.GetKubePoolOutputs, never a direct cross-CR status read.
                       type: object
+                    ciWorkflowsVersion:
+                      description: |-
+                        CIWorkflowsVersion is the kubecore-ci-workflows chart version the pool
+                        RUNS: read from its Helm Release only once that Release is deployed and
+                        synced at its current spec, never from the pin the operator wants.
+                        Consumed by KubeApp, which turns on features that need a newer chart
+                        (the k8smlapp ci-sync trigger and dataset-config, #1439) only when the
+                        chart is really there — the operator, the compositions and each pool's
+                        charts roll out in no fixed order. Empty = not observed yet; kept when a
+                        pass cannot read it. Not required for Ready.
+                      type: string
                     cloudProvider:
                       description: Core — required for Ready; the helper rejects Ready outputs with any of these empty.
                       type: string
