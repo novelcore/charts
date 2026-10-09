@@ -56,7 +56,11 @@ yq 'select(.kind == "ClusterWorkflowTemplate" and .metadata.name == "ml-ci-recon
 #   HEAD            the app repo's HEAD sha, or "" when the repo is not there
 #   CM              "built" (last-built-sha = HEAD), "unbuilt" (no baseline yet),
 #                   or "absent" (NotFound; gitops already targets ml-proj)
+GITOPS_CTX='kind: ConfigMap  # gitops pipeline-context.yaml, raw'
+CTX_SHA=$(printf '%s' "$GITOPS_CTX" | sha256sum | cut -c1-64)
+
 run_case() {
+  WANT_CTX="${5:-}"
   T=$(mktemp -d "${BASE_TMP}/case-XXXX")
   mkdir -p "$T/bin"
   printf 'token' > "$T/token"
@@ -82,12 +86,14 @@ echo "\$*" >> "$T/curl.log"
 case "\$*" in
   *"/commits/"*) [ -n '$3' ] || exit 22; printf '{"sha":"%s"}' '$3' ;;
   *"pipeline-images.yaml"*) printf 'metadata:\n  namespace: ml-proj\n' ;;
+  *"pipeline-context.yaml"*) printf '%s' '$GITOPS_CTX' ;;
   *) exit 22 ;;
 esac
 EOF
   chmod +x "$T/bin/kubectl" "$T/bin/curl"
   sed -e "s#{{workflow.namespace}}#ci#g" \
       -e "s#{{workflow.parameters.force}}#$1#g" \
+      -e "s#{{workflow.parameters.context_sha}}#$WANT_CTX#g" \
       -e "s#{{workflow.parameters.app_name}}#app1#g" \
       -e "s#{{workflow.parameters.project_name}}#proj#g" \
       -e "s#{{workflow.parameters.branch}}#dev#g" \
@@ -138,6 +144,11 @@ run_case true "$IDLE" "$HEAD_SHA" unbuilt
 expect_eq "$RC/$NEEDS/$SHA" "0/true/$HEAD_SHA" "force, new app: builds HEAD"
 run_case true "$IDLE" "$HEAD_SHA" built
 expect_eq "$RC/$NEEDS/$SHA" "0/true/$HEAD_SHA" "force, HEAD already built (context changed): re-renders anyway"
+
+run_case true "$IDLE" "$HEAD_SHA" built "0000000000000000000000000000000000000000000000000000000000000000"
+expect_eq "$RC" "3" "force, gitops context not yet the one this trigger is for: waits (exit 3)"
+run_case true "$IDLE" "$HEAD_SHA" built "$CTX_SHA"
+expect_eq "$RC/$NEEDS" "0/true" "force, gitops context matches: builds"
 
 RETRY=$(yq 'select(.kind == "ClusterWorkflowTemplate" and .metadata.name == "ml-ci-reconcile")
     | .spec.templates[] | select(.name == "check-drift") | .retryStrategy.expression' "$RENDERED")

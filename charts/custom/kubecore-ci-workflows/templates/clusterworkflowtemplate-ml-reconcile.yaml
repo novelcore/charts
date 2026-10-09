@@ -104,6 +104,13 @@ spec:
     # skipped: skipping would drop the event, and there is no next poll.
     - name: force
       value: "false"
+    # context_sha (force mode): sha256 of the pipeline-context.yaml the
+    # composition just wrote to gitops. The build renders from the gitops copy,
+    # so force waits until that copy matches; a build started before the
+    # composition's commit lands would render the old context and nothing would
+    # re-trigger it. Empty = do not wait.
+    - name: context_sha
+      value: ""
     - name: node_class
       value: {{ .Values.ci.defaultNodeClass | default (dig "platform.kubecore.io/nodegroup-type" "kubecorecpu" .Values.nodeSelector) | quote }}
 
@@ -307,6 +314,14 @@ spec:
         printf '%s' "$HEAD_SHA" > /tmp/head_sha
 
         if [ "$FORCE" = "true" ]; then
+          WANT_CTX="{{`{{workflow.parameters.context_sha}}`}}"
+          if [ -n "$WANT_CTX" ]; then
+            GORG="{{ .Values.github.org }}"; GREPO="{{`{{workflow.parameters.gitops_repository}}`}}"; GBRANCH="{{`{{workflow.parameters.gitops_branch}}`}}"
+            CTX_REL="$(dirname "{{`{{workflow.parameters.workflow_template_path}}`}}")/pipeline-context.yaml"
+            HAVE_CTX=$(curl -sf -H "Authorization: Bearer ${TOKEN}" -H "Accept: application/vnd.github.raw" \
+              "https://api.github.com/repos/${GORG}/${GREPO}/contents/${CTX_REL}?ref=${GBRANCH}" | sha256sum | cut -c1-64)
+            [ "$HAVE_CTX" = "$WANT_CTX" ] || not_yet "gitops ${CTX_REL} is not the context this trigger is for yet (${HAVE_CTX:0:12} != ${WANT_CTX:0:12})"
+          fi
           printf 'true' > /tmp/needs_build
           echo "reconcile: FORCED — app created or its platform context changed; submitting ml-ci-build to (re)render"
           exit 0
