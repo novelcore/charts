@@ -47,6 +47,14 @@ ML_SCRIPTS=$(yq 'select(.kind == "ClusterWorkflowTemplate" and .metadata.name ==
 expect_eq "$(printf '%s' "$ML_SCRIPTS" | grep -v '^[[:space:]]*#' | grep -c 'dataset-config')" "0" \
   "no ml-ci-build step writes .kubecore/dataset-config.yaml"
 
+# charts#158: a build that changes no step must still record last-built-sha, or
+# the backstop rebuilds the same SHA. patch-images records it; it must run on
+# every non-chore build, not only when a step image changed.
+PATCH_WHEN=$(yq 'select(.kind == "ClusterWorkflowTemplate" and .metadata.name == "ml-ci-build")
+    | .spec.templates[] | select(.name == "ml-ci-build") | .steps[][] | select(.name == "patch-images") | .when' "$RENDERED")
+expect_eq "$PATCH_WHEN" "{{workflow.parameters.branch_type}} != chore" \
+  "patch-images (records last-built-sha) runs on every non-chore build"
+
 DRIFT_SRC="${BASE_TMP}/check-drift.src"
 yq 'select(.kind == "ClusterWorkflowTemplate" and .metadata.name == "ml-ci-reconcile")
     | .spec.templates[] | select(.name == "check-drift") | .container.args[0]' "$RENDERED" > "$DRIFT_SRC"
