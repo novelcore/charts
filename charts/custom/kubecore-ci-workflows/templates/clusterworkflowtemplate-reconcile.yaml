@@ -171,17 +171,17 @@ spec:
       # required (in-flight guard) and alpine/git has none, which turned that
       # check into an always-true build storm the first time around
       # (clusterworkflowtemplate-ml-reconcile.yaml, live 2026-07-16).
-      image: google/cloud-sdk:alpine
+      # kubectl + jq + curl are baked in; nothing is installed at start-up.
+      image: {{ .Values.tooling.kubectlImage | default "alpine/k8s:1.36.4" }}
+      {{- with .Values.tooling.resources }}
+      resources:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       command: [sh, -c]
       args:
       - |
         set -eu
-        if ! command -v kubectl >/dev/null 2>&1; then
-          gcloud components install kubectl --quiet >/dev/null 2>&1 \
-            || apk add --no-cache kubectl >/dev/null 2>&1 \
-            || { echo "FATAL: could not install kubectl" >&2; exit 1; }
-        fi
-        command -v jq >/dev/null 2>&1 || apk add --no-cache jq >/dev/null 2>&1 || true
+        command -v kubectl >/dev/null 2>&1 || { echo "FATAL: kubectl missing from this image" >&2; exit 1; }
 
         # IN-FLIGHT GUARD: never stack a new build on an unfinished one.
         # Scoped to THIS app only — ci_namespace is shared by every app in

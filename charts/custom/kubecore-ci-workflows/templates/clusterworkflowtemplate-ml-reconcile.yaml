@@ -156,25 +156,23 @@ spec:
         valueFrom:
           path: /tmp/head_sha
     container:
-      # google/cloud-sdk:alpine — the chart's existing image for steps that need
-      # kubectl (see clusterworkflowtemplate-autoscaler-healer). alpine/git has
-      # NO kubectl: the baseline read silently produced "" on every poll, so
+      # kubectl + jq + curl baked in (tooling.kubectlImage, pinned). alpine/git
+      # has NO kubectl: the baseline read silently produced "" on every poll, so
       # needs_build was ALWAYS true and this backstop became a build storm
-      # (live 2026-07-16, 39 builds). curl + jq are already in this image.
-      image: google/cloud-sdk:alpine
+      # (live 2026-07-16, 39 builds). Nothing is installed at start-up: the
+      # google/cloud-sdk:alpine image this step used before spent 9-18 minutes
+      # on `gcloud components install kubectl` on a busy system node, which
+      # delayed a new app's first build by 17.5 minutes (2026-10-11).
+      image: {{ .Values.tooling.kubectlImage | default "alpine/k8s:1.36.4" }}
+      {{- with .Values.tooling.resources }}
+      resources:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       command: [sh, -c]
       args:
       - |
         set -eu
-        # kubectl is NOT in the alpine cloud-sdk image; install it (idempotent).
-        # Same pattern the autoscaler-healer uses on this same image — the one
-        # kubectl-on-cloud-sdk recipe already proven to work in this cluster.
-        if ! command -v kubectl >/dev/null 2>&1; then
-          gcloud components install kubectl --quiet >/dev/null 2>&1 \
-            || apk add --no-cache kubectl >/dev/null 2>&1 \
-            || { echo "FATAL: could not install kubectl" >&2; exit 1; }
-        fi
-        command -v jq >/dev/null 2>&1 || apk add --no-cache jq >/dev/null 2>&1 || true
+        command -v kubectl >/dev/null 2>&1 || { echo "FATAL: kubectl missing from this image" >&2; exit 1; }
 
         # IN-FLIGHT GUARD (kubecore-operator#872): never stack a new build on an
         # unfinished one. When builds cannot complete (live 2026-08-09: regional

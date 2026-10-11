@@ -90,23 +90,21 @@ spec:
       labels:
         platform.kubecore.io/compute-model: live-ephemeral-nodegroups
         platform.kubecore.io/maintenance: autoscaler-healer
+    # The gcloud alpine image has no kubectl: this init container copies the
+    # pinned static binary in. Both gcloud and kubectl authenticate off the
+    # pod's GKE Workload Identity (the WI-annotated KSA).
+    {{- include "kubecore-ci-workflows.kubectlBinInit" . | nindent 4 }}
     container:
-      # Same image/bootstrap pattern as the nodepool janitor: google/cloud-sdk:alpine
-      # ships gcloud + python3 but not kubectl on the alpine variant, so install it
-      # at start-up. Both gcloud and kubectl authenticate off the pod's GKE Workload
-      # Identity (the WI-annotated KSA).
-      image: google/cloud-sdk:alpine
+      # Same image as the nodepool janitor: gcloud + python3, pinned.
+      image: {{ .Values.tooling.gcloudImage | default "google/cloud-sdk:585.0.0-alpine" }}
       command: [sh, -c]
       args:
       - |
         set -eu
 
-        # kubectl is not in the alpine cloud-sdk image; install it (idempotent).
-        if ! command -v kubectl >/dev/null 2>&1; then
-          gcloud components install kubectl --quiet >/dev/null 2>&1 \
-            || apk add --no-cache kubectl >/dev/null 2>&1 \
-            || { echo "ERROR: could not install kubectl" >&2; exit 1; }
-        fi
+        # kubectl comes from the kubectl-bin init container (no runtime install).
+        export PATH="/opt/kubectl-bin:${PATH}"
+        command -v kubectl >/dev/null 2>&1 || { echo "ERROR: kubectl missing from /opt/kubectl-bin" >&2; exit 1; }
 
         PROJECT="{{`{{inputs.parameters.project_id}}`}}"
         REGION="{{`{{inputs.parameters.region}}`}}"
@@ -248,7 +246,12 @@ spec:
 
         echo "healer done: healed $HEALED pool(s)."
 
+      {{- with .Values.tooling.gcloudResources }}
+      resources:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       volumeMounts:
+      {{- include "kubecore-ci-workflows.kubectlBinMount" . | nindent 6 }}
       - name: scripts
         mountPath: /tmp/decide.py
         subPath: decide.py
@@ -256,6 +259,7 @@ spec:
         mountPath: /tmp/record_state.py
         subPath: record_state.py
     volumes:
+    {{- include "kubecore-ci-workflows.kubectlBinVolume" . | nindent 4 }}
     - name: scripts
       configMap:
         name: {{ include "kubecore-ci-workflows.fullname" . }}-autoscaler-healer-scripts

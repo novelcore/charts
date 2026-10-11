@@ -413,3 +413,37 @@ retryStrategy:
     factor: "2"
 {{- end }}
 
+
+{{/*
+kubectl for a step that runs the gcloud alpine image (tooling.gcloudImage),
+which ships gcloud + python3 but no kubectl. Instead of installing kubectl when
+the pod starts (`gcloud components install kubectl` took 9-18 minutes on a busy
+system node), an init container copies the static binary from the pinned
+tooling.kubectlBinaryImage into the "kubectl-bin" emptyDir. The step mounts it
+at /opt/kubectl-bin and puts that on its PATH. A template that includes this
+also needs the kubectlBinVolume and kubectlBinMount below.
+*/}}
+{{- define "kubecore-ci-workflows.kubectlBinInit" -}}
+initContainers:
+- name: kubectl-bin
+  image: {{ .Values.tooling.kubectlBinaryImage | default "alpine/kubectl:1.36.4" }}
+  command: [cp, /usr/local/bin/kubectl, /opt/kubectl-bin/kubectl]
+  {{- with .Values.tooling.resources }}
+  resources:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  volumeMounts:
+  - name: kubectl-bin
+    mountPath: /opt/kubectl-bin
+{{- end }}
+
+{{- define "kubecore-ci-workflows.kubectlBinVolume" -}}
+- name: kubectl-bin
+  emptyDir: {}
+{{- end }}
+
+{{- define "kubecore-ci-workflows.kubectlBinMount" -}}
+- name: kubectl-bin
+  mountPath: /opt/kubectl-bin
+  readOnly: true
+{{- end }}

@@ -76,6 +76,40 @@ kaniko:
 ciSecretsPrep:
   image: "mikefarah/yq:4.44.3"
 
+# Images and requests for the small tooling steps: ci-reconcile and
+# ml-ci-reconcile check-drift, ml-autoscaler-healer, ml-nodepool-janitor and
+# ml-compute-probe. Each tool is baked into a pinned image; nothing is
+# installed when the pod starts. These steps used to run google/cloud-sdk:alpine
+# with no requests and run `gcloud components install kubectl` (plus
+# `apk add jq`) first. On a pool's CPU-saturated e2-standard-2 system node that
+# BestEffort install took 9-18 minutes before ~5s of logic, which held up a new
+# ML app's first build by 17.5 minutes (dev hub e2e, 2026-10-11).
+tooling:
+  # kubectl + jq + curl, busybox sh. Runs the two check-drift steps. The same
+  # image family as the projectmlstack composition's kubectl/jq steps. kubectl
+  # 1.36 is within one minor of the dev/prod hubs (GKE 1.35) and of the pools
+  # (GKE 1.36 on 2026-10-11).
+  kubectlImage: "alpine/k8s:1.36.4"
+  # gcloud + python3, busybox sh. Runs the healer, the janitor and the
+  # compute probe. Pinned: the floating :alpine tag changes weekly.
+  gcloudImage: "google/cloud-sdk:585.0.0-alpine"
+  # The gcloud alpine image has no kubectl. An init container copies the
+  # static kubectl binary from this image into an emptyDir instead.
+  kubectlBinaryImage: "alpine/kubectl:1.36.4"
+  # Requests keep these pods out of the BestEffort class, so the scheduler
+  # spreads them by CPU instead of piling them onto one saturated node.
+  # There is no limit: a janitor's `kubectl get workflows -A -o json` grows
+  # with the cluster, and an OOMKill there would only hide the result.
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+  # gcloud is Python and needs more memory than kubectl.
+  gcloudResources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+
 # Build paths for the service-app (non-ML) CWTs.
 #
 # NO BuildKit anywhere in this chart. Every build-push — ml-ci-build,
