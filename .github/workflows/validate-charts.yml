@@ -83,6 +83,14 @@ jobs:
           # A new app's first-push clone retries (exit 75) while the CI token does not reach the repo yet.
           sh charts/custom/kubecore-ci-workflows/tests/clone-token-scope/run.sh "$RUNNER_TEMP/ci-workflows.yaml"
 
+      - name: Test kubecore-e2e-canary render + readiness probe (kubecore-operator#1464)
+        # The e2e helm self-heal check depends on this probe failing until readyAfter
+        # and passing from then on; the suite executes the rendered probe command for a
+        # past, a future and an empty instant, and a malformed value must fail the render.
+        run: |
+          export PATH="$RUNNER_TEMP:$PATH"
+          sh charts/custom/kubecore-e2e-canary/tests/render/run.sh
+
       - name: Set up Python
         uses: actions/setup-python@v4
         with:

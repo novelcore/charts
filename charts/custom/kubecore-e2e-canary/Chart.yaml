@@ -1,0 +1,22 @@
+apiVersion: v2
+name: kubecore-e2e-canary
+description: >-
+  E2E-only fault-injection canary for KubeCore pools. One tiny Deployment whose
+  readiness probe fails until a rendered instant (readyAfter), so a Helm upgrade
+  with `wait` can be made to time out on purpose and the platform's
+  rollbackLimit self-heal observed. Installed only by the kubecore-operator
+  behind --enable-e2e-faults on a labelled e2e pool; never on a tenant pool.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+maintainers:
+  - name: Novelcore Platform Team
+    email: platform@novelcore.io
+keywords:
+  - kubecore
+  - e2e
+  - testing
+home: https://github.com/novelcore/charts
+sources:
+  - https://github.com/novelcore/charts
+kubeVersion: ">=1.26.0-0"
