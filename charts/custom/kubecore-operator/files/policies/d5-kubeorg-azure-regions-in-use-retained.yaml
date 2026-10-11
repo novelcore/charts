@@ -1,0 +1,135 @@
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: d5-kubeorg-azure-regions-in-use-retained
+  annotations:
+    kubecore.io/catalog-domain: "D5"
+    kubecore.io/catalog-id: "d5-kubeorg-azure-regions-in-use-retained"
+    kubecore.io/evidence-ref: "internal/operators/kubeorg/compositions/azure/org_sync_network_prune.go"
+    policies.kyverno.io/category: "KubeCore Catalog"
+    policies.kyverno.io/description: "A KubeOrg UPDATE may not drop the primary region, or a region a KubePool in the org namespace (not being deleted) runs in, from spec.azureConfig.regions (empty means [primaryRegion]); if the KubePools cannot be listed, any removal is denied."
+    policies.kyverno.io/severity: "medium"
+    policies.kyverno.io/subject: "schema.kubecore.io/KubeOrg"
+spec:
+  admission: true
+  emitWarning: false
+  validationFailureAction: Enforce
+  failurePolicy: Fail
+  background: false
+  rules:
+  - name: d5-kubeorg-azure-regions-in-use-retained-primary
+    skipBackgroundRequests: true
+    match:
+      any:
+      - resources:
+          kinds:
+            - KubeOrg
+          operations:
+            - UPDATE
+    context:
+    - name: oldregions
+      variable:
+        jmesPath: "request.oldObject.spec.azureConfig.regions || [request.oldObject.spec.azureConfig.primaryRegion]"
+    - name: newregions
+      variable:
+        jmesPath: "request.object.spec.azureConfig.regions || [request.object.spec.azureConfig.primaryRegion]"
+    preconditions:
+      all:
+      - key: "{{ request.oldObject.spec.azureConfig.primaryRegion || '' }}"
+        operator: NotEquals
+        value: ""
+    validate:
+      allowExistingViolations: true
+      message: "KubeOrg {{ request.object.metadata.name }}: the primary region {{ request.oldObject.spec.azureConfig.primaryRegion }} cannot be removed from spec.azureConfig.regions; the organization's core network lives there (catalog: d5-kubeorg-azure-regions-in-use-retained, domain: D5). See PRD-310."
+      deny:
+        conditions:
+          all:
+          - key: "{{ request.oldObject.spec.azureConfig.primaryRegion }}"
+            operator: AnyIn
+            value: "{{ oldregions }}"
+          - key: "{{ request.oldObject.spec.azureConfig.primaryRegion }}"
+            operator: AnyNotIn
+            value: "{{ newregions }}"
+  - name: d5-kubeorg-azure-regions-in-use-retained-unresolved
+    skipBackgroundRequests: true
+    match:
+      any:
+      - resources:
+          kinds:
+            - KubeOrg
+          operations:
+            - UPDATE
+    context:
+    - name: oldregions
+      variable:
+        jmesPath: "request.oldObject.spec.azureConfig.regions || [request.oldObject.spec.azureConfig.primaryRegion]"
+    - name: newregions
+      variable:
+        jmesPath: "request.object.spec.azureConfig.regions || [request.object.spec.azureConfig.primaryRegion]"
+    - name: pools
+      apiCall:
+        urlPath: "/apis/schema.kubecore.io/v1beta1/namespaces/{{ request.namespace }}/kubepools"
+        method: GET
+        jmesPath: "items[?metadata.deletionTimestamp == null && spec.cloudProvider.azure.region != null].{name: metadata.name, region: spec.cloudProvider.azure.region}"
+        default: __unresolved__
+    preconditions:
+      all:
+      - key: "{{ request.oldObject.spec.azureConfig.primaryRegion || '' }}"
+        operator: NotEquals
+        value: ""
+      - key: "{{ oldregions }}"
+        operator: AnyNotIn
+        value: "{{ newregions }}"
+    validate:
+      allowExistingViolations: true
+      message: "KubeOrg {{ request.object.metadata.name }}: this update removes a region from spec.azureConfig.regions, but the KubePools in namespace {{ request.namespace }} cannot be listed, so it is unknown whether a cluster still runs there (catalog: d5-kubeorg-azure-regions-in-use-retained, domain: D5). See PRD-310."
+      deny:
+        conditions:
+          all:
+          - key: "{{ to_string(pools) }}"
+            operator: Equals
+            value: __unresolved__
+  - name: d5-kubeorg-azure-regions-in-use-retained
+    skipBackgroundRequests: true
+    match:
+      any:
+      - resources:
+          kinds:
+            - KubeOrg
+          operations:
+            - UPDATE
+    context:
+    - name: oldregions
+      variable:
+        jmesPath: "request.oldObject.spec.azureConfig.regions || [request.oldObject.spec.azureConfig.primaryRegion]"
+    - name: newregions
+      variable:
+        jmesPath: "request.object.spec.azureConfig.regions || [request.object.spec.azureConfig.primaryRegion]"
+    - name: pools
+      apiCall:
+        urlPath: "/apis/schema.kubecore.io/v1beta1/namespaces/{{ request.namespace }}/kubepools"
+        method: GET
+        jmesPath: "items[?metadata.deletionTimestamp == null && spec.cloudProvider.azure.region != null].{name: metadata.name, region: spec.cloudProvider.azure.region}"
+        default: __unresolved__
+    - name: blocking
+      variable:
+        jmesPath: "pools[?contains(`{{ oldregions }}`, region) && contains(`{{ newregions }}`, region) == `false`].join('', [name, ' (', region, ')'])"
+        default: []
+    preconditions:
+      all:
+      - key: "{{ request.oldObject.spec.azureConfig.primaryRegion || '' }}"
+        operator: NotEquals
+        value: ""
+      - key: "{{ oldregions }}"
+        operator: AnyNotIn
+        value: "{{ newregions }}"
+    validate:
+      allowExistingViolations: true
+      message: "KubeOrg {{ request.object.metadata.name }}: a region removed from spec.azureConfig.regions is still used by KubePool(s) {{ join(', ', blocking) }}; delete those clusters first (catalog: d5-kubeorg-azure-regions-in-use-retained, domain: D5). See PRD-310."
+      deny:
+        conditions:
+          all:
+          - key: "{{ length(blocking) }}"
+            operator: GreaterThan
+            value: 0
+
