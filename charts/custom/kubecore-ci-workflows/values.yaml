@@ -67,6 +67,14 @@ kaniko:
     limits:
       cpu: "4"
       memory: "11Gi"
+  # Requests for ci-build / ci-rc-build build-push (service apps). These had
+  # none (BestEffort). Kept well below the ML request above: a service image
+  # is small, and the build shares the project's CI node with the other steps
+  # of the run. No limit, so a large build is never OOMKilled by this value.
+  serviceResources:
+    requests:
+      cpu: 500m
+      memory: 1Gi
 
 # ci-secrets-prep init container of ci-build / ci-rc-build build-push (kaos
 # PRD 695): lays out the user's CI secrets under /kaniko/secrets and writes
@@ -76,10 +84,10 @@ kaniko:
 ciSecretsPrep:
   image: "mikefarah/yq:4.44.3"
 
-# Images and requests for the small tooling steps: ci-reconcile and
-# ml-ci-reconcile check-drift, ml-autoscaler-healer, ml-nodepool-janitor and
-# ml-compute-probe. Each tool is baked into a pinned image; nothing is
-# installed when the pod starts. These steps used to run google/cloud-sdk:alpine
+# Images and requests for every step except kaniko's build-push (see kaniko:
+# above), including the create/destroy-nodegroups steps render-wft writes into
+# an ML app's pipeline. Each tool is baked into a pinned image; nothing is
+# installed when the pod starts (tests/tooling-images guards this). These steps used to run google/cloud-sdk:alpine
 # with no requests and run `gcloud components install kubectl` (plus
 # `apk add jq`) first. On a pool's CPU-saturated e2-standard-2 system node that
 # BestEffort install took 9-18 minutes before ~5s of logic, which held up a new
@@ -96,6 +104,29 @@ tooling:
   # The gcloud alpine image has no kubectl. An init container copies the
   # static kubectl binary from this image into an emptyDir instead.
   kubectlBinaryImage: "alpine/kubectl:1.36.4"
+  # The script steps that need more than git or curl: git + curl + jq + yq v4 +
+  # kustomize + kubectl + python3 with PyYAML, busybox sh. The same image as
+  # kubectlImage (one pull per node). Runs ml-ci-build's detect-steps,
+  # render-wft, hera-enhance-commit, patch-images, status and report,
+  # ml-ci-pr-render's hera-enhance-gate, the status and gitops-notify steps of
+  # ci-build and ci-rc-build, the dataset catalog probe and the pending reaper.
+  # Those used to `apk add` / `apt-get install` / `pip install` their tools, or
+  # download yq and kustomize, when the pod started. python3 here is 3.14; the
+  # platform enhancer and render_wft.py need only the standard library and
+  # PyYAML (the enhancer at platformEnhancer.ref renders byte-identical output
+  # under 3.12 and 3.14).
+  toolboxImage: "alpine/k8s:1.36.4"
+  # git only, busybox sh: the clone, version and tag steps.
+  gitImage: "alpine/git:2.52.0"
+  # curl only, busybox sh: status/release/issue steps that need no jq.
+  curlImage: "alpine/curl:8.21.0"
+  # busybox only: ml-ci-pr-render's detect-frontend.
+  alpineImage: "alpine:3.20.10"
+  # hera-render runs the developer's pipeline.py after `pip install -e .` of
+  # the app repo's own pyproject.toml. Those dependencies are the developer's,
+  # so that install stays (tests/tooling-images allow-lists it); the image is
+  # pinned.
+  heraRenderImage: "python:3.12.13-slim"
   # Requests keep these pods out of the BestEffort class, so the scheduler
   # spreads them by CPU instead of piling them onto one saturated node.
   # There is no limit: a janitor's `kubectl get workflows -A -o json` grows
@@ -109,6 +140,12 @@ tooling:
     requests:
       cpu: 50m
       memory: 128Mi
+  # The python steps (render-wft, the Hera render/enhance steps, the dataset
+  # probe): the interpreter plus a parsed WorkflowTemplate.
+  pythonResources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
 
 # Build paths for the service-app (non-ML) CWTs.
 #

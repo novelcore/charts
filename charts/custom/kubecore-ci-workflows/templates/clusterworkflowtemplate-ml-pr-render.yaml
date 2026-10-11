@@ -155,7 +155,8 @@ spec:
         valueFrom:
           path: /workspace/frontend
     container:
-      image: alpine:3.20
+      image: {{ .Values.tooling.alpineImage | default "alpine:3.20.10" }}
+      {{- include "kubecore-ci-workflows.resources" .Values.tooling.resources | nindent 6 }}
       command: [sh, -c]
       args:
       - |
@@ -176,7 +177,8 @@ spec:
       runAsUser: 0
       runAsGroup: 0
     container:
-      image: python:3.12-slim
+      image: {{ .Values.tooling.toolboxImage | default "alpine/k8s:1.36.4" }}
+      {{- include "kubecore-ci-workflows.resources" .Values.tooling.pythonResources | nindent 6 }}
       command: [sh, -c]
       securityContext:
         runAsUser: 0
@@ -184,8 +186,7 @@ spec:
       args:
       - |
         set -e
-        apt-get update -qq >/dev/null 2>&1 && apt-get install -y -qq git >/dev/null 2>&1
-        pip install --quiet pyyaml
+        # git and PyYAML are baked into tooling.toolboxImage.
 
         TOKEN=$(cat /etc/github-token/token)
 {{ include "kubecore-ci-workflows.gitAuth" . | indent 8 }}
@@ -233,7 +234,7 @@ spec:
         # have steps/<dir>/Dockerfile (dir = step name with '-' → '_').
         # Steps with a verbatim image are NOT checked: the
         # platform.kubecore.io/image escape hatch, and platform-injected
-        # templates such as meluxina-run (HPC-ready pools; python:3.12-alpine)
+        # templates such as meluxina-run (HPC-ready pools; python:3.12.13-alpine)
         # — the first live run of this gate (#1126 e2e) failed on exactly
         # that, because the retired GitHub job rendered with a placeholder
         # context that never produced an HPC step.
@@ -312,7 +313,8 @@ spec:
       - name: state
       - name: description
     container:
-      image: alpine/curl
+      image: {{ .Values.tooling.curlImage | default "alpine/curl:8.21.0" }}
+      {{- include "kubecore-ci-workflows.resources" .Values.tooling.resources | nindent 6 }}
       command: [sh, -c]
       args:
       - |

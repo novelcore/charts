@@ -40,10 +40,11 @@ jobs:
           sh charts/custom/kubecore-ci-workflows/tests/render/run.sh "$RUNNER_TEMP/ci-workflows.yaml"
 
       - name: Test kubecore-ci-workflows tooling images
-        # The reconcile, healer, janitor and compute-probe steps run pinned images
-        # with their tools baked in and with resource requests. They used to install
-        # kubectl at start-up as BestEffort pods, which took 9-18 minutes on a busy
-        # system node.
+        # Every container the chart runs (and the nodegroup steps render-wft
+        # generates) uses a pinned image with its tools baked in and has resource
+        # requests; nothing installs at start-up except the allow-listed steps.
+        # The tooling steps used to install kubectl at start-up as BestEffort
+        # pods, which took 9-18 minutes on a busy system node.
         run: |
           export PATH="$RUNNER_TEMP:$PATH"
           helm template t charts/custom/kubecore-ci-workflows > "$RUNNER_TEMP/ci-workflows.yaml"

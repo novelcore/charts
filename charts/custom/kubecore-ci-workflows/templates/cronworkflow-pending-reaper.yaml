@@ -94,12 +94,12 @@ spec:
     templates:
       - name: reap
         container:
-          image: alpine/kubectl:1.33.4
+          image: {{ .Values.tooling.kubectlImage | default "alpine/k8s:1.36.4" }}
+          {{- include "kubecore-ci-workflows.resources" .Values.tooling.resources | nindent 10 }}
           command: [sh, -c]
           args:
             - |
               set -e
-              apk add --no-cache jq coreutils >/dev/null 2>&1 || true
               NOW=$(date +%s)
               PENDING_MAX={{ .Values.pendingReaper.pendingMaxSeconds | default 2700 }}
               TERM_GRACE={{ .Values.pendingReaper.terminateGraceSeconds | default 1200 }}
