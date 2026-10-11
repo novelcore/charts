@@ -111,6 +111,7 @@ so the files it writes carry the same ownership kaniko (root) had before.
 {{- define "kubecore-ci-workflows.ciSecretsPrepInitContainer" -}}
 - name: ci-secrets-prep
   image: {{ .Values.ciSecretsPrep.image | default "mikefarah/yq:4.44.3" }}
+  {{- include "kubecore-ci-workflows.resources" .Values.tooling.resources | nindent 2 }}
   command: [sh, -c]
   securityContext:
     runAsUser: 0
@@ -446,4 +447,17 @@ initContainers:
 - name: kubectl-bin
   mountPath: /opt/kubectl-bin
   readOnly: true
+{{- end }}
+
+{{/*
+A step's resources block from a tooling.*Resources (or kaniko.*Resources)
+value. Requests keep these pods out of the BestEffort class. Usage:
+  image: ...
+  {{- include "kubecore-ci-workflows.resources" .Values.tooling.resources | nindent 6 }}
+*/}}
+{{- define "kubecore-ci-workflows.resources" -}}
+{{- with . }}
+resources:
+  {{- toYaml . | nindent 2 }}
+{{- end }}
 {{- end }}

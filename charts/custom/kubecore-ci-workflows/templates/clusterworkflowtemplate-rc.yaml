@@ -267,7 +267,8 @@ spec:
         # real build (kubecore-operator#1377). limit bounds the retries.
     activeDeadlineSeconds: 600
     container:
-      image: alpine/git:latest
+      image: {{ .Values.tooling.gitImage | default "alpine/git:2.52.0" }}
+      {{- include "kubecore-ci-workflows.resources" .Values.tooling.resources | nindent 6 }}
       command: [sh, -c]
       args:
       - |
@@ -341,7 +342,8 @@ spec:
         valueFrom:
           path: /tmp/image_tag
     container:
-      image: alpine/git:latest
+      image: {{ .Values.tooling.gitImage | default "alpine/git:2.52.0" }}
+      {{- include "kubecore-ci-workflows.resources" .Values.tooling.resources | nindent 6 }}
       command: [sh, -c]
       args:
       - |
@@ -454,6 +456,7 @@ spec:
     {{- include "kubecore-ci-workflows.ciSecretsPrepInitContainer" . | nindent 4 }}
     container:
       image: {{ .Values.kaniko.image | default "gcr.io/kaniko-project/executor:v1.23.2-debug" }}
+      {{- include "kubecore-ci-workflows.resources" .Values.kaniko.serviceResources | nindent 6 }}
       command: ["/busybox/sh", "-c"]
       args:
       - |
@@ -550,7 +553,8 @@ spec:
       parameters:
       - name: rc_tag
     container:
-      image: alpine/git:latest
+      image: {{ .Values.tooling.gitImage | default "alpine/git:2.52.0" }}
+      {{- include "kubecore-ci-workflows.resources" .Values.tooling.resources | nindent 6 }}
       command: [sh, -c]
       args:
       - |
@@ -624,7 +628,8 @@ spec:
       - name: environment
         value: "argo-workflows-rc"
     container:
-      image: alpine/curl
+      image: {{ .Values.tooling.toolboxImage | default "alpine/k8s:1.36.4" }}
+      {{- include "kubecore-ci-workflows.resources" .Values.tooling.resources | nindent 6 }}
       command: [sh, -c]
       args:
       - |
@@ -660,9 +665,9 @@ spec:
         # describe; defaulting would deadlock the Deployment on its own check.
         # Resolved on success/failure against the Deployment created for this
         # SHA + environment. jq for response parsing (compact vs pretty JSON
-        # both occur); if jq cannot be installed the statuses still stand.
+        # both occur; baked into tooling.toolboxImage); without jq the
+        # statuses still stand.
         [ -n "${ENVIRONMENT}" ] || exit 0
-        apk add --no-cache jq >/dev/null 2>&1 || true
         if ! command -v jq >/dev/null; then
           echo "WARN: jq unavailable — commit status posted, deployment rollup skipped"
           exit 0
@@ -761,10 +766,10 @@ spec:
       - name: image_tag
       - name: semantic_version
     container:
-      # alpine/git, not the alpine/curl this step used while it only POSTed a
-      # dispatch: it clones and pushes now. Same image as ci-build's
-      # gitops-notify; its busybox wget/tar also fetch the kustomize binary.
-      image: alpine/git:latest
+      # git + kustomize + busybox wget: it clones and pushes. Same image as
+      # ci-build's gitops-notify.
+      image: {{ .Values.tooling.toolboxImage | default "alpine/k8s:1.36.4" }}
+      {{- include "kubecore-ci-workflows.resources" .Values.tooling.resources | nindent 6 }}
       command: [sh, -c]
       args:
       - |
@@ -802,11 +807,8 @@ spec:
         git_assert_no_token /tmp/ops-repo
         cd /tmp/ops-repo
 
-        # Install kustomize (direct binary download — alpine sh doesn't support the bash install script)
-        KUSTOMIZE_VERSION="v5.6.0"
-        wget -q "https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2F${KUSTOMIZE_VERSION}/kustomize_${KUSTOMIZE_VERSION}_linux_amd64.tar.gz" -O /tmp/kustomize.tar.gz
-        tar -xzf /tmp/kustomize.tar.gz -C /usr/local/bin/
-        chmod +x /usr/local/bin/kustomize
+        # kustomize is baked into tooling.toolboxImage (it used to be
+        # downloaded here, amd64 only, on every run).
 
         if [ ! -d "${APP_DIR}" ]; then
           echo "app dir ${APP_DIR} not found in ${OPS_REPO}"; exit 1
@@ -890,7 +892,8 @@ spec:
       parameters:
       - name: rc_tag
     container:
-      image: alpine/curl
+      image: {{ .Values.tooling.curlImage | default "alpine/curl:8.21.0" }}
+      {{- include "kubecore-ci-workflows.resources" .Values.tooling.resources | nindent 6 }}
       command: [sh, -c]
       args:
       - |
@@ -962,7 +965,8 @@ spec:
       - name: rc_tag
       - name: semantic_version
     container:
-      image: alpine/curl
+      image: {{ .Values.tooling.curlImage | default "alpine/curl:8.21.0" }}
+      {{- include "kubecore-ci-workflows.resources" .Values.tooling.resources | nindent 6 }}
       command: [sh, -c]
       args:
       - |

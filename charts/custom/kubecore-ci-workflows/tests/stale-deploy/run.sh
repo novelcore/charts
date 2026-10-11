@@ -55,7 +55,8 @@ APP_DIR=kubeapps/proj-app1
 OLD_TAG=dev-v0.3.0-20260930-132427-97388a6
 NEW_TAG=dev-v0.3.1-20260930-131700-6767e5c
 
-# A kustomize-built tarball holding the stub kustomize the step "downloads".
+# The stub kustomize. The step's image ships kustomize, so each case puts the
+# stub on its PATH.
 mkdir -p "${BASE_TMP}/kbin"
 cat > "${BASE_TMP}/kbin/kustomize" <<'EOF'
 #!/bin/sh
@@ -63,10 +64,9 @@ cat > "${BASE_TMP}/kbin/kustomize" <<'EOF'
 echo "$(basename "$(pwd)") $*" >> "${STUB_LOG_DIR}/kustomize.log"
 EOF
 chmod +x "${BASE_TMP}/kbin/kustomize"
-tar -czf "${BASE_TMP}/kustomize.tar.gz" -C "${BASE_TMP}/kbin" kustomize
 
 # new_case BUILT_SHA: a sandbox with an empty fixture ops repo (the app dir
-# exists, no overlays yet) and stub git/wget. COMPARE (a file) is the GitHub
+# exists, no overlays yet) and stub git/wget/kustomize. COMPARE (a file) is the GitHub
 # compare body; COMPARE_FAIL=1 makes the call fail like a non-2xx.
 new_case() {
   T=$(mktemp -d "${BASE_TMP}/case-XXXXXX")
@@ -98,7 +98,6 @@ while [ \$# -gt 0 ]; do
 done
 echo "\$URL \$HDRS" >> "$T/wget.log"
 case "\$URL" in
-  *kustomize_*) cp "${BASE_TMP}/kustomize.tar.gz" "\$OUT" ;;
   *api.github.com*/compare/*)
     if [ -f "$T/compare-fail" ]; then
       echo "wget: server returned error: HTTP/1.1 404 Not Found" >&2; exit 1
@@ -113,6 +112,7 @@ case "\$URL" in
 esac
 EOF
   chmod +x "$T/bin/git" "$T/bin/wget"
+  cp "${BASE_TMP}/kbin/kustomize" "$T/bin/kustomize"
   # the branch head at notify time defaults to the NEWER commit, as in the
   # incident (dev had moved on to 6767e5c when 97388a6's build notified)
   set_head "$NEW_SHA"
@@ -284,7 +284,7 @@ expect_has "$(cat "$T/git.log")" "pull --rebase" "the pull --rebase before push 
 
 Q='select(.kind == "ClusterWorkflowTemplate" and .metadata.name == "ci-build") | .spec.templates[] | select(.name == "gitops-notify")'
 expect_eq "$(yq "$Q | .activeDeadlineSeconds" "$RENDERED")/$(yq "$Q | .retryStrategy.limit" "$RENDERED")" "600/2" "retry + deadline unchanged"
-expect_eq "$(yq "$Q | .container.image" "$RENDERED")" "alpine/git:latest" "no new image"
+expect_eq "$(yq "$Q | .container.image" "$RENDERED")" "alpine/k8s:1.36.4" "runs the pinned toolbox image (git, kustomize, busybox wget baked in)"
 
 echo
 echo "stale-deploy: ${PASSED} passed, ${FAILED} failed"

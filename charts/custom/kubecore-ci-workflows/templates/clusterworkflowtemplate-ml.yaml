@@ -279,7 +279,8 @@ spec:
   - name: clone
 {{ include "kubecore-ci-workflows.cloneRetry" . | indent 4 }}
     container:
-      image: alpine/git:latest
+      image: {{ .Values.tooling.gitImage | default "alpine/git:2.52.0" }}
+      {{- include "kubecore-ci-workflows.resources" .Values.tooling.resources | nindent 6 }}
       command: [sh, -c]
       args:
       - |
@@ -353,19 +354,15 @@ spec:
         valueFrom:
           path: /workspace/frontend
     container:
-      image: alpine/git:latest
+      image: {{ .Values.tooling.toolboxImage | default "alpine/k8s:1.36.4" }}
+      {{- include "kubecore-ci-workflows.resources" .Values.tooling.resources | nindent 6 }}
       command: [sh, -c]
       args:
       - |
         set -e
 {{ include "kubecore-ci-workflows.gitAuth" . | indent 8 }}
-        # detect-steps needs both git and yq; alpine/git ships with git but no yq.
-        # Drop the yq binary in /usr/local/bin (~10MB, no-cache, idempotent).
-        if ! command -v yq >/dev/null 2>&1; then
-          apk add --no-cache curl >/dev/null
-          curl -fsSL "https://github.com/mikefarah/yq/releases/download/v4.44.3/yq_linux_amd64" -o /usr/local/bin/yq
-          chmod +x /usr/local/bin/yq
-        fi
+        # detect-steps needs both git and yq: both are baked into
+        # tooling.toolboxImage.
         cd /workspace/repo
         FRONTEND=$(cat /workspace/frontend 2>/dev/null || echo kubeline)
         echo "frontend=${FRONTEND}"
@@ -563,7 +560,8 @@ spec:
         valueFrom:
           path: /tmp/image_tag
     container:
-      image: alpine/git:latest
+      image: {{ .Values.tooling.gitImage | default "alpine/git:2.52.0" }}
+      {{- include "kubecore-ci-workflows.resources" .Values.tooling.resources | nindent 6 }}
       command: [sh, -c]
       args:
       - |
@@ -692,7 +690,8 @@ spec:
       emptyDir: {}
     initContainers:
     - name: clone
-      image: alpine/git:latest
+      image: {{ .Values.tooling.gitImage | default "alpine/git:2.52.0" }}
+      {{- include "kubecore-ci-workflows.resources" .Values.tooling.resources | nindent 6 }}
       command: [sh, -c]
       args:
       - |
@@ -720,7 +719,8 @@ spec:
         mountPath: /etc/github-token
         readOnly: true
     - name: docker-config
-      image: alpine:3.20
+      image: {{ .Values.tooling.alpineImage | default "alpine:3.20.10" }}
+      {{- include "kubecore-ci-workflows.resources" .Values.tooling.resources | nindent 6 }}
       command: [sh, -c]
       args:
       - |
@@ -883,7 +883,8 @@ spec:
       runAsUser: 0
       runAsGroup: 0
     container:
-      image: python:3.12-alpine
+      image: {{ .Values.tooling.toolboxImage | default "alpine/k8s:1.36.4" }}
+      {{- include "kubecore-ci-workflows.resources" .Values.tooling.pythonResources | nindent 6 }}
       command: [sh, -c]
       securityContext:
         runAsUser: 0
@@ -891,8 +892,7 @@ spec:
       args:
       - |
         set -e
-        apk add --no-cache git >/dev/null
-        pip install pyyaml --quiet
+        # git and PyYAML are baked into tooling.toolboxImage.
 
         TOKEN=$(cat /etc/github-token/token)
 {{ include "kubecore-ci-workflows.gitAuth" . | indent 8 }}
@@ -1568,7 +1568,8 @@ spec:
                 'tolerations': CI_POOL_TOLERATIONS,
                 'inputs': {'parameters': nodegroup_inputs},
                 'container': {
-                    'image': 'google/cloud-sdk:alpine',
+                    'image': '{{ .Values.tooling.gcloudImage | default "google/cloud-sdk:585.0.0-alpine" }}',
+                    'resources': {{ .Values.tooling.gcloudResources | default dict | toJson }},
                     'command': ['sh', '-c'],
                     'args': ['\n'.join(create_lines) + '\n'],
                 },
@@ -1600,7 +1601,8 @@ spec:
                 'tolerations': CI_POOL_TOLERATIONS,
                 'inputs': {'parameters': destroy_inputs},
                 'container': {
-                    'image': 'google/cloud-sdk:alpine',
+                    'image': '{{ .Values.tooling.gcloudImage | default "google/cloud-sdk:585.0.0-alpine" }}',
+                    'resources': {{ .Values.tooling.gcloudResources | default dict | toJson }},
                     'command': ['sh', '-c'],
                     'args': ['\n'.join(destroy_lines) + '\n'],
                 },
@@ -1634,7 +1636,7 @@ spec:
                 'tolerations': CI_POOL_TOLERATIONS,
                 'inputs': {'parameters': guard_inputs},
                 'container': {
-                    'image': 'busybox:1.36',
+                    'image': 'busybox:1.36.1',
                     'command': ['sh', '-c'],
                     'args': ['\n'.join(guard_lines) + '\n'],
                 },
@@ -1990,7 +1992,7 @@ spec:
                         'platform.kubecore.io/compute-type': 'hpc',
                     }},
                     'script': {
-                        'image': 'python:3.12-alpine',
+                        'image': 'python:3.12.13-alpine',
                         'command': ['python3'],
                         'source': mel_src,
                         'env': [
@@ -2603,7 +2605,7 @@ spec:
             templates.append({
                 'name': 'hpc-burst',
                 'container': {
-                    'image': 'busybox:1.36',
+                    'image': 'busybox:1.36.1',
                     'command': ['sh', '-c'],
                     'args': [f'echo "HPC burst placeholder, provider={provider} not yet wired"']
                 }
@@ -2741,7 +2743,8 @@ spec:
       runAsUser: 0
       runAsGroup: 0
     container:
-      image: python:3.12-slim
+      image: {{ .Values.tooling.heraRenderImage | default "python:3.12.13-slim" }}
+      {{- include "kubecore-ci-workflows.resources" .Values.tooling.pythonResources | nindent 6 }}
       command: [sh, -c]
       args:
       - |
@@ -2775,7 +2778,8 @@ spec:
       runAsUser: 0
       runAsGroup: 0
     container:
-      image: python:3.12-slim
+      image: {{ .Values.tooling.toolboxImage | default "alpine/k8s:1.36.4" }}
+      {{- include "kubecore-ci-workflows.resources" .Values.tooling.pythonResources | nindent 6 }}
       command: [sh, -c]
       securityContext:
         runAsUser: 0
@@ -2783,8 +2787,7 @@ spec:
       args:
       - |
         set -e
-        apt-get update -qq >/dev/null 2>&1 && apt-get install -y -qq git >/dev/null 2>&1
-        pip install --quiet pyyaml
+        # git and PyYAML are baked into tooling.toolboxImage.
 
         TOKEN=$(cat /etc/github-token/token)
 {{ include "kubecore-ci-workflows.gitAuth" . | indent 8 }}
@@ -2966,7 +2969,8 @@ spec:
       runAsUser: 0
       runAsGroup: 0
     container:
-      image: mikefarah/yq:4.44.3
+      image: {{ .Values.tooling.toolboxImage | default "alpine/k8s:1.36.4" }}
+      {{- include "kubecore-ci-workflows.resources" .Values.tooling.resources | nindent 6 }}
       command: [sh, -c]
       securityContext:
         runAsUser: 0
@@ -2990,8 +2994,6 @@ spec:
         if [ -z "$IMAGE_REPO" ]; then
           IMAGE_REPO="{{`{{workflow.parameters.project_name}}`}}/${APP_NAME}"
         fi
-
-        apk add --no-cache git curl >/dev/null
 
         REPO_URL="https://github.com/${ORG}/${GITOPS_REPO}.git"
         git clone --depth=1 --branch "${GITOPS_BRANCH}" "${REPO_URL}" /tmp/gitops
@@ -3150,7 +3152,8 @@ spec:
       - name: image_tag
       - name: new_version
     container:
-      image: alpine/git:latest
+      image: {{ .Values.tooling.gitImage | default "alpine/git:2.52.0" }}
+      {{- include "kubecore-ci-workflows.resources" .Values.tooling.resources | nindent 6 }}
       command: [sh, -c]
       args:
       - |
@@ -3196,7 +3199,8 @@ spec:
       - name: environment
         value: "auto"
     container:
-      image: alpine/curl
+      image: {{ .Values.tooling.toolboxImage | default "alpine/k8s:1.36.4" }}
+      {{- include "kubecore-ci-workflows.resources" .Values.tooling.resources | nindent 6 }}
       command: [sh, -c]
       args:
       - |
@@ -3244,9 +3248,9 @@ spec:
         # describe; defaulting would deadlock the Deployment on its own check.
         # Resolved on success/failure against the Deployment created for this
         # SHA + environment. jq for response parsing (compact vs pretty JSON
-        # both occur); if jq cannot be installed the statuses still stand.
+        # both occur; baked into tooling.toolboxImage); without jq the
+        # statuses still stand.
         [ -n "${ENVIRONMENT}" ] || exit 0
-        apk add --no-cache jq >/dev/null 2>&1 || true
         if ! command -v jq >/dev/null; then
           echo "WARN: jq unavailable — commit status posted, deployment rollup skipped"
           exit 0
@@ -3312,12 +3316,12 @@ spec:
       - name: pr_number
         value: ""
     container:
-      image: alpine/kubectl:1.33.4
+      image: {{ .Values.tooling.kubectlImage | default "alpine/k8s:1.36.4" }}
+      {{- include "kubecore-ci-workflows.resources" .Values.tooling.resources | nindent 6 }}
       command: [sh, -c]
       args:
       - |
         set +e
-        apk add --no-cache curl jq >/dev/null 2>&1
         TOKEN=$(cat /etc/github-token/token)
         REPO="{{`{{workflow.parameters.repo_url}}`}}"
         OWNER_REPO=$(echo "$REPO" | sed 's|https://github.com/||' | sed 's|.git$||')
