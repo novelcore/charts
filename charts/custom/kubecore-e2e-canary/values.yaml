@@ -1,0 +1,40 @@
+# kubecore-e2e-canary — an e2e fault-injection target, nothing else.
+#
+# The ONLY knob that matters is `readyAfter`. The pod's readiness probe fails until the
+# wall clock reaches that instant, so a Helm upgrade with `wait` whose `waitTimeout` ends
+# before it fails (and leaves the release `failed`), and the first attempt after it
+# succeeds. The kubecore-operator renders it from the KubePool annotation
+# `e2e.kubecore.io/helm-canary-ready-after` (only behind --enable-e2e-faults, only on a
+# KubePool carrying the e2e run label).
+
+# RFC3339 instant, e.g. "2026-10-11T12:00:00Z". Empty = ready immediately. A value that is
+# not RFC3339 fails the render (mustToDate) rather than silently becoming "ready now".
+readyAfter: ""
+
+replicas: 1
+
+image:
+  # The Kubernetes project's own e2e busybox, served from registry.k8s.io (no Docker Hub
+  # pull-rate limit on a fresh pool's nodes). Exact tag AND the multi-arch index digest:
+  # the image never changes under the test.
+  repository: registry.k8s.io/e2e-test-images/busybox
+  tag: "1.36.1-1"
+  digest: "sha256:a9155b13325b2abef48e71de77bb8ac015412a566829f621d06bfae5c699b1b9"
+  pullPolicy: IfNotPresent
+
+# Requests on purpose: a BestEffort pod is the first thing evicted on a busy system node,
+# and an eviction mid-test would read as a Helm failure the platform did not cause.
+resources:
+  requests:
+    cpu: 5m
+    memory: 8Mi
+  limits:
+    cpu: 50m
+    memory: 32Mi
+
+# How often the readiness probe runs. Small, so the pod turns Ready within seconds of
+# `readyAfter` and the recovering upgrade finishes well inside its wait.
+probePeriodSeconds: 5
+
+nodeSelector: {}
+tolerations: []

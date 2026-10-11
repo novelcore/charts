@@ -1,0 +1,64 @@
+{{- $epoch := include "e2e-canary.readyAfterEpoch" . -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}
+  labels:
+    {{- include "e2e-canary.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicas }}
+  # A new revision must become Ready before the old pod goes: Helm's `wait` then judges
+  # exactly the pod that carries the new readyAfter.
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      {{- include "e2e-canary.selector" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "e2e-canary.labels" . | nindent 8 }}
+      annotations:
+        e2e.kubecore.io/ready-after: {{ .Values.readyAfter | quote }}
+    spec:
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 5
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        runAsGroup: 65534
+        seccompProfile:
+          type: RuntimeDefault
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: canary
+          image: {{ include "e2e-canary.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["sh", "-c", "trap 'exit 0' TERM; sleep 2147483647 & wait"]
+          env:
+            - name: READY_AFTER_EPOCH
+              value: {{ $epoch | quote }}
+          readinessProbe:
+            exec:
+              command: ["sh", "-c", "[ \"$(date +%s)\" -ge \"$READY_AFTER_EPOCH\" ]"]
+            periodSeconds: {{ .Values.probePeriodSeconds }}
+            failureThreshold: 1
+            successThreshold: 1
+            timeoutSeconds: 2
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
