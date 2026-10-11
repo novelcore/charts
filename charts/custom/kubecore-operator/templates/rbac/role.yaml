@@ -367,6 +367,14 @@ rules:
   - update
   - watch
 - apiGroups:
+  - helm.m.crossplane.io
+  - kubernetes.m.crossplane.io
+  resources:
+  - providerconfigusages
+  verbs:
+  - get
+  - list
+- apiGroups:
   - iam.aws.m.upbound.io
   resources:
   - policies
