@@ -526,9 +526,9 @@ the Deployment; success/failure resolve the Deployment created for this SHA +
 environment.
 
 Every call goes through gh_api (ghApi above). A write that still fails no
-longer ends in a WARN and exit 0: the step exits 75 (GitHub unavailable,
-retried in a new pod by githubReportRetry) or 1 (GitHub refused, or there is
-no Deployment to resolve), with the HTTP status in the log. Every caller runs
+longer ends in a WARN and exit 0: the step exits 75 (GitHub unavailable, or
+still no Deployment listed for the SHA after 5 lookups; retried in a new pod by
+githubReportRetry) or 1 (GitHub refused), with the HTTP status in the log. Every caller runs
 the step with continueOn failed, so a reporting failure is a red status node
 in the Argo run, never a red (or stopped) build. The commit status and the
 Deployment are attempted independently; the exit code is the worst of the two.
@@ -604,12 +604,27 @@ else
     fi
     DEP_STATE="in_progress"
   else
-    if gh_api GET "${API}/deployments?sha=${SHA}&environment=${ENVIRONMENT}&per_page=1"; then
-      DEP_ID=$(printf '%s' "${GH_BODY}" | jq -r 'if type == "array" then (.[0].id // empty) else empty end' 2>/dev/null || true)
-      [ -n "${DEP_ID}" ] || report_failed 1 "no ${ENVIRONMENT} Deployment exists for ${SHA} (the pending step creates it: see its log)"
-    else
-      report_failed $? "${ENVIRONMENT} Deployment for ${SHA} not resolved — it stays in_progress"
-    fi
+    # An empty list is retried too (same 5 attempts, 2/4/8/16s): the list
+    # endpoint can lag the create, and an empty answer may be what left
+    # e2e-suite-devmove-g77qv's Deployment in_progress. Still empty after
+    # that = exit 75, so a new pod tries again.
+    _ln=1; _lw=2
+    while :; do
+      if gh_api GET "${API}/deployments?sha=${SHA}&environment=${ENVIRONMENT}&per_page=1"; then
+        DEP_ID=$(printf '%s' "${GH_BODY}" | jq -r 'if type == "array" then (.[0].id // empty) else empty end' 2>/dev/null || true)
+        [ -z "${DEP_ID}" ] || break
+        if [ "${_ln}" -ge 5 ]; then
+          report_failed 75 "no ${ENVIRONMENT} Deployment listed for ${SHA} after ${_ln} lookups (the pending step creates it: see its log) — it stays in_progress"
+          break
+        fi
+        echo "GitHub lists no ${ENVIRONMENT} Deployment for ${SHA} yet (lookup ${_ln}/5), retrying in ${_lw}s" >&2
+        sleep "${_lw}"
+        _ln=$((_ln + 1)); _lw=$((_lw * 2))
+      else
+        report_failed $? "${ENVIRONMENT} Deployment for ${SHA} not resolved — it stays in_progress"
+        break
+      fi
+    done
     DEP_STATE="${STATE}"
   fi
   if [ -n "${DEP_ID}" ]; then

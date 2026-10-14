@@ -131,13 +131,21 @@ P
   expect_has "$OUT" "ERROR: argo-workflows-dev Deployment for abc123 not resolved — it stays in_progress (HTTP 502)" "$wf success: the stuck Deployment is named"
   expect_has "$OUT" "Posted commit status ctx=success" "$wf success: the commit status still went through"
 
-  # Nothing to resolve (HTTP 200, empty list): a real error, not retried.
+  # An empty list (HTTP 200, no id) is retried: the list endpoint can lag the create.
+  run "$wf" failure argo-workflows-dev <<'P'
+GET deployments?sha= 200e,200e,200
+P
+  expect_eq "$RC" "0" "$wf failure: [] twice, then the Deployment → exit 0"
+  expect_eq "$SLEEPS" "2 4 " "$wf failure: empty lookups back off 2s then 4s"
+  expect_has "$OUT" "lists no argo-workflows-dev Deployment for abc123 yet (lookup 1/5), retrying in 2s" "$wf failure: each empty lookup is logged"
+  expect_has "$CALLS" "POST https://api.github.com/repos/acme/app/deployments/7054474542/statuses 201" "$wf failure: the late-listed Deployment gets its terminal status"
   run "$wf" failure argo-workflows-dev <<'P'
 GET deployments?sha= 200e
 P
-  expect_eq "$RC" "1" "$wf failure: no Deployment for the SHA exits 1"
-  expect_eq "$SLEEPS" "" "$wf failure: an empty answer is not retried"
-  expect_has "$OUT" "no argo-workflows-dev Deployment exists for abc123" "$wf failure: the missing Deployment is logged"
+  expect_eq "$RC" "75" "$wf failure: still [] after 5 lookups exits 75 (retried in a new pod)"
+  expect_eq "$SLEEPS" "2 4 8 16 " "$wf failure: 5 lookups, backoff 2/4/8/16s"
+  expect_has "$OUT" "no argo-workflows-dev Deployment listed for abc123 after 5 lookups" "$wf failure: the missing Deployment is logged"
+  expect_not "$CALLS" "deployments/7054474542/statuses" "$wf failure: no Deployment status is posted without an id"
 
   # 429 with Retry-After: the header wins over the backoff.
   run "$wf" success argo-workflows-dev <<'P'
