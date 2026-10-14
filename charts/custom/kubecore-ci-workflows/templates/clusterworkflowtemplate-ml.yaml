@@ -167,6 +167,10 @@ spec:
     # and a cluster-side stall is a visible stuck-pending check instead of
     # silence (#459-class outages become observable from GitHub alone).
     - - name: status-pending
+        # Reporting only: a GitHub write that fails after its retries is a red
+        # node here, never a failed (or stopped) build.
+        continueOn:
+          failed: true
         template: status
         arguments:
           parameters:
@@ -268,6 +272,10 @@ spec:
           - name: new_version
             value: "{{`{{steps.version.outputs.parameters.new_version}}`}}"
     - - name: status
+        # Reporting only: a GitHub write that fails after its retries is a red
+        # node here, never a failed (or stopped) build.
+        continueOn:
+          failed: true
         template: status
         arguments:
           parameters:
@@ -3177,15 +3185,17 @@ spec:
         readOnly: true
 
   - name: status
-{{ include "kubecore-ci-workflows.preemptionRetry" . | indent 4 }}
+{{ include "kubecore-ci-workflows.githubReportRetry" . | indent 4 }}
     # GitHub reporting for the AUTHORITATIVE in-cluster build (#1126): ONE
     # commit status (context kubecore-ml-ci by default) with target_url into
     # the Argo UI run, plus a Deployment rollup (environment auto = argo-workflows-<branch|pr> by default)
     # whose log/environment URL is the same run. pending creates the
     # Deployment; success/failure resolve the Deployment created for this SHA.
-    # Best-effort against the GitHub API: curl without -f never fails the
-    # build over a status write. Shared by ml-ci-rc-build via templateRef
-    # with context kubecore-ml-ci/rc + environment ml-rc.
+    # Every GitHub call retries transient answers; a write that still fails
+    # fails this step, and every caller runs it with continueOn failed, so a
+    # reporting failure is a red status node, never a red build.
+    # Shared by ml-ci-rc-build via templateRef with context
+    # kubecore-ml-ci/rc + environment ml-rc.
     inputs:
       parameters:
       - name: state
@@ -3234,61 +3244,9 @@ spec:
           RUN_URL="${ARGO_BASE}/workflows/{{`{{workflow.namespace}}`}}/{{`{{workflow.name}}`}}?uid={{`{{workflow.uid}}`}}"
         fi
 
-        # 1) commit status — the check on the commit / PR, linking to the run.
-        if [ -n "${RUN_URL}" ]; then
-          PAYLOAD="{\"state\":\"${STATE}\",\"description\":\"${DESC}\",\"context\":\"${CONTEXT}\",\"target_url\":\"${RUN_URL}\"}"
-        else
-          PAYLOAD="{\"state\":\"${STATE}\",\"description\":\"${DESC}\",\"context\":\"${CONTEXT}\"}"
-        fi
-        curl -s -X POST -H "${AUTH}" -H "${ACCEPT}" "${API}/statuses/${SHA}" -d "${PAYLOAD}" > /dev/null
-        echo "Posted commit status ${CONTEXT}=${STATE} on ${OWNER_REPO}@${SHA}"
-
-        # 2) Deployment rollup (environment = this pipeline). Created on pending
-        # with required_contexts:[] — THIS run is what the commit statuses
-        # describe; defaulting would deadlock the Deployment on its own check.
-        # Resolved on success/failure against the Deployment created for this
-        # SHA + environment. jq for response parsing (compact vs pretty JSON
-        # both occur; baked into tooling.toolboxImage); without jq the
-        # statuses still stand.
-        [ -n "${ENVIRONMENT}" ] || exit 0
-        if ! command -v jq >/dev/null; then
-          echo "WARN: jq unavailable — commit status posted, deployment rollup skipped"
-          exit 0
-        fi
-        if [ "${STATE}" = "pending" ]; then
-          # Self-heal: a run killed before its exit handler leaves its
-          # Deployment in_progress forever. Before creating this run's
-          # Deployment, mark every non-terminal one in the same environment
-          # inactive (this run supersedes them).
-          curl -s -H "${AUTH}" -H "${ACCEPT}" "${API}/deployments?environment=${ENVIRONMENT}&per_page=20" \
-            | jq -r 'if type == "array" then .[].id else empty end' 2>/dev/null | while read -r OLD; do
-            OLD_STATE=$(curl -s -H "${AUTH}" -H "${ACCEPT}" "${API}/deployments/${OLD}/statuses?per_page=1" | jq -r 'if type == "array" then (.[0].state // "none") else "none" end' 2>/dev/null)
-            case "${OLD_STATE}" in pending|in_progress|queued|none)
-              curl -s -X POST -H "${AUTH}" -H "${ACCEPT}" "${API}/deployments/${OLD}/statuses" \
-                -d "{\"state\":\"inactive\",\"description\":\"superseded by {{`{{workflow.name}}`}}\"}" > /dev/null
-              echo "Inactivated stale deployment ${ENVIRONMENT}#${OLD} (${OLD_STATE})";;
-            esac
-          done
-          DEP_ID=$(curl -s -X POST -H "${AUTH}" -H "${ACCEPT}" "${API}/deployments" \
-            -d "{\"ref\":\"${SHA}\",\"environment\":\"${ENVIRONMENT}\",\"auto_merge\":false,\"required_contexts\":[],\"transient_environment\":true,\"description\":\"{{`{{workflow.name}}`}}\"}" \
-            | jq -r 'if type == "object" then (.id // empty) else empty end' 2>/dev/null || true)
-          DEP_STATE="in_progress"
-        else
-          DEP_ID=$(curl -s -H "${AUTH}" -H "${ACCEPT}" "${API}/deployments?sha=${SHA}&environment=${ENVIRONMENT}&per_page=1" \
-            | jq -r 'if type == "array" then (.[0].id // empty) else empty end' 2>/dev/null || true)
-          DEP_STATE="${STATE}"
-        fi
-        if [ -n "${DEP_ID}" ]; then
-          if [ -n "${RUN_URL}" ]; then
-            DPAYLOAD="{\"state\":\"${DEP_STATE}\",\"log_url\":\"${RUN_URL}\",\"environment_url\":\"${RUN_URL}\",\"description\":\"${DESC}\"}"
-          else
-            DPAYLOAD="{\"state\":\"${DEP_STATE}\",\"description\":\"${DESC}\"}"
-          fi
-          curl -s -X POST -H "${AUTH}" -H "${ACCEPT}" "${API}/deployments/${DEP_ID}/statuses" -d "${DPAYLOAD}" > /dev/null
-          echo "Posted deployment ${ENVIRONMENT}#${DEP_ID} status: ${DEP_STATE}"
-        else
-          echo "WARN: no ${ENVIRONMENT} Deployment resolved for ${SHA} — skipped deployment status"
-        fi
+        # Commit status + Deployment rollup, every GitHub call retried (ghApi);
+        # a write that still fails fails this step (see githubStatusReport).
+{{ include "kubecore-ci-workflows.githubStatusReport" . | indent 8 }}
       volumeMounts:
       - name: github-token
         mountPath: /etc/github-token
@@ -3463,6 +3421,10 @@ spec:
   - name: exit-handler
     steps:
     - - name: post-failure-status
+        # Reporting only: a GitHub write that fails after its retries is a red
+        # node here, never a failed (or stopped) build.
+        continueOn:
+          failed: true
         template: status
         arguments:
           parameters:

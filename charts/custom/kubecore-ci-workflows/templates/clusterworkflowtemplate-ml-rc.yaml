@@ -143,6 +143,10 @@ spec:
     # build is a visible stuck-pending check + in_progress ml-rc Deployment,
     # never silence (#1126 — full GitHub reporting on every pipeline).
     - - name: status-pending
+        # Reporting only: a GitHub write that fails after its retries is a red
+        # node here, never a failed (or stopped) build.
+        continueOn:
+          failed: true
         templateRef:
           name: ml-ci-build
           template: status
@@ -214,6 +218,10 @@ spec:
           - name: changed_steps
             value: "{{`{{steps.detect-steps.outputs.parameters.changed_steps}}`}}"
     - - name: status
+        # Reporting only: a GitHub write that fails after its retries is a red
+        # node here, never a failed (or stopped) build.
+        continueOn:
+          failed: true
         templateRef:
           name: ml-ci-build
           template: status
@@ -232,6 +240,10 @@ spec:
   - name: exit-handler
     steps:
     - - name: post-failure-status
+        # Reporting only: a GitHub write that fails after its retries is a red
+        # node here, never a failed (or stopped) build.
+        continueOn:
+          failed: true
         templateRef:
           name: ml-ci-build
           template: status
