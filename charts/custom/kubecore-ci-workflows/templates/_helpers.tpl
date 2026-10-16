@@ -461,3 +461,205 @@ resources:
   {{- toYaml . | nindent 2 }}
 {{- end }}
 {{- end }}
+
+{{/*
+GitHub REST calls from a reporting step, with retries. Every call used to be a
+single `curl -s` whose HTTP status was thrown away, so one transient answer
+(5xx, a secondary rate limit) silently dropped a write: in kaos
+e2e-suite-devmove-g77qv (2026-10-14) the success step could not resolve the
+run's Deployment, logged a WARN, exited 0, and the Deployment stayed
+in_progress forever.
+
+gh_api METHOD URL [DATA] retries what is transient: no answer (curl transport
+error), HTTP 429, 5xx, and a 403 that is a secondary rate limit (a Retry-After
+header or GitHub's "secondary rate limit" message). 5 attempts, backoff
+2/4/8/16s; a numeric Retry-After replaces the backoff (capped at 60s). It sets
+GH_CODE (the HTTP status, "000" = no answer) and GH_BODY, logs every failed
+answer with GitHub's message, and returns 0 on 2xx, 75 when GitHub stayed
+unavailable (a new pod may succeed: githubReportRetry retries exit 75), 1 on
+any other answer (a real refusal: retrying changes nothing). The token only
+travels in the AUTH header and is never logged.
+
+Caller: AUTH and ACCEPT set; image has curl.
+*/}}
+{{- define "kubecore-ci-workflows.ghApi" -}}
+gh_api() {
+  _gm="$1"; _gu="$2"; _gd="${3:-}"; _gn=1; _gw=2; _gt=$(mktemp -d)
+  while :; do
+    : > "${_gt}/hdr"; : > "${_gt}/body"
+    GH_CODE=$(curl -sS -o "${_gt}/body" -D "${_gt}/hdr" -w '%{http_code}' \
+      --connect-timeout 10 --max-time 30 -X "${_gm}" -H "${AUTH}" -H "${ACCEPT}" \
+      ${_gd:+-d} ${_gd:+"${_gd}"} "${_gu}") || GH_CODE="000"
+    GH_BODY=$(cat "${_gt}/body")
+    _gr=""
+    case "${GH_CODE}" in
+      2??) rm -rf "${_gt}"; return 0 ;;
+      000|429|5??) _gr=1 ;;
+      403) if grep -qi '^retry-after:' "${_gt}/hdr" \
+              || printf '%s' "${GH_BODY}" | grep -qi 'secondary rate limit'; then _gr=1; fi ;;
+    esac
+    _gx=$(printf '%s' "${GH_BODY}" | tr -d '\n' | cut -c1-200)
+    if [ -z "${_gr}" ]; then
+      echo "GitHub ${_gm} ${_gu#https://api.github.com} answered HTTP ${GH_CODE}: ${_gx}" >&2
+      rm -rf "${_gt}"; return 1
+    fi
+    if [ "${_gn}" -ge 5 ]; then
+      echo "GitHub ${_gm} ${_gu#https://api.github.com} still unavailable after ${_gn} attempts (last HTTP ${GH_CODE}): ${_gx}" >&2
+      rm -rf "${_gt}"; return 75
+    fi
+    _gs=$(grep -i '^retry-after:' "${_gt}/hdr" | tail -1 | tr -d '\r' | awk '{print $2}')
+    case "${_gs}" in ''|*[!0-9]*) _gs="${_gw}" ;; esac
+    [ "${_gs}" -le 60 ] || _gs=60
+    echo "GitHub ${_gm} ${_gu#https://api.github.com} answered HTTP ${GH_CODE} (attempt ${_gn}/5), retrying in ${_gs}s" >&2
+    sleep "${_gs}"
+    _gn=$((_gn + 1)); _gw=$((_gw * 2))
+  done
+}
+{{- end }}
+
+{{/*
+The GitHub reporting of a build (#1126), shared by the status templates of
+ci-build, ci-rc-build and ml-ci-build (ml-ci-rc-build borrows ml-ci-build's
+by templateRef): ONE commit status with target_url into the Argo UI run, plus
+a Deployment rollup whose log/environment URL is the same run. pending creates
+the Deployment; success/failure resolve the Deployment created for this SHA +
+environment.
+
+Every call goes through gh_api (ghApi above). A write that still fails no
+longer ends in a WARN and exit 0: the step exits 75 (GitHub unavailable, or
+still no Deployment listed for the SHA after 5 lookups; retried in a new pod by
+githubReportRetry) or 1 (GitHub refused), with the HTTP status in the log. Every caller runs
+the step with continueOn failed, so a reporting failure is a red status node
+in the Argo run, never a red (or stopped) build. The commit status and the
+Deployment are attempted independently; the exit code is the worst of the two.
+
+Caller: SHA, STATE, DESC, CONTEXT, ENVIRONMENT ("" = statuses only), API,
+AUTH, ACCEPT, RUN_URL ("" = no link) and OWNER_REPO set; image has curl and jq.
+*/}}
+{{- define "kubecore-ci-workflows.githubStatusReport" -}}
+{{ include "kubecore-ci-workflows.ghApi" . }}
+REPORT_RC=0
+report_failed() {
+  echo "ERROR: $2 (HTTP ${GH_CODE})" >&2
+  [ "${REPORT_RC}" = 75 ] || REPORT_RC="$1"
+}
+
+# 1) commit status — the check on the commit / PR, linking to the run.
+if [ -n "${RUN_URL}" ]; then
+  PAYLOAD="{\"state\":\"${STATE}\",\"description\":\"${DESC}\",\"context\":\"${CONTEXT}\",\"target_url\":\"${RUN_URL}\"}"
+else
+  PAYLOAD="{\"state\":\"${STATE}\",\"description\":\"${DESC}\",\"context\":\"${CONTEXT}\"}"
+fi
+if gh_api POST "${API}/statuses/${SHA}" "${PAYLOAD}"; then
+  echo "Posted commit status ${CONTEXT}=${STATE} on ${OWNER_REPO}@${SHA}"
+else
+  report_failed $? "commit status ${CONTEXT}=${STATE} not posted on ${OWNER_REPO}@${SHA}"
+fi
+
+# 2) Deployment rollup (environment = this pipeline). Created on pending
+# with required_contexts:[] — THIS run is what the commit statuses
+# describe; defaulting would deadlock the Deployment on its own check.
+# Resolved on success/failure against the Deployment created for this
+# SHA + environment. jq for response parsing (compact vs pretty JSON
+# both occur; baked into tooling.toolboxImage); without jq the
+# statuses still stand.
+if [ -z "${ENVIRONMENT}" ]; then
+  :
+elif ! command -v jq >/dev/null; then
+  echo "WARN: jq unavailable — commit status posted, deployment rollup skipped"
+else
+  DEP_ID=""
+  if [ "${STATE}" = "pending" ]; then
+    # Self-heal: a run killed before its exit handler leaves its
+    # Deployment in_progress forever. Before creating this run's
+    # Deployment, mark every non-terminal one in the same environment
+    # inactive (this run supersedes them). Best-effort: a failure here
+    # is logged and never fails the step; a Deployment whose state could
+    # not be read is left alone.
+    if gh_api GET "${API}/deployments?environment=${ENVIRONMENT}&per_page=20"; then
+      printf '%s' "${GH_BODY}" | jq -r 'if type == "array" then .[].id else empty end' 2>/dev/null | while read -r OLD; do
+        if gh_api GET "${API}/deployments/${OLD}/statuses?per_page=1"; then
+          OLD_STATE=$(printf '%s' "${GH_BODY}" | jq -r 'if type == "array" then (.[0].state // "none") else "unknown" end' 2>/dev/null || echo unknown)
+        else
+          OLD_STATE="unknown"
+        fi
+        case "${OLD_STATE}" in pending|in_progress|queued|none)
+          if gh_api POST "${API}/deployments/${OLD}/statuses" \
+               "{\"state\":\"inactive\",\"description\":\"superseded by {{`{{workflow.name}}`}}\"}"; then
+            echo "Inactivated stale deployment ${ENVIRONMENT}#${OLD} (${OLD_STATE})"
+          else
+            echo "WARN: stale deployment ${ENVIRONMENT}#${OLD} (${OLD_STATE}) not inactivated (HTTP ${GH_CODE})"
+          fi;;
+        esac
+      done
+    else
+      echo "WARN: ${ENVIRONMENT} Deployments not listed (HTTP ${GH_CODE}) — stale ones not inactivated"
+    fi
+    if gh_api POST "${API}/deployments" \
+         "{\"ref\":\"${SHA}\",\"environment\":\"${ENVIRONMENT}\",\"auto_merge\":false,\"required_contexts\":[],\"transient_environment\":true,\"description\":\"{{`{{workflow.name}}`}}\"}"; then
+      DEP_ID=$(printf '%s' "${GH_BODY}" | jq -r 'if type == "object" then (.id // empty) else empty end' 2>/dev/null || true)
+      [ -n "${DEP_ID}" ] || report_failed 1 "GitHub created no ${ENVIRONMENT} Deployment for ${SHA}: $(printf '%s' "${GH_BODY}" | tr -d '\n' | cut -c1-200)"
+    else
+      report_failed $? "${ENVIRONMENT} Deployment not created for ${SHA}"
+    fi
+    DEP_STATE="in_progress"
+  else
+    # An empty list is retried too (same 5 attempts, 2/4/8/16s): the list
+    # endpoint can lag the create, and an empty answer may be what left
+    # e2e-suite-devmove-g77qv's Deployment in_progress. Still empty after
+    # that = exit 75, so a new pod tries again.
+    _ln=1; _lw=2
+    while :; do
+      if gh_api GET "${API}/deployments?sha=${SHA}&environment=${ENVIRONMENT}&per_page=1"; then
+        DEP_ID=$(printf '%s' "${GH_BODY}" | jq -r 'if type == "array" then (.[0].id // empty) else empty end' 2>/dev/null || true)
+        [ -z "${DEP_ID}" ] || break
+        if [ "${_ln}" -ge 5 ]; then
+          report_failed 75 "no ${ENVIRONMENT} Deployment listed for ${SHA} after ${_ln} lookups (the pending step creates it: see its log) — it stays in_progress"
+          break
+        fi
+        echo "GitHub lists no ${ENVIRONMENT} Deployment for ${SHA} yet (lookup ${_ln}/5), retrying in ${_lw}s" >&2
+        sleep "${_lw}"
+        _ln=$((_ln + 1)); _lw=$((_lw * 2))
+      else
+        report_failed $? "${ENVIRONMENT} Deployment for ${SHA} not resolved — it stays in_progress"
+        break
+      fi
+    done
+    DEP_STATE="${STATE}"
+  fi
+  if [ -n "${DEP_ID}" ]; then
+    if [ -n "${RUN_URL}" ]; then
+      DPAYLOAD="{\"state\":\"${DEP_STATE}\",\"log_url\":\"${RUN_URL}\",\"environment_url\":\"${RUN_URL}\",\"description\":\"${DESC}\"}"
+    else
+      DPAYLOAD="{\"state\":\"${DEP_STATE}\",\"description\":\"${DESC}\"}"
+    fi
+    if gh_api POST "${API}/deployments/${DEP_ID}/statuses" "${DPAYLOAD}"; then
+      echo "Posted deployment ${ENVIRONMENT}#${DEP_ID} status: ${DEP_STATE}"
+    else
+      report_failed $? "deployment ${ENVIRONMENT}#${DEP_ID} status ${DEP_STATE} not posted"
+    fi
+  fi
+fi
+if [ "${REPORT_RC}" != 0 ]; then
+  echo "GitHub reporting incomplete: exit ${REPORT_RC} (75 = GitHub unavailable, retried in a new pod). The build result does not depend on it: callers run this step with continueOn failed." >&2
+fi
+exit "${REPORT_RC}"
+{{- end }}
+
+{{/*
+The status step's retry: preemptionRetry plus exit 75, gh_api's "GitHub stayed
+unavailable" (see ghApi). Same limit and backoff (30s, then 60s), so an outage
+gets ~2 minutes on top of the in-pod retries. Re-running is safe: the commit
+status and the terminal Deployment status are idempotent, and a re-run pending
+step inactivates the Deployment an earlier attempt created before creating its
+own.
+*/}}
+{{- define "kubecore-ci-workflows.githubReportRetry" -}}
+retryStrategy:
+  limit: "2"
+  retryPolicy: Always
+  expression: 'lastRetry.status == "Error" or lastRetry.message matches "imminent node shutdown" or lastRetry.exitCode == "75"'
+  backoff:
+    duration: "30s"
+    factor: "2"
+{{- end }}
