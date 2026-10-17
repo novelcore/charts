@@ -1033,7 +1033,7 @@ spec:
                 cm = c.get('configMapName')
                 if not isinstance(cm, str) or not cm.strip():
                     continue
-                if 'environment' in c and c.get('environment') != ml_env_name:
+                if c.get('environment') and c.get('environment') != ml_env_name:
                     continue
                 if cm in seen:
                     continue

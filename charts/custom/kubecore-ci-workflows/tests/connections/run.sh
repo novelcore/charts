@@ -10,4 +10,4 @@
 # Exit status is pytest's.
 set -eu
 HERE=$(cd "$(dirname "$0")" && pwd)
-RENDERED="$1" python3 -m pytest -v "${HERE}/test_render_wft.py" "${HERE}/test_hera_enhancer.py"
+RENDERED="$1" python3 -m pytest -v "${HERE}/test_render_wft.py" "${HERE}/test_hera_enhancer.py" "${HERE}/test_harness_cli.py"

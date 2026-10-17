@@ -108,3 +108,21 @@ def test_envfrom_no_yaml_aliases(name):
             assert "&id" not in line and "*id" not in line, line
             assert "&id" not in lines[i + 1] and "*id" not in lines[i + 1], lines[i + 1]
     assert "envFrom:" in out
+
+
+@pytest.mark.parametrize("env", ["", None], ids=["empty-string", "null"])
+def test_empty_or_null_environment_counts_as_absent(env):
+    # Parity with the Hera enhancer: an empty/null `environment` is "no environment", so the
+    # entry applies to every ml environment (including a different one).
+    conns = [{"name": "a", "envPrefix": "A", "configMapName": "cm-a", "environment": env}]
+
+    def other_env(ctx):
+        ctx["mlEnvironment"] = dict(ctx.get("mlEnvironment") or {}, name="some-other-env")
+        return ctx
+
+    users = _user_names("kubeline-static")
+    for ov in (None, other_env):
+        got = [t for t in _tpls("kubeline-static", conns, ctx_override=ov) if t["name"] in users]
+        assert got
+        for t in got:
+            assert t["container"]["envFrom"] == [{"configMapRef": {"name": "cm-a", "optional": True}}]

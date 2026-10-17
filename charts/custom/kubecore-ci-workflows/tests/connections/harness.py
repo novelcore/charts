@@ -318,6 +318,14 @@ def main(argv=None) -> int:
                 f.write(text)
             print(f"wrote {os.path.relpath(p, HERE)}")
         return 0
+    if a.cmd == "diff-hera":
+        if os.environ.get("ENHANCER_DIR"):
+            print("diff-hera: ENHANCER_DIR is set, so both refs resolve to the same directory and the "
+                  "diff would be vacuous; unset ENHANCER_DIR", file=sys.stderr)
+            return 2
+        if a.ref_a == a.ref_b:
+            print(f"diff-hera: --ref-a and --ref-b are both {a.ref_a!r}; nothing to compare", file=sys.stderr)
+            return 2
     ctx = _bare_context(a.context)
     if a.cmd == "diff-hera":
         repo = pinned_repo()
