@@ -1,0 +1,23 @@
+# Live compute catalog (PLACEHOLDER values) as published by the
+# ml-compute-catalog-probe; only the keys render-wft's live path reads.
+region: PLACEHOLDER-region
+classes:
+  - name: cpu-standard
+    tier: cpu
+    machineType: n2-standard-8
+    available: true
+    stockout: false
+    allocatable:
+      cpu: 7
+      memoryGiB: 27
+  - name: gpu-t4
+    tier: gpu
+    machineType: n1-standard-8
+    available: true
+    stockout: false
+    guestAccelerator:
+      type: nvidia-tesla-t4
+      count: 1
+    allocatable:
+      cpu: 7
+      memoryGiB: 25

@@ -222,6 +222,22 @@ jobs:
         run: |
           ct install --config ct.yaml --target-branch ${{ github.event.repository.default_branch }}
 
+      - name: Set up Python 3.12 (connections renderers)
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.12'
+
+      - name: Test kubecore-ci-workflows connection envFrom renderers (kaos 1034, CON-02)
+        # render-wft (extracted from the rendered chart) and the pinned Hera
+        # enhancer render byte-identical goldens with no connections, and add
+        # optional envFrom to user steps only when connections are present.
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          python3 -m pip install --quiet pyyaml pytest
+          helm template t charts/custom/kubecore-ci-workflows > "$RUNNER_TEMP/ci-workflows.yaml"
+          bash charts/custom/kubecore-ci-workflows/tests/connections/run.sh "$RUNNER_TEMP/ci-workflows.yaml"
+
   # security-scan:
   #   runs-on: ubuntu-latest
   #   # Only run security scan if Code Security is enabled

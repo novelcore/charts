@@ -1,0 +1,629 @@
+# source: novelcore/yolo-pipelines-template@7369467131507c1f5e03e07bb50c3a19c23b742b (pipeline.py -> out/raw-workflow-template.yaml)
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: ml-pipeline
+spec:
+  entrypoint: main
+  templates:
+  - name: compose-and-validate
+    container:
+      image: platform-managed
+      args:
+      - image_processing={{workflow.parameters.image_processing}}
+      - model={{workflow.parameters.model}}
+      - train/callbacks={{workflow.parameters.train-callbacks}}
+      - train/optimizer={{workflow.parameters.train-optimizer}}
+      - train/qat={{workflow.parameters.train-qat}}
+      - summary.label={{workflow.parameters.summary-label}}
+      - data.ref={{workflow.parameters.data-ref}}
+      - data.source={{workflow.parameters.data-source}}
+      - data.version={{workflow.parameters.data-version}}
+      - data.path_override={{workflow.parameters.data-path_override}}
+      - data.sample_size={{workflow.parameters.data-sample_size}}
+      - data.seed={{workflow.parameters.data-seed}}
+      - quantization.mode={{workflow.parameters.quantization-mode}}
+      - quantization.image_size={{workflow.parameters.quantization-image_size}}
+      - quantization.calibration_frames={{workflow.parameters.quantization-calibration_frames}}
+      - quantization.calibration_seed={{workflow.parameters.quantization-calibration_seed}}
+      - quantization.parity_frames={{workflow.parameters.quantization-parity_frames}}
+      - quantization.parity_max_abs_error={{workflow.parameters.quantization-parity_max_abs_error}}
+      - quantization.output_prefix={{workflow.parameters.quantization-output_prefix}}
+      - experiment.name={{workflow.parameters.experiment-name}}
+      - experiment.description={{workflow.parameters.experiment-description}}
+      - model.variant={{workflow.parameters.model-variant}}
+      - model.pretrained_weights={{workflow.parameters.model-pretrained_weights}}
+      - train.epochs={{workflow.parameters.train-epochs}}
+      - train.batch_size={{workflow.parameters.train-batch_size}}
+      - train.image_size={{workflow.parameters.train-image_size}}
+      - train.cos_lr={{workflow.parameters.train-cos_lr}}
+      - train.lrf={{workflow.parameters.train-lrf}}
+      - train.warmup_epochs={{workflow.parameters.train-warmup_epochs}}
+      - train.warmup_momentum={{workflow.parameters.train-warmup_momentum}}
+      - train.dropout={{workflow.parameters.train-dropout}}
+      - train.label_smoothing={{workflow.parameters.train-label_smoothing}}
+      - train.nbs={{workflow.parameters.train-nbs}}
+      - train.freeze={{workflow.parameters.train-freeze}}
+      - train.amp={{workflow.parameters.train-amp}}
+      - train.close_mosaic={{workflow.parameters.train-close_mosaic}}
+      - train.seed={{workflow.parameters.train-seed}}
+      - train.deterministic={{workflow.parameters.train-deterministic}}
+      - train.loss.pose={{workflow.parameters.train-loss-pose}}
+      - train.loss.kobj={{workflow.parameters.train-loss-kobj}}
+      - train.loss.box={{workflow.parameters.train-loss-box}}
+      - train.loss.cls={{workflow.parameters.train-loss-cls}}
+      - train.loss.dfl={{workflow.parameters.train-loss-dfl}}
+      - train.checkpointing.interval_epochs={{workflow.parameters.train-checkpointing-interval_epochs}}
+      - train.checkpointing.storage_path={{workflow.parameters.train-checkpointing-storage_path}}
+      - train.checkpointing.resume_from={{workflow.parameters.train-checkpointing-resume_from}}
+      - train.export.enabled={{workflow.parameters.train-export-enabled}}
+      - train.export.formats={{workflow.parameters.train-export-formats}}
+      - train.export.precisions={{workflow.parameters.train-export-precisions}}
+      - train.optimizer.name={{workflow.parameters.train-optimizer-name}}
+      - train.optimizer.lr={{workflow.parameters.train-optimizer-lr}}
+      - train.optimizer.momentum={{workflow.parameters.train-optimizer-momentum}}
+      - train.optimizer.weight_decay={{workflow.parameters.train-optimizer-weight_decay}}
+      - train.callbacks.early_stopping_enabled={{workflow.parameters.train-callbacks-early_stopping_enabled}}
+      - train.callbacks.patience={{workflow.parameters.train-callbacks-patience}}
+      - train.qat.epochs={{workflow.parameters.train-qat-epochs}}
+      - train.qat.lr={{workflow.parameters.train-qat-lr}}
+      - image_processing.hsv_h={{workflow.parameters.image_processing-hsv_h}}
+      - image_processing.hsv_s={{workflow.parameters.image_processing-hsv_s}}
+      - image_processing.hsv_v={{workflow.parameters.image_processing-hsv_v}}
+      - image_processing.degrees={{workflow.parameters.image_processing-degrees}}
+      - image_processing.translate={{workflow.parameters.image_processing-translate}}
+      - image_processing.scale={{workflow.parameters.image_processing-scale}}
+      - image_processing.shear={{workflow.parameters.image_processing-shear}}
+      - image_processing.perspective={{workflow.parameters.image_processing-perspective}}
+      - image_processing.flipud={{workflow.parameters.image_processing-flipud}}
+      - image_processing.fliplr={{workflow.parameters.image_processing-fliplr}}
+      - image_processing.mosaic={{workflow.parameters.image_processing-mosaic}}
+      - image_processing.mixup={{workflow.parameters.image_processing-mixup}}
+      - image_processing.copy_paste={{workflow.parameters.image_processing-copy_paste}}
+      - image_processing.erasing={{workflow.parameters.image_processing-erasing}}
+      - image_processing.bgr={{workflow.parameters.image_processing-bgr}}
+      - registration.registered_model_name={{workflow.parameters.registration-registered_model_name}}
+      - registration.promote_to={{workflow.parameters.registration-promote_to}}
+      - logging.level={{workflow.parameters.logging-level}}
+      - logging.log_artifacts={{workflow.parameters.logging-log_artifacts}}
+      - --render-defaults
+      - '{"image_processing":"mosaic_default","model":"yolov8n","train/callbacks":"early_stopping","train/optimizer":"sgd","train/qat":"default_qat","summary.label":"\ud83d\udcca
+        Data summary","data.ref":"main","data.source":"lakefs","data.version":"","data.path_override":"","data.sample_size":"","data.seed":"42","quantization.mode":"none","quantization.image_size":"640","quantization.calibration_frames":"512","quantization.calibration_seed":"42","quantization.parity_frames":"100","quantization.parity_max_abs_error":"0.05","quantization.output_prefix":"main/quantization","experiment.name":"object-pose-v1-yolov8n","experiment.description":"","model.variant":"yolov8n-pose.pt","model.pretrained_weights":"","train.epochs":"100","train.batch_size":"16","train.image_size":"640","train.cos_lr":"true","train.lrf":"0.01","train.warmup_epochs":"3.0","train.warmup_momentum":"0.8","train.dropout":"0.0","train.label_smoothing":"0.0","train.nbs":"64","train.freeze":"","train.amp":"true","train.close_mosaic":"10","train.seed":"0","train.deterministic":"true","train.loss.pose":"12.0","train.loss.kobj":"2.0","train.loss.box":"7.5","train.loss.cls":"0.5","train.loss.dfl":"1.5","train.checkpointing.interval_epochs":"10","train.checkpointing.storage_path":"","train.checkpointing.resume_from":"","train.export.enabled":"false","train.export.formats":"engine","train.export.precisions":"fp16","train.optimizer.name":"SGD","train.optimizer.lr":"0.01","train.optimizer.momentum":"0.937","train.optimizer.weight_decay":"0.0005","train.callbacks.early_stopping_enabled":"true","train.callbacks.patience":"50","train.qat.epochs":"10","train.qat.lr":"0.0001","image_processing.hsv_h":"0.015","image_processing.hsv_s":"0.7","image_processing.hsv_v":"0.4","image_processing.degrees":"0.0","image_processing.translate":"0.1","image_processing.scale":"0.5","image_processing.shear":"0.0","image_processing.perspective":"0.0","image_processing.flipud":"0.0","image_processing.fliplr":"0.0","image_processing.mosaic":"1.0","image_processing.mixup":"0.0","image_processing.copy_paste":"0.0","image_processing.erasing":"0.4","image_processing.bgr":"0.0","registration.registered_model_name":"","registration.promote_to":"","logging.level":"INFO","logging.log_artifacts":"true"}'
+      - --advanced
+      - '{{workflow.parameters.config}}'
+      - --require=data
+      - --require=experiment
+      - --require=image_processing
+      - --require=logging
+      - --require=model
+      - --require=quantization
+      - --require=registration
+      - --require=summary
+      - --require=train
+      - --output
+      - /work/params.yaml
+      command:
+      - python
+      - -m
+      - kubecore.compose
+    outputs:
+      parameters:
+      - name: params
+        valueFrom:
+          path: /work/params.yaml
+  - name: config-validation
+    container:
+      image: platform-managed
+      args:
+      - --params
+      - '{{inputs.parameters.params}}'
+      command:
+      - python
+      - -m
+      - app.entry
+    inputs:
+      parameters:
+      - name: params
+  - name: dataset-loading
+    container:
+      image: platform-managed
+      args:
+      - --params
+      - '{{inputs.parameters.params}}'
+      command:
+      - python
+      - -m
+      - app.entry
+    inputs:
+      parameters:
+      - name: params
+    outputs:
+      parameters:
+      - name: data-yaml
+        valueFrom:
+          default: '{}'
+          path: /work/output/data-yaml.json
+      - name: manifest-summary
+        valueFrom:
+          default: '{}'
+          path: /work/output/manifest-summary.json
+  - name: data-summary
+    container:
+      image: platform-managed
+      args:
+      - --params
+      - '{{inputs.parameters.params}}'
+      - --data-yaml
+      - '{{inputs.parameters.data-yaml}}'
+      - --manifest-summary
+      - '{{inputs.parameters.manifest-summary}}'
+      command:
+      - python
+      - -m
+      - app.entry
+    inputs:
+      parameters:
+      - name: params
+      - name: data-yaml
+        default: '{}'
+      - name: manifest-summary
+        default: '{}'
+  - name: model-training
+    container:
+      image: platform-managed
+      args:
+      - --params
+      - '{{inputs.parameters.params}}'
+      - --data-yaml
+      - '{{inputs.parameters.data-yaml}}'
+      - --manifest-summary
+      - '{{inputs.parameters.manifest-summary}}'
+      command:
+      - python
+      - -m
+      - app.entry
+      resources:
+        limits:
+          nvidia.com/gpu: '1'
+        requests:
+          nvidia.com/gpu: '1'
+    inputs:
+      parameters:
+      - name: params
+      - name: data-yaml
+        default: '{}'
+      - name: manifest-summary
+        default: '{}'
+    metadata:
+      annotations:
+        platform.kubecore.io/hpc: 12h
+    outputs:
+      parameters:
+      - name: training-result
+        valueFrom:
+          default: '{}'
+          path: /work/output/training-result.json
+  - name: qat-finetune
+    container:
+      image: platform-managed
+      args:
+      - --params
+      - '{{inputs.parameters.params}}'
+      - --training-result
+      - '{{inputs.parameters.training-result}}'
+      command:
+      - python
+      - -m
+      - app.entry
+      resources:
+        limits:
+          nvidia.com/gpu: '1'
+        requests:
+          ephemeral-storage: 20Gi
+          nvidia.com/gpu: '1'
+    inputs:
+      parameters:
+      - name: params
+      - name: training-result
+        default: '{}'
+    outputs:
+      parameters:
+      - name: qat-result
+        valueFrom:
+          default: '{}'
+          path: /work/output/qat-result.json
+  - name: model-quantization
+    container:
+      image: platform-managed
+      args:
+      - --params
+      - '{{inputs.parameters.params}}'
+      - --training-result
+      - '{{inputs.parameters.training-result}}'
+      - --qat-result
+      - '{{inputs.parameters.qat-result}}'
+      command:
+      - python
+      - -m
+      - app.entry
+    inputs:
+      parameters:
+      - name: params
+      - name: training-result
+        default: '{}'
+      - name: qat-result
+        default: '{}'
+    outputs:
+      parameters:
+      - name: quantization-result
+        valueFrom:
+          default: '{}'
+          path: /work/output/quantization-result.json
+  - name: model-registration
+    container:
+      image: platform-managed
+      args:
+      - --params
+      - '{{inputs.parameters.params}}'
+      - --training-result
+      - '{{inputs.parameters.training-result}}'
+      - --quantization-result
+      - '{{inputs.parameters.quantization-result}}'
+      command:
+      - python
+      - -m
+      - app.entry
+    inputs:
+      parameters:
+      - name: params
+      - name: training-result
+        default: '{}'
+      - name: quantization-result
+        default: '{}'
+    outputs:
+      parameters:
+      - name: registration-result
+        valueFrom:
+          default: '{}'
+          path: /work/output/registration-result.json
+  - name: main
+    dag:
+      tasks:
+      - name: compose-and-validate
+        template: compose-and-validate
+      - name: config-validation
+        depends: compose-and-validate
+        template: config-validation
+        arguments:
+          parameters:
+          - name: params
+            value: '{{tasks.compose-and-validate.outputs.parameters.params}}'
+      - name: dataset-loading
+        depends: compose-and-validate && config-validation
+        template: dataset-loading
+        arguments:
+          parameters:
+          - name: params
+            value: '{{tasks.compose-and-validate.outputs.parameters.params}}'
+      - name: data-summary
+        depends: compose-and-validate && dataset-loading
+        template: data-summary
+        arguments:
+          parameters:
+          - name: params
+            value: '{{tasks.compose-and-validate.outputs.parameters.params}}'
+          - name: data-yaml
+            value: '{{tasks.dataset-loading.outputs.parameters.data-yaml}}'
+          - name: manifest-summary
+            value: '{{tasks.dataset-loading.outputs.parameters.manifest-summary}}'
+      - name: model-training
+        depends: compose-and-validate && dataset-loading
+        template: model-training
+        arguments:
+          parameters:
+          - name: params
+            value: '{{tasks.compose-and-validate.outputs.parameters.params}}'
+          - name: data-yaml
+            value: '{{tasks.dataset-loading.outputs.parameters.data-yaml}}'
+          - name: manifest-summary
+            value: '{{tasks.dataset-loading.outputs.parameters.manifest-summary}}'
+      - name: qat-finetune
+        depends: compose-and-validate && model-training
+        template: qat-finetune
+        when: '{{workflow.parameters.quantization-mode}} == qat'
+        arguments:
+          parameters:
+          - name: params
+            value: '{{tasks.compose-and-validate.outputs.parameters.params}}'
+          - name: training-result
+            value: '{{tasks.model-training.outputs.parameters.training-result}}'
+      - name: model-quantization
+        depends: compose-and-validate && model-training && (qat-finetune.Succeeded
+          || qat-finetune.Skipped || qat-finetune.Omitted)
+        template: model-quantization
+        when: '{{workflow.parameters.quantization-mode}} != none'
+        arguments:
+          parameters:
+          - name: params
+            value: '{{tasks.compose-and-validate.outputs.parameters.params}}'
+          - name: training-result
+            value: '{{tasks.model-training.outputs.parameters.training-result}}'
+          - name: qat-result
+            value: '{{tasks.qat-finetune.outputs.parameters.qat-result}}'
+      - name: model-registration
+        depends: compose-and-validate && model-training && (model-quantization.Succeeded
+          || model-quantization.Skipped || model-quantization.Omitted)
+        template: model-registration
+        arguments:
+          parameters:
+          - name: params
+            value: '{{tasks.compose-and-validate.outputs.parameters.params}}'
+          - name: training-result
+            value: '{{tasks.model-training.outputs.parameters.training-result}}'
+          - name: quantization-result
+            value: '{{tasks.model-quantization.outputs.parameters.quantization-result}}'
+  arguments:
+    parameters:
+    - name: image_processing
+      description: 'Config group ''image_processing'': swaps the whole subtree (options:
+        conservative, mosaic_default, none).'
+      value: mosaic_default
+      enum:
+      - conservative
+      - mosaic_default
+      - none
+    - name: model
+      description: 'Config group ''model'': swaps the whole subtree (options: yolov11x,
+        yolov8n, yolov8s).'
+      value: yolov8n
+      enum:
+      - yolov11x
+      - yolov8n
+      - yolov8s
+    - name: train-callbacks
+      description: 'Config group ''train/callbacks'': swaps the whole subtree (options:
+        early_stopping, none).'
+      value: early_stopping
+      enum:
+      - early_stopping
+      - none
+    - name: train-optimizer
+      description: 'Config group ''train/optimizer'': swaps the whole subtree (options:
+        adam, adamw, sgd).'
+      value: sgd
+      enum:
+      - adam
+      - adamw
+      - sgd
+    - name: train-qat
+      description: 'Config group ''train/qat'': swaps the whole subtree (options:
+        default_qat, no_qat).'
+      value: default_qat
+      enum:
+      - default_qat
+      - no_qat
+    - name: summary-label
+      description: 'Config: summary.label'
+      value: "\U0001F4CA Data summary"
+    - name: data-ref
+      description: 'Config: data.ref'
+      value: main
+    - name: data-source
+      description: 'Config: data.source'
+      value: lakefs
+      enum:
+      - lakefs
+      - s3
+    - name: data-version
+      description: 'Config: data.version'
+      value: ''
+    - name: data-path_override
+      description: 'Config: data.path_override'
+      value: ''
+    - name: data-sample_size
+      description: 'Config: data.sample_size'
+      value: ''
+    - name: data-seed
+      description: 'Config: data.seed'
+      value: '42'
+    - name: quantization-mode
+      description: 'Config: quantization.mode'
+      value: none
+      enum:
+      - none
+      - ptq
+      - qat
+    - name: quantization-image_size
+      description: 'Config: quantization.image_size'
+      value: '640'
+    - name: quantization-calibration_frames
+      description: 'Config: quantization.calibration_frames'
+      value: '512'
+    - name: quantization-calibration_seed
+      description: 'Config: quantization.calibration_seed'
+      value: '42'
+    - name: quantization-parity_frames
+      description: 'Config: quantization.parity_frames'
+      value: '100'
+    - name: quantization-parity_max_abs_error
+      description: 'Config: quantization.parity_max_abs_error'
+      value: '0.05'
+    - name: quantization-output_prefix
+      description: 'Config: quantization.output_prefix'
+      value: main/quantization
+    - name: experiment-name
+      description: 'Config: experiment.name'
+      value: object-pose-v1-yolov8n
+    - name: experiment-description
+      description: 'Config: experiment.description'
+      value: ''
+    - name: model-variant
+      description: 'Config: model.variant'
+      value: yolov8n-pose.pt
+    - name: model-pretrained_weights
+      description: 'Config: model.pretrained_weights'
+      value: ''
+    - name: train-epochs
+      description: 'Config: train.epochs'
+      value: '100'
+    - name: train-batch_size
+      description: 'Config: train.batch_size'
+      value: '16'
+    - name: train-image_size
+      description: 'Config: train.image_size'
+      value: '640'
+    - name: train-cos_lr
+      description: 'Config: train.cos_lr'
+      value: 'true'
+    - name: train-lrf
+      description: 'Config: train.lrf'
+      value: '0.01'
+    - name: train-warmup_epochs
+      description: 'Config: train.warmup_epochs'
+      value: '3.0'
+    - name: train-warmup_momentum
+      description: 'Config: train.warmup_momentum'
+      value: '0.8'
+    - name: train-dropout
+      description: 'Config: train.dropout'
+      value: '0.0'
+    - name: train-label_smoothing
+      description: 'Config: train.label_smoothing'
+      value: '0.0'
+    - name: train-nbs
+      description: 'Config: train.nbs'
+      value: '64'
+    - name: train-freeze
+      description: 'Config: train.freeze'
+      value: ''
+    - name: train-amp
+      description: 'Config: train.amp'
+      value: 'true'
+    - name: train-close_mosaic
+      description: 'Config: train.close_mosaic'
+      value: '10'
+    - name: train-seed
+      description: 'Config: train.seed'
+      value: '0'
+    - name: train-deterministic
+      description: 'Config: train.deterministic'
+      value: 'true'
+    - name: train-loss-pose
+      description: 'Config: train.loss.pose'
+      value: '12.0'
+    - name: train-loss-kobj
+      description: 'Config: train.loss.kobj'
+      value: '2.0'
+    - name: train-loss-box
+      description: 'Config: train.loss.box'
+      value: '7.5'
+    - name: train-loss-cls
+      description: 'Config: train.loss.cls'
+      value: '0.5'
+    - name: train-loss-dfl
+      description: 'Config: train.loss.dfl'
+      value: '1.5'
+    - name: train-checkpointing-interval_epochs
+      description: 'Config: train.checkpointing.interval_epochs'
+      value: '10'
+    - name: train-checkpointing-storage_path
+      description: 'Config: train.checkpointing.storage_path'
+      value: ''
+    - name: train-checkpointing-resume_from
+      description: 'Config: train.checkpointing.resume_from'
+      value: ''
+    - name: train-export-enabled
+      description: 'Config: train.export.enabled'
+      value: 'false'
+    - name: train-export-formats
+      description: 'Config: train.export.formats'
+      value: engine
+    - name: train-export-precisions
+      description: 'Config: train.export.precisions'
+      value: fp16
+    - name: train-optimizer-name
+      description: 'Config: train.optimizer.name'
+      value: SGD
+    - name: train-optimizer-lr
+      description: 'Config: train.optimizer.lr'
+      value: '0.01'
+    - name: train-optimizer-momentum
+      description: 'Config: train.optimizer.momentum'
+      value: '0.937'
+    - name: train-optimizer-weight_decay
+      description: 'Config: train.optimizer.weight_decay'
+      value: '0.0005'
+    - name: train-callbacks-early_stopping_enabled
+      description: 'Config: train.callbacks.early_stopping_enabled'
+      value: 'true'
+    - name: train-callbacks-patience
+      description: 'Config: train.callbacks.patience'
+      value: '50'
+    - name: train-qat-epochs
+      description: 'Config: train.qat.epochs'
+      value: '10'
+    - name: train-qat-lr
+      description: 'Config: train.qat.lr'
+      value: '0.0001'
+    - name: image_processing-hsv_h
+      description: 'Config: image_processing.hsv_h'
+      value: '0.015'
+    - name: image_processing-hsv_s
+      description: 'Config: image_processing.hsv_s'
+      value: '0.7'
+    - name: image_processing-hsv_v
+      description: 'Config: image_processing.hsv_v'
+      value: '0.4'
+    - name: image_processing-degrees
+      description: 'Config: image_processing.degrees'
+      value: '0.0'
+    - name: image_processing-translate
+      description: 'Config: image_processing.translate'
+      value: '0.1'
+    - name: image_processing-scale
+      description: 'Config: image_processing.scale'
+      value: '0.5'
+    - name: image_processing-shear
+      description: 'Config: image_processing.shear'
+      value: '0.0'
+    - name: image_processing-perspective
+      description: 'Config: image_processing.perspective'
+      value: '0.0'
+    - name: image_processing-flipud
+      description: 'Config: image_processing.flipud'
+      value: '0.0'
+    - name: image_processing-fliplr
+      description: 'Config: image_processing.fliplr'
+      value: '0.0'
+    - name: image_processing-mosaic
+      description: 'Config: image_processing.mosaic'
+      value: '1.0'
+    - name: image_processing-mixup
+      description: 'Config: image_processing.mixup'
+      value: '0.0'
+    - name: image_processing-copy_paste
+      description: 'Config: image_processing.copy_paste'
+      value: '0.0'
+    - name: image_processing-erasing
+      description: 'Config: image_processing.erasing'
+      value: '0.4'
+    - name: image_processing-bgr
+      description: 'Config: image_processing.bgr'
+      value: '0.0'
+    - name: registration-registered_model_name
+      description: 'Config: registration.registered_model_name'
+      value: ''
+    - name: registration-promote_to
+      description: 'Config: registration.promote_to'
+      value: ''
+    - name: logging-level
+      description: 'Config: logging.level'
+      value: INFO
+    - name: logging-log_artifacts
+      description: 'Config: logging.log_artifacts'
+      value: 'true'
+    - name: config
+      description: "ADVANCED: override YAML merged LAST over the composed config (OmegaConf.merge).\
+        \ Overrides everything above \u2014 intended for scripted submissions (argo\
+        \ submit -p config=...). May not modify platform.*."
+      value: ''

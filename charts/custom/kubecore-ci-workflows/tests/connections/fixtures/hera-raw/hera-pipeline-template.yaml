@@ -1,0 +1,68 @@
+# source: novelcore/hera-pipeline-template@192e5486c0431b472a474d468d6d59f4244fd6a2 (pipeline.py -> out/raw-workflow-template.yaml)
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: ml-pipeline
+spec:
+  entrypoint: main
+  templates:
+  - name: compose-and-validate
+    container:
+      image: platform-managed
+      args:
+      - experiment.name={{workflow.parameters.experiment-name}}
+      - experiment.description={{workflow.parameters.experiment-description}}
+      - --render-defaults
+      - '{"experiment.name":"my-experiment-v1","experiment.description":""}'
+      - --advanced
+      - '{{workflow.parameters.config}}'
+      - --require=experiment
+      - --output
+      - /work/params.yaml
+      command:
+      - python
+      - -m
+      - kubecore.compose
+    outputs:
+      parameters:
+      - name: params
+        valueFrom:
+          path: /work/params.yaml
+  - name: hello-world
+    container:
+      image: platform-managed
+      args:
+      - --params
+      - '{{inputs.parameters.params}}'
+      command:
+      - python
+      - -m
+      - app.entry
+    inputs:
+      parameters:
+      - name: params
+  - name: main
+    dag:
+      tasks:
+      - name: compose-and-validate
+        template: compose-and-validate
+      - name: hello-world
+        depends: compose-and-validate
+        template: hello-world
+        arguments:
+          parameters:
+          - name: params
+            value: '{{tasks.compose-and-validate.outputs.parameters.params}}'
+  arguments:
+    parameters:
+    - name: experiment-name
+      description: 'Config: experiment.name'
+      value: my-experiment-v1
+    - name: experiment-description
+      description: 'Config: experiment.description'
+      value: ''
+    - name: config
+      description: "ADVANCED: override YAML merged LAST over the composed config (OmegaConf.merge).\
+        \ Overrides everything above \u2014 intended for scripted submissions (argo\
+        \ submit -p config=...). May not modify platform.*."
+      value: ''
