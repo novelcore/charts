@@ -185,6 +185,7 @@ def fetch_enhancer(ref: str, repo: str = "novelcore/hera-mlops-template") -> str
     except Exception as e:
         _ENHANCER_FAIL[key] = repr(e)
         raise
+    _ENHANCER_CACHE[key] = root
     return root
 
 

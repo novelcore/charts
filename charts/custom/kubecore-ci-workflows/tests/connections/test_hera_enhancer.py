@@ -1,3 +1,5 @@
+import re
+
 import pytest
 import yaml
 
@@ -56,4 +58,4 @@ def test_platform_templates_untouched(name):
 @pytest.mark.parametrize("name", HERA)
 def test_envfrom_no_yaml_aliases(name):
     out = render(name, CONNECTIONS, ref=pinned_ref())
-    assert "&id" not in out and "*id" not in out
+    assert not re.search(r"(?m)[&*]id\d+\b", out)
