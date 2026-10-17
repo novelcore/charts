@@ -19,6 +19,7 @@ import difflib
 import io
 import json
 import os
+import re
 import subprocess
 import sys
 import tarfile
@@ -164,15 +165,30 @@ def render_wft(script: str, ctx: dict, kubeline_path: str, *, app: str, project:
 # ── Hera enhancer ───────────────────────────────────────────────────────────
 
 _ENHANCER_CACHE = {}
+_ENHANCER_FAIL = {}
+_SHA_RE = re.compile(r"[0-9a-f]{40}")
 
 
 def fetch_enhancer(ref: str, repo: str = "novelcore/hera-mlops-template") -> str:
     """A directory containing kubecore/ for `repo`@`ref` (or $ENHANCER_DIR unchanged)."""
     if os.environ.get("ENHANCER_DIR"):
         return os.environ["ENHANCER_DIR"]
+    if not _SHA_RE.fullmatch(ref):
+        raise ValueError(f"enhancer ref must be a 40-char lowercase hex sha, got {ref!r}")
     key = (repo, ref)
     if key in _ENHANCER_CACHE:
         return _ENHANCER_CACHE[key]
+    if key in _ENHANCER_FAIL:  # fail fast: one fetch attempt per session, failures included
+        raise RuntimeError(f"enhancer fetch for {repo}@{ref} already failed: {_ENHANCER_FAIL[key]}")
+    try:
+        root = _fetch_enhancer(repo, ref)
+    except Exception as e:
+        _ENHANCER_FAIL[key] = repr(e)
+        raise
+    return root
+
+
+def _fetch_enhancer(repo: str, ref: str) -> str:
     req = urllib.request.Request(f"https://api.github.com/repos/{repo}/tarball/{ref}",
                                  headers={"Accept": "application/vnd.github+json", "User-Agent": "kubecore-ci"})
     tok = os.environ.get("GITHUB_TOKEN", "")
@@ -191,6 +207,8 @@ def fetch_enhancer(ref: str, repo: str = "novelcore/hera-mlops-template") -> str
         rel = parts[1][len("kubecore/"):]
         if not rel or "__pycache__" in rel:
             continue
+        if ".." in rel.split("/") or os.path.isabs(rel):
+            raise RuntimeError(f"unsafe tar member path {m.name!r}")
         out = os.path.join(dst, rel)
         if m.isdir():
             os.makedirs(out, exist_ok=True)
@@ -201,7 +219,6 @@ def fetch_enhancer(ref: str, repo: str = "novelcore/hera-mlops-template") -> str
             n += 1
     if n == 0:
         raise RuntimeError(f"no kubecore/ files in {repo}@{ref}")
-    _ENHANCER_CACHE[key] = root
     return root
 
 
@@ -262,6 +279,12 @@ def render(name: str, connections: Optional[list], *, rendered: Optional[str] = 
     if ref is None:
         raise ValueError("hera fixtures need ref=")
     return enhance_hera(fetch_enhancer(ref, pinned_repo()), fx.source, ctx, fx.catalog)
+
+
+def raw_container_names(name: str) -> set:
+    """Names of the container templates in the fixture's raw (pre-enhancer) WFT: the user steps."""
+    raw = _load(FIXTURES[name].source)
+    return {t["name"] for t in raw["spec"]["templates"] if "container" in t}
 
 
 def golden_path(kind: str, name: str) -> str:
