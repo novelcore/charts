@@ -1021,6 +1021,26 @@ spec:
         ml_env = ctx.get('mlEnvironment') or {}
         ml_env_name = (ml_env.get('name') or '').strip()
 
+        def _connection_env_from(ctx, ml_env_name):
+            # App connections: optional envFrom refs to the connection ConfigMaps
+            # listed in pipeline-context. Always a fresh list of fresh dicts (a
+            # shared object would make yaml.dump emit anchors/aliases).
+            out = []
+            seen = set()
+            for c in (ctx.get('connections') or []):
+                if not isinstance(c, dict):
+                    continue
+                cm = c.get('configMapName')
+                if not isinstance(cm, str) or not cm.strip():
+                    continue
+                if c.get('environment') and c.get('environment') != ml_env_name:
+                    continue
+                if cm in seen:
+                    continue
+                seen.add(cm)
+                out.append({'configMapRef': {'name': cm, 'optional': True}})
+            return out
+
         compute = ctx.get('computeClasses', {})
         cpu_cls = compute.get('cpu', {})
         gpu_cls = compute.get('gpu', {})
@@ -1796,6 +1816,9 @@ spec:
                     {'name': 'mlflow-svc', 'mountPath': '/etc/mlflow-svc', 'readOnly': True},
                     {'name': 'dshm', 'mountPath': '/dev/shm'},
                 ]
+                env_from = _connection_env_from(ctx, ml_env_name)
+                if env_from:
+                    container['envFrom'] = env_from
 
                 # tolerations: the ephemeral node is tainted with the step's tier
                 # (platform.kubecore.io/ml-workload) + nvidia.com/gpu for gpu. Tolerate
@@ -2467,6 +2490,9 @@ spec:
                 # /dev/shm; sizeLimit caps it so it can't eat the whole node.
                 {'name': 'dshm', 'mountPath': '/dev/shm'},
             ]
+            env_from = _connection_env_from(ctx, ml_env_name)
+            if env_from:
+                container['envFrom'] = env_from
 
             tmpl = {
                 'name': f"{sn}-{'gpu' if is_gpu else 'cpu'}",

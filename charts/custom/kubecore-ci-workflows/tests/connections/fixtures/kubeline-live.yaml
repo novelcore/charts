@@ -1,0 +1,858 @@
+# Derived from kubeline-yolo-mlops.yaml (novelcore/kubeline-yolo-mlops@e3cf52b3fc92346ddfb0554c8ce1ce88df0772b3)
+# with every step's `env:` removed, for the live-compute path ONLY.
+# Why: on origin/main (chart 0.12.112) build_live_step_template reads
+# `dataset_pathoverride_expr` while looping a step's env, but that name is first
+# assigned after the live block has already run, so ANY live-path step with an
+# `env:` raises NameError. Env-less steps render. Mechanically regenerable:
+# load the source, `step.pop("env")` for each step, safe_dump.
+version: 2
+pipeline:
+  parameters:
+  - name: config
+    default: ''
+    description: "ADVANCED: full pipeline config YAML (schema pipeline_config.example.yaml).\
+      \ When non-empty it OVERRIDES all individual parameters above \u2014 intended\
+      \ for scripted submissions (argo submit -p config=...)."
+  - name: experiment-name
+    default: object-pose-v1-yolov8n
+    description: MLflow experiment name and S3 checkpoint path prefix.
+  - name: experiment-description
+    default: ''
+    description: Optional free-text description stored in the MLflow run.
+  - name: dataset-ref
+    default: main
+    description: "Dataset (lakeFS ref) to train on \u2014 rendered as a dropdown from\
+      \ the dataset catalog."
+  - name: dataset-source
+    default: lakefs
+    enum:
+    - lakefs
+    - s3
+    description: 'Storage backend for the dataset: ''lakefs'' or ''s3''.'
+  - name: dataset-version
+    default: ''
+    description: Provenance tag recorded in MLflow (derived from dataset-ref). Not
+      a path.
+  - name: dataset-path-override
+    default: ''
+    description: Optional s3:// override. Empty = use the picked dataset-ref.
+  - name: dataset-sample-size
+    default: ''
+    description: Integer sample size for reproducible subsets. Empty = full dataset.
+  - name: dataset-seed
+    default: '42'
+    description: Random seed for reproducible dataset sampling.
+  - name: model-variant
+    default: yolov8n-pose.pt
+    enum:
+    - yolov8n-pose.pt
+    - yolov8s-pose.pt
+    - yolov8m-pose.pt
+    - yolov8l-pose.pt
+    - yolov8x-pose.pt
+    - yolov9n-pose.pt
+    - yolov9s-pose.pt
+    - yolov9m-pose.pt
+    - yolov9l-pose.pt
+    - yolov9x-pose.pt
+    - yolov10n-pose.pt
+    - yolov10s-pose.pt
+    - yolov10m-pose.pt
+    - yolov10l-pose.pt
+    - yolov10x-pose.pt
+    - yolov11n-pose.pt
+    - yolov11s-pose.pt
+    - yolov11m-pose.pt
+    - yolov11l-pose.pt
+    - yolov11x-pose.pt
+    description: YOLO pose model variant file. Determines architecture and parameter
+      count.
+  - name: pretrained-weights
+    default: ''
+    description: S3 URI to custom .pt weights for weight-only init. Empty = use model-variant's
+      bundled weights.
+  - name: epochs
+    default: '100'
+    description: Total training epochs.
+  - name: batch-size
+    default: '16'
+    description: Training batch size. Use -1 for Ultralytics auto-batch.
+  - name: image-size
+    default: '640'
+    description: Input image resolution in pixels (must be a multiple of 32).
+  - name: learning-rate
+    default: '0.01'
+    description: Initial learning rate (Ultralytics lr0).
+  - name: cos-lr
+    default: 'true'
+    enum:
+    - 'false'
+    - 'true'
+    description: Use cosine learning rate schedule.
+  - name: lrf
+    default: '0.01'
+    description: 'Final LR ratio: final_lr = learning_rate * lrf. Must be in (0, 1].'
+  - name: optimizer
+    default: SGD
+    enum:
+    - SGD
+    - Adam
+    - AdamW
+    description: Gradient optimizer. SGD is the Ultralytics default for YOLO.
+  - name: momentum
+    default: '0.937'
+    description: SGD momentum or Adam beta1.
+  - name: weight-decay
+    default: '0.0005'
+    description: Optimizer weight decay (L2 regularization coefficient).
+  - name: warmup-epochs
+    default: '3.0'
+    description: Number of LR warmup epochs.
+  - name: warmup-momentum
+    default: '0.8'
+    description: Initial momentum during warmup (rises to `momentum` by end of warmup).
+  - name: dropout
+    default: '0.0'
+    description: Dropout rate applied in the classifier head [0.0, 1.0).
+  - name: label-smoothing
+    default: '0.0'
+    description: Label smoothing epsilon [0.0, 1.0). Reduces overconfidence.
+  - name: nbs
+    default: '64'
+    description: Nominal batch size. Ultralytics scales gradients so effective LR
+      matches this batch size.
+  - name: freeze
+    default: ''
+    description: Freeze the first N backbone layers. Empty = train all layers.
+  - name: amp
+    default: 'true'
+    enum:
+    - 'false'
+    - 'true'
+    description: Enable Automatic Mixed Precision (FP16). Halves GPU memory use.
+  - name: close-mosaic
+    default: '10'
+    description: Disable mosaic augmentation for the last N epochs (0 = never disable).
+  - name: training-seed
+    default: '0'
+    description: Global training RNG seed (separate from dataset-seed).
+  - name: deterministic
+    default: 'true'
+    enum:
+    - 'false'
+    - 'true'
+    description: Enable cuDNN deterministic mode. Slight speed penalty; ensures reproducibility.
+  - name: pose
+    default: '12.0'
+    description: Keypoint regression loss gain. Primary lever for object keypoint
+      accuracy.
+  - name: kobj
+    default: '2.0'
+    description: Keypoint objectness loss gain.
+  - name: box
+    default: '7.5'
+    description: Bounding-box regression loss gain.
+  - name: cls
+    default: '0.5'
+    description: Classification loss gain.
+  - name: dfl
+    default: '1.5'
+    description: Distribution Focal Loss gain.
+  - name: early-stopping-patience
+    default: '50'
+    description: Epochs without improvement before early stopping triggers.
+  - name: checkpointing-interval-epochs
+    default: '10'
+    description: Upload an intermediate checkpoint to S3 every N epochs.
+  - name: checkpointing-storage-path
+    default: ''
+    description: Override checkpoint location (s3://bucket/prefix). Empty = platform-derived
+      (project lakeFS repository, main/checkpoints).
+  - name: checkpoint-resume-from
+    default: ''
+    description: 'Checkpoint to resume from: empty = start fresh, ''auto'' = latest,
+      or a full S3 path.'
+  - name: aug-hsv-h
+    default: '0.015'
+    description: HSV hue augmentation range [0.0, 1.0].
+  - name: aug-hsv-s
+    default: '0.7'
+    description: HSV saturation augmentation range [0.0, 1.0].
+  - name: aug-hsv-v
+    default: '0.4'
+    description: HSV value augmentation range [0.0, 1.0].
+  - name: aug-degrees
+    default: '0.0'
+    description: Random rotation range in degrees. Keep 0.0 for pose (keypoints are
+      rotation-sensitive).
+  - name: aug-translate
+    default: '0.1'
+    description: Random translation fraction of image size.
+  - name: aug-scale
+    default: '0.5'
+    description: Random scale gain (multiplicative).
+  - name: aug-shear
+    default: '0.0'
+    description: Random shear range in degrees.
+  - name: aug-perspective
+    default: '0.0'
+    description: Random perspective warp [0.0, 0.001]. Values > 0.001 cause severe
+      keypoint displacement.
+  - name: aug-flipud
+    default: '0.0'
+    description: Vertical flip probability. Keep 0.0 for object (no defined up direction
+      has defined 'up').
+  - name: aug-fliplr
+    default: '0.0'
+    description: Horizontal flip probability. Keep 0.0 for object (no left-right symmetry
+      in canonical pose).
+  - name: aug-mosaic
+    default: '1.0'
+    description: Mosaic augmentation probability [0.0, 1.0]. Disabled for last `close-mosaic`
+      epochs.
+  - name: aug-mixup
+    default: '0.0'
+    description: MixUp augmentation probability [0.0, 1.0].
+  - name: aug-copy-paste
+    default: '0.0'
+    description: Segment copy-paste augmentation probability [0.0, 1.0].
+  - name: aug-erasing
+    default: '0.4'
+    description: Random erasing probability [0.0, 0.9].
+  - name: aug-bgr
+    default: '0.0'
+    description: BGR channel flip probability [0.0, 1.0].
+  - name: export-enabled
+    default: 'false'
+    enum:
+    - 'false'
+    - 'true'
+    description: Enable post-training model export (TensorRT/ONNX).
+  - name: export-formats
+    default: engine
+    description: 'Comma-separated export formats: ''engine'' (TensorRT) and/or ''onnx''.
+      Only used when export-enabled=true.'
+  - name: export-precisions
+    default: fp16
+    description: 'Comma-separated precisions: ''fp16'' and/or ''int8''. Only used
+      when export-enabled=true.'
+  - name: quantization-mode
+    default: none
+    enum:
+    - none
+    - ptq
+    - qat
+    description: 'Quantization mode: ''none'' skips both qat-finetune and model-quantization;
+      ''ptq'' runs Ultralytics INT8 export; ''qat'' runs PT2E QAT fine-tune then model-quantization.'
+  - name: quantization-image-size
+    default: '640'
+    description: Input image size for quantization. Must match training image-size.
+  - name: quantization-calibration-frames
+    default: '512'
+    description: Number of calibration frames sampled from the dataset for PTQ/QAT
+      calibration.
+  - name: quantization-calibration-seed
+    default: '42'
+    description: RNG seed for deterministic calibration frame sampling (FR-M-04).
+  - name: quantization-parity-frames
+    default: '100'
+    description: Number of frames for the INT8 vs FP32 parity check.
+  - name: quantization-parity-max-abs-error
+    default: '0.05'
+    description: Maximum allowed max-absolute-error in the parity check. Run fails
+      if this threshold is exceeded.
+  - name: quantization-output-prefix
+    default: quantization
+    description: S3 key prefix for quantized TFLite artifacts (e.g. 'quantization/exp-001').
+  - name: qat-epochs
+    default: '10'
+    description: Number of QAT fine-tune epochs. Only used when quantization-mode=qat.
+  - name: qat-lr
+    default: '0.0001'
+    description: Learning rate for QAT fine-tuning. Only used when quantization-mode=qat.
+  - name: registered-model-name
+    default: ''
+    description: 'MLflow registered model name. Empty = use REGISTERED_MODEL_NAME
+      env var (default: object-pose-yolo).'
+  - name: promote-to
+    default: ''
+    description: 'Transition the registered model version to this stage: empty = no
+      promotion, ''Staging'', or ''Production''.'
+steps:
+- name: config-validation
+  path: config_validation
+  compute: cpu
+  dependencies: []
+  command:
+  - python
+  - -c
+  args:
+  - "import os, sys, subprocess, yaml\n\n# Config resolution: if PIPELINE_CONFIG (injected\
+    \ by platform generator)\n# is non-empty, it OVERRIDES all individual parameters.\
+    \ Otherwise,\n# PARAMS_YAML (assembled from individual Argo parameters) is used.\n\
+    pipeline_config = os.environ.get(\"PIPELINE_CONFIG\", \"\")\nparams_yaml = os.environ.get(\"\
+    PARAMS_YAML\", \"\")\nraw = pipeline_config.strip() if pipeline_config.strip()\
+    \ else params_yaml\n\nif not raw.strip():\n    print(\"ERROR: Neither PIPELINE_CONFIG\
+    \ nor PARAMS_YAML is set.\", flush=True)\n    sys.exit(1)\ntry:\n    cfg = yaml.safe_load(raw)\n\
+    except yaml.YAMLError as e:\n    print(f\"ERROR: Config is not valid YAML: {e}\"\
+    , flush=True)\n    sys.exit(1)\nif not isinstance(cfg, dict):\n    print(\"ERROR:\
+    \ Config parsed to a non-dict value.\", flush=True)\n    sys.exit(1)\n\n# Enforce\
+    \ manifest-only: full-download and labels-only are not\n# supported in the cluster\
+    \ because steps run in separate pods and\n# there is no shared volume between\
+    \ them. In param mode, PARAMS_YAML\n# always sets manifest_only=true; in config\
+    \ mode we verify it.\ndataset = cfg.get(\"dataset\") or {}\nmanifest_only = dataset.get(\"\
+    manifest_only\", False)\nlabels_only = dataset.get(\"labels_only\", False)\nif\
+    \ not manifest_only:\n    mode = \"labels-only\" if labels_only else \"full-download\"\
+    \n    print(\n        f\"ERROR: dataset.manifest_only must be true. \"\n     \
+    \   f\"Current mode is '{mode}'. \"\n        f\"Full-download and labels-only\
+    \ modes require a shared filesystem \"\n        f\"between steps, which this cluster\
+    \ does not provide. \"\n        f\"Set dataset.manifest_only: true in your pipeline\
+    \ config.\",\n        flush=True,\n    )\n    sys.exit(1)\n\nexp = cfg.get(\"\
+    experiment\") or {}\ndataset = cfg.get(\"dataset\") or {}\nmodel = cfg.get(\"\
+    model\") or {}\ntraining = cfg.get(\"training\") or {}\ncheckpointing = cfg.get(\"\
+    checkpointing\") or {}\nearly_stopping = cfg.get(\"early_stopping\") or {}\naugmentation\
+    \ = cfg.get(\"augmentation\") or {}\n\n# Precedence: explicit param wins; empty\
+    \ param falls back to platform env.\n# CHECKPOINT_BUCKET/CHECKPOINT_PREFIX are\
+    \ injected by render-wft from the\n# k8smlapp pipeline-context (checkpoints.bucket\
+    \ = lakeFS repo, prefix =\n# main/checkpoints). When both are absent the platform\
+    \ didn't inject them\n# (legacy deployment or misconfiguration) and we fail loudly.\n\
+    storage_path = str(checkpointing.get(\"storage_path\", \"\") or \"\").strip()\n\
+    if not storage_path:\n    ckpt_bucket = os.environ.get(\"CHECKPOINT_BUCKET\",\
+    \ \"\").strip()\n    ckpt_prefix = os.environ.get(\"CHECKPOINT_PREFIX\", \"\"\
+    ).strip()\n    if not ckpt_bucket:\n        print(\n            \"ERROR: checkpointing-storage-path\
+    \ is empty and CHECKPOINT_BUCKET env \"\n            \"is not set. The platform\
+    \ should inject CHECKPOINT_BUCKET/CHECKPOINT_PREFIX \"\n            \"from the\
+    \ project lakeFS repository via render-wft. Either set \"\n            \"checkpointing-storage-path\
+    \ explicitly or ensure the k8smlapp composition \"\n            \"version includes\
+    \ the checkpoints block in pipeline-context.yaml.\",\n            flush=True,\n\
+    \        )\n        sys.exit(1)\n    storage_path = f\"s3://{ckpt_bucket}/{ckpt_prefix}\"\
+    \ if ckpt_prefix else f\"s3://{ckpt_bucket}/main/checkpoints\"\n\nflags = [\n\
+    \    \"--experiment-name\", str(exp[\"name\"]),\n    \"--dataset-version\", str(dataset[\"\
+    version\"]),\n    \"--dataset-source\", str(dataset[\"source\"]),\n    \"--model-variant\"\
+    , str(model[\"variant\"]),\n    \"--training-epochs\", str(training[\"epochs\"\
+    ]),\n    \"--training-batch-size\", str(training[\"batch_size\"]),\n    \"--training-image-size\"\
+    , str(training[\"image_size\"]),\n    \"--training-learning-rate\", str(training[\"\
+    learning_rate\"]),\n    \"--training-optimizer\", str(training[\"optimizer\"]),\n\
+    \    \"--checkpointing-interval-epochs\", str(checkpointing[\"interval_epochs\"\
+    ]),\n    \"--checkpointing-storage-path\", storage_path,\n    \"--early-stopping-patience\"\
+    , str(early_stopping[\"patience\"]),\n]\n\n# Optional dataset flags\nif dataset.get(\"\
+    lakefs_repo\"):\n    flags += [\"--dataset-lakefs-repo\", str(dataset[\"lakefs_repo\"\
+    ])]\nif dataset.get(\"lakefs_branch\"):\n    flags += [\"--dataset-lakefs-branch\"\
+    , str(dataset[\"lakefs_branch\"])]\nif dataset.get(\"path_override\"):\n    flags\
+    \ += [\"--dataset-path-override\", str(dataset[\"path_override\"])]\nif dataset.get(\"\
+    sample_size\") is not None:\n    flags += [\"--dataset-sample-size\", str(dataset[\"\
+    sample_size\"])]\nif dataset.get(\"seed\") is not None:\n    flags += [\"--dataset-seed\"\
+    , str(dataset[\"seed\"])]\n\n# dataset_manifest_only: always true (enforced above)\
+    \ \u2014 pass the flag\nflags += [\"--dataset-manifest-only\"]\n\n# Optional model\
+    \ flags\nif model.get(\"pretrained_weights\"):\n    flags += [\"--model-pretrained-weights\"\
+    , str(model[\"pretrained_weights\"])]\n\n# Optional training flags (non-default\
+    \ values)\nif training.get(\"cos_lr\") is not None:\n    flags += [\"--training-cos-lr\"\
+    \ if training[\"cos_lr\"] else \"--no-training-cos-lr\"]\nif training.get(\"lrf\"\
+    ) is not None:\n    flags += [\"--training-lrf\", str(training[\"lrf\"])]\nif\
+    \ training.get(\"momentum\") is not None:\n    flags += [\"--training-momentum\"\
+    , str(training[\"momentum\"])]\nif training.get(\"weight_decay\") is not None:\n\
+    \    flags += [\"--training-weight-decay\", str(training[\"weight_decay\"])]\n\
+    if training.get(\"warmup_epochs\") is not None:\n    flags += [\"--training-warmup-epochs\"\
+    , str(training[\"warmup_epochs\"])]\nif training.get(\"warmup_momentum\") is not\
+    \ None:\n    flags += [\"--training-warmup-momentum\", str(training[\"warmup_momentum\"\
+    ])]\nif training.get(\"dropout\") is not None:\n    flags += [\"--training-dropout\"\
+    , str(training[\"dropout\"])]\nif training.get(\"label_smoothing\") is not None:\n\
+    \    flags += [\"--training-label-smoothing\", str(training[\"label_smoothing\"\
+    ])]\nif training.get(\"nbs\") is not None:\n    flags += [\"--training-nbs\",\
+    \ str(training[\"nbs\"])]\nif training.get(\"freeze\") is not None:\n    flags\
+    \ += [\"--training-freeze\", str(training[\"freeze\"])]\nif training.get(\"amp\"\
+    ) is not None:\n    flags += [\"--training-amp\" if training[\"amp\"] else \"\
+    --no-training-amp\"]\nif training.get(\"close_mosaic\") is not None:\n    flags\
+    \ += [\"--training-close-mosaic\", str(training[\"close_mosaic\"])]\nif training.get(\"\
+    seed\") is not None:\n    flags += [\"--training-seed\", str(training[\"seed\"\
+    ])]\nif training.get(\"deterministic\") is not None:\n    flags += [\"--training-deterministic\"\
+    \ if training[\"deterministic\"] else \"--no-training-deterministic\"]\nif training.get(\"\
+    pose\") is not None:\n    flags += [\"--training-pose\", str(training[\"pose\"\
+    ])]\nif training.get(\"kobj\") is not None:\n    flags += [\"--training-kobj\"\
+    , str(training[\"kobj\"])]\nif training.get(\"box\") is not None:\n    flags +=\
+    \ [\"--training-box\", str(training[\"box\"])]\nif training.get(\"cls\") is not\
+    \ None:\n    flags += [\"--training-cls\", str(training[\"cls\"])]\nif training.get(\"\
+    dfl\") is not None:\n    flags += [\"--training-dfl\", str(training[\"dfl\"])]\n\
+    \n# Optional checkpointing flags\nif checkpointing.get(\"resume_from\"):\n   \
+    \ flags += [\"--checkpointing-resume-from\", str(checkpointing[\"resume_from\"\
+    ])]\n\n# Augmentation flags\naug = augmentation\nfor key, flag in [\n    (\"hsv_h\"\
+    , \"--aug-hsv-h\"), (\"hsv_s\", \"--aug-hsv-s\"), (\"hsv_v\", \"--aug-hsv-v\"\
+    ),\n    (\"degrees\", \"--aug-degrees\"), (\"translate\", \"--aug-translate\"\
+    ),\n    (\"scale\", \"--aug-scale\"), (\"shear\", \"--aug-shear\"),\n    (\"perspective\"\
+    , \"--aug-perspective\"), (\"flipud\", \"--aug-flipud\"),\n    (\"fliplr\", \"\
+    --aug-fliplr\"), (\"mosaic\", \"--aug-mosaic\"),\n    (\"mixup\", \"--aug-mixup\"\
+    ), (\"copy_paste\", \"--aug-copy-paste\"),\n    (\"erasing\", \"--aug-erasing\"\
+    ), (\"bgr\", \"--aug-bgr\"),\n]:\n    if aug.get(key) is not None:\n        flags\
+    \ += [flag, str(aug[key])]\n\n# Optional experiment description\nif exp.get(\"\
+    description\"):\n    flags += [\"--experiment-description\", str(exp[\"description\"\
+    ])]\n\nprint(f\"[config-validation] Running: config-validation {' '.join(flags)}\"\
+    , flush=True)\nresult = subprocess.run([\"config-validation\"] + flags)\nsys.exit(result.returncode)\n"
+- name: dataset-loading
+  path: dataset_loading
+  compute: cpu
+  dependencies:
+  - config-validation
+  command:
+  - sh
+  - -c
+  args:
+  - "python3 - <<'PYEOF'\nimport os, sys, subprocess, json, yaml\n\n# Config resolution:\
+    \ PIPELINE_CONFIG (platform-injected) overrides PARAMS_YAML.\npipeline_config\
+    \ = os.environ.get(\"PIPELINE_CONFIG\", \"\")\nparams_yaml = os.environ.get(\"\
+    PARAMS_YAML\", \"\")\nraw = pipeline_config.strip() if pipeline_config.strip()\
+    \ else params_yaml\n\nif not raw.strip():\n    print(\"ERROR: Neither PIPELINE_CONFIG\
+    \ nor PARAMS_YAML is set.\", flush=True)\n    sys.exit(1)\ntry:\n    cfg = yaml.safe_load(raw)\n\
+    except yaml.YAMLError as e:\n    print(f\"ERROR: Config is not valid YAML: {e}\"\
+    , flush=True)\n    sys.exit(1)\n\ndataset = cfg.get(\"dataset\") or {}\n\nflags\
+    \ = [\n    \"--version\", str(dataset[\"version\"]),\n    \"--source\", str(dataset[\"\
+    source\"]),\n    \"--output-dir\", \"/work/dataset\",\n    \"--manifest-only\"\
+    ,\n]\n\nif dataset.get(\"lakefs_repo\"):\n    flags += [\"--lakefs-repo\", str(dataset[\"\
+    lakefs_repo\"])]\nif dataset.get(\"lakefs_branch\"):\n    flags += [\"--lakefs-branch\"\
+    , str(dataset[\"lakefs_branch\"])]\nif dataset.get(\"path_override\"):\n    flags\
+    \ += [\"--path-override\", str(dataset[\"path_override\"])]\nif dataset.get(\"\
+    sample_size\") is not None:\n    flags += [\"--sample-size\", str(dataset[\"sample_size\"\
+    ]), \"--seed\", str(dataset.get(\"seed\", 42))]\n\nprint(f\"[dataset-loading]\
+    \ Running: dataset-loading {' '.join(flags)}\", flush=True)\nresult = subprocess.run([\"\
+    dataset-loading\"] + flags)\nif result.returncode != 0:\n    sys.exit(result.returncode)\n\
+    \n# Read the full manifest written by the CLI and extract a compact\n# summary\
+    \ safe for Argo parameter passing (no key lists).\nmanifest_path = \"/work/dataset/dataset_manifest.json\"\
+    \ntry:\n    with open(manifest_path) as fh:\n        manifest = json.load(fh)\n\
+    except Exception as e:\n    print(f\"ERROR: Could not read {manifest_path}: {e}\"\
+    , flush=True)\n    sys.exit(1)\n\nbucket = manifest.get(\"bucket\")\nprefix =\
+    \ manifest.get(\"prefix\")\nif not bucket or not prefix:\n    print(f\"ERROR:\
+    \ manifest missing 'bucket' or 'prefix': {manifest}\", flush=True)\n    sys.exit(1)\n\
+    \n# label_keys sentinel: non-empty dict signals to model-training that\n# labels\
+    \ must also be streamed from S3 (manifest-only mode). We do NOT\n# embed the actual\
+    \ key lists \u2014 they are too large for Argo parameters.\nlabel_keys_raw = manifest.get(\"\
+    label_keys\")\nlabel_keys_sentinel = {\"_present\": True} if label_keys_raw else\
+    \ {}\n\nsummary = {\"bucket\": bucket, \"prefix\": prefix, \"label_keys\": label_keys_sentinel}\n\
+    summary_path = \"/work/dataset/manifest_summary.json\"\nwith open(summary_path,\
+    \ \"w\") as fh:\n    json.dump(summary, fh, separators=(\",\", \":\"))\nprint(f\"\
+    [dataset-loading] Wrote manifest summary to {summary_path}: bucket={bucket} prefix={prefix}\"\
+    , flush=True)\nPYEOF\n"
+  outputs:
+    parameters:
+    - name: data-yaml
+      path: /work/dataset/data.yaml
+    - name: manifest-summary
+      path: /work/dataset/manifest_summary.json
+- name: model-training
+  path: model_training
+  compute: gpu
+  dependencies:
+  - dataset-loading
+  inputs:
+    parameters:
+    - name: data-yaml
+      from: dataset-loading
+    - name: manifest-summary
+      from: dataset-loading
+  command:
+  - python
+  - -c
+  args:
+  - "import os, sys, subprocess, json, yaml\n\n# Config resolution: PIPELINE_CONFIG\
+    \ (platform-injected) overrides PARAMS_YAML.\npipeline_config = os.environ.get(\"\
+    PIPELINE_CONFIG\", \"\")\nparams_yaml = os.environ.get(\"PARAMS_YAML\", \"\")\n\
+    raw = pipeline_config.strip() if pipeline_config.strip() else params_yaml\n\n\
+    if not raw.strip():\n    print(\"ERROR: Neither PIPELINE_CONFIG nor PARAMS_YAML\
+    \ is set.\", flush=True)\n    sys.exit(1)\ntry:\n    cfg = yaml.safe_load(raw)\n\
+    except yaml.YAMLError as e:\n    print(f\"ERROR: Config is not valid YAML: {e}\"\
+    , flush=True)\n    sys.exit(1)\n\n# Reconstruct /work/dataset from input parameters\n\
+    os.makedirs(\"/work/dataset\", exist_ok=True)\n\ndata_yaml = os.environ.get(\"\
+    DATA_YAML\", \"\")\nif not data_yaml.strip():\n    print(\"ERROR: DATA_YAML input\
+    \ parameter is empty.\", flush=True)\n    sys.exit(1)\nwith open(\"/work/dataset/data.yaml\"\
+    , \"w\") as fh:\n    fh.write(data_yaml)\n\nmanifest_summary = os.environ.get(\"\
+    MANIFEST_SUMMARY\", \"\")\nif not manifest_summary.strip():\n    print(\"ERROR:\
+    \ MANIFEST_SUMMARY input parameter is empty.\", flush=True)\n    sys.exit(1)\n\
+    # Write summary as dataset_manifest.json so model_training auto-detects\n# the\
+    \ S3 source (bucket + prefix) and streaming mode (label_keys presence).\nwith\
+    \ open(\"/work/dataset/dataset_manifest.json\", \"w\") as fh:\n    fh.write(manifest_summary)\n\
+    \nexp = cfg.get(\"experiment\") or {}\nmodel = cfg.get(\"model\") or {}\ntraining\
+    \ = cfg.get(\"training\") or {}\ncheckpointing = cfg.get(\"checkpointing\") or\
+    \ {}\nearly_stopping = cfg.get(\"early_stopping\") or {}\naugmentation = cfg.get(\"\
+    augmentation\") or {}\nexport_cfg = cfg.get(\"export\") or {}\n\n# Precedence:\
+    \ explicit param wins; empty param falls back to platform env.\n# CHECKPOINT_BUCKET/CHECKPOINT_PREFIX\
+    \ are injected by render-wft from the\n# k8smlapp pipeline-context. model-training\
+    \ takes --checkpoint-bucket and\n# --checkpoint-prefix directly so no s3:// parsing\
+    \ is needed in that path.\nstorage_path = str(checkpointing.get(\"storage_path\"\
+    , \"\") or \"\").strip()\nif storage_path.startswith(\"s3://\"):\n    # Explicit\
+    \ override: parse bucket/prefix from the s3:// URI.\n    parts = storage_path[5:].split(\"\
+    /\", 1)\n    checkpoint_bucket = parts[0]\n    checkpoint_prefix = parts[1].rstrip(\"\
+    /\") if len(parts) > 1 else \"main/checkpoints\"\nelse:\n    # Platform-derived:\
+    \ use env vars injected by render-wft.\n    checkpoint_bucket = os.environ.get(\"\
+    CHECKPOINT_BUCKET\", \"\").strip()\n    checkpoint_prefix = os.environ.get(\"\
+    CHECKPOINT_PREFIX\", \"main/checkpoints\").strip()\n    if not checkpoint_bucket:\n\
+    \        print(\n            \"ERROR: checkpointing-storage-path is empty and\
+    \ CHECKPOINT_BUCKET env \"\n            \"is not set. The platform should inject\
+    \ CHECKPOINT_BUCKET/CHECKPOINT_PREFIX \"\n            \"from the project lakeFS\
+    \ repository via render-wft. Either set \"\n            \"checkpointing-storage-path\
+    \ explicitly or ensure the k8smlapp composition \"\n            \"version includes\
+    \ the checkpoints block in pipeline-context.yaml.\",\n            flush=True,\n\
+    \        )\n        sys.exit(1)\n\nflags = [\n    \"--model-variant\", str(model[\"\
+    variant\"]),\n    \"--experiment-name\", str(exp[\"name\"]),\n    \"--dataset-dir\"\
+    , \"/work/dataset\",\n    \"--output-dir\", \"/work/output\",\n    \"--source\"\
+    , \"s3\",\n    \"--epochs\", str(training[\"epochs\"]),\n    \"--batch-size\"\
+    , str(training[\"batch_size\"]),\n    \"--image-size\", str(training[\"image_size\"\
+    ]),\n    \"--learning-rate\", str(training[\"learning_rate\"]),\n    \"--optimizer\"\
+    , str(training[\"optimizer\"]),\n    \"--checkpoint-interval\", str(checkpointing[\"\
+    interval_epochs\"]),\n    \"--checkpoint-bucket\", checkpoint_bucket,\n    \"\
+    --checkpoint-prefix\", checkpoint_prefix,\n    \"--patience\", str(early_stopping[\"\
+    patience\"]),\n]\n\n# Optional training flags\nif training.get(\"cos_lr\") is\
+    \ not None:\n    flags += [\"--cos-lr\" if training[\"cos_lr\"] else \"--no-cos-lr\"\
+    ]\nif training.get(\"lrf\") is not None:\n    flags += [\"--lrf\", str(training[\"\
+    lrf\"])]\nif training.get(\"momentum\") is not None:\n    flags += [\"--momentum\"\
+    , str(training[\"momentum\"])]\nif training.get(\"weight_decay\") is not None:\n\
+    \    flags += [\"--weight-decay\", str(training[\"weight_decay\"])]\nif training.get(\"\
+    warmup_epochs\") is not None:\n    flags += [\"--warmup-epochs\", str(training[\"\
+    warmup_epochs\"])]\nif training.get(\"warmup_momentum\") is not None:\n    flags\
+    \ += [\"--warmup-momentum\", str(training[\"warmup_momentum\"])]\nif training.get(\"\
+    dropout\") is not None:\n    flags += [\"--dropout\", str(training[\"dropout\"\
+    ])]\nif training.get(\"label_smoothing\") is not None:\n    flags += [\"--label-smoothing\"\
+    , str(training[\"label_smoothing\"])]\nif training.get(\"nbs\") is not None:\n\
+    \    flags += [\"--nbs\", str(training[\"nbs\"])]\nif training.get(\"freeze\"\
+    ) is not None:\n    flags += [\"--freeze\", str(training[\"freeze\"])]\nif training.get(\"\
+    amp\") is not None:\n    flags += [\"--amp\" if training[\"amp\"] else \"--no-amp\"\
+    ]\nif training.get(\"close_mosaic\") is not None:\n    flags += [\"--close-mosaic\"\
+    , str(training[\"close_mosaic\"])]\nif training.get(\"seed\") is not None:\n \
+    \   flags += [\"--seed\", str(training[\"seed\"])]\nif training.get(\"deterministic\"\
+    ) is not None:\n    flags += [\"--deterministic\" if training[\"deterministic\"\
+    ] else \"--no-deterministic\"]\nif training.get(\"pose\") is not None:\n    flags\
+    \ += [\"--pose\", str(training[\"pose\"])]\nif training.get(\"kobj\") is not None:\n\
+    \    flags += [\"--kobj\", str(training[\"kobj\"])]\nif training.get(\"box\")\
+    \ is not None:\n    flags += [\"--box\", str(training[\"box\"])]\nif training.get(\"\
+    cls\") is not None:\n    flags += [\"--cls\", str(training[\"cls\"])]\nif training.get(\"\
+    dfl\") is not None:\n    flags += [\"--dfl\", str(training[\"dfl\"])]\n\n# Optional\
+    \ weight init / resume\nif model.get(\"pretrained_weights\"):\n    flags += [\"\
+    --pretrained-weights\", str(model[\"pretrained_weights\"])]\nif checkpointing.get(\"\
+    resume_from\"):\n    flags += [\"--resume-from\", str(checkpointing[\"resume_from\"\
+    ])]\n\n# disk-cache-gb: cap S3 streaming cache for ephemeral pod storage\nflags\
+    \ += [\"--disk-cache-gb\", \"8.0\"]\n\n# Augmentation\naug = augmentation\nfor\
+    \ key, flag in [\n    (\"hsv_h\", \"--hsv-h\"), (\"hsv_s\", \"--hsv-s\"), (\"\
+    hsv_v\", \"--hsv-v\"),\n    (\"degrees\", \"--degrees\"), (\"translate\", \"--translate\"\
+    ),\n    (\"scale\", \"--scale\"), (\"shear\", \"--shear\"),\n    (\"perspective\"\
+    , \"--perspective\"), (\"flipud\", \"--flipud\"),\n    (\"fliplr\", \"--fliplr\"\
+    ), (\"mosaic\", \"--mosaic\"),\n    (\"mixup\", \"--mixup\"), (\"copy_paste\"\
+    , \"--copy-paste\"),\n    (\"erasing\", \"--erasing\"), (\"bgr\", \"--bgr\"),\n\
+    ]:\n    if aug.get(key) is not None:\n        flags += [flag, str(aug[key])]\n\
+    \n# Export flags\nif export_cfg.get(\"enabled\"):\n    flags += [\"--export\"\
+    ]\n    formats = export_cfg.get(\"formats\")\n    if formats:\n        flags +=\
+    \ [\"--export-formats\", \",\".join(formats)]\n    precisions = export_cfg.get(\"\
+    precisions\")\n    if precisions:\n        flags += [\"--export-precisions\",\
+    \ \",\".join(precisions)]\n\nprint(f\"[model-training] Running: model-training\
+    \ {' '.join(flags)}\", flush=True)\nresult = subprocess.run([\"model-training\"\
+    ] + flags)\nsys.exit(result.returncode)\n"
+  outputs:
+    parameters:
+    - name: training-result
+      path: /work/output/training_result.json
+  resources:
+    requests:
+      cpu: '1'
+      memory: 10Gi
+      ephemeral-storage: 10Gi
+    limits:
+      cpu: '4'
+      memory: 16Gi
+      ephemeral-storage: 30Gi
+- name: qat-finetune
+  path: qat_finetune
+  compute: gpu
+  dependencies:
+  - model-training
+  inputs:
+    parameters:
+    - name: training-result
+      from: model-training
+    - name: data-yaml
+      from: dataset-loading
+    - name: manifest-summary
+      from: dataset-loading
+  command:
+  - python
+  - -c
+  args:
+  - "import os, sys, subprocess, json, yaml\n\n# Config resolution: PIPELINE_CONFIG\
+    \ (platform-injected) overrides PARAMS_YAML.\npipeline_config = os.environ.get(\"\
+    PIPELINE_CONFIG\", \"\")\nparams_yaml = os.environ.get(\"PARAMS_YAML\", \"\")\n\
+    raw = pipeline_config.strip() if pipeline_config.strip() else params_yaml\n\n\
+    if not raw.strip():\n    print(\"ERROR: Neither PIPELINE_CONFIG nor PARAMS_YAML\
+    \ is set.\", flush=True)\n    sys.exit(1)\ntry:\n    cfg = yaml.safe_load(raw)\n\
+    except yaml.YAMLError as e:\n    print(f\"ERROR: Config is not valid YAML: {e}\"\
+    , flush=True)\n    sys.exit(1)\n\ntr_raw = os.environ.get(\"TRAINING_RESULT\"\
+    , \"\")\nif not tr_raw.strip():\n    print(\"ERROR: TRAINING_RESULT input parameter\
+    \ is empty.\", flush=True)\n    sys.exit(1)\ntry:\n    tr = json.loads(tr_raw)\n\
+    except json.JSONDecodeError as e:\n    print(f\"ERROR: TRAINING_RESULT is not\
+    \ valid JSON: {e}\", flush=True)\n    sys.exit(1)\n\nmlflow_run_id = tr.get(\"\
+    mlflow_run_id\")\nbest_checkpoint_s3 = tr.get(\"best_checkpoint_s3\")\nif not\
+    \ mlflow_run_id or not best_checkpoint_s3:\n    print(f\"ERROR: training_result\
+    \ missing mlflow_run_id or best_checkpoint_s3: {tr}\", flush=True)\n    sys.exit(1)\n\
+    \nexp = cfg.get(\"experiment\") or {}\nquant = cfg.get(\"quantization\") or {}\n\
+    \n# Self-gate: qat-finetune fine-tunes ONLY in qat mode. The platform gates\n\
+    # this step on quantization-mode != 'none', so it ALSO fires in ptq mode,\n# where\
+    \ it must be a no-op. Write a stub result so model-quantization's\n# qat-result\
+    \ input param still resolves, then exit success.\nmode = str(quant.get(\"mode\"\
+    , \"none\")).lower()\nif mode != \"qat\":\n    os.makedirs(\"/work/qat_output\"\
+    , exist_ok=True)\n    with open(\"/work/qat_output/qat_result.json\", \"w\") as\
+    \ fh:\n        json.dump({\"mode\": mode, \"skipped\": True,\n               \
+    \    \"reason\": \"qat-finetune runs only when quantization-mode=qat\"}, fh)\n\
+    \    print(f\"[qat-finetune] mode={mode} (not qat) - no-op; wrote stub qat_result.json.\"\
+    , flush=True)\n    sys.exit(0)\n\n# Derive output bucket + lakeFS branch from\
+    \ checkpoint URI (same as training).\n# s3://<repo>/<branch>/<path>: branch is\
+    \ the FIRST key segment; the output\n# prefix must start with it or lakeFS treats\
+    \ it as a non-existent branch.\ncheckpoint_uri = best_checkpoint_s3\nif checkpoint_uri.startswith(\"\
+    s3://\"):\n    _ckpt_parts = checkpoint_uri[5:].split(\"/\")\n    output_bucket\
+    \ = _ckpt_parts[0]\n    lakefs_branch = _ckpt_parts[1] if len(_ckpt_parts) > 1\
+    \ else \"main\"\nelse:\n    output_bucket = os.environ.get(\"CHECKPOINT_BUCKET\"\
+    , \"\")\n    lakefs_branch = os.environ.get(\"LAKEFS_BRANCH\", \"main\")\nif not\
+    \ output_bucket:\n    print(\"ERROR: cannot derive output bucket from checkpoint\
+    \ URI and CHECKPOINT_BUCKET is unset.\", flush=True)\n    sys.exit(1)\n\n# Reconstruct\
+    \ /work/dataset and download TRAIN frames from S3 \u2014 the QAT\n# calibration/distillation\
+    \ loop reads images/train (no shared FS across pods).\nos.makedirs(\"/work/dataset\"\
+    , exist_ok=True)\ndata_yaml_content = os.environ.get(\"DATA_YAML\", \"\")\nif\
+    \ data_yaml_content.strip():\n    with open(\"/work/dataset/data.yaml\", \"w\"\
+    ) as fh:\n        fh.write(data_yaml_content)\nmanifest_summary = os.environ.get(\"\
+    MANIFEST_SUMMARY\", \"\")\nif manifest_summary.strip():\n    with open(\"/work/dataset/dataset_manifest.json\"\
+    , \"w\") as fh:\n        fh.write(manifest_summary)\ntry:\n    import boto3\n\
+    \    from botocore.config import Config as BotoConfig\n    boto_cfg = BotoConfig(retries={\"\
+    max_attempts\": 3, \"mode\": \"adaptive\"})\n    lakefs_endpoint = os.environ.get(\"\
+    LAKEFS_ENDPOINT\", \"\")\n    lakefs_key = os.environ.get(\"LAKEFS_ACCESS_KEY\"\
+    , \"\")\n    lakefs_secret = os.environ.get(\"LAKEFS_SECRET_KEY\", \"\")\n   \
+    \ if lakefs_endpoint and lakefs_key and lakefs_secret:\n        s3 = boto3.client(\"\
+    s3\", endpoint_url=lakefs_endpoint,\n                          aws_access_key_id=lakefs_key,\n\
+    \                          aws_secret_access_key=lakefs_secret,\n            \
+    \              region_name=None, config=boto_cfg)\n    else:\n        s3 = boto3.client(\"\
+    s3\",\n                          endpoint_url=os.environ.get(\"S3_ENDPOINT_URL\"\
+    ),\n                          aws_access_key_id=os.environ.get(\"AWS_ACCESS_KEY_ID\"\
+    ),\n                          aws_secret_access_key=os.environ.get(\"AWS_SECRET_ACCESS_KEY\"\
+    ),\n                          region_name=os.environ.get(\"AWS_DEFAULT_REGION\"\
+    ),\n                          config=boto_cfg)\n    ms = json.loads(manifest_summary)\
+    \ if manifest_summary.strip() else {}\n    ds_bucket = ms.get(\"bucket\", \"\"\
+    )\n    ds_prefix = ms.get(\"prefix\", \"\").rstrip(\"/\")\n    if ds_bucket and\
+    \ ds_prefix:\n        max_download = int(quant.get(\"calibration_frames\", 512))\n\
+    \        images_dir = \"/work/dataset/images/train\"\n        os.makedirs(images_dir,\
+    \ exist_ok=True)\n        paginator = s3.get_paginator(\"list_objects_v2\")\n\
+    \        image_exts = {\".jpg\", \".jpeg\", \".png\", \".bmp\"}\n        downloaded\
+    \ = 0\n        for page in paginator.paginate(Bucket=ds_bucket, Prefix=f\"{ds_prefix}/images/train/\"\
+    ):\n            for obj in page.get(\"Contents\", []):\n                key =\
+    \ obj[\"Key\"]\n                if os.path.splitext(key)[1].lower() not in image_exts:\n\
+    \                    continue\n                s3.download_file(ds_bucket, key,\
+    \ os.path.join(images_dir, os.path.basename(key)))\n                downloaded\
+    \ += 1\n                if downloaded >= max_download:\n                    break\n\
+    \            if downloaded >= max_download:\n                break\n        print(f\"\
+    [qat-finetune] Downloaded {downloaded} train frames for calibration.\", flush=True)\n\
+    \    else:\n        print(\"[qat-finetune] WARNING: manifest_summary missing bucket/prefix\
+    \ \u2014 no frames downloaded.\", flush=True)\nexcept Exception as e:\n    print(f\"\
+    [qat-finetune] WARNING: frame download failed: {e}.\", flush=True)\n\nos.makedirs(\"\
+    /work/qat_output\", exist_ok=True)\n\nflags = [\n    \"--fp32-checkpoint-path\"\
+    , best_checkpoint_s3,\n    \"--source-mlflow-run-id\", mlflow_run_id,\n    \"\
+    --dataset-dir\", \"/work/dataset\",\n    \"--output-dir\", \"/work/qat_output\"\
+    ,\n    \"--output-bucket\", output_bucket,\n    \"--output-prefix\", f\"{lakefs_branch}/{quant.get('output_prefix',\
+    \ 'quantization/qat')}\",\n    \"--experiment-name\", str(exp.get(\"name\", \"\
+    quantization\")),\n    \"--image-size\", str(quant.get(\"image_size\", 640)),\n\
+    \    \"--qat-epochs\", str(quant.get(\"qat_epochs\", 10)),\n    \"--qat-lr\",\
+    \ str(quant.get(\"qat_lr\", 1e-4)),\n    \"--calibration-frames\", str(quant.get(\"\
+    calibration_frames\", 512)),\n    \"--calibration-seed\", str(quant.get(\"calibration_seed\"\
+    , 42)),\n    \"--parity-frames\", str(quant.get(\"parity_frames\", 100)),\n  \
+    \  \"--parity-max-abs-error\", str(quant.get(\"parity_max_abs_error\", 0.05)),\n\
+    ]\n\nprint(f\"[qat-finetune] Running: qat-finetune run {' '.join(flags)}\", flush=True)\n\
+    result = subprocess.run([\"qat-finetune\"] + flags)\nsys.exit(result.returncode)\n"
+  outputs:
+    parameters:
+    - name: qat-result
+      path: /work/qat_output/qat_result.json
+  resources:
+    requests:
+      cpu: '4'
+      memory: 16Gi
+      ephemeral-storage: 20Gi
+    limits:
+      cpu: '8'
+      memory: 32Gi
+      ephemeral-storage: 50Gi
+- name: model-quantization
+  path: model_quantization
+  compute: cpu
+  dependencies:
+  - model-training
+  - qat-finetune
+  inputs:
+    parameters:
+    - name: training-result
+      from: model-training
+    - name: qat-result
+      from: qat-finetune
+      default: ''
+    - name: data-yaml
+      from: dataset-loading
+    - name: manifest-summary
+      from: dataset-loading
+  command:
+  - python
+  - -c
+  args:
+  - "import os, sys, subprocess, json, yaml, importlib\n\n# Config resolution: PIPELINE_CONFIG\
+    \ (platform-injected) overrides PARAMS_YAML.\npipeline_config = os.environ.get(\"\
+    PIPELINE_CONFIG\", \"\")\nparams_yaml = os.environ.get(\"PARAMS_YAML\", \"\")\n\
+    raw = pipeline_config.strip() if pipeline_config.strip() else params_yaml\n\n\
+    if not raw.strip():\n    print(\"ERROR: Neither PIPELINE_CONFIG nor PARAMS_YAML\
+    \ is set.\", flush=True)\n    sys.exit(1)\ntry:\n    cfg = yaml.safe_load(raw)\n\
+    except yaml.YAMLError as e:\n    print(f\"ERROR: Config is not valid YAML: {e}\"\
+    , flush=True)\n    sys.exit(1)\n\ntr_raw = os.environ.get(\"TRAINING_RESULT\"\
+    , \"\")\nif not tr_raw.strip():\n    print(\"ERROR: TRAINING_RESULT input parameter\
+    \ is empty.\", flush=True)\n    sys.exit(1)\ntry:\n    tr = json.loads(tr_raw)\n\
+    except json.JSONDecodeError as e:\n    print(f\"ERROR: TRAINING_RESULT is not\
+    \ valid JSON: {e}\", flush=True)\n    sys.exit(1)\n\nexp = cfg.get(\"experiment\"\
+    ) or {}\nquant = cfg.get(\"quantization\") or {}\nmode = str(quant.get(\"mode\"\
+    , \"ptq\"))\n\nmlflow_run_id = tr.get(\"mlflow_run_id\")\nbest_checkpoint_s3 =\
+    \ tr.get(\"best_checkpoint_s3\")\nif not mlflow_run_id:\n    print(f\"ERROR: training_result\
+    \ missing mlflow_run_id: {tr}\", flush=True)\n    sys.exit(1)\n\n# Derive output\
+    \ bucket + lakeFS branch from checkpoint URI.\n# s3://<repo>/<branch>/<path>:\
+    \ the branch is the FIRST key segment; lakeFS\n# reads it as the branch, so the\
+    \ output prefix must start with it (else lakeFS\n# treats e.g. 'quantization'\
+    \ as a non-existent branch -> NoSuchBucket).\nif best_checkpoint_s3 and best_checkpoint_s3.startswith(\"\
+    s3://\"):\n    _ckpt_parts = best_checkpoint_s3[5:].split(\"/\")\n    output_bucket\
+    \ = _ckpt_parts[0]\n    lakefs_branch = _ckpt_parts[1] if len(_ckpt_parts) > 1\
+    \ else \"main\"\nelse:\n    output_bucket = os.environ.get(\"CHECKPOINT_BUCKET\"\
+    , \"\")\n    lakefs_branch = os.environ.get(\"LAKEFS_BRANCH\", \"main\")\nif not\
+    \ output_bucket:\n    print(\"ERROR: cannot derive output bucket from checkpoint\
+    \ URI and CHECKPOINT_BUCKET is unset.\", flush=True)\n    sys.exit(1)\n\n# Reconstruct\
+    \ /work/dataset so model-quantization can discover data.yaml\n# and download calibration/parity\
+    \ frames from S3.\nos.makedirs(\"/work/dataset\", exist_ok=True)\ndata_yaml_content\
+    \ = os.environ.get(\"DATA_YAML\", \"\")\nif data_yaml_content.strip():\n    with\
+    \ open(\"/work/dataset/data.yaml\", \"w\") as fh:\n        fh.write(data_yaml_content)\n\
+    manifest_summary = os.environ.get(\"MANIFEST_SUMMARY\", \"\")\nif manifest_summary.strip():\n\
+    \    with open(\"/work/dataset/dataset_manifest.json\", \"w\") as fh:\n      \
+    \  fh.write(manifest_summary)\n\n# Download calibration + parity frames from S3\
+    \ to /work/dataset/images/val/.\n# The manifest_summary contains bucket and prefix;\
+    \ we list image keys and\n# download the first calibration_frames + parity_frames\
+    \ files.\ntry:\n    import boto3\n    from botocore.config import Config as BotoConfig\n\
+    \    boto_cfg = BotoConfig(retries={\"max_attempts\": 3, \"mode\": \"adaptive\"\
+    })\n\n    lakefs_endpoint = os.environ.get(\"LAKEFS_ENDPOINT\", \"\")\n    lakefs_key\
+    \ = os.environ.get(\"LAKEFS_ACCESS_KEY\", \"\")\n    lakefs_secret = os.environ.get(\"\
+    LAKEFS_SECRET_KEY\", \"\")\n\n    if lakefs_endpoint and lakefs_key and lakefs_secret:\n\
+    \        s3 = boto3.client(\"s3\", endpoint_url=lakefs_endpoint,\n           \
+    \               aws_access_key_id=lakefs_key,\n                          aws_secret_access_key=lakefs_secret,\n\
+    \                          region_name=None, config=boto_cfg)\n    else:\n   \
+    \     s3 = boto3.client(\"s3\",\n                          endpoint_url=os.environ.get(\"\
+    S3_ENDPOINT_URL\"),\n                          aws_access_key_id=os.environ.get(\"\
+    AWS_ACCESS_KEY_ID\"),\n                          aws_secret_access_key=os.environ.get(\"\
+    AWS_SECRET_ACCESS_KEY\"),\n                          region_name=os.environ.get(\"\
+    AWS_DEFAULT_REGION\"),\n                          config=boto_cfg)\n\n    ms =\
+    \ json.loads(manifest_summary) if manifest_summary.strip() else {}\n    ds_bucket\
+    \ = ms.get(\"bucket\", \"\")\n    ds_prefix = ms.get(\"prefix\", \"\").rstrip(\"\
+    /\")\n\n    if ds_bucket and ds_prefix:\n        max_download = int(quant.get(\"\
+    calibration_frames\", 512)) + int(quant.get(\"parity_frames\", 100))\n       \
+    \ images_dir = \"/work/dataset/images/val\"\n        os.makedirs(images_dir, exist_ok=True)\n\
+    \n        paginator = s3.get_paginator(\"list_objects_v2\")\n        image_exts\
+    \ = {\".jpg\", \".jpeg\", \".png\", \".bmp\"}\n        # Labels go beside the\
+    \ images so YOLO's model.val (the FP32-vs-INT8\n        # mAP-delta) has ground\
+    \ truth. YOLO derives the label path by\n        # swapping /images/ -> /labels/\
+    \ and the extension -> .txt. Without\n        # this, val has 0 labels and every\
+    \ mAP comes back 0.\n        labels_dir = \"/work/dataset/labels/val\"\n     \
+    \   os.makedirs(labels_dir, exist_ok=True)\n        downloaded = 0\n        labels_dl\
+    \ = 0\n        for page in paginator.paginate(Bucket=ds_bucket, Prefix=f\"{ds_prefix}/images/\"\
+    ):\n            for obj in page.get(\"Contents\", []):\n                key =\
+    \ obj[\"Key\"]\n                ext = os.path.splitext(key)[1].lower()\n     \
+    \           if ext not in image_exts:\n                    continue\n        \
+    \        stem = os.path.splitext(os.path.basename(key))[0]\n                local_path\
+    \ = os.path.join(images_dir, os.path.basename(key))\n                s3.download_file(ds_bucket,\
+    \ key, local_path)\n                downloaded += 1\n                # Best-effort\
+    \ matching label; frames without one are valid\n                # backgrounds\
+    \ \u2014 skip silently.\n                label_key = os.path.splitext(\n     \
+    \               key.replace(\"/images/\", \"/labels/\", 1)\n                )[0]\
+    \ + \".txt\"\n                try:\n                    s3.download_file(\n  \
+    \                      ds_bucket, label_key,\n                        os.path.join(labels_dir,\
+    \ stem + \".txt\"),\n                    )\n                    labels_dl += 1\n\
+    \                except Exception:\n                    pass\n               \
+    \ if downloaded >= max_download:\n                    break\n            if downloaded\
+    \ >= max_download:\n                break\n        print(\n            f\"[model-quantization]\
+    \ Downloaded {downloaded} frames \"\n            f\"+ {labels_dl} labels.\",\n\
+    \            flush=True,\n        )\n    else:\n        print(\"[model-quantization]\
+    \ WARNING: manifest_summary missing bucket/prefix \u2014 calibration frames not\
+    \ downloaded.\", flush=True)\nexcept Exception as e:\n    print(f\"[model-quantization]\
+    \ WARNING: frame download failed: {e}. Proceeding \u2014 CLI will fail if dataset\
+    \ is needed.\", flush=True)\n\nos.makedirs(\"/work/quant_output\", exist_ok=True)\n\
+    \nflags = [\n    \"--mode\", mode,\n    \"--source-mlflow-run-id\", mlflow_run_id,\n\
+    \    \"--dataset-dir\", \"/work/dataset\",\n    \"--output-dir\", \"/work/quant_output\"\
+    ,\n    \"--output-bucket\", output_bucket,\n    \"--output-prefix\", f\"{lakefs_branch}/{quant.get('output_prefix',\
+    \ 'quantization/model')}\",\n    \"--experiment-name\", str(exp.get(\"name\",\
+    \ \"quantization\")),\n    \"--image-size\", str(quant.get(\"image_size\", 640)),\n\
+    \    \"--calibration-frames\", str(quant.get(\"calibration_frames\", 512)),\n\
+    \    \"--calibration-seed\", str(quant.get(\"calibration_seed\", 42)),\n    \"\
+    --parity-frames\", str(quant.get(\"parity_frames\", 100)),\n    \"--parity-max-abs-error\"\
+    , str(quant.get(\"parity_max_abs_error\", 0.05)),\n]\n\nif mode == \"ptq\":\n\
+    \    if not best_checkpoint_s3:\n        print(\"ERROR: best_checkpoint_s3 missing\
+    \ in training_result for PTQ mode.\", flush=True)\n        sys.exit(1)\n    flags\
+    \ += [\"--fp32-checkpoint-path\", best_checkpoint_s3]\n\nelif mode == \"qat\"\
+    :\n    qat_raw = os.environ.get(\"QAT_RESULT\", \"\")\n    if not qat_raw.strip():\n\
+    \        print(\"ERROR: QAT_RESULT is empty but mode=qat \u2014 qat-finetune must\
+    \ have run.\", flush=True)\n        sys.exit(1)\n    try:\n        qr = json.loads(qat_raw)\n\
+    \    except json.JSONDecodeError as e:\n        print(f\"ERROR: QAT_RESULT is\
+    \ not valid JSON: {e}\", flush=True)\n        sys.exit(1)\n    tflite_uri = qr.get(\"\
+    tflite_s3_uri\")\n    qat_run_id = qr.get(\"mlflow_run_id\")\n    if not tflite_uri:\n\
+    \        print(f\"ERROR: qat_result missing tflite_s3_uri: {qr}\", flush=True)\n\
+    \        sys.exit(1)\n    flags += [\"--tflite-s3-uri\", tflite_uri]\n    if qat_run_id:\n\
+    \        flags += [\"--qat-run-id\", qat_run_id]\n    if best_checkpoint_s3:\n\
+    \        flags += [\"--fp32-checkpoint-path\", best_checkpoint_s3]\n\nprint(f\"\
+    [model-quantization] Running: model-quantization run {' '.join(flags)}\", flush=True)\n\
+    result = subprocess.run([\"model-quantization\"] + flags)\nsys.exit(result.returncode)\n"
+  outputs:
+    parameters:
+    - name: quantization-result
+      path: /work/quant_output/quantization_result.json
+  resources:
+    requests:
+      cpu: '2'
+      memory: 8Gi
+      ephemeral-storage: 10Gi
+    limits:
+      cpu: '4'
+      memory: 16Gi
+      ephemeral-storage: 20Gi
+- name: model-registration
+  path: model_registration
+  compute: cpu
+  dependencies:
+  - model-training
+  - model-quantization
+  inputs:
+    parameters:
+    - name: training-result
+      from: model-training
+  command:
+  - python
+  - -c
+  args:
+  - "import os, sys, subprocess, json, yaml\n\n# Config resolution: PIPELINE_CONFIG\
+    \ (platform-injected) overrides PARAMS_YAML.\npipeline_config = os.environ.get(\"\
+    PIPELINE_CONFIG\", \"\")\nparams_yaml = os.environ.get(\"PARAMS_YAML\", \"\")\n\
+    raw = pipeline_config.strip() if pipeline_config.strip() else params_yaml\n\n\
+    if not raw.strip():\n    print(\"ERROR: Neither PIPELINE_CONFIG nor PARAMS_YAML\
+    \ is set.\", flush=True)\n    sys.exit(1)\ntry:\n    cfg = yaml.safe_load(raw)\n\
+    except yaml.YAMLError as e:\n    print(f\"ERROR: Config is not valid YAML: {e}\"\
+    , flush=True)\n    sys.exit(1)\n\ntr_raw = os.environ.get(\"TRAINING_RESULT\"\
+    , \"\")\nif not tr_raw.strip():\n    print(\"ERROR: TRAINING_RESULT input parameter\
+    \ is empty.\", flush=True)\n    sys.exit(1)\ntry:\n    tr = json.loads(tr_raw)\n\
+    except json.JSONDecodeError as e:\n    print(f\"ERROR: TRAINING_RESULT is not\
+    \ valid JSON: {e}\", flush=True)\n    sys.exit(1)\n\ndataset = cfg.get(\"dataset\"\
+    ) or {}\nmodel = cfg.get(\"model\") or {}\nregistration = cfg.get(\"registration\"\
+    ) or {}\n\nmlflow_run_id = tr.get(\"mlflow_run_id\")\nbest_checkpoint_s3 = tr.get(\"\
+    best_checkpoint_s3\")\nif not mlflow_run_id or not best_checkpoint_s3:\n    print(f\"\
+    ERROR: training_result missing mlflow_run_id or best_checkpoint_s3: {tr}\", flush=True)\n\
+    \    sys.exit(1)\n\n# Derive last checkpoint path from best: replace best.pt with\
+    \ last.pt\nlast_checkpoint_s3 = best_checkpoint_s3.replace(\"/best.pt\", \"/last.pt\"\
+    )\n\nflags = [\n    \"--mlflow-run-id\", mlflow_run_id,\n    \"--best-checkpoint-path\"\
+    , best_checkpoint_s3,\n    \"--last-checkpoint-path\", last_checkpoint_s3,\n \
+    \   \"--dataset-version\", str(dataset.get(\"version\", \"\")),\n    \"--model-variant\"\
+    , str(model.get(\"variant\", \"\")),\n]\n\n# Optional registration flags\nif registration.get(\"\
+    registered_model_name\"):\n    flags += [\"--registered-model-name\", str(registration[\"\
+    registered_model_name\"])]\nif registration.get(\"promote_to\"):\n    flags +=\
+    \ [\"--promote-to\", str(registration[\"promote_to\"])]\n\n# Optional lineage\
+    \ flags from training result\nif dataset.get(\"sample_size\") is not None:\n \
+    \   flags += [\"--dataset-sample-size\", str(dataset[\"sample_size\"])]\n\nfinal_map50\
+    \ = tr.get(\"final_map50\")\nif final_map50 is not None:\n    flags += [\"--best-map50\"\
+    , str(final_map50)]\n\nexported_models = tr.get(\"exported_models\")\nif exported_models:\n\
+    \    flags += [\"--exported-models\", json.dumps(exported_models)]\n\nprint(f\"\
+    [model-registration] Running: model-registration {' '.join(flags)}\", flush=True)\n\
+    result = subprocess.run([\"model-registration\"] + flags)\nsys.exit(result.returncode)\n"

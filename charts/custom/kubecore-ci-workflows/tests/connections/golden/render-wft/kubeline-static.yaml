@@ -1,0 +1,2520 @@
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: kubeline-static-pipeline
+  namespace: PLACEHOLDER-vision-runtime
+  annotations:
+    platform.kubecore.io/cost-tracking: enabled
+    platform.kubecore.io/pipeline: kubeline-static
+    platform.kubecore.io/gpu-nodepool: kubeline-static-gpu
+    platform.kubecore.io/cpu-nodepool: kubeline-static-cpu
+    platform.kubecore.io/generated-by: ml-ci-build/render-wft
+    platform.kubecore.io/rendered-from-commit-time: '1700000000'
+  labels:
+    platform.kubecore.io/project: vision
+    platform.kubecore.io/app: kubeline-static
+    platform.kubecore.io/managed-by: kubecore-ci
+spec:
+  serviceAccountName: argo-workflow
+  entrypoint: kubeline-static-pipeline
+  arguments:
+    parameters:
+    - name: pipeline-info
+      value: "HOW TO RUN: defaults below are headroom-sized and runnable as-is — just\
+        \ press Submit.\nPER-STEP COMPUTE: set {step}-cpu / {step}-mem / {step}-gpu\
+        \ for each step. {step}-gpu > 0 routes that step to a GPU node pool; 0 keeps\
+        \ it on CPU.\nCOMPUTE CLASSES on this pool (cpu-class / gpu-class pick the\
+        \ node pool):\nCPU:\n  • cpu-standard — n2-standard-8 — n2-standard-8 (8 vCPU,\
+        \ 32 GiB) — CPU pipeline steps (headroom for heavier CPU steps; scale-from-0\
+        \ so cost only during a step)\n  • kubecorecpu — e2-standard-8 — e2-standard-8\
+        \ + 200GiB — CI builds (kaniko), sized for build-push req 4cpu/12Gi\nGPU:\n\
+        \  • gpu-t4 — n1-standard-8 + 1x nvidia-tesla-t4 — n1-standard-8 + 1x T4 —\
+        \ GPU training steps (scale-from-0)\n(This field is informational — leave\
+        \ it unchanged.)"
+      description: 'Read-only: live pool compute classes + how to fill this form.
+        Leave unchanged.'
+    - name: config
+      value: ''
+      description: 'ADVANCED: full pipeline config YAML (schema pipeline_config.example.yaml).
+        When non-empty it OVERRIDES all individual parameters above — intended for
+        scripted submissions (argo submit -p config=...).'
+    - name: experiment-name
+      value: object-pose-v1-yolov8n
+      description: MLflow experiment name and S3 checkpoint path prefix.
+    - name: experiment-description
+      value: ''
+      description: Optional free-text description stored in the MLflow run.
+    - name: dataset-ref
+      value: main
+      description: lakeFS branch/tag to train on (the ref NAME, not a path). Defaults
+        to "main" — type another branch to train on it. The run reads s3://{repo}/{ref}/
+        directly. To point at an exact path/commit instead, set dataset-path-override.
+    - name: dataset-source
+      value: lakefs
+      description: 'Storage backend for the dataset: ''lakefs'' or ''s3''.'
+      enum:
+      - lakefs
+      - s3
+    - name: dataset-version
+      value: ''
+      description: Provenance tag recorded in MLflow (derived from dataset-ref). Not
+        a path.
+    - name: dataset-path-override
+      value: ''
+      description: Optional s3:// override. Empty = use the picked dataset-ref.
+    - name: dataset-sample-size
+      value: ''
+      description: Integer sample size for reproducible subsets. Empty = full dataset.
+    - name: dataset-seed
+      value: '42'
+      description: Random seed for reproducible dataset sampling.
+    - name: model-variant
+      value: yolov8n-pose.pt
+      description: YOLO pose model variant file. Determines architecture and parameter
+        count.
+      enum:
+      - yolov8n-pose.pt
+      - yolov8s-pose.pt
+      - yolov8m-pose.pt
+      - yolov8l-pose.pt
+      - yolov8x-pose.pt
+      - yolov9n-pose.pt
+      - yolov9s-pose.pt
+      - yolov9m-pose.pt
+      - yolov9l-pose.pt
+      - yolov9x-pose.pt
+      - yolov10n-pose.pt
+      - yolov10s-pose.pt
+      - yolov10m-pose.pt
+      - yolov10l-pose.pt
+      - yolov10x-pose.pt
+      - yolov11n-pose.pt
+      - yolov11s-pose.pt
+      - yolov11m-pose.pt
+      - yolov11l-pose.pt
+      - yolov11x-pose.pt
+    - name: pretrained-weights
+      value: ''
+      description: S3 URI to custom .pt weights for weight-only init. Empty = use
+        model-variant's bundled weights.
+    - name: epochs
+      value: '100'
+      description: Total training epochs.
+    - name: batch-size
+      value: '16'
+      description: Training batch size. Use -1 for Ultralytics auto-batch.
+    - name: image-size
+      value: '640'
+      description: Input image resolution in pixels (must be a multiple of 32).
+    - name: learning-rate
+      value: '0.01'
+      description: Initial learning rate (Ultralytics lr0).
+    - name: cos-lr
+      value: 'true'
+      description: Use cosine learning rate schedule.
+      enum:
+      - 'false'
+      - 'true'
+    - name: lrf
+      value: '0.01'
+      description: 'Final LR ratio: final_lr = learning_rate * lrf. Must be in (0,
+        1].'
+    - name: optimizer
+      value: SGD
+      description: Gradient optimizer. SGD is the Ultralytics default for YOLO.
+      enum:
+      - SGD
+      - Adam
+      - AdamW
+    - name: momentum
+      value: '0.937'
+      description: SGD momentum or Adam beta1.
+    - name: weight-decay
+      value: '0.0005'
+      description: Optimizer weight decay (L2 regularization coefficient).
+    - name: warmup-epochs
+      value: '3.0'
+      description: Number of LR warmup epochs.
+    - name: warmup-momentum
+      value: '0.8'
+      description: Initial momentum during warmup (rises to `momentum` by end of warmup).
+    - name: dropout
+      value: '0.0'
+      description: Dropout rate applied in the classifier head [0.0, 1.0).
+    - name: label-smoothing
+      value: '0.0'
+      description: Label smoothing epsilon [0.0, 1.0). Reduces overconfidence.
+    - name: nbs
+      value: '64'
+      description: Nominal batch size. Ultralytics scales gradients so effective LR
+        matches this batch size.
+    - name: freeze
+      value: ''
+      description: Freeze the first N backbone layers. Empty = train all layers.
+    - name: amp
+      value: 'true'
+      description: Enable Automatic Mixed Precision (FP16). Halves GPU memory use.
+      enum:
+      - 'false'
+      - 'true'
+    - name: close-mosaic
+      value: '10'
+      description: Disable mosaic augmentation for the last N epochs (0 = never disable).
+    - name: training-seed
+      value: '0'
+      description: Global training RNG seed (separate from dataset-seed).
+    - name: deterministic
+      value: 'true'
+      description: Enable cuDNN deterministic mode. Slight speed penalty; ensures
+        reproducibility.
+      enum:
+      - 'false'
+      - 'true'
+    - name: pose
+      value: '12.0'
+      description: Keypoint regression loss gain. Primary lever for object keypoint
+        accuracy.
+    - name: kobj
+      value: '2.0'
+      description: Keypoint objectness loss gain.
+    - name: box
+      value: '7.5'
+      description: Bounding-box regression loss gain.
+    - name: cls
+      value: '0.5'
+      description: Classification loss gain.
+    - name: dfl
+      value: '1.5'
+      description: Distribution Focal Loss gain.
+    - name: early-stopping-patience
+      value: '50'
+      description: Epochs without improvement before early stopping triggers.
+    - name: checkpointing-interval-epochs
+      value: '10'
+      description: Upload an intermediate checkpoint to S3 every N epochs.
+    - name: checkpointing-storage-path
+      value: ''
+      description: Override checkpoint location (s3://bucket/prefix). Empty = platform-derived
+        (project lakeFS repository, main/checkpoints).
+    - name: checkpoint-resume-from
+      value: ''
+      description: 'Checkpoint to resume from: empty = start fresh, ''auto'' = latest,
+        or a full S3 path.'
+    - name: aug-hsv-h
+      value: '0.015'
+      description: HSV hue augmentation range [0.0, 1.0].
+    - name: aug-hsv-s
+      value: '0.7'
+      description: HSV saturation augmentation range [0.0, 1.0].
+    - name: aug-hsv-v
+      value: '0.4'
+      description: HSV value augmentation range [0.0, 1.0].
+    - name: aug-degrees
+      value: '0.0'
+      description: Random rotation range in degrees. Keep 0.0 for pose (keypoints
+        are rotation-sensitive).
+    - name: aug-translate
+      value: '0.1'
+      description: Random translation fraction of image size.
+    - name: aug-scale
+      value: '0.5'
+      description: Random scale gain (multiplicative).
+    - name: aug-shear
+      value: '0.0'
+      description: Random shear range in degrees.
+    - name: aug-perspective
+      value: '0.0'
+      description: Random perspective warp [0.0, 0.001]. Values > 0.001 cause severe
+        keypoint displacement.
+    - name: aug-flipud
+      value: '0.0'
+      description: Vertical flip probability. Keep 0.0 for object (no defined up direction
+        has defined 'up').
+    - name: aug-fliplr
+      value: '0.0'
+      description: Horizontal flip probability. Keep 0.0 for object (no left-right
+        symmetry in canonical pose).
+    - name: aug-mosaic
+      value: '1.0'
+      description: Mosaic augmentation probability [0.0, 1.0]. Disabled for last `close-mosaic`
+        epochs.
+    - name: aug-mixup
+      value: '0.0'
+      description: MixUp augmentation probability [0.0, 1.0].
+    - name: aug-copy-paste
+      value: '0.0'
+      description: Segment copy-paste augmentation probability [0.0, 1.0].
+    - name: aug-erasing
+      value: '0.4'
+      description: Random erasing probability [0.0, 0.9].
+    - name: aug-bgr
+      value: '0.0'
+      description: BGR channel flip probability [0.0, 1.0].
+    - name: export-enabled
+      value: 'false'
+      description: Enable post-training model export (TensorRT/ONNX).
+      enum:
+      - 'false'
+      - 'true'
+    - name: export-formats
+      value: engine
+      description: 'Comma-separated export formats: ''engine'' (TensorRT) and/or ''onnx''.
+        Only used when export-enabled=true.'
+    - name: export-precisions
+      value: fp16
+      description: 'Comma-separated precisions: ''fp16'' and/or ''int8''. Only used
+        when export-enabled=true.'
+    - name: quantization-mode
+      value: none
+      description: 'Quantization mode: ''none'' skips both qat-finetune and model-quantization;
+        ''ptq'' runs Ultralytics INT8 export; ''qat'' runs PT2E QAT fine-tune then
+        model-quantization.'
+      enum:
+      - none
+      - ptq
+      - qat
+    - name: quantization-image-size
+      value: '640'
+      description: Input image size for quantization. Must match training image-size.
+    - name: quantization-calibration-frames
+      value: '512'
+      description: Number of calibration frames sampled from the dataset for PTQ/QAT
+        calibration.
+    - name: quantization-calibration-seed
+      value: '42'
+      description: RNG seed for deterministic calibration frame sampling (FR-M-04).
+    - name: quantization-parity-frames
+      value: '100'
+      description: Number of frames for the INT8 vs FP32 parity check.
+    - name: quantization-parity-max-abs-error
+      value: '0.05'
+      description: Maximum allowed max-absolute-error in the parity check. Run fails
+        if this threshold is exceeded.
+    - name: quantization-output-prefix
+      value: quantization
+      description: S3 key prefix for quantized TFLite artifacts (e.g. 'quantization/exp-001').
+    - name: qat-epochs
+      value: '10'
+      description: Number of QAT fine-tune epochs. Only used when quantization-mode=qat.
+    - name: qat-lr
+      value: '0.0001'
+      description: Learning rate for QAT fine-tuning. Only used when quantization-mode=qat.
+    - name: registered-model-name
+      value: ''
+      description: 'MLflow registered model name. Empty = use REGISTERED_MODEL_NAME
+        env var (default: object-pose-yolo).'
+    - name: promote-to
+      value: ''
+      description: 'Transition the registered model version to this stage: empty =
+        no promotion, ''Staging'', or ''Production''.'
+    - name: config-validation-class
+      value: cpu-standard
+      description: "Which machine the 'config-validation' step runs on. Leave the\
+        \ default unless you need more/less power.\n\nAvailable machines:\n  - cpu-standard\
+        \ — n2-standard-8 — n2-standard-8 (8 vCPU, 32 GiB) — CPU pipeline steps (headroom\
+        \ for heavier CPU steps; scale-from-0 so cost only during a step)\n  - kubecorecpu\
+        \ — e2-standard-8 — e2-standard-8 + 200GiB — CI builds (kaniko), sized for\
+        \ build-push req 4cpu/12Gi\n  - gpu-t4 — n1-standard-8 + 1x nvidia-tesla-t4\
+        \ — n1-standard-8 + 1x T4 — GPU training steps (scale-from-0)\n\nRule of thumb:\
+        \ pick a GPU class (e.g. gpu-t4) for model-training, qat-finetune and model-quantization;\
+        \ a CPU class (e.g. cpu-standard) is enough for config-validation, dataset-loading\
+        \ and model-registration. The default is already set correctly for this step."
+      enum: &id001
+      - cpu-standard
+      - kubecorecpu
+      - gpu-t4
+    - name: dataset-loading-class
+      value: cpu-standard
+      description: "Which machine the 'dataset-loading' step runs on. Leave the default\
+        \ unless you need more/less power.\n\nAvailable machines:\n  - cpu-standard\
+        \ — n2-standard-8 — n2-standard-8 (8 vCPU, 32 GiB) — CPU pipeline steps (headroom\
+        \ for heavier CPU steps; scale-from-0 so cost only during a step)\n  - kubecorecpu\
+        \ — e2-standard-8 — e2-standard-8 + 200GiB — CI builds (kaniko), sized for\
+        \ build-push req 4cpu/12Gi\n  - gpu-t4 — n1-standard-8 + 1x nvidia-tesla-t4\
+        \ — n1-standard-8 + 1x T4 — GPU training steps (scale-from-0)\n\nRule of thumb:\
+        \ pick a GPU class (e.g. gpu-t4) for model-training, qat-finetune and model-quantization;\
+        \ a CPU class (e.g. cpu-standard) is enough for config-validation, dataset-loading\
+        \ and model-registration. The default is already set correctly for this step."
+      enum: *id001
+    - name: model-training-class
+      value: gpu-t4
+      description: "Which machine the 'model-training' step runs on. Leave the default\
+        \ unless you need more/less power. This step normally needs a GPU — the default\
+        \ is a GPU class.\n\nAvailable machines:\n  - cpu-standard — n2-standard-8\
+        \ — n2-standard-8 (8 vCPU, 32 GiB) — CPU pipeline steps (headroom for heavier\
+        \ CPU steps; scale-from-0 so cost only during a step)\n  - kubecorecpu — e2-standard-8\
+        \ — e2-standard-8 + 200GiB — CI builds (kaniko), sized for build-push req\
+        \ 4cpu/12Gi\n  - gpu-t4 — n1-standard-8 + 1x nvidia-tesla-t4 — n1-standard-8\
+        \ + 1x T4 — GPU training steps (scale-from-0)\n\nRule of thumb: pick a GPU\
+        \ class (e.g. gpu-t4) for model-training, qat-finetune and model-quantization;\
+        \ a CPU class (e.g. cpu-standard) is enough for config-validation, dataset-loading\
+        \ and model-registration. The default is already set correctly for this step."
+      enum: *id001
+    - name: qat-finetune-class
+      value: gpu-t4
+      description: "Which machine the 'qat-finetune' step runs on. Leave the default\
+        \ unless you need more/less power. This step normally needs a GPU — the default\
+        \ is a GPU class.\n\nAvailable machines:\n  - cpu-standard — n2-standard-8\
+        \ — n2-standard-8 (8 vCPU, 32 GiB) — CPU pipeline steps (headroom for heavier\
+        \ CPU steps; scale-from-0 so cost only during a step)\n  - kubecorecpu — e2-standard-8\
+        \ — e2-standard-8 + 200GiB — CI builds (kaniko), sized for build-push req\
+        \ 4cpu/12Gi\n  - gpu-t4 — n1-standard-8 + 1x nvidia-tesla-t4 — n1-standard-8\
+        \ + 1x T4 — GPU training steps (scale-from-0)\n\nRule of thumb: pick a GPU\
+        \ class (e.g. gpu-t4) for model-training, qat-finetune and model-quantization;\
+        \ a CPU class (e.g. cpu-standard) is enough for config-validation, dataset-loading\
+        \ and model-registration. The default is already set correctly for this step."
+      enum: *id001
+    - name: model-quantization-class
+      value: gpu-t4
+      description: "Which machine the 'model-quantization' step runs on. Leave the\
+        \ default unless you need more/less power. This step normally needs a GPU\
+        \ — the default is a GPU class.\n\nAvailable machines:\n  - cpu-standard —\
+        \ n2-standard-8 — n2-standard-8 (8 vCPU, 32 GiB) — CPU pipeline steps (headroom\
+        \ for heavier CPU steps; scale-from-0 so cost only during a step)\n  - kubecorecpu\
+        \ — e2-standard-8 — e2-standard-8 + 200GiB — CI builds (kaniko), sized for\
+        \ build-push req 4cpu/12Gi\n  - gpu-t4 — n1-standard-8 + 1x nvidia-tesla-t4\
+        \ — n1-standard-8 + 1x T4 — GPU training steps (scale-from-0)\n\nRule of thumb:\
+        \ pick a GPU class (e.g. gpu-t4) for model-training, qat-finetune and model-quantization;\
+        \ a CPU class (e.g. cpu-standard) is enough for config-validation, dataset-loading\
+        \ and model-registration. The default is already set correctly for this step."
+      enum: *id001
+    - name: model-registration-class
+      value: cpu-standard
+      description: "Which machine the 'model-registration' step runs on. Leave the\
+        \ default unless you need more/less power.\n\nAvailable machines:\n  - cpu-standard\
+        \ — n2-standard-8 — n2-standard-8 (8 vCPU, 32 GiB) — CPU pipeline steps (headroom\
+        \ for heavier CPU steps; scale-from-0 so cost only during a step)\n  - kubecorecpu\
+        \ — e2-standard-8 — e2-standard-8 + 200GiB — CI builds (kaniko), sized for\
+        \ build-push req 4cpu/12Gi\n  - gpu-t4 — n1-standard-8 + 1x nvidia-tesla-t4\
+        \ — n1-standard-8 + 1x T4 — GPU training steps (scale-from-0)\n\nRule of thumb:\
+        \ pick a GPU class (e.g. gpu-t4) for model-training, qat-finetune and model-quantization;\
+        \ a CPU class (e.g. cpu-standard) is enough for config-validation, dataset-loading\
+        \ and model-registration. The default is already set correctly for this step."
+      enum: *id001
+    - name: registered-model-name
+      value: kubeline-static-model
+    - name: promote-to
+      value: ''
+  templates:
+  - name: kubeline-static-pipeline
+    dag:
+      tasks:
+      - name: config-validation-cpu
+        template: config-validation-cpu
+        when: '{{=!(workflow.parameters[''config-validation-class''] == ''gpu-t4'')}}'
+        arguments:
+          parameters:
+          - name: dataset-path-override
+            value: '{{=workflow.parameters[''dataset-path-override'']}}'
+      - name: config-validation-gpu
+        template: config-validation-gpu
+        when: '{{=workflow.parameters[''config-validation-class''] == ''gpu-t4''}}'
+        arguments:
+          parameters:
+          - name: dataset-path-override
+            value: '{{=workflow.parameters[''dataset-path-override'']}}'
+      - name: dataset-loading-cpu
+        template: dataset-loading-cpu
+        when: '{{=!(workflow.parameters[''dataset-loading-class''] == ''gpu-t4'')}}'
+        depends: (config-validation-cpu.Succeeded || config-validation-cpu.Skipped)
+          && (config-validation-gpu.Succeeded || config-validation-gpu.Skipped)
+        arguments:
+          parameters:
+          - name: dataset-path-override
+            value: '{{=workflow.parameters[''dataset-path-override'']}}'
+      - name: dataset-loading-gpu
+        template: dataset-loading-gpu
+        when: '{{=workflow.parameters[''dataset-loading-class''] == ''gpu-t4''}}'
+        depends: (config-validation-cpu.Succeeded || config-validation-cpu.Skipped)
+          && (config-validation-gpu.Succeeded || config-validation-gpu.Skipped)
+        arguments:
+          parameters:
+          - name: dataset-path-override
+            value: '{{=workflow.parameters[''dataset-path-override'']}}'
+      - name: model-training-cpu
+        template: model-training-cpu
+        when: '{{=!(workflow.parameters[''model-training-class''] == ''gpu-t4'')}}'
+        depends: (dataset-loading-cpu.Succeeded || dataset-loading-cpu.Skipped) &&
+          (dataset-loading-gpu.Succeeded || dataset-loading-gpu.Skipped)
+        arguments:
+          parameters:
+          - name: dataset-path-override
+            value: '{{=workflow.parameters[''dataset-path-override'']}}'
+          - name: data-yaml
+            value: '{{=(workflow.parameters[''dataset-loading-class''] == ''gpu-t4'')
+              ? tasks[''dataset-loading-gpu''].outputs.parameters[''data-yaml''] :
+              tasks[''dataset-loading-cpu''].outputs.parameters[''data-yaml'']}}'
+          - name: manifest-summary
+            value: '{{=(workflow.parameters[''dataset-loading-class''] == ''gpu-t4'')
+              ? tasks[''dataset-loading-gpu''].outputs.parameters[''manifest-summary'']
+              : tasks[''dataset-loading-cpu''].outputs.parameters[''manifest-summary'']}}'
+      - name: model-training-gpu
+        template: model-training-gpu
+        when: '{{=workflow.parameters[''model-training-class''] == ''gpu-t4''}}'
+        depends: (dataset-loading-cpu.Succeeded || dataset-loading-cpu.Skipped) &&
+          (dataset-loading-gpu.Succeeded || dataset-loading-gpu.Skipped)
+        arguments:
+          parameters:
+          - name: dataset-path-override
+            value: '{{=workflow.parameters[''dataset-path-override'']}}'
+          - name: data-yaml
+            value: '{{=(workflow.parameters[''dataset-loading-class''] == ''gpu-t4'')
+              ? tasks[''dataset-loading-gpu''].outputs.parameters[''data-yaml''] :
+              tasks[''dataset-loading-cpu''].outputs.parameters[''data-yaml'']}}'
+          - name: manifest-summary
+            value: '{{=(workflow.parameters[''dataset-loading-class''] == ''gpu-t4'')
+              ? tasks[''dataset-loading-gpu''].outputs.parameters[''manifest-summary'']
+              : tasks[''dataset-loading-cpu''].outputs.parameters[''manifest-summary'']}}'
+      - name: qat-finetune-cpu
+        template: qat-finetune-cpu
+        when: '{{=(!(workflow.parameters[''qat-finetune-class''] == ''gpu-t4'')) &&
+          workflow.parameters[''quantization-mode''] == ''qat''}}'
+        depends: (model-training-cpu.Succeeded || model-training-cpu.Skipped) && (model-training-gpu.Succeeded
+          || model-training-gpu.Skipped)
+        arguments:
+          parameters:
+          - name: dataset-path-override
+            value: '{{=workflow.parameters[''dataset-path-override'']}}'
+          - name: training-result
+            value: '{{=(workflow.parameters[''model-training-class''] == ''gpu-t4'')
+              ? tasks[''model-training-gpu''].outputs.parameters[''training-result'']
+              : tasks[''model-training-cpu''].outputs.parameters[''training-result'']}}'
+          - name: data-yaml
+            value: '{{=(workflow.parameters[''dataset-loading-class''] == ''gpu-t4'')
+              ? tasks[''dataset-loading-gpu''].outputs.parameters[''data-yaml''] :
+              tasks[''dataset-loading-cpu''].outputs.parameters[''data-yaml'']}}'
+          - name: manifest-summary
+            value: '{{=(workflow.parameters[''dataset-loading-class''] == ''gpu-t4'')
+              ? tasks[''dataset-loading-gpu''].outputs.parameters[''manifest-summary'']
+              : tasks[''dataset-loading-cpu''].outputs.parameters[''manifest-summary'']}}'
+      - name: qat-finetune-gpu
+        template: qat-finetune-gpu
+        when: '{{=(workflow.parameters[''qat-finetune-class''] == ''gpu-t4'') && workflow.parameters[''quantization-mode'']
+          == ''qat''}}'
+        depends: (model-training-cpu.Succeeded || model-training-cpu.Skipped) && (model-training-gpu.Succeeded
+          || model-training-gpu.Skipped)
+        arguments:
+          parameters:
+          - name: dataset-path-override
+            value: '{{=workflow.parameters[''dataset-path-override'']}}'
+          - name: training-result
+            value: '{{=(workflow.parameters[''model-training-class''] == ''gpu-t4'')
+              ? tasks[''model-training-gpu''].outputs.parameters[''training-result'']
+              : tasks[''model-training-cpu''].outputs.parameters[''training-result'']}}'
+          - name: data-yaml
+            value: '{{=(workflow.parameters[''dataset-loading-class''] == ''gpu-t4'')
+              ? tasks[''dataset-loading-gpu''].outputs.parameters[''data-yaml''] :
+              tasks[''dataset-loading-cpu''].outputs.parameters[''data-yaml'']}}'
+          - name: manifest-summary
+            value: '{{=(workflow.parameters[''dataset-loading-class''] == ''gpu-t4'')
+              ? tasks[''dataset-loading-gpu''].outputs.parameters[''manifest-summary'']
+              : tasks[''dataset-loading-cpu''].outputs.parameters[''manifest-summary'']}}'
+      - name: model-quantization-cpu
+        template: model-quantization-cpu
+        when: '{{=(!(workflow.parameters[''model-quantization-class''] == ''gpu-t4''))
+          && workflow.parameters[''quantization-mode''] != ''none''}}'
+        depends: (model-training-cpu.Succeeded || model-training-cpu.Skipped) && (model-training-gpu.Succeeded
+          || model-training-gpu.Skipped) && (qat-finetune-cpu.Succeeded || qat-finetune-cpu.Skipped)
+          && (qat-finetune-gpu.Succeeded || qat-finetune-gpu.Skipped)
+        arguments:
+          parameters:
+          - name: dataset-path-override
+            value: '{{=workflow.parameters[''dataset-path-override'']}}'
+          - name: training-result
+            value: '{{=(workflow.parameters[''model-training-class''] == ''gpu-t4'')
+              ? tasks[''model-training-gpu''].outputs.parameters[''training-result'']
+              : tasks[''model-training-cpu''].outputs.parameters[''training-result'']}}'
+          - name: qat-result
+            value: '{{=(workflow.parameters[''qat-finetune-class''] == ''gpu-t4'')
+              ? tasks[''qat-finetune-gpu''].outputs.parameters[''qat-result''] : tasks[''qat-finetune-cpu''].outputs.parameters[''qat-result'']}}'
+          - name: data-yaml
+            value: '{{=(workflow.parameters[''dataset-loading-class''] == ''gpu-t4'')
+              ? tasks[''dataset-loading-gpu''].outputs.parameters[''data-yaml''] :
+              tasks[''dataset-loading-cpu''].outputs.parameters[''data-yaml'']}}'
+          - name: manifest-summary
+            value: '{{=(workflow.parameters[''dataset-loading-class''] == ''gpu-t4'')
+              ? tasks[''dataset-loading-gpu''].outputs.parameters[''manifest-summary'']
+              : tasks[''dataset-loading-cpu''].outputs.parameters[''manifest-summary'']}}'
+      - name: model-quantization-gpu
+        template: model-quantization-gpu
+        when: '{{=(workflow.parameters[''model-quantization-class''] == ''gpu-t4'')
+          && workflow.parameters[''quantization-mode''] != ''none''}}'
+        depends: (model-training-cpu.Succeeded || model-training-cpu.Skipped) && (model-training-gpu.Succeeded
+          || model-training-gpu.Skipped) && (qat-finetune-cpu.Succeeded || qat-finetune-cpu.Skipped)
+          && (qat-finetune-gpu.Succeeded || qat-finetune-gpu.Skipped)
+        arguments:
+          parameters:
+          - name: dataset-path-override
+            value: '{{=workflow.parameters[''dataset-path-override'']}}'
+          - name: training-result
+            value: '{{=(workflow.parameters[''model-training-class''] == ''gpu-t4'')
+              ? tasks[''model-training-gpu''].outputs.parameters[''training-result'']
+              : tasks[''model-training-cpu''].outputs.parameters[''training-result'']}}'
+          - name: qat-result
+            value: '{{=(workflow.parameters[''qat-finetune-class''] == ''gpu-t4'')
+              ? tasks[''qat-finetune-gpu''].outputs.parameters[''qat-result''] : tasks[''qat-finetune-cpu''].outputs.parameters[''qat-result'']}}'
+          - name: data-yaml
+            value: '{{=(workflow.parameters[''dataset-loading-class''] == ''gpu-t4'')
+              ? tasks[''dataset-loading-gpu''].outputs.parameters[''data-yaml''] :
+              tasks[''dataset-loading-cpu''].outputs.parameters[''data-yaml'']}}'
+          - name: manifest-summary
+            value: '{{=(workflow.parameters[''dataset-loading-class''] == ''gpu-t4'')
+              ? tasks[''dataset-loading-gpu''].outputs.parameters[''manifest-summary'']
+              : tasks[''dataset-loading-cpu''].outputs.parameters[''manifest-summary'']}}'
+      - name: model-registration-cpu
+        template: model-registration-cpu
+        when: '{{=!(workflow.parameters[''model-registration-class''] == ''gpu-t4'')}}'
+        depends: (model-training-cpu.Succeeded || model-training-cpu.Skipped) && (model-training-gpu.Succeeded
+          || model-training-gpu.Skipped) && (model-quantization-cpu.Succeeded || model-quantization-cpu.Skipped)
+          && (model-quantization-gpu.Succeeded || model-quantization-gpu.Skipped)
+        arguments:
+          parameters:
+          - name: dataset-path-override
+            value: '{{=workflow.parameters[''dataset-path-override'']}}'
+          - name: training-result
+            value: '{{=(workflow.parameters[''model-training-class''] == ''gpu-t4'')
+              ? tasks[''model-training-gpu''].outputs.parameters[''training-result'']
+              : tasks[''model-training-cpu''].outputs.parameters[''training-result'']}}'
+      - name: model-registration-gpu
+        template: model-registration-gpu
+        when: '{{=workflow.parameters[''model-registration-class''] == ''gpu-t4''}}'
+        depends: (model-training-cpu.Succeeded || model-training-cpu.Skipped) && (model-training-gpu.Succeeded
+          || model-training-gpu.Skipped) && (model-quantization-cpu.Succeeded || model-quantization-cpu.Skipped)
+          && (model-quantization-gpu.Succeeded || model-quantization-gpu.Skipped)
+        arguments:
+          parameters:
+          - name: dataset-path-override
+            value: '{{=workflow.parameters[''dataset-path-override'']}}'
+          - name: training-result
+            value: '{{=(workflow.parameters[''model-training-class''] == ''gpu-t4'')
+              ? tasks[''model-training-gpu''].outputs.parameters[''training-result'']
+              : tasks[''model-training-cpu''].outputs.parameters[''training-result'']}}'
+  - name: config-validation-cpu
+    inputs:
+      parameters:
+      - name: image
+        valueFrom:
+          configMapKeyRef:
+            name: kubeline-static-pipeline-images
+            key: config-validation
+      - name: dataset-path-override
+        default: ''
+    metadata:
+      labels:
+        platform.kubecore.io/project: vision
+        platform.kubecore.io/pipeline: kubeline-static
+        platform.kubecore.io/step: config-validation
+        platform.kubecore.io/compute-type: cpu
+        platform.kubecore.io/compute-class: '{{workflow.parameters.config-validation-class}}'
+    nodeSelector:
+      platform.kubecore.io/nodegroup-type: '{{workflow.parameters.config-validation-class}}'
+    tolerations:
+    - key: platform.kubecore.io/ml-workload
+      operator: Equal
+      effect: NoSchedule
+      value: cpu
+    serviceAccountName: argo-workflow
+    retryStrategy:
+      limit: '2'
+      retryPolicy: OnError
+      expression: lastRetry.exitCode != "137"
+      backoff:
+        duration: 30s
+        factor: '2'
+    activeDeadlineSeconds: 1800
+    container:
+      image: '{{inputs.parameters.image}}'
+      resources:
+        requests:
+          cpu: '7'
+          memory: 27Gi
+          ephemeral-storage: 2Gi
+        limits:
+          cpu: '7'
+          memory: 27Gi
+          ephemeral-storage: 4Gi
+      command: &id002
+      - python
+      - -c
+      args: &id003
+      - "import os, sys, subprocess, yaml\n\n# Config resolution: if PIPELINE_CONFIG\
+        \ (injected by platform generator)\n# is non-empty, it OVERRIDES all individual\
+        \ parameters. Otherwise,\n# PARAMS_YAML (assembled from individual Argo parameters)\
+        \ is used.\npipeline_config = os.environ.get(\"PIPELINE_CONFIG\", \"\")\n\
+        params_yaml = os.environ.get(\"PARAMS_YAML\", \"\")\nraw = pipeline_config.strip()\
+        \ if pipeline_config.strip() else params_yaml\n\nif not raw.strip():\n   \
+        \ print(\"ERROR: Neither PIPELINE_CONFIG nor PARAMS_YAML is set.\", flush=True)\n\
+        \    sys.exit(1)\ntry:\n    cfg = yaml.safe_load(raw)\nexcept yaml.YAMLError\
+        \ as e:\n    print(f\"ERROR: Config is not valid YAML: {e}\", flush=True)\n\
+        \    sys.exit(1)\nif not isinstance(cfg, dict):\n    print(\"ERROR: Config\
+        \ parsed to a non-dict value.\", flush=True)\n    sys.exit(1)\n\n# Enforce\
+        \ manifest-only: full-download and labels-only are not\n# supported in the\
+        \ cluster because steps run in separate pods and\n# there is no shared volume\
+        \ between them. In param mode, PARAMS_YAML\n# always sets manifest_only=true;\
+        \ in config mode we verify it.\ndataset = cfg.get(\"dataset\") or {}\nmanifest_only\
+        \ = dataset.get(\"manifest_only\", False)\nlabels_only = dataset.get(\"labels_only\"\
+        , False)\nif not manifest_only:\n    mode = \"labels-only\" if labels_only\
+        \ else \"full-download\"\n    print(\n        f\"ERROR: dataset.manifest_only\
+        \ must be true. \"\n        f\"Current mode is '{mode}'. \"\n        f\"Full-download\
+        \ and labels-only modes require a shared filesystem \"\n        f\"between\
+        \ steps, which this cluster does not provide. \"\n        f\"Set dataset.manifest_only:\
+        \ true in your pipeline config.\",\n        flush=True,\n    )\n    sys.exit(1)\n\
+        \nexp = cfg.get(\"experiment\") or {}\ndataset = cfg.get(\"dataset\") or {}\n\
+        model = cfg.get(\"model\") or {}\ntraining = cfg.get(\"training\") or {}\n\
+        checkpointing = cfg.get(\"checkpointing\") or {}\nearly_stopping = cfg.get(\"\
+        early_stopping\") or {}\naugmentation = cfg.get(\"augmentation\") or {}\n\n\
+        # Precedence: explicit param wins; empty param falls back to platform env.\n\
+        # CHECKPOINT_BUCKET/CHECKPOINT_PREFIX are injected by render-wft from the\n\
+        # k8smlapp pipeline-context (checkpoints.bucket = lakeFS repo, prefix =\n\
+        # main/checkpoints). When both are absent the platform didn't inject them\n\
+        # (legacy deployment or misconfiguration) and we fail loudly.\nstorage_path\
+        \ = str(checkpointing.get(\"storage_path\", \"\") or \"\").strip()\nif not\
+        \ storage_path:\n    ckpt_bucket = os.environ.get(\"CHECKPOINT_BUCKET\", \"\
+        \").strip()\n    ckpt_prefix = os.environ.get(\"CHECKPOINT_PREFIX\", \"\"\
+        ).strip()\n    if not ckpt_bucket:\n        print(\n            \"ERROR: checkpointing-storage-path\
+        \ is empty and CHECKPOINT_BUCKET env \"\n            \"is not set. The platform\
+        \ should inject CHECKPOINT_BUCKET/CHECKPOINT_PREFIX \"\n            \"from\
+        \ the project lakeFS repository via render-wft. Either set \"\n          \
+        \  \"checkpointing-storage-path explicitly or ensure the k8smlapp composition\
+        \ \"\n            \"version includes the checkpoints block in pipeline-context.yaml.\"\
+        ,\n            flush=True,\n        )\n        sys.exit(1)\n    storage_path\
+        \ = f\"s3://{ckpt_bucket}/{ckpt_prefix}\" if ckpt_prefix else f\"s3://{ckpt_bucket}/main/checkpoints\"\
+        \n\nflags = [\n    \"--experiment-name\", str(exp[\"name\"]),\n    \"--dataset-version\"\
+        , str(dataset[\"version\"]),\n    \"--dataset-source\", str(dataset[\"source\"\
+        ]),\n    \"--model-variant\", str(model[\"variant\"]),\n    \"--training-epochs\"\
+        , str(training[\"epochs\"]),\n    \"--training-batch-size\", str(training[\"\
+        batch_size\"]),\n    \"--training-image-size\", str(training[\"image_size\"\
+        ]),\n    \"--training-learning-rate\", str(training[\"learning_rate\"]),\n\
+        \    \"--training-optimizer\", str(training[\"optimizer\"]),\n    \"--checkpointing-interval-epochs\"\
+        , str(checkpointing[\"interval_epochs\"]),\n    \"--checkpointing-storage-path\"\
+        , storage_path,\n    \"--early-stopping-patience\", str(early_stopping[\"\
+        patience\"]),\n]\n\n# Optional dataset flags\nif dataset.get(\"lakefs_repo\"\
+        ):\n    flags += [\"--dataset-lakefs-repo\", str(dataset[\"lakefs_repo\"])]\n\
+        if dataset.get(\"lakefs_branch\"):\n    flags += [\"--dataset-lakefs-branch\"\
+        , str(dataset[\"lakefs_branch\"])]\nif dataset.get(\"path_override\"):\n \
+        \   flags += [\"--dataset-path-override\", str(dataset[\"path_override\"])]\n\
+        if dataset.get(\"sample_size\") is not None:\n    flags += [\"--dataset-sample-size\"\
+        , str(dataset[\"sample_size\"])]\nif dataset.get(\"seed\") is not None:\n\
+        \    flags += [\"--dataset-seed\", str(dataset[\"seed\"])]\n\n# dataset_manifest_only:\
+        \ always true (enforced above) — pass the flag\nflags += [\"--dataset-manifest-only\"\
+        ]\n\n# Optional model flags\nif model.get(\"pretrained_weights\"):\n    flags\
+        \ += [\"--model-pretrained-weights\", str(model[\"pretrained_weights\"])]\n\
+        \n# Optional training flags (non-default values)\nif training.get(\"cos_lr\"\
+        ) is not None:\n    flags += [\"--training-cos-lr\" if training[\"cos_lr\"\
+        ] else \"--no-training-cos-lr\"]\nif training.get(\"lrf\") is not None:\n\
+        \    flags += [\"--training-lrf\", str(training[\"lrf\"])]\nif training.get(\"\
+        momentum\") is not None:\n    flags += [\"--training-momentum\", str(training[\"\
+        momentum\"])]\nif training.get(\"weight_decay\") is not None:\n    flags +=\
+        \ [\"--training-weight-decay\", str(training[\"weight_decay\"])]\nif training.get(\"\
+        warmup_epochs\") is not None:\n    flags += [\"--training-warmup-epochs\"\
+        , str(training[\"warmup_epochs\"])]\nif training.get(\"warmup_momentum\")\
+        \ is not None:\n    flags += [\"--training-warmup-momentum\", str(training[\"\
+        warmup_momentum\"])]\nif training.get(\"dropout\") is not None:\n    flags\
+        \ += [\"--training-dropout\", str(training[\"dropout\"])]\nif training.get(\"\
+        label_smoothing\") is not None:\n    flags += [\"--training-label-smoothing\"\
+        , str(training[\"label_smoothing\"])]\nif training.get(\"nbs\") is not None:\n\
+        \    flags += [\"--training-nbs\", str(training[\"nbs\"])]\nif training.get(\"\
+        freeze\") is not None:\n    flags += [\"--training-freeze\", str(training[\"\
+        freeze\"])]\nif training.get(\"amp\") is not None:\n    flags += [\"--training-amp\"\
+        \ if training[\"amp\"] else \"--no-training-amp\"]\nif training.get(\"close_mosaic\"\
+        ) is not None:\n    flags += [\"--training-close-mosaic\", str(training[\"\
+        close_mosaic\"])]\nif training.get(\"seed\") is not None:\n    flags += [\"\
+        --training-seed\", str(training[\"seed\"])]\nif training.get(\"deterministic\"\
+        ) is not None:\n    flags += [\"--training-deterministic\" if training[\"\
+        deterministic\"] else \"--no-training-deterministic\"]\nif training.get(\"\
+        pose\") is not None:\n    flags += [\"--training-pose\", str(training[\"pose\"\
+        ])]\nif training.get(\"kobj\") is not None:\n    flags += [\"--training-kobj\"\
+        , str(training[\"kobj\"])]\nif training.get(\"box\") is not None:\n    flags\
+        \ += [\"--training-box\", str(training[\"box\"])]\nif training.get(\"cls\"\
+        ) is not None:\n    flags += [\"--training-cls\", str(training[\"cls\"])]\n\
+        if training.get(\"dfl\") is not None:\n    flags += [\"--training-dfl\", str(training[\"\
+        dfl\"])]\n\n# Optional checkpointing flags\nif checkpointing.get(\"resume_from\"\
+        ):\n    flags += [\"--checkpointing-resume-from\", str(checkpointing[\"resume_from\"\
+        ])]\n\n# Augmentation flags\naug = augmentation\nfor key, flag in [\n    (\"\
+        hsv_h\", \"--aug-hsv-h\"), (\"hsv_s\", \"--aug-hsv-s\"), (\"hsv_v\", \"--aug-hsv-v\"\
+        ),\n    (\"degrees\", \"--aug-degrees\"), (\"translate\", \"--aug-translate\"\
+        ),\n    (\"scale\", \"--aug-scale\"), (\"shear\", \"--aug-shear\"),\n    (\"\
+        perspective\", \"--aug-perspective\"), (\"flipud\", \"--aug-flipud\"),\n \
+        \   (\"fliplr\", \"--aug-fliplr\"), (\"mosaic\", \"--aug-mosaic\"),\n    (\"\
+        mixup\", \"--aug-mixup\"), (\"copy_paste\", \"--aug-copy-paste\"),\n    (\"\
+        erasing\", \"--aug-erasing\"), (\"bgr\", \"--aug-bgr\"),\n]:\n    if aug.get(key)\
+        \ is not None:\n        flags += [flag, str(aug[key])]\n\n# Optional experiment\
+        \ description\nif exp.get(\"description\"):\n    flags += [\"--experiment-description\"\
+        , str(exp[\"description\"])]\n\nprint(f\"[config-validation] Running: config-validation\
+        \ {' '.join(flags)}\", flush=True)\nresult = subprocess.run([\"config-validation\"\
+        ] + flags)\nsys.exit(result.returncode)\n"
+      env:
+      - name: MLFLOW_TRACKING_URI
+        value: http://mlflow.internal.invalid
+      - name: LAKEFS_ENDPOINT
+        value: http://lakefs.internal.invalid
+      - name: LAKEFS_ACCESS_KEY
+        valueFrom:
+          secretKeyRef:
+            name: PLACEHOLDER-lakefs-admin
+            key: accessKeyId
+      - name: LAKEFS_SECRET_KEY
+        valueFrom:
+          secretKeyRef:
+            name: PLACEHOLDER-lakefs-admin
+            key: secretAccessKey
+      - name: MLFLOW_TRACKING_AUTH
+        value: zitadel
+      - name: ZITADEL_MACHINE_KEY_FILE
+        value: /etc/mlflow-svc/ZITADEL_MACHINE_KEY
+      - name: ZITADEL_DOMAIN
+        value: oidc.internal.invalid
+      - name: ZITADEL_MLFLOW_PROJECT_ID
+        value: PLACEHOLDER-oidc-project-id
+      - name: CHECKPOINT_BUCKET
+        value: PLACEHOLDER-bucket
+      - name: CHECKPOINT_PREFIX
+        value: main/checkpoints
+      - name: PARAMS_YAML
+        value: "experiment:\n  name: \"{{workflow.parameters.experiment-name}}\"\n\
+          \  description: \"{{workflow.parameters.experiment-description}}\"\ndataset:\n\
+          \  version: \"{{workflow.parameters.dataset-version}}\"\n  source: \"{{workflow.parameters.dataset-source}}\"\
+          \n  lakefs_repo: \"PLACEHOLDER-repo\"\n  lakefs_branch: \"{{workflow.parameters.dataset-ref}}\"\
+          \n  lakefs_endpoint: \"http://lakefs.internal.invalid\"\n  path_override:\
+          \ \"{{inputs.parameters.dataset-path-override}}\"\n  sample_size: {{workflow.parameters.dataset-sample-size}}\n\
+          \  seed: {{workflow.parameters.dataset-seed}}\n  manifest_only: true\nmodel:\n\
+          \  variant: \"{{workflow.parameters.model-variant}}\"\n  pretrained_weights:\
+          \ \"{{workflow.parameters.pretrained-weights}}\"\ntraining:\n  epochs: {{workflow.parameters.epochs}}\n\
+          \  batch_size: {{workflow.parameters.batch-size}}\n  image_size: {{workflow.parameters.image-size}}\n\
+          \  learning_rate: {{workflow.parameters.learning-rate}}\n  cos_lr: {{workflow.parameters.cos-lr}}\n\
+          \  lrf: {{workflow.parameters.lrf}}\n  optimizer: \"{{workflow.parameters.optimizer}}\"\
+          \n  momentum: {{workflow.parameters.momentum}}\n  weight_decay: {{workflow.parameters.weight-decay}}\n\
+          \  warmup_epochs: {{workflow.parameters.warmup-epochs}}\n  warmup_momentum:\
+          \ {{workflow.parameters.warmup-momentum}}\n  dropout: {{workflow.parameters.dropout}}\n\
+          \  label_smoothing: {{workflow.parameters.label-smoothing}}\n  nbs: {{workflow.parameters.nbs}}\n\
+          \  freeze: {{workflow.parameters.freeze}}\n  amp: {{workflow.parameters.amp}}\n\
+          \  close_mosaic: {{workflow.parameters.close-mosaic}}\n  seed: {{workflow.parameters.training-seed}}\n\
+          \  deterministic: {{workflow.parameters.deterministic}}\n  pose: {{workflow.parameters.pose}}\n\
+          \  kobj: {{workflow.parameters.kobj}}\n  box: {{workflow.parameters.box}}\n\
+          \  cls: {{workflow.parameters.cls}}\n  dfl: {{workflow.parameters.dfl}}\n\
+          checkpointing:\n  interval_epochs: {{workflow.parameters.checkpointing-interval-epochs}}\n\
+          \  storage_path: \"{{workflow.parameters.checkpointing-storage-path}}\"\n\
+          \  resume_from: \"{{workflow.parameters.checkpoint-resume-from}}\"\nearly_stopping:\n\
+          \  patience: {{workflow.parameters.early-stopping-patience}}\naugmentation:\n\
+          \  hsv_h: {{workflow.parameters.aug-hsv-h}}\n  hsv_s: {{workflow.parameters.aug-hsv-s}}\n\
+          \  hsv_v: {{workflow.parameters.aug-hsv-v}}\n  degrees: {{workflow.parameters.aug-degrees}}\n\
+          \  translate: {{workflow.parameters.aug-translate}}\n  scale: {{workflow.parameters.aug-scale}}\n\
+          \  shear: {{workflow.parameters.aug-shear}}\n  perspective: {{workflow.parameters.aug-perspective}}\n\
+          \  flipud: {{workflow.parameters.aug-flipud}}\n  fliplr: {{workflow.parameters.aug-fliplr}}\n\
+          \  mosaic: {{workflow.parameters.aug-mosaic}}\n  mixup: {{workflow.parameters.aug-mixup}}\n\
+          \  copy_paste: {{workflow.parameters.aug-copy-paste}}\n  erasing: {{workflow.parameters.aug-erasing}}\n\
+          \  bgr: {{workflow.parameters.aug-bgr}}\nexport:\n  enabled: {{workflow.parameters.export-enabled}}\n\
+          \  formats: [\"{{workflow.parameters.export-formats}}\"]\n  precisions:\
+          \ [\"{{workflow.parameters.export-precisions}}\"]\n"
+      volumeMounts:
+      - name: mlflow-svc
+        mountPath: /etc/mlflow-svc
+        readOnly: true
+      - name: dshm
+        mountPath: /dev/shm
+    volumes:
+    - name: mlflow-svc
+      secret:
+        secretName: PLACEHOLDER-mlflow-svc
+        optional: true
+    - name: dshm
+      emptyDir:
+        medium: Memory
+        sizeLimit: 3Gi
+    podSpecPatch: "containers:\n- name: main\n  resources:\n    requests:\n      cpu:\
+      \ \"{{=workflow.parameters['config-validation-class'] == 'cpu-standard' ? '6'\
+      \ : workflow.parameters['config-validation-class'] == 'kubecorecpu' ? '6' :\
+      \ '6'}}\"\n      memory: \"{{=workflow.parameters['config-validation-class']\
+      \ == 'cpu-standard' ? '23Gi' : workflow.parameters['config-validation-class']\
+      \ == 'kubecorecpu' ? '23Gi' : '23Gi'}}\"\n    limits:\n      cpu: \"{{=workflow.parameters['config-validation-class']\
+      \ == 'cpu-standard' ? '6' : workflow.parameters['config-validation-class'] ==\
+      \ 'kubecorecpu' ? '6' : '6'}}\"\n      memory: \"{{=workflow.parameters['config-validation-class']\
+      \ == 'cpu-standard' ? '23Gi' : workflow.parameters['config-validation-class']\
+      \ == 'kubecorecpu' ? '23Gi' : '23Gi'}}\"\n"
+  - name: config-validation-gpu
+    inputs:
+      parameters:
+      - name: image
+        valueFrom:
+          configMapKeyRef:
+            name: kubeline-static-pipeline-images
+            key: config-validation
+      - name: dataset-path-override
+        default: ''
+    metadata:
+      labels:
+        platform.kubecore.io/project: vision
+        platform.kubecore.io/pipeline: kubeline-static
+        platform.kubecore.io/step: config-validation
+        platform.kubecore.io/compute-type: gpu
+        platform.kubecore.io/compute-class: '{{workflow.parameters.config-validation-class}}'
+    nodeSelector:
+      platform.kubecore.io/nodegroup-type: '{{workflow.parameters.config-validation-class}}'
+    tolerations:
+    - key: platform.kubecore.io/ml-workload
+      operator: Equal
+      effect: NoSchedule
+      value: gpu
+    - key: nvidia.com/gpu
+      operator: Exists
+      effect: NoSchedule
+    serviceAccountName: argo-workflow
+    retryStrategy:
+      limit: '2'
+      retryPolicy: OnError
+      expression: lastRetry.exitCode != "137"
+      backoff:
+        duration: 30s
+        factor: '2'
+    activeDeadlineSeconds: 10800
+    container:
+      image: '{{inputs.parameters.image}}'
+      resources:
+        requests:
+          cpu: '7'
+          memory: 25Gi
+          ephemeral-storage: 10Gi
+          nvidia.com/gpu: '1'
+        limits:
+          cpu: '7'
+          memory: 25Gi
+          ephemeral-storage: 30Gi
+          nvidia.com/gpu: '1'
+      command: *id002
+      args: *id003
+      env:
+      - name: MLFLOW_TRACKING_URI
+        value: http://mlflow.internal.invalid
+      - name: LAKEFS_ENDPOINT
+        value: http://lakefs.internal.invalid
+      - name: LAKEFS_ACCESS_KEY
+        valueFrom:
+          secretKeyRef:
+            name: PLACEHOLDER-lakefs-admin
+            key: accessKeyId
+      - name: LAKEFS_SECRET_KEY
+        valueFrom:
+          secretKeyRef:
+            name: PLACEHOLDER-lakefs-admin
+            key: secretAccessKey
+      - name: MLFLOW_TRACKING_AUTH
+        value: zitadel
+      - name: ZITADEL_MACHINE_KEY_FILE
+        value: /etc/mlflow-svc/ZITADEL_MACHINE_KEY
+      - name: ZITADEL_DOMAIN
+        value: oidc.internal.invalid
+      - name: ZITADEL_MLFLOW_PROJECT_ID
+        value: PLACEHOLDER-oidc-project-id
+      - name: CHECKPOINT_BUCKET
+        value: PLACEHOLDER-bucket
+      - name: CHECKPOINT_PREFIX
+        value: main/checkpoints
+      - name: PARAMS_YAML
+        value: "experiment:\n  name: \"{{workflow.parameters.experiment-name}}\"\n\
+          \  description: \"{{workflow.parameters.experiment-description}}\"\ndataset:\n\
+          \  version: \"{{workflow.parameters.dataset-version}}\"\n  source: \"{{workflow.parameters.dataset-source}}\"\
+          \n  lakefs_repo: \"PLACEHOLDER-repo\"\n  lakefs_branch: \"{{workflow.parameters.dataset-ref}}\"\
+          \n  lakefs_endpoint: \"http://lakefs.internal.invalid\"\n  path_override:\
+          \ \"{{inputs.parameters.dataset-path-override}}\"\n  sample_size: {{workflow.parameters.dataset-sample-size}}\n\
+          \  seed: {{workflow.parameters.dataset-seed}}\n  manifest_only: true\nmodel:\n\
+          \  variant: \"{{workflow.parameters.model-variant}}\"\n  pretrained_weights:\
+          \ \"{{workflow.parameters.pretrained-weights}}\"\ntraining:\n  epochs: {{workflow.parameters.epochs}}\n\
+          \  batch_size: {{workflow.parameters.batch-size}}\n  image_size: {{workflow.parameters.image-size}}\n\
+          \  learning_rate: {{workflow.parameters.learning-rate}}\n  cos_lr: {{workflow.parameters.cos-lr}}\n\
+          \  lrf: {{workflow.parameters.lrf}}\n  optimizer: \"{{workflow.parameters.optimizer}}\"\
+          \n  momentum: {{workflow.parameters.momentum}}\n  weight_decay: {{workflow.parameters.weight-decay}}\n\
+          \  warmup_epochs: {{workflow.parameters.warmup-epochs}}\n  warmup_momentum:\
+          \ {{workflow.parameters.warmup-momentum}}\n  dropout: {{workflow.parameters.dropout}}\n\
+          \  label_smoothing: {{workflow.parameters.label-smoothing}}\n  nbs: {{workflow.parameters.nbs}}\n\
+          \  freeze: {{workflow.parameters.freeze}}\n  amp: {{workflow.parameters.amp}}\n\
+          \  close_mosaic: {{workflow.parameters.close-mosaic}}\n  seed: {{workflow.parameters.training-seed}}\n\
+          \  deterministic: {{workflow.parameters.deterministic}}\n  pose: {{workflow.parameters.pose}}\n\
+          \  kobj: {{workflow.parameters.kobj}}\n  box: {{workflow.parameters.box}}\n\
+          \  cls: {{workflow.parameters.cls}}\n  dfl: {{workflow.parameters.dfl}}\n\
+          checkpointing:\n  interval_epochs: {{workflow.parameters.checkpointing-interval-epochs}}\n\
+          \  storage_path: \"{{workflow.parameters.checkpointing-storage-path}}\"\n\
+          \  resume_from: \"{{workflow.parameters.checkpoint-resume-from}}\"\nearly_stopping:\n\
+          \  patience: {{workflow.parameters.early-stopping-patience}}\naugmentation:\n\
+          \  hsv_h: {{workflow.parameters.aug-hsv-h}}\n  hsv_s: {{workflow.parameters.aug-hsv-s}}\n\
+          \  hsv_v: {{workflow.parameters.aug-hsv-v}}\n  degrees: {{workflow.parameters.aug-degrees}}\n\
+          \  translate: {{workflow.parameters.aug-translate}}\n  scale: {{workflow.parameters.aug-scale}}\n\
+          \  shear: {{workflow.parameters.aug-shear}}\n  perspective: {{workflow.parameters.aug-perspective}}\n\
+          \  flipud: {{workflow.parameters.aug-flipud}}\n  fliplr: {{workflow.parameters.aug-fliplr}}\n\
+          \  mosaic: {{workflow.parameters.aug-mosaic}}\n  mixup: {{workflow.parameters.aug-mixup}}\n\
+          \  copy_paste: {{workflow.parameters.aug-copy-paste}}\n  erasing: {{workflow.parameters.aug-erasing}}\n\
+          \  bgr: {{workflow.parameters.aug-bgr}}\nexport:\n  enabled: {{workflow.parameters.export-enabled}}\n\
+          \  formats: [\"{{workflow.parameters.export-formats}}\"]\n  precisions:\
+          \ [\"{{workflow.parameters.export-precisions}}\"]\n"
+      volumeMounts:
+      - name: mlflow-svc
+        mountPath: /etc/mlflow-svc
+        readOnly: true
+      - name: dshm
+        mountPath: /dev/shm
+    volumes:
+    - name: mlflow-svc
+      secret:
+        secretName: PLACEHOLDER-mlflow-svc
+        optional: true
+    - name: dshm
+      emptyDir:
+        medium: Memory
+        sizeLimit: 2Gi
+    podSpecPatch: "containers:\n- name: main\n  resources:\n    requests:\n      cpu:\
+      \ \"{{=workflow.parameters['config-validation-class'] == 'gpu-t4' ? '6' : '6'}}\"\
+      \n      memory: \"{{=workflow.parameters['config-validation-class'] == 'gpu-t4'\
+      \ ? '22Gi' : '22Gi'}}\"\n      nvidia.com/gpu: \"{{=workflow.parameters['config-validation-class']\
+      \ == 'gpu-t4' ? '1' : '1'}}\"\n    limits:\n      cpu: \"{{=workflow.parameters['config-validation-class']\
+      \ == 'gpu-t4' ? '6' : '6'}}\"\n      memory: \"{{=workflow.parameters['config-validation-class']\
+      \ == 'gpu-t4' ? '22Gi' : '22Gi'}}\"\n      nvidia.com/gpu: \"{{=workflow.parameters['config-validation-class']\
+      \ == 'gpu-t4' ? '1' : '1'}}\"\n"
+  - name: dataset-loading-cpu
+    inputs:
+      parameters:
+      - name: image
+        valueFrom:
+          configMapKeyRef:
+            name: kubeline-static-pipeline-images
+            key: dataset-loading
+      - name: dataset-path-override
+        default: ''
+    metadata:
+      labels:
+        platform.kubecore.io/project: vision
+        platform.kubecore.io/pipeline: kubeline-static
+        platform.kubecore.io/step: dataset-loading
+        platform.kubecore.io/compute-type: cpu
+        platform.kubecore.io/compute-class: '{{workflow.parameters.dataset-loading-class}}'
+    nodeSelector:
+      platform.kubecore.io/nodegroup-type: '{{workflow.parameters.dataset-loading-class}}'
+    tolerations:
+    - key: platform.kubecore.io/ml-workload
+      operator: Equal
+      effect: NoSchedule
+      value: cpu
+    serviceAccountName: argo-workflow
+    retryStrategy:
+      limit: '2'
+      retryPolicy: OnError
+      expression: lastRetry.exitCode != "137"
+      backoff:
+        duration: 30s
+        factor: '2'
+    activeDeadlineSeconds: 1800
+    container:
+      image: '{{inputs.parameters.image}}'
+      resources:
+        requests:
+          cpu: '7'
+          memory: 27Gi
+          ephemeral-storage: 2Gi
+        limits:
+          cpu: '7'
+          memory: 27Gi
+          ephemeral-storage: 4Gi
+      command: &id004
+      - sh
+      - -c
+      args: &id005
+      - "python3 - <<'PYEOF'\nimport os, sys, subprocess, json, yaml\n\n# Config resolution:\
+        \ PIPELINE_CONFIG (platform-injected) overrides PARAMS_YAML.\npipeline_config\
+        \ = os.environ.get(\"PIPELINE_CONFIG\", \"\")\nparams_yaml = os.environ.get(\"\
+        PARAMS_YAML\", \"\")\nraw = pipeline_config.strip() if pipeline_config.strip()\
+        \ else params_yaml\n\nif not raw.strip():\n    print(\"ERROR: Neither PIPELINE_CONFIG\
+        \ nor PARAMS_YAML is set.\", flush=True)\n    sys.exit(1)\ntry:\n    cfg =\
+        \ yaml.safe_load(raw)\nexcept yaml.YAMLError as e:\n    print(f\"ERROR: Config\
+        \ is not valid YAML: {e}\", flush=True)\n    sys.exit(1)\n\ndataset = cfg.get(\"\
+        dataset\") or {}\n\nflags = [\n    \"--version\", str(dataset[\"version\"\
+        ]),\n    \"--source\", str(dataset[\"source\"]),\n    \"--output-dir\", \"\
+        /work/dataset\",\n    \"--manifest-only\",\n]\n\nif dataset.get(\"lakefs_repo\"\
+        ):\n    flags += [\"--lakefs-repo\", str(dataset[\"lakefs_repo\"])]\nif dataset.get(\"\
+        lakefs_branch\"):\n    flags += [\"--lakefs-branch\", str(dataset[\"lakefs_branch\"\
+        ])]\nif dataset.get(\"path_override\"):\n    flags += [\"--path-override\"\
+        , str(dataset[\"path_override\"])]\nif dataset.get(\"sample_size\") is not\
+        \ None:\n    flags += [\"--sample-size\", str(dataset[\"sample_size\"]), \"\
+        --seed\", str(dataset.get(\"seed\", 42))]\n\nprint(f\"[dataset-loading] Running:\
+        \ dataset-loading {' '.join(flags)}\", flush=True)\nresult = subprocess.run([\"\
+        dataset-loading\"] + flags)\nif result.returncode != 0:\n    sys.exit(result.returncode)\n\
+        \n# Read the full manifest written by the CLI and extract a compact\n# summary\
+        \ safe for Argo parameter passing (no key lists).\nmanifest_path = \"/work/dataset/dataset_manifest.json\"\
+        \ntry:\n    with open(manifest_path) as fh:\n        manifest = json.load(fh)\n\
+        except Exception as e:\n    print(f\"ERROR: Could not read {manifest_path}:\
+        \ {e}\", flush=True)\n    sys.exit(1)\n\nbucket = manifest.get(\"bucket\"\
+        )\nprefix = manifest.get(\"prefix\")\nif not bucket or not prefix:\n    print(f\"\
+        ERROR: manifest missing 'bucket' or 'prefix': {manifest}\", flush=True)\n\
+        \    sys.exit(1)\n\n# label_keys sentinel: non-empty dict signals to model-training\
+        \ that\n# labels must also be streamed from S3 (manifest-only mode). We do\
+        \ NOT\n# embed the actual key lists — they are too large for Argo parameters.\n\
+        label_keys_raw = manifest.get(\"label_keys\")\nlabel_keys_sentinel = {\"_present\"\
+        : True} if label_keys_raw else {}\n\nsummary = {\"bucket\": bucket, \"prefix\"\
+        : prefix, \"label_keys\": label_keys_sentinel}\nsummary_path = \"/work/dataset/manifest_summary.json\"\
+        \nwith open(summary_path, \"w\") as fh:\n    json.dump(summary, fh, separators=(\"\
+        ,\", \":\"))\nprint(f\"[dataset-loading] Wrote manifest summary to {summary_path}:\
+        \ bucket={bucket} prefix={prefix}\", flush=True)\nPYEOF\n"
+      env:
+      - name: MLFLOW_TRACKING_URI
+        value: http://mlflow.internal.invalid
+      - name: LAKEFS_ENDPOINT
+        value: http://lakefs.internal.invalid
+      - name: LAKEFS_ACCESS_KEY
+        valueFrom:
+          secretKeyRef:
+            name: PLACEHOLDER-lakefs-admin
+            key: accessKeyId
+      - name: LAKEFS_SECRET_KEY
+        valueFrom:
+          secretKeyRef:
+            name: PLACEHOLDER-lakefs-admin
+            key: secretAccessKey
+      - name: MLFLOW_TRACKING_AUTH
+        value: zitadel
+      - name: ZITADEL_MACHINE_KEY_FILE
+        value: /etc/mlflow-svc/ZITADEL_MACHINE_KEY
+      - name: ZITADEL_DOMAIN
+        value: oidc.internal.invalid
+      - name: ZITADEL_MLFLOW_PROJECT_ID
+        value: PLACEHOLDER-oidc-project-id
+      - name: CHECKPOINT_BUCKET
+        value: PLACEHOLDER-bucket
+      - name: CHECKPOINT_PREFIX
+        value: main/checkpoints
+      - name: PARAMS_YAML
+        value: "dataset:\n  version: \"{{workflow.parameters.dataset-version}}\"\n\
+          \  source: \"{{workflow.parameters.dataset-source}}\"\n  lakefs_repo: \"\
+          PLACEHOLDER-repo\"\n  lakefs_branch: \"{{workflow.parameters.dataset-ref}}\"\
+          \n  lakefs_endpoint: \"http://lakefs.internal.invalid\"\n  path_override:\
+          \ \"{{inputs.parameters.dataset-path-override}}\"\n  sample_size: {{workflow.parameters.dataset-sample-size}}\n\
+          \  seed: {{workflow.parameters.dataset-seed}}\n"
+      volumeMounts:
+      - name: mlflow-svc
+        mountPath: /etc/mlflow-svc
+        readOnly: true
+      - name: dshm
+        mountPath: /dev/shm
+    volumes:
+    - name: mlflow-svc
+      secret:
+        secretName: PLACEHOLDER-mlflow-svc
+        optional: true
+    - name: dshm
+      emptyDir:
+        medium: Memory
+        sizeLimit: 3Gi
+    podSpecPatch: "containers:\n- name: main\n  resources:\n    requests:\n      cpu:\
+      \ \"{{=workflow.parameters['dataset-loading-class'] == 'cpu-standard' ? '6'\
+      \ : workflow.parameters['dataset-loading-class'] == 'kubecorecpu' ? '6' : '6'}}\"\
+      \n      memory: \"{{=workflow.parameters['dataset-loading-class'] == 'cpu-standard'\
+      \ ? '23Gi' : workflow.parameters['dataset-loading-class'] == 'kubecorecpu' ?\
+      \ '23Gi' : '23Gi'}}\"\n    limits:\n      cpu: \"{{=workflow.parameters['dataset-loading-class']\
+      \ == 'cpu-standard' ? '6' : workflow.parameters['dataset-loading-class'] ==\
+      \ 'kubecorecpu' ? '6' : '6'}}\"\n      memory: \"{{=workflow.parameters['dataset-loading-class']\
+      \ == 'cpu-standard' ? '23Gi' : workflow.parameters['dataset-loading-class']\
+      \ == 'kubecorecpu' ? '23Gi' : '23Gi'}}\"\n"
+    outputs:
+      parameters:
+      - name: data-yaml
+        valueFrom:
+          path: /work/dataset/data.yaml
+      - name: manifest-summary
+        valueFrom:
+          path: /work/dataset/manifest_summary.json
+  - name: dataset-loading-gpu
+    inputs:
+      parameters:
+      - name: image
+        valueFrom:
+          configMapKeyRef:
+            name: kubeline-static-pipeline-images
+            key: dataset-loading
+      - name: dataset-path-override
+        default: ''
+    metadata:
+      labels:
+        platform.kubecore.io/project: vision
+        platform.kubecore.io/pipeline: kubeline-static
+        platform.kubecore.io/step: dataset-loading
+        platform.kubecore.io/compute-type: gpu
+        platform.kubecore.io/compute-class: '{{workflow.parameters.dataset-loading-class}}'
+    nodeSelector:
+      platform.kubecore.io/nodegroup-type: '{{workflow.parameters.dataset-loading-class}}'
+    tolerations:
+    - key: platform.kubecore.io/ml-workload
+      operator: Equal
+      effect: NoSchedule
+      value: gpu
+    - key: nvidia.com/gpu
+      operator: Exists
+      effect: NoSchedule
+    serviceAccountName: argo-workflow
+    retryStrategy:
+      limit: '2'
+      retryPolicy: OnError
+      expression: lastRetry.exitCode != "137"
+      backoff:
+        duration: 30s
+        factor: '2'
+    activeDeadlineSeconds: 10800
+    container:
+      image: '{{inputs.parameters.image}}'
+      resources:
+        requests:
+          cpu: '7'
+          memory: 25Gi
+          ephemeral-storage: 10Gi
+          nvidia.com/gpu: '1'
+        limits:
+          cpu: '7'
+          memory: 25Gi
+          ephemeral-storage: 30Gi
+          nvidia.com/gpu: '1'
+      command: *id004
+      args: *id005
+      env:
+      - name: MLFLOW_TRACKING_URI
+        value: http://mlflow.internal.invalid
+      - name: LAKEFS_ENDPOINT
+        value: http://lakefs.internal.invalid
+      - name: LAKEFS_ACCESS_KEY
+        valueFrom:
+          secretKeyRef:
+            name: PLACEHOLDER-lakefs-admin
+            key: accessKeyId
+      - name: LAKEFS_SECRET_KEY
+        valueFrom:
+          secretKeyRef:
+            name: PLACEHOLDER-lakefs-admin
+            key: secretAccessKey
+      - name: MLFLOW_TRACKING_AUTH
+        value: zitadel
+      - name: ZITADEL_MACHINE_KEY_FILE
+        value: /etc/mlflow-svc/ZITADEL_MACHINE_KEY
+      - name: ZITADEL_DOMAIN
+        value: oidc.internal.invalid
+      - name: ZITADEL_MLFLOW_PROJECT_ID
+        value: PLACEHOLDER-oidc-project-id
+      - name: CHECKPOINT_BUCKET
+        value: PLACEHOLDER-bucket
+      - name: CHECKPOINT_PREFIX
+        value: main/checkpoints
+      - name: PARAMS_YAML
+        value: "dataset:\n  version: \"{{workflow.parameters.dataset-version}}\"\n\
+          \  source: \"{{workflow.parameters.dataset-source}}\"\n  lakefs_repo: \"\
+          PLACEHOLDER-repo\"\n  lakefs_branch: \"{{workflow.parameters.dataset-ref}}\"\
+          \n  lakefs_endpoint: \"http://lakefs.internal.invalid\"\n  path_override:\
+          \ \"{{inputs.parameters.dataset-path-override}}\"\n  sample_size: {{workflow.parameters.dataset-sample-size}}\n\
+          \  seed: {{workflow.parameters.dataset-seed}}\n"
+      volumeMounts:
+      - name: mlflow-svc
+        mountPath: /etc/mlflow-svc
+        readOnly: true
+      - name: dshm
+        mountPath: /dev/shm
+    volumes:
+    - name: mlflow-svc
+      secret:
+        secretName: PLACEHOLDER-mlflow-svc
+        optional: true
+    - name: dshm
+      emptyDir:
+        medium: Memory
+        sizeLimit: 2Gi
+    podSpecPatch: "containers:\n- name: main\n  resources:\n    requests:\n      cpu:\
+      \ \"{{=workflow.parameters['dataset-loading-class'] == 'gpu-t4' ? '6' : '6'}}\"\
+      \n      memory: \"{{=workflow.parameters['dataset-loading-class'] == 'gpu-t4'\
+      \ ? '22Gi' : '22Gi'}}\"\n      nvidia.com/gpu: \"{{=workflow.parameters['dataset-loading-class']\
+      \ == 'gpu-t4' ? '1' : '1'}}\"\n    limits:\n      cpu: \"{{=workflow.parameters['dataset-loading-class']\
+      \ == 'gpu-t4' ? '6' : '6'}}\"\n      memory: \"{{=workflow.parameters['dataset-loading-class']\
+      \ == 'gpu-t4' ? '22Gi' : '22Gi'}}\"\n      nvidia.com/gpu: \"{{=workflow.parameters['dataset-loading-class']\
+      \ == 'gpu-t4' ? '1' : '1'}}\"\n"
+    outputs:
+      parameters:
+      - name: data-yaml
+        valueFrom:
+          path: /work/dataset/data.yaml
+      - name: manifest-summary
+        valueFrom:
+          path: /work/dataset/manifest_summary.json
+  - name: model-training-cpu
+    inputs:
+      parameters:
+      - name: image
+        valueFrom:
+          configMapKeyRef:
+            name: kubeline-static-pipeline-images
+            key: model-training
+      - name: dataset-path-override
+        default: ''
+      - name: data-yaml
+      - name: manifest-summary
+    metadata:
+      labels:
+        platform.kubecore.io/project: vision
+        platform.kubecore.io/pipeline: kubeline-static
+        platform.kubecore.io/step: model-training
+        platform.kubecore.io/compute-type: cpu
+        platform.kubecore.io/compute-class: '{{workflow.parameters.model-training-class}}'
+    nodeSelector:
+      platform.kubecore.io/nodegroup-type: '{{workflow.parameters.model-training-class}}'
+    tolerations:
+    - key: platform.kubecore.io/ml-workload
+      operator: Equal
+      effect: NoSchedule
+      value: cpu
+    serviceAccountName: argo-workflow
+    retryStrategy:
+      limit: '2'
+      retryPolicy: OnError
+      expression: lastRetry.exitCode != "137"
+      backoff:
+        duration: 30s
+        factor: '2'
+    activeDeadlineSeconds: 1800
+    container:
+      image: '{{inputs.parameters.image}}'
+      resources:
+        requests:
+          cpu: '7'
+          memory: 27Gi
+          ephemeral-storage: 2Gi
+        limits:
+          cpu: '7'
+          memory: 27Gi
+          ephemeral-storage: 4Gi
+      command: &id006
+      - python
+      - -c
+      args: &id007
+      - "import os, sys, subprocess, json, yaml\n\n# Config resolution: PIPELINE_CONFIG\
+        \ (platform-injected) overrides PARAMS_YAML.\npipeline_config = os.environ.get(\"\
+        PIPELINE_CONFIG\", \"\")\nparams_yaml = os.environ.get(\"PARAMS_YAML\", \"\
+        \")\nraw = pipeline_config.strip() if pipeline_config.strip() else params_yaml\n\
+        \nif not raw.strip():\n    print(\"ERROR: Neither PIPELINE_CONFIG nor PARAMS_YAML\
+        \ is set.\", flush=True)\n    sys.exit(1)\ntry:\n    cfg = yaml.safe_load(raw)\n\
+        except yaml.YAMLError as e:\n    print(f\"ERROR: Config is not valid YAML:\
+        \ {e}\", flush=True)\n    sys.exit(1)\n\n# Reconstruct /work/dataset from\
+        \ input parameters\nos.makedirs(\"/work/dataset\", exist_ok=True)\n\ndata_yaml\
+        \ = os.environ.get(\"DATA_YAML\", \"\")\nif not data_yaml.strip():\n    print(\"\
+        ERROR: DATA_YAML input parameter is empty.\", flush=True)\n    sys.exit(1)\n\
+        with open(\"/work/dataset/data.yaml\", \"w\") as fh:\n    fh.write(data_yaml)\n\
+        \nmanifest_summary = os.environ.get(\"MANIFEST_SUMMARY\", \"\")\nif not manifest_summary.strip():\n\
+        \    print(\"ERROR: MANIFEST_SUMMARY input parameter is empty.\", flush=True)\n\
+        \    sys.exit(1)\n# Write summary as dataset_manifest.json so model_training\
+        \ auto-detects\n# the S3 source (bucket + prefix) and streaming mode (label_keys\
+        \ presence).\nwith open(\"/work/dataset/dataset_manifest.json\", \"w\") as\
+        \ fh:\n    fh.write(manifest_summary)\n\nexp = cfg.get(\"experiment\") or\
+        \ {}\nmodel = cfg.get(\"model\") or {}\ntraining = cfg.get(\"training\") or\
+        \ {}\ncheckpointing = cfg.get(\"checkpointing\") or {}\nearly_stopping = cfg.get(\"\
+        early_stopping\") or {}\naugmentation = cfg.get(\"augmentation\") or {}\n\
+        export_cfg = cfg.get(\"export\") or {}\n\n# Precedence: explicit param wins;\
+        \ empty param falls back to platform env.\n# CHECKPOINT_BUCKET/CHECKPOINT_PREFIX\
+        \ are injected by render-wft from the\n# k8smlapp pipeline-context. model-training\
+        \ takes --checkpoint-bucket and\n# --checkpoint-prefix directly so no s3://\
+        \ parsing is needed in that path.\nstorage_path = str(checkpointing.get(\"\
+        storage_path\", \"\") or \"\").strip()\nif storage_path.startswith(\"s3://\"\
+        ):\n    # Explicit override: parse bucket/prefix from the s3:// URI.\n   \
+        \ parts = storage_path[5:].split(\"/\", 1)\n    checkpoint_bucket = parts[0]\n\
+        \    checkpoint_prefix = parts[1].rstrip(\"/\") if len(parts) > 1 else \"\
+        main/checkpoints\"\nelse:\n    # Platform-derived: use env vars injected by\
+        \ render-wft.\n    checkpoint_bucket = os.environ.get(\"CHECKPOINT_BUCKET\"\
+        , \"\").strip()\n    checkpoint_prefix = os.environ.get(\"CHECKPOINT_PREFIX\"\
+        , \"main/checkpoints\").strip()\n    if not checkpoint_bucket:\n        print(\n\
+        \            \"ERROR: checkpointing-storage-path is empty and CHECKPOINT_BUCKET\
+        \ env \"\n            \"is not set. The platform should inject CHECKPOINT_BUCKET/CHECKPOINT_PREFIX\
+        \ \"\n            \"from the project lakeFS repository via render-wft. Either\
+        \ set \"\n            \"checkpointing-storage-path explicitly or ensure the\
+        \ k8smlapp composition \"\n            \"version includes the checkpoints\
+        \ block in pipeline-context.yaml.\",\n            flush=True,\n        )\n\
+        \        sys.exit(1)\n\nflags = [\n    \"--model-variant\", str(model[\"variant\"\
+        ]),\n    \"--experiment-name\", str(exp[\"name\"]),\n    \"--dataset-dir\"\
+        , \"/work/dataset\",\n    \"--output-dir\", \"/work/output\",\n    \"--source\"\
+        , \"s3\",\n    \"--epochs\", str(training[\"epochs\"]),\n    \"--batch-size\"\
+        , str(training[\"batch_size\"]),\n    \"--image-size\", str(training[\"image_size\"\
+        ]),\n    \"--learning-rate\", str(training[\"learning_rate\"]),\n    \"--optimizer\"\
+        , str(training[\"optimizer\"]),\n    \"--checkpoint-interval\", str(checkpointing[\"\
+        interval_epochs\"]),\n    \"--checkpoint-bucket\", checkpoint_bucket,\n  \
+        \  \"--checkpoint-prefix\", checkpoint_prefix,\n    \"--patience\", str(early_stopping[\"\
+        patience\"]),\n]\n\n# Optional training flags\nif training.get(\"cos_lr\"\
+        ) is not None:\n    flags += [\"--cos-lr\" if training[\"cos_lr\"] else \"\
+        --no-cos-lr\"]\nif training.get(\"lrf\") is not None:\n    flags += [\"--lrf\"\
+        , str(training[\"lrf\"])]\nif training.get(\"momentum\") is not None:\n  \
+        \  flags += [\"--momentum\", str(training[\"momentum\"])]\nif training.get(\"\
+        weight_decay\") is not None:\n    flags += [\"--weight-decay\", str(training[\"\
+        weight_decay\"])]\nif training.get(\"warmup_epochs\") is not None:\n    flags\
+        \ += [\"--warmup-epochs\", str(training[\"warmup_epochs\"])]\nif training.get(\"\
+        warmup_momentum\") is not None:\n    flags += [\"--warmup-momentum\", str(training[\"\
+        warmup_momentum\"])]\nif training.get(\"dropout\") is not None:\n    flags\
+        \ += [\"--dropout\", str(training[\"dropout\"])]\nif training.get(\"label_smoothing\"\
+        ) is not None:\n    flags += [\"--label-smoothing\", str(training[\"label_smoothing\"\
+        ])]\nif training.get(\"nbs\") is not None:\n    flags += [\"--nbs\", str(training[\"\
+        nbs\"])]\nif training.get(\"freeze\") is not None:\n    flags += [\"--freeze\"\
+        , str(training[\"freeze\"])]\nif training.get(\"amp\") is not None:\n    flags\
+        \ += [\"--amp\" if training[\"amp\"] else \"--no-amp\"]\nif training.get(\"\
+        close_mosaic\") is not None:\n    flags += [\"--close-mosaic\", str(training[\"\
+        close_mosaic\"])]\nif training.get(\"seed\") is not None:\n    flags += [\"\
+        --seed\", str(training[\"seed\"])]\nif training.get(\"deterministic\") is\
+        \ not None:\n    flags += [\"--deterministic\" if training[\"deterministic\"\
+        ] else \"--no-deterministic\"]\nif training.get(\"pose\") is not None:\n \
+        \   flags += [\"--pose\", str(training[\"pose\"])]\nif training.get(\"kobj\"\
+        ) is not None:\n    flags += [\"--kobj\", str(training[\"kobj\"])]\nif training.get(\"\
+        box\") is not None:\n    flags += [\"--box\", str(training[\"box\"])]\nif\
+        \ training.get(\"cls\") is not None:\n    flags += [\"--cls\", str(training[\"\
+        cls\"])]\nif training.get(\"dfl\") is not None:\n    flags += [\"--dfl\",\
+        \ str(training[\"dfl\"])]\n\n# Optional weight init / resume\nif model.get(\"\
+        pretrained_weights\"):\n    flags += [\"--pretrained-weights\", str(model[\"\
+        pretrained_weights\"])]\nif checkpointing.get(\"resume_from\"):\n    flags\
+        \ += [\"--resume-from\", str(checkpointing[\"resume_from\"])]\n\n# disk-cache-gb:\
+        \ cap S3 streaming cache for ephemeral pod storage\nflags += [\"--disk-cache-gb\"\
+        , \"8.0\"]\n\n# Augmentation\naug = augmentation\nfor key, flag in [\n   \
+        \ (\"hsv_h\", \"--hsv-h\"), (\"hsv_s\", \"--hsv-s\"), (\"hsv_v\", \"--hsv-v\"\
+        ),\n    (\"degrees\", \"--degrees\"), (\"translate\", \"--translate\"),\n\
+        \    (\"scale\", \"--scale\"), (\"shear\", \"--shear\"),\n    (\"perspective\"\
+        , \"--perspective\"), (\"flipud\", \"--flipud\"),\n    (\"fliplr\", \"--fliplr\"\
+        ), (\"mosaic\", \"--mosaic\"),\n    (\"mixup\", \"--mixup\"), (\"copy_paste\"\
+        , \"--copy-paste\"),\n    (\"erasing\", \"--erasing\"), (\"bgr\", \"--bgr\"\
+        ),\n]:\n    if aug.get(key) is not None:\n        flags += [flag, str(aug[key])]\n\
+        \n# Export flags\nif export_cfg.get(\"enabled\"):\n    flags += [\"--export\"\
+        ]\n    formats = export_cfg.get(\"formats\")\n    if formats:\n        flags\
+        \ += [\"--export-formats\", \",\".join(formats)]\n    precisions = export_cfg.get(\"\
+        precisions\")\n    if precisions:\n        flags += [\"--export-precisions\"\
+        , \",\".join(precisions)]\n\nprint(f\"[model-training] Running: model-training\
+        \ {' '.join(flags)}\", flush=True)\nresult = subprocess.run([\"model-training\"\
+        ] + flags)\nsys.exit(result.returncode)\n"
+      env:
+      - name: MLFLOW_TRACKING_URI
+        value: http://mlflow.internal.invalid
+      - name: LAKEFS_ENDPOINT
+        value: http://lakefs.internal.invalid
+      - name: LAKEFS_ACCESS_KEY
+        valueFrom:
+          secretKeyRef:
+            name: PLACEHOLDER-lakefs-admin
+            key: accessKeyId
+      - name: LAKEFS_SECRET_KEY
+        valueFrom:
+          secretKeyRef:
+            name: PLACEHOLDER-lakefs-admin
+            key: secretAccessKey
+      - name: MLFLOW_TRACKING_AUTH
+        value: zitadel
+      - name: ZITADEL_MACHINE_KEY_FILE
+        value: /etc/mlflow-svc/ZITADEL_MACHINE_KEY
+      - name: ZITADEL_DOMAIN
+        value: oidc.internal.invalid
+      - name: ZITADEL_MLFLOW_PROJECT_ID
+        value: PLACEHOLDER-oidc-project-id
+      - name: CHECKPOINT_BUCKET
+        value: PLACEHOLDER-bucket
+      - name: CHECKPOINT_PREFIX
+        value: main/checkpoints
+      - &id008
+        name: DATA_YAML
+        value: '{{inputs.parameters.data-yaml}}'
+      - &id009
+        name: MANIFEST_SUMMARY
+        value: '{{inputs.parameters.manifest-summary}}'
+      - &id010
+        name: PARAMS_YAML
+        value: "experiment:\n  name: \"{{workflow.parameters.experiment-name}}\"\n\
+          model:\n  variant: \"{{workflow.parameters.model-variant}}\"\n  pretrained_weights:\
+          \ \"{{workflow.parameters.pretrained-weights}}\"\ntraining:\n  epochs: {{workflow.parameters.epochs}}\n\
+          \  batch_size: {{workflow.parameters.batch-size}}\n  image_size: {{workflow.parameters.image-size}}\n\
+          \  learning_rate: {{workflow.parameters.learning-rate}}\n  cos_lr: {{workflow.parameters.cos-lr}}\n\
+          \  lrf: {{workflow.parameters.lrf}}\n  optimizer: \"{{workflow.parameters.optimizer}}\"\
+          \n  momentum: {{workflow.parameters.momentum}}\n  weight_decay: {{workflow.parameters.weight-decay}}\n\
+          \  warmup_epochs: {{workflow.parameters.warmup-epochs}}\n  warmup_momentum:\
+          \ {{workflow.parameters.warmup-momentum}}\n  dropout: {{workflow.parameters.dropout}}\n\
+          \  label_smoothing: {{workflow.parameters.label-smoothing}}\n  nbs: {{workflow.parameters.nbs}}\n\
+          \  freeze: {{workflow.parameters.freeze}}\n  amp: {{workflow.parameters.amp}}\n\
+          \  close_mosaic: {{workflow.parameters.close-mosaic}}\n  seed: {{workflow.parameters.training-seed}}\n\
+          \  deterministic: {{workflow.parameters.deterministic}}\n  pose: {{workflow.parameters.pose}}\n\
+          \  kobj: {{workflow.parameters.kobj}}\n  box: {{workflow.parameters.box}}\n\
+          \  cls: {{workflow.parameters.cls}}\n  dfl: {{workflow.parameters.dfl}}\n\
+          checkpointing:\n  interval_epochs: {{workflow.parameters.checkpointing-interval-epochs}}\n\
+          \  storage_path: \"{{workflow.parameters.checkpointing-storage-path}}\"\n\
+          \  resume_from: \"{{workflow.parameters.checkpoint-resume-from}}\"\nearly_stopping:\n\
+          \  patience: {{workflow.parameters.early-stopping-patience}}\naugmentation:\n\
+          \  hsv_h: {{workflow.parameters.aug-hsv-h}}\n  hsv_s: {{workflow.parameters.aug-hsv-s}}\n\
+          \  hsv_v: {{workflow.parameters.aug-hsv-v}}\n  degrees: {{workflow.parameters.aug-degrees}}\n\
+          \  translate: {{workflow.parameters.aug-translate}}\n  scale: {{workflow.parameters.aug-scale}}\n\
+          \  shear: {{workflow.parameters.aug-shear}}\n  perspective: {{workflow.parameters.aug-perspective}}\n\
+          \  flipud: {{workflow.parameters.aug-flipud}}\n  fliplr: {{workflow.parameters.aug-fliplr}}\n\
+          \  mosaic: {{workflow.parameters.aug-mosaic}}\n  mixup: {{workflow.parameters.aug-mixup}}\n\
+          \  copy_paste: {{workflow.parameters.aug-copy-paste}}\n  erasing: {{workflow.parameters.aug-erasing}}\n\
+          \  bgr: {{workflow.parameters.aug-bgr}}\nexport:\n  enabled: {{workflow.parameters.export-enabled}}\n\
+          \  formats: [\"{{workflow.parameters.export-formats}}\"]\n  precisions:\
+          \ [\"{{workflow.parameters.export-precisions}}\"]\n"
+      volumeMounts:
+      - name: mlflow-svc
+        mountPath: /etc/mlflow-svc
+        readOnly: true
+      - name: dshm
+        mountPath: /dev/shm
+    volumes:
+    - name: mlflow-svc
+      secret:
+        secretName: PLACEHOLDER-mlflow-svc
+        optional: true
+    - name: dshm
+      emptyDir:
+        medium: Memory
+        sizeLimit: 3Gi
+    podSpecPatch: "containers:\n- name: main\n  resources:\n    requests:\n      cpu:\
+      \ \"{{=workflow.parameters['model-training-class'] == 'cpu-standard' ? '6' :\
+      \ workflow.parameters['model-training-class'] == 'kubecorecpu' ? '6' : '6'}}\"\
+      \n      memory: \"{{=workflow.parameters['model-training-class'] == 'cpu-standard'\
+      \ ? '23Gi' : workflow.parameters['model-training-class'] == 'kubecorecpu' ?\
+      \ '23Gi' : '23Gi'}}\"\n    limits:\n      cpu: \"{{=workflow.parameters['model-training-class']\
+      \ == 'cpu-standard' ? '6' : workflow.parameters['model-training-class'] == 'kubecorecpu'\
+      \ ? '6' : '6'}}\"\n      memory: \"{{=workflow.parameters['model-training-class']\
+      \ == 'cpu-standard' ? '23Gi' : workflow.parameters['model-training-class'] ==\
+      \ 'kubecorecpu' ? '23Gi' : '23Gi'}}\"\n"
+    outputs:
+      parameters:
+      - name: training-result
+        valueFrom:
+          path: /work/output/training_result.json
+  - name: model-training-gpu
+    inputs:
+      parameters:
+      - name: image
+        valueFrom:
+          configMapKeyRef:
+            name: kubeline-static-pipeline-images
+            key: model-training
+      - name: dataset-path-override
+        default: ''
+      - name: data-yaml
+      - name: manifest-summary
+    metadata:
+      labels:
+        platform.kubecore.io/project: vision
+        platform.kubecore.io/pipeline: kubeline-static
+        platform.kubecore.io/step: model-training
+        platform.kubecore.io/compute-type: gpu
+        platform.kubecore.io/compute-class: '{{workflow.parameters.model-training-class}}'
+    nodeSelector:
+      platform.kubecore.io/nodegroup-type: '{{workflow.parameters.model-training-class}}'
+    tolerations:
+    - key: platform.kubecore.io/ml-workload
+      operator: Equal
+      effect: NoSchedule
+      value: gpu
+    - key: nvidia.com/gpu
+      operator: Exists
+      effect: NoSchedule
+    serviceAccountName: argo-workflow
+    retryStrategy:
+      limit: '2'
+      retryPolicy: OnError
+      expression: lastRetry.exitCode != "137"
+      backoff:
+        duration: 30s
+        factor: '2'
+    activeDeadlineSeconds: 10800
+    container:
+      image: '{{inputs.parameters.image}}'
+      resources:
+        requests:
+          cpu: '7'
+          memory: 25Gi
+          ephemeral-storage: 10Gi
+          nvidia.com/gpu: '1'
+        limits:
+          cpu: '7'
+          memory: 25Gi
+          ephemeral-storage: 30Gi
+          nvidia.com/gpu: '1'
+      command: *id006
+      args: *id007
+      env:
+      - name: MLFLOW_TRACKING_URI
+        value: http://mlflow.internal.invalid
+      - name: LAKEFS_ENDPOINT
+        value: http://lakefs.internal.invalid
+      - name: LAKEFS_ACCESS_KEY
+        valueFrom:
+          secretKeyRef:
+            name: PLACEHOLDER-lakefs-admin
+            key: accessKeyId
+      - name: LAKEFS_SECRET_KEY
+        valueFrom:
+          secretKeyRef:
+            name: PLACEHOLDER-lakefs-admin
+            key: secretAccessKey
+      - name: MLFLOW_TRACKING_AUTH
+        value: zitadel
+      - name: ZITADEL_MACHINE_KEY_FILE
+        value: /etc/mlflow-svc/ZITADEL_MACHINE_KEY
+      - name: ZITADEL_DOMAIN
+        value: oidc.internal.invalid
+      - name: ZITADEL_MLFLOW_PROJECT_ID
+        value: PLACEHOLDER-oidc-project-id
+      - name: CHECKPOINT_BUCKET
+        value: PLACEHOLDER-bucket
+      - name: CHECKPOINT_PREFIX
+        value: main/checkpoints
+      - *id008
+      - *id009
+      - *id010
+      volumeMounts:
+      - name: mlflow-svc
+        mountPath: /etc/mlflow-svc
+        readOnly: true
+      - name: dshm
+        mountPath: /dev/shm
+    volumes:
+    - name: mlflow-svc
+      secret:
+        secretName: PLACEHOLDER-mlflow-svc
+        optional: true
+    - name: dshm
+      emptyDir:
+        medium: Memory
+        sizeLimit: 2Gi
+    podSpecPatch: "containers:\n- name: main\n  resources:\n    requests:\n      cpu:\
+      \ \"{{=workflow.parameters['model-training-class'] == 'gpu-t4' ? '6' : '6'}}\"\
+      \n      memory: \"{{=workflow.parameters['model-training-class'] == 'gpu-t4'\
+      \ ? '22Gi' : '22Gi'}}\"\n      nvidia.com/gpu: \"{{=workflow.parameters['model-training-class']\
+      \ == 'gpu-t4' ? '1' : '1'}}\"\n    limits:\n      cpu: \"{{=workflow.parameters['model-training-class']\
+      \ == 'gpu-t4' ? '6' : '6'}}\"\n      memory: \"{{=workflow.parameters['model-training-class']\
+      \ == 'gpu-t4' ? '22Gi' : '22Gi'}}\"\n      nvidia.com/gpu: \"{{=workflow.parameters['model-training-class']\
+      \ == 'gpu-t4' ? '1' : '1'}}\"\n"
+    outputs:
+      parameters:
+      - name: training-result
+        valueFrom:
+          path: /work/output/training_result.json
+  - name: qat-finetune-cpu
+    inputs:
+      parameters:
+      - name: image
+        valueFrom:
+          configMapKeyRef:
+            name: kubeline-static-pipeline-images
+            key: qat-finetune
+      - name: dataset-path-override
+        default: ''
+      - name: training-result
+      - name: data-yaml
+      - name: manifest-summary
+    metadata:
+      labels:
+        platform.kubecore.io/project: vision
+        platform.kubecore.io/pipeline: kubeline-static
+        platform.kubecore.io/step: qat-finetune
+        platform.kubecore.io/compute-type: cpu
+        platform.kubecore.io/compute-class: '{{workflow.parameters.qat-finetune-class}}'
+    nodeSelector:
+      platform.kubecore.io/nodegroup-type: '{{workflow.parameters.qat-finetune-class}}'
+    tolerations:
+    - key: platform.kubecore.io/ml-workload
+      operator: Equal
+      effect: NoSchedule
+      value: cpu
+    serviceAccountName: argo-workflow
+    retryStrategy:
+      limit: '2'
+      retryPolicy: OnError
+      expression: lastRetry.exitCode != "137"
+      backoff:
+        duration: 30s
+        factor: '2'
+    activeDeadlineSeconds: 10800
+    container:
+      image: '{{inputs.parameters.image}}'
+      resources:
+        requests:
+          cpu: '7'
+          memory: 27Gi
+          ephemeral-storage: 2Gi
+        limits:
+          cpu: '7'
+          memory: 27Gi
+          ephemeral-storage: 4Gi
+      command: &id011
+      - python
+      - -c
+      args: &id012
+      - "import os, sys, subprocess, json, yaml\n\n# Config resolution: PIPELINE_CONFIG\
+        \ (platform-injected) overrides PARAMS_YAML.\npipeline_config = os.environ.get(\"\
+        PIPELINE_CONFIG\", \"\")\nparams_yaml = os.environ.get(\"PARAMS_YAML\", \"\
+        \")\nraw = pipeline_config.strip() if pipeline_config.strip() else params_yaml\n\
+        \nif not raw.strip():\n    print(\"ERROR: Neither PIPELINE_CONFIG nor PARAMS_YAML\
+        \ is set.\", flush=True)\n    sys.exit(1)\ntry:\n    cfg = yaml.safe_load(raw)\n\
+        except yaml.YAMLError as e:\n    print(f\"ERROR: Config is not valid YAML:\
+        \ {e}\", flush=True)\n    sys.exit(1)\n\ntr_raw = os.environ.get(\"TRAINING_RESULT\"\
+        , \"\")\nif not tr_raw.strip():\n    print(\"ERROR: TRAINING_RESULT input\
+        \ parameter is empty.\", flush=True)\n    sys.exit(1)\ntry:\n    tr = json.loads(tr_raw)\n\
+        except json.JSONDecodeError as e:\n    print(f\"ERROR: TRAINING_RESULT is\
+        \ not valid JSON: {e}\", flush=True)\n    sys.exit(1)\n\nmlflow_run_id = tr.get(\"\
+        mlflow_run_id\")\nbest_checkpoint_s3 = tr.get(\"best_checkpoint_s3\")\nif\
+        \ not mlflow_run_id or not best_checkpoint_s3:\n    print(f\"ERROR: training_result\
+        \ missing mlflow_run_id or best_checkpoint_s3: {tr}\", flush=True)\n    sys.exit(1)\n\
+        \nexp = cfg.get(\"experiment\") or {}\nquant = cfg.get(\"quantization\") or\
+        \ {}\n\n# Self-gate: qat-finetune fine-tunes ONLY in qat mode. The platform\
+        \ gates\n# this step on quantization-mode != 'none', so it ALSO fires in ptq\
+        \ mode,\n# where it must be a no-op. Write a stub result so model-quantization's\n\
+        # qat-result input param still resolves, then exit success.\nmode = str(quant.get(\"\
+        mode\", \"none\")).lower()\nif mode != \"qat\":\n    os.makedirs(\"/work/qat_output\"\
+        , exist_ok=True)\n    with open(\"/work/qat_output/qat_result.json\", \"w\"\
+        ) as fh:\n        json.dump({\"mode\": mode, \"skipped\": True,\n        \
+        \           \"reason\": \"qat-finetune runs only when quantization-mode=qat\"\
+        }, fh)\n    print(f\"[qat-finetune] mode={mode} (not qat) - no-op; wrote stub\
+        \ qat_result.json.\", flush=True)\n    sys.exit(0)\n\n# Derive output bucket\
+        \ + lakeFS branch from checkpoint URI (same as training).\n# s3://<repo>/<branch>/<path>:\
+        \ branch is the FIRST key segment; the output\n# prefix must start with it\
+        \ or lakeFS treats it as a non-existent branch.\ncheckpoint_uri = best_checkpoint_s3\n\
+        if checkpoint_uri.startswith(\"s3://\"):\n    _ckpt_parts = checkpoint_uri[5:].split(\"\
+        /\")\n    output_bucket = _ckpt_parts[0]\n    lakefs_branch = _ckpt_parts[1]\
+        \ if len(_ckpt_parts) > 1 else \"main\"\nelse:\n    output_bucket = os.environ.get(\"\
+        CHECKPOINT_BUCKET\", \"\")\n    lakefs_branch = os.environ.get(\"LAKEFS_BRANCH\"\
+        , \"main\")\nif not output_bucket:\n    print(\"ERROR: cannot derive output\
+        \ bucket from checkpoint URI and CHECKPOINT_BUCKET is unset.\", flush=True)\n\
+        \    sys.exit(1)\n\n# Reconstruct /work/dataset and download TRAIN frames\
+        \ from S3 — the QAT\n# calibration/distillation loop reads images/train (no\
+        \ shared FS across pods).\nos.makedirs(\"/work/dataset\", exist_ok=True)\n\
+        data_yaml_content = os.environ.get(\"DATA_YAML\", \"\")\nif data_yaml_content.strip():\n\
+        \    with open(\"/work/dataset/data.yaml\", \"w\") as fh:\n        fh.write(data_yaml_content)\n\
+        manifest_summary = os.environ.get(\"MANIFEST_SUMMARY\", \"\")\nif manifest_summary.strip():\n\
+        \    with open(\"/work/dataset/dataset_manifest.json\", \"w\") as fh:\n  \
+        \      fh.write(manifest_summary)\ntry:\n    import boto3\n    from botocore.config\
+        \ import Config as BotoConfig\n    boto_cfg = BotoConfig(retries={\"max_attempts\"\
+        : 3, \"mode\": \"adaptive\"})\n    lakefs_endpoint = os.environ.get(\"LAKEFS_ENDPOINT\"\
+        , \"\")\n    lakefs_key = os.environ.get(\"LAKEFS_ACCESS_KEY\", \"\")\n  \
+        \  lakefs_secret = os.environ.get(\"LAKEFS_SECRET_KEY\", \"\")\n    if lakefs_endpoint\
+        \ and lakefs_key and lakefs_secret:\n        s3 = boto3.client(\"s3\", endpoint_url=lakefs_endpoint,\n\
+        \                          aws_access_key_id=lakefs_key,\n               \
+        \           aws_secret_access_key=lakefs_secret,\n                       \
+        \   region_name=None, config=boto_cfg)\n    else:\n        s3 = boto3.client(\"\
+        s3\",\n                          endpoint_url=os.environ.get(\"S3_ENDPOINT_URL\"\
+        ),\n                          aws_access_key_id=os.environ.get(\"AWS_ACCESS_KEY_ID\"\
+        ),\n                          aws_secret_access_key=os.environ.get(\"AWS_SECRET_ACCESS_KEY\"\
+        ),\n                          region_name=os.environ.get(\"AWS_DEFAULT_REGION\"\
+        ),\n                          config=boto_cfg)\n    ms = json.loads(manifest_summary)\
+        \ if manifest_summary.strip() else {}\n    ds_bucket = ms.get(\"bucket\",\
+        \ \"\")\n    ds_prefix = ms.get(\"prefix\", \"\").rstrip(\"/\")\n    if ds_bucket\
+        \ and ds_prefix:\n        max_download = int(quant.get(\"calibration_frames\"\
+        , 512))\n        images_dir = \"/work/dataset/images/train\"\n        os.makedirs(images_dir,\
+        \ exist_ok=True)\n        paginator = s3.get_paginator(\"list_objects_v2\"\
+        )\n        image_exts = {\".jpg\", \".jpeg\", \".png\", \".bmp\"}\n      \
+        \  downloaded = 0\n        for page in paginator.paginate(Bucket=ds_bucket,\
+        \ Prefix=f\"{ds_prefix}/images/train/\"):\n            for obj in page.get(\"\
+        Contents\", []):\n                key = obj[\"Key\"]\n                if os.path.splitext(key)[1].lower()\
+        \ not in image_exts:\n                    continue\n                s3.download_file(ds_bucket,\
+        \ key, os.path.join(images_dir, os.path.basename(key)))\n                downloaded\
+        \ += 1\n                if downloaded >= max_download:\n                 \
+        \   break\n            if downloaded >= max_download:\n                break\n\
+        \        print(f\"[qat-finetune] Downloaded {downloaded} train frames for\
+        \ calibration.\", flush=True)\n    else:\n        print(\"[qat-finetune] WARNING:\
+        \ manifest_summary missing bucket/prefix — no frames downloaded.\", flush=True)\n\
+        except Exception as e:\n    print(f\"[qat-finetune] WARNING: frame download\
+        \ failed: {e}.\", flush=True)\n\nos.makedirs(\"/work/qat_output\", exist_ok=True)\n\
+        \nflags = [\n    \"--fp32-checkpoint-path\", best_checkpoint_s3,\n    \"--source-mlflow-run-id\"\
+        , mlflow_run_id,\n    \"--dataset-dir\", \"/work/dataset\",\n    \"--output-dir\"\
+        , \"/work/qat_output\",\n    \"--output-bucket\", output_bucket,\n    \"--output-prefix\"\
+        , f\"{lakefs_branch}/{quant.get('output_prefix', 'quantization/qat')}\",\n\
+        \    \"--experiment-name\", str(exp.get(\"name\", \"quantization\")),\n  \
+        \  \"--image-size\", str(quant.get(\"image_size\", 640)),\n    \"--qat-epochs\"\
+        , str(quant.get(\"qat_epochs\", 10)),\n    \"--qat-lr\", str(quant.get(\"\
+        qat_lr\", 1e-4)),\n    \"--calibration-frames\", str(quant.get(\"calibration_frames\"\
+        , 512)),\n    \"--calibration-seed\", str(quant.get(\"calibration_seed\",\
+        \ 42)),\n    \"--parity-frames\", str(quant.get(\"parity_frames\", 100)),\n\
+        \    \"--parity-max-abs-error\", str(quant.get(\"parity_max_abs_error\", 0.05)),\n\
+        ]\n\nprint(f\"[qat-finetune] Running: qat-finetune run {' '.join(flags)}\"\
+        , flush=True)\nresult = subprocess.run([\"qat-finetune\"] + flags)\nsys.exit(result.returncode)\n"
+      env:
+      - name: MLFLOW_TRACKING_URI
+        value: http://mlflow.internal.invalid
+      - name: LAKEFS_ENDPOINT
+        value: http://lakefs.internal.invalid
+      - name: LAKEFS_ACCESS_KEY
+        valueFrom:
+          secretKeyRef:
+            name: PLACEHOLDER-lakefs-admin
+            key: accessKeyId
+      - name: LAKEFS_SECRET_KEY
+        valueFrom:
+          secretKeyRef:
+            name: PLACEHOLDER-lakefs-admin
+            key: secretAccessKey
+      - name: MLFLOW_TRACKING_AUTH
+        value: zitadel
+      - name: ZITADEL_MACHINE_KEY_FILE
+        value: /etc/mlflow-svc/ZITADEL_MACHINE_KEY
+      - name: ZITADEL_DOMAIN
+        value: oidc.internal.invalid
+      - name: ZITADEL_MLFLOW_PROJECT_ID
+        value: PLACEHOLDER-oidc-project-id
+      - name: CHECKPOINT_BUCKET
+        value: PLACEHOLDER-bucket
+      - name: CHECKPOINT_PREFIX
+        value: main/checkpoints
+      - &id013
+        name: TRAINING_RESULT
+        value: '{{inputs.parameters.training-result}}'
+      - &id014
+        name: DATA_YAML
+        value: '{{inputs.parameters.data-yaml}}'
+      - &id015
+        name: MANIFEST_SUMMARY
+        value: '{{inputs.parameters.manifest-summary}}'
+      - &id016
+        name: PARAMS_YAML
+        value: "experiment:\n  name: \"{{workflow.parameters.experiment-name}}\"\n\
+          quantization:\n  mode: \"{{workflow.parameters.quantization-mode}}\"\n \
+          \ image_size: {{workflow.parameters.quantization-image-size}}\n  calibration_frames:\
+          \ {{workflow.parameters.quantization-calibration-frames}}\n  calibration_seed:\
+          \ {{workflow.parameters.quantization-calibration-seed}}\n  parity_frames:\
+          \ {{workflow.parameters.quantization-parity-frames}}\n  parity_max_abs_error:\
+          \ {{workflow.parameters.quantization-parity-max-abs-error}}\n  output_prefix:\
+          \ \"{{workflow.parameters.quantization-output-prefix}}/qat\"\n  qat_epochs:\
+          \ {{workflow.parameters.qat-epochs}}\n  qat_lr: {{workflow.parameters.qat-lr}}\n"
+      volumeMounts:
+      - name: mlflow-svc
+        mountPath: /etc/mlflow-svc
+        readOnly: true
+      - name: dshm
+        mountPath: /dev/shm
+    volumes:
+    - name: mlflow-svc
+      secret:
+        secretName: PLACEHOLDER-mlflow-svc
+        optional: true
+    - name: dshm
+      emptyDir:
+        medium: Memory
+        sizeLimit: 3Gi
+    podSpecPatch: "containers:\n- name: main\n  resources:\n    requests:\n      cpu:\
+      \ \"{{=workflow.parameters['qat-finetune-class'] == 'cpu-standard' ? '6' : workflow.parameters['qat-finetune-class']\
+      \ == 'kubecorecpu' ? '6' : '6'}}\"\n      memory: \"{{=workflow.parameters['qat-finetune-class']\
+      \ == 'cpu-standard' ? '23Gi' : workflow.parameters['qat-finetune-class'] ==\
+      \ 'kubecorecpu' ? '23Gi' : '23Gi'}}\"\n    limits:\n      cpu: \"{{=workflow.parameters['qat-finetune-class']\
+      \ == 'cpu-standard' ? '6' : workflow.parameters['qat-finetune-class'] == 'kubecorecpu'\
+      \ ? '6' : '6'}}\"\n      memory: \"{{=workflow.parameters['qat-finetune-class']\
+      \ == 'cpu-standard' ? '23Gi' : workflow.parameters['qat-finetune-class'] ==\
+      \ 'kubecorecpu' ? '23Gi' : '23Gi'}}\"\n"
+    outputs:
+      parameters:
+      - name: qat-result
+        valueFrom:
+          path: /work/qat_output/qat_result.json
+  - name: qat-finetune-gpu
+    inputs:
+      parameters:
+      - name: image
+        valueFrom:
+          configMapKeyRef:
+            name: kubeline-static-pipeline-images
+            key: qat-finetune
+      - name: dataset-path-override
+        default: ''
+      - name: training-result
+      - name: data-yaml
+      - name: manifest-summary
+    metadata:
+      labels:
+        platform.kubecore.io/project: vision
+        platform.kubecore.io/pipeline: kubeline-static
+        platform.kubecore.io/step: qat-finetune
+        platform.kubecore.io/compute-type: gpu
+        platform.kubecore.io/compute-class: '{{workflow.parameters.qat-finetune-class}}'
+    nodeSelector:
+      platform.kubecore.io/nodegroup-type: '{{workflow.parameters.qat-finetune-class}}'
+    tolerations:
+    - key: platform.kubecore.io/ml-workload
+      operator: Equal
+      effect: NoSchedule
+      value: gpu
+    - key: nvidia.com/gpu
+      operator: Exists
+      effect: NoSchedule
+    serviceAccountName: argo-workflow
+    retryStrategy:
+      limit: '2'
+      retryPolicy: OnError
+      expression: lastRetry.exitCode != "137"
+      backoff:
+        duration: 30s
+        factor: '2'
+    activeDeadlineSeconds: 10800
+    container:
+      image: '{{inputs.parameters.image}}'
+      resources:
+        requests:
+          cpu: '7'
+          memory: 25Gi
+          ephemeral-storage: 10Gi
+          nvidia.com/gpu: '1'
+        limits:
+          cpu: '7'
+          memory: 25Gi
+          ephemeral-storage: 30Gi
+          nvidia.com/gpu: '1'
+      command: *id011
+      args: *id012
+      env:
+      - name: MLFLOW_TRACKING_URI
+        value: http://mlflow.internal.invalid
+      - name: LAKEFS_ENDPOINT
+        value: http://lakefs.internal.invalid
+      - name: LAKEFS_ACCESS_KEY
+        valueFrom:
+          secretKeyRef:
+            name: PLACEHOLDER-lakefs-admin
+            key: accessKeyId
+      - name: LAKEFS_SECRET_KEY
+        valueFrom:
+          secretKeyRef:
+            name: PLACEHOLDER-lakefs-admin
+            key: secretAccessKey
+      - name: MLFLOW_TRACKING_AUTH
+        value: zitadel
+      - name: ZITADEL_MACHINE_KEY_FILE
+        value: /etc/mlflow-svc/ZITADEL_MACHINE_KEY
+      - name: ZITADEL_DOMAIN
+        value: oidc.internal.invalid
+      - name: ZITADEL_MLFLOW_PROJECT_ID
+        value: PLACEHOLDER-oidc-project-id
+      - name: CHECKPOINT_BUCKET
+        value: PLACEHOLDER-bucket
+      - name: CHECKPOINT_PREFIX
+        value: main/checkpoints
+      - *id013
+      - *id014
+      - *id015
+      - *id016
+      volumeMounts:
+      - name: mlflow-svc
+        mountPath: /etc/mlflow-svc
+        readOnly: true
+      - name: dshm
+        mountPath: /dev/shm
+    volumes:
+    - name: mlflow-svc
+      secret:
+        secretName: PLACEHOLDER-mlflow-svc
+        optional: true
+    - name: dshm
+      emptyDir:
+        medium: Memory
+        sizeLimit: 2Gi
+    podSpecPatch: "containers:\n- name: main\n  resources:\n    requests:\n      cpu:\
+      \ \"{{=workflow.parameters['qat-finetune-class'] == 'gpu-t4' ? '6' : '6'}}\"\
+      \n      memory: \"{{=workflow.parameters['qat-finetune-class'] == 'gpu-t4' ?\
+      \ '22Gi' : '22Gi'}}\"\n      nvidia.com/gpu: \"{{=workflow.parameters['qat-finetune-class']\
+      \ == 'gpu-t4' ? '1' : '1'}}\"\n    limits:\n      cpu: \"{{=workflow.parameters['qat-finetune-class']\
+      \ == 'gpu-t4' ? '6' : '6'}}\"\n      memory: \"{{=workflow.parameters['qat-finetune-class']\
+      \ == 'gpu-t4' ? '22Gi' : '22Gi'}}\"\n      nvidia.com/gpu: \"{{=workflow.parameters['qat-finetune-class']\
+      \ == 'gpu-t4' ? '1' : '1'}}\"\n"
+    outputs:
+      parameters:
+      - name: qat-result
+        valueFrom:
+          path: /work/qat_output/qat_result.json
+  - name: model-quantization-cpu
+    inputs:
+      parameters:
+      - name: image
+        valueFrom:
+          configMapKeyRef:
+            name: kubeline-static-pipeline-images
+            key: model-quantization
+      - name: dataset-path-override
+        default: ''
+      - name: training-result
+      - name: qat-result
+      - name: data-yaml
+      - name: manifest-summary
+    metadata:
+      labels:
+        platform.kubecore.io/project: vision
+        platform.kubecore.io/pipeline: kubeline-static
+        platform.kubecore.io/step: model-quantization
+        platform.kubecore.io/compute-type: cpu
+        platform.kubecore.io/compute-class: '{{workflow.parameters.model-quantization-class}}'
+    nodeSelector:
+      platform.kubecore.io/nodegroup-type: '{{workflow.parameters.model-quantization-class}}'
+    tolerations:
+    - key: platform.kubecore.io/ml-workload
+      operator: Equal
+      effect: NoSchedule
+      value: cpu
+    serviceAccountName: argo-workflow
+    retryStrategy:
+      limit: '2'
+      retryPolicy: OnError
+      expression: lastRetry.exitCode != "137"
+      backoff:
+        duration: 30s
+        factor: '2'
+    activeDeadlineSeconds: 10800
+    container:
+      image: '{{inputs.parameters.image}}'
+      resources:
+        requests:
+          cpu: '7'
+          memory: 27Gi
+          ephemeral-storage: 2Gi
+        limits:
+          cpu: '7'
+          memory: 27Gi
+          ephemeral-storage: 4Gi
+      command: &id017
+      - python
+      - -c
+      args: &id018
+      - "import os, sys, subprocess, json, yaml, importlib\n\n# Config resolution:\
+        \ PIPELINE_CONFIG (platform-injected) overrides PARAMS_YAML.\npipeline_config\
+        \ = os.environ.get(\"PIPELINE_CONFIG\", \"\")\nparams_yaml = os.environ.get(\"\
+        PARAMS_YAML\", \"\")\nraw = pipeline_config.strip() if pipeline_config.strip()\
+        \ else params_yaml\n\nif not raw.strip():\n    print(\"ERROR: Neither PIPELINE_CONFIG\
+        \ nor PARAMS_YAML is set.\", flush=True)\n    sys.exit(1)\ntry:\n    cfg =\
+        \ yaml.safe_load(raw)\nexcept yaml.YAMLError as e:\n    print(f\"ERROR: Config\
+        \ is not valid YAML: {e}\", flush=True)\n    sys.exit(1)\n\ntr_raw = os.environ.get(\"\
+        TRAINING_RESULT\", \"\")\nif not tr_raw.strip():\n    print(\"ERROR: TRAINING_RESULT\
+        \ input parameter is empty.\", flush=True)\n    sys.exit(1)\ntry:\n    tr\
+        \ = json.loads(tr_raw)\nexcept json.JSONDecodeError as e:\n    print(f\"ERROR:\
+        \ TRAINING_RESULT is not valid JSON: {e}\", flush=True)\n    sys.exit(1)\n\
+        \nexp = cfg.get(\"experiment\") or {}\nquant = cfg.get(\"quantization\") or\
+        \ {}\nmode = str(quant.get(\"mode\", \"ptq\"))\n\nmlflow_run_id = tr.get(\"\
+        mlflow_run_id\")\nbest_checkpoint_s3 = tr.get(\"best_checkpoint_s3\")\nif\
+        \ not mlflow_run_id:\n    print(f\"ERROR: training_result missing mlflow_run_id:\
+        \ {tr}\", flush=True)\n    sys.exit(1)\n\n# Derive output bucket + lakeFS\
+        \ branch from checkpoint URI.\n# s3://<repo>/<branch>/<path>: the branch is\
+        \ the FIRST key segment; lakeFS\n# reads it as the branch, so the output prefix\
+        \ must start with it (else lakeFS\n# treats e.g. 'quantization' as a non-existent\
+        \ branch -> NoSuchBucket).\nif best_checkpoint_s3 and best_checkpoint_s3.startswith(\"\
+        s3://\"):\n    _ckpt_parts = best_checkpoint_s3[5:].split(\"/\")\n    output_bucket\
+        \ = _ckpt_parts[0]\n    lakefs_branch = _ckpt_parts[1] if len(_ckpt_parts)\
+        \ > 1 else \"main\"\nelse:\n    output_bucket = os.environ.get(\"CHECKPOINT_BUCKET\"\
+        , \"\")\n    lakefs_branch = os.environ.get(\"LAKEFS_BRANCH\", \"main\")\n\
+        if not output_bucket:\n    print(\"ERROR: cannot derive output bucket from\
+        \ checkpoint URI and CHECKPOINT_BUCKET is unset.\", flush=True)\n    sys.exit(1)\n\
+        \n# Reconstruct /work/dataset so model-quantization can discover data.yaml\n\
+        # and download calibration/parity frames from S3.\nos.makedirs(\"/work/dataset\"\
+        , exist_ok=True)\ndata_yaml_content = os.environ.get(\"DATA_YAML\", \"\")\n\
+        if data_yaml_content.strip():\n    with open(\"/work/dataset/data.yaml\",\
+        \ \"w\") as fh:\n        fh.write(data_yaml_content)\nmanifest_summary = os.environ.get(\"\
+        MANIFEST_SUMMARY\", \"\")\nif manifest_summary.strip():\n    with open(\"\
+        /work/dataset/dataset_manifest.json\", \"w\") as fh:\n        fh.write(manifest_summary)\n\
+        \n# Download calibration + parity frames from S3 to /work/dataset/images/val/.\n\
+        # The manifest_summary contains bucket and prefix; we list image keys and\n\
+        # download the first calibration_frames + parity_frames files.\ntry:\n   \
+        \ import boto3\n    from botocore.config import Config as BotoConfig\n   \
+        \ boto_cfg = BotoConfig(retries={\"max_attempts\": 3, \"mode\": \"adaptive\"\
+        })\n\n    lakefs_endpoint = os.environ.get(\"LAKEFS_ENDPOINT\", \"\")\n  \
+        \  lakefs_key = os.environ.get(\"LAKEFS_ACCESS_KEY\", \"\")\n    lakefs_secret\
+        \ = os.environ.get(\"LAKEFS_SECRET_KEY\", \"\")\n\n    if lakefs_endpoint\
+        \ and lakefs_key and lakefs_secret:\n        s3 = boto3.client(\"s3\", endpoint_url=lakefs_endpoint,\n\
+        \                          aws_access_key_id=lakefs_key,\n               \
+        \           aws_secret_access_key=lakefs_secret,\n                       \
+        \   region_name=None, config=boto_cfg)\n    else:\n        s3 = boto3.client(\"\
+        s3\",\n                          endpoint_url=os.environ.get(\"S3_ENDPOINT_URL\"\
+        ),\n                          aws_access_key_id=os.environ.get(\"AWS_ACCESS_KEY_ID\"\
+        ),\n                          aws_secret_access_key=os.environ.get(\"AWS_SECRET_ACCESS_KEY\"\
+        ),\n                          region_name=os.environ.get(\"AWS_DEFAULT_REGION\"\
+        ),\n                          config=boto_cfg)\n\n    ms = json.loads(manifest_summary)\
+        \ if manifest_summary.strip() else {}\n    ds_bucket = ms.get(\"bucket\",\
+        \ \"\")\n    ds_prefix = ms.get(\"prefix\", \"\").rstrip(\"/\")\n\n    if\
+        \ ds_bucket and ds_prefix:\n        max_download = int(quant.get(\"calibration_frames\"\
+        , 512)) + int(quant.get(\"parity_frames\", 100))\n        images_dir = \"\
+        /work/dataset/images/val\"\n        os.makedirs(images_dir, exist_ok=True)\n\
+        \n        paginator = s3.get_paginator(\"list_objects_v2\")\n        image_exts\
+        \ = {\".jpg\", \".jpeg\", \".png\", \".bmp\"}\n        # Labels go beside\
+        \ the images so YOLO's model.val (the FP32-vs-INT8\n        # mAP-delta) has\
+        \ ground truth. YOLO derives the label path by\n        # swapping /images/\
+        \ -> /labels/ and the extension -> .txt. Without\n        # this, val has\
+        \ 0 labels and every mAP comes back 0.\n        labels_dir = \"/work/dataset/labels/val\"\
+        \n        os.makedirs(labels_dir, exist_ok=True)\n        downloaded = 0\n\
+        \        labels_dl = 0\n        for page in paginator.paginate(Bucket=ds_bucket,\
+        \ Prefix=f\"{ds_prefix}/images/\"):\n            for obj in page.get(\"Contents\"\
+        , []):\n                key = obj[\"Key\"]\n                ext = os.path.splitext(key)[1].lower()\n\
+        \                if ext not in image_exts:\n                    continue\n\
+        \                stem = os.path.splitext(os.path.basename(key))[0]\n     \
+        \           local_path = os.path.join(images_dir, os.path.basename(key))\n\
+        \                s3.download_file(ds_bucket, key, local_path)\n          \
+        \      downloaded += 1\n                # Best-effort matching label; frames\
+        \ without one are valid\n                # backgrounds — skip silently.\n\
+        \                label_key = os.path.splitext(\n                    key.replace(\"\
+        /images/\", \"/labels/\", 1)\n                )[0] + \".txt\"\n          \
+        \      try:\n                    s3.download_file(\n                     \
+        \   ds_bucket, label_key,\n                        os.path.join(labels_dir,\
+        \ stem + \".txt\"),\n                    )\n                    labels_dl\
+        \ += 1\n                except Exception:\n                    pass\n    \
+        \            if downloaded >= max_download:\n                    break\n \
+        \           if downloaded >= max_download:\n                break\n      \
+        \  print(\n            f\"[model-quantization] Downloaded {downloaded} frames\
+        \ \"\n            f\"+ {labels_dl} labels.\",\n            flush=True,\n \
+        \       )\n    else:\n        print(\"[model-quantization] WARNING: manifest_summary\
+        \ missing bucket/prefix — calibration frames not downloaded.\", flush=True)\n\
+        except Exception as e:\n    print(f\"[model-quantization] WARNING: frame download\
+        \ failed: {e}. Proceeding — CLI will fail if dataset is needed.\", flush=True)\n\
+        \nos.makedirs(\"/work/quant_output\", exist_ok=True)\n\nflags = [\n    \"\
+        --mode\", mode,\n    \"--source-mlflow-run-id\", mlflow_run_id,\n    \"--dataset-dir\"\
+        , \"/work/dataset\",\n    \"--output-dir\", \"/work/quant_output\",\n    \"\
+        --output-bucket\", output_bucket,\n    \"--output-prefix\", f\"{lakefs_branch}/{quant.get('output_prefix',\
+        \ 'quantization/model')}\",\n    \"--experiment-name\", str(exp.get(\"name\"\
+        , \"quantization\")),\n    \"--image-size\", str(quant.get(\"image_size\"\
+        , 640)),\n    \"--calibration-frames\", str(quant.get(\"calibration_frames\"\
+        , 512)),\n    \"--calibration-seed\", str(quant.get(\"calibration_seed\",\
+        \ 42)),\n    \"--parity-frames\", str(quant.get(\"parity_frames\", 100)),\n\
+        \    \"--parity-max-abs-error\", str(quant.get(\"parity_max_abs_error\", 0.05)),\n\
+        ]\n\nif mode == \"ptq\":\n    if not best_checkpoint_s3:\n        print(\"\
+        ERROR: best_checkpoint_s3 missing in training_result for PTQ mode.\", flush=True)\n\
+        \        sys.exit(1)\n    flags += [\"--fp32-checkpoint-path\", best_checkpoint_s3]\n\
+        \nelif mode == \"qat\":\n    qat_raw = os.environ.get(\"QAT_RESULT\", \"\"\
+        )\n    if not qat_raw.strip():\n        print(\"ERROR: QAT_RESULT is empty\
+        \ but mode=qat — qat-finetune must have run.\", flush=True)\n        sys.exit(1)\n\
+        \    try:\n        qr = json.loads(qat_raw)\n    except json.JSONDecodeError\
+        \ as e:\n        print(f\"ERROR: QAT_RESULT is not valid JSON: {e}\", flush=True)\n\
+        \        sys.exit(1)\n    tflite_uri = qr.get(\"tflite_s3_uri\")\n    qat_run_id\
+        \ = qr.get(\"mlflow_run_id\")\n    if not tflite_uri:\n        print(f\"ERROR:\
+        \ qat_result missing tflite_s3_uri: {qr}\", flush=True)\n        sys.exit(1)\n\
+        \    flags += [\"--tflite-s3-uri\", tflite_uri]\n    if qat_run_id:\n    \
+        \    flags += [\"--qat-run-id\", qat_run_id]\n    if best_checkpoint_s3:\n\
+        \        flags += [\"--fp32-checkpoint-path\", best_checkpoint_s3]\n\nprint(f\"\
+        [model-quantization] Running: model-quantization run {' '.join(flags)}\",\
+        \ flush=True)\nresult = subprocess.run([\"model-quantization\"] + flags)\n\
+        sys.exit(result.returncode)\n"
+      env:
+      - name: MLFLOW_TRACKING_URI
+        value: http://mlflow.internal.invalid
+      - name: LAKEFS_ENDPOINT
+        value: http://lakefs.internal.invalid
+      - name: LAKEFS_ACCESS_KEY
+        valueFrom:
+          secretKeyRef:
+            name: PLACEHOLDER-lakefs-admin
+            key: accessKeyId
+      - name: LAKEFS_SECRET_KEY
+        valueFrom:
+          secretKeyRef:
+            name: PLACEHOLDER-lakefs-admin
+            key: secretAccessKey
+      - name: MLFLOW_TRACKING_AUTH
+        value: zitadel
+      - name: ZITADEL_MACHINE_KEY_FILE
+        value: /etc/mlflow-svc/ZITADEL_MACHINE_KEY
+      - name: ZITADEL_DOMAIN
+        value: oidc.internal.invalid
+      - name: ZITADEL_MLFLOW_PROJECT_ID
+        value: PLACEHOLDER-oidc-project-id
+      - name: CHECKPOINT_BUCKET
+        value: PLACEHOLDER-bucket
+      - name: CHECKPOINT_PREFIX
+        value: main/checkpoints
+      - &id019
+        name: TRAINING_RESULT
+        value: '{{inputs.parameters.training-result}}'
+      - &id020
+        name: QAT_RESULT
+        value: '{{inputs.parameters.qat-result}}'
+      - &id021
+        name: DATA_YAML
+        value: '{{inputs.parameters.data-yaml}}'
+      - &id022
+        name: MANIFEST_SUMMARY
+        value: '{{inputs.parameters.manifest-summary}}'
+      - &id023
+        name: PARAMS_YAML
+        value: "experiment:\n  name: \"{{workflow.parameters.experiment-name}}\"\n\
+          quantization:\n  mode: \"{{workflow.parameters.quantization-mode}}\"\n \
+          \ image_size: {{workflow.parameters.quantization-image-size}}\n  calibration_frames:\
+          \ {{workflow.parameters.quantization-calibration-frames}}\n  calibration_seed:\
+          \ {{workflow.parameters.quantization-calibration-seed}}\n  parity_frames:\
+          \ {{workflow.parameters.quantization-parity-frames}}\n  parity_max_abs_error:\
+          \ {{workflow.parameters.quantization-parity-max-abs-error}}\n  output_prefix:\
+          \ \"{{workflow.parameters.quantization-output-prefix}}/model\"\n"
+      volumeMounts:
+      - name: mlflow-svc
+        mountPath: /etc/mlflow-svc
+        readOnly: true
+      - name: dshm
+        mountPath: /dev/shm
+    volumes:
+    - name: mlflow-svc
+      secret:
+        secretName: PLACEHOLDER-mlflow-svc
+        optional: true
+    - name: dshm
+      emptyDir:
+        medium: Memory
+        sizeLimit: 3Gi
+    podSpecPatch: "containers:\n- name: main\n  resources:\n    requests:\n      cpu:\
+      \ \"{{=workflow.parameters['model-quantization-class'] == 'cpu-standard' ? '6'\
+      \ : workflow.parameters['model-quantization-class'] == 'kubecorecpu' ? '6' :\
+      \ '6'}}\"\n      memory: \"{{=workflow.parameters['model-quantization-class']\
+      \ == 'cpu-standard' ? '23Gi' : workflow.parameters['model-quantization-class']\
+      \ == 'kubecorecpu' ? '23Gi' : '23Gi'}}\"\n    limits:\n      cpu: \"{{=workflow.parameters['model-quantization-class']\
+      \ == 'cpu-standard' ? '6' : workflow.parameters['model-quantization-class']\
+      \ == 'kubecorecpu' ? '6' : '6'}}\"\n      memory: \"{{=workflow.parameters['model-quantization-class']\
+      \ == 'cpu-standard' ? '23Gi' : workflow.parameters['model-quantization-class']\
+      \ == 'kubecorecpu' ? '23Gi' : '23Gi'}}\"\n"
+    outputs:
+      parameters:
+      - name: quantization-result
+        valueFrom:
+          path: /work/quant_output/quantization_result.json
+  - name: model-quantization-gpu
+    inputs:
+      parameters:
+      - name: image
+        valueFrom:
+          configMapKeyRef:
+            name: kubeline-static-pipeline-images
+            key: model-quantization
+      - name: dataset-path-override
+        default: ''
+      - name: training-result
+      - name: qat-result
+      - name: data-yaml
+      - name: manifest-summary
+    metadata:
+      labels:
+        platform.kubecore.io/project: vision
+        platform.kubecore.io/pipeline: kubeline-static
+        platform.kubecore.io/step: model-quantization
+        platform.kubecore.io/compute-type: gpu
+        platform.kubecore.io/compute-class: '{{workflow.parameters.model-quantization-class}}'
+    nodeSelector:
+      platform.kubecore.io/nodegroup-type: '{{workflow.parameters.model-quantization-class}}'
+    tolerations:
+    - key: platform.kubecore.io/ml-workload
+      operator: Equal
+      effect: NoSchedule
+      value: gpu
+    - key: nvidia.com/gpu
+      operator: Exists
+      effect: NoSchedule
+    serviceAccountName: argo-workflow
+    retryStrategy:
+      limit: '2'
+      retryPolicy: OnError
+      expression: lastRetry.exitCode != "137"
+      backoff:
+        duration: 30s
+        factor: '2'
+    activeDeadlineSeconds: 10800
+    container:
+      image: '{{inputs.parameters.image}}'
+      resources:
+        requests:
+          cpu: '7'
+          memory: 25Gi
+          ephemeral-storage: 10Gi
+          nvidia.com/gpu: '1'
+        limits:
+          cpu: '7'
+          memory: 25Gi
+          ephemeral-storage: 30Gi
+          nvidia.com/gpu: '1'
+      command: *id017
+      args: *id018
+      env:
+      - name: MLFLOW_TRACKING_URI
+        value: http://mlflow.internal.invalid
+      - name: LAKEFS_ENDPOINT
+        value: http://lakefs.internal.invalid
+      - name: LAKEFS_ACCESS_KEY
+        valueFrom:
+          secretKeyRef:
+            name: PLACEHOLDER-lakefs-admin
+            key: accessKeyId
+      - name: LAKEFS_SECRET_KEY
+        valueFrom:
+          secretKeyRef:
+            name: PLACEHOLDER-lakefs-admin
+            key: secretAccessKey
+      - name: MLFLOW_TRACKING_AUTH
+        value: zitadel
+      - name: ZITADEL_MACHINE_KEY_FILE
+        value: /etc/mlflow-svc/ZITADEL_MACHINE_KEY
+      - name: ZITADEL_DOMAIN
+        value: oidc.internal.invalid
+      - name: ZITADEL_MLFLOW_PROJECT_ID
+        value: PLACEHOLDER-oidc-project-id
+      - name: CHECKPOINT_BUCKET
+        value: PLACEHOLDER-bucket
+      - name: CHECKPOINT_PREFIX
+        value: main/checkpoints
+      - *id019
+      - *id020
+      - *id021
+      - *id022
+      - *id023
+      volumeMounts:
+      - name: mlflow-svc
+        mountPath: /etc/mlflow-svc
+        readOnly: true
+      - name: dshm
+        mountPath: /dev/shm
+    volumes:
+    - name: mlflow-svc
+      secret:
+        secretName: PLACEHOLDER-mlflow-svc
+        optional: true
+    - name: dshm
+      emptyDir:
+        medium: Memory
+        sizeLimit: 2Gi
+    podSpecPatch: "containers:\n- name: main\n  resources:\n    requests:\n      cpu:\
+      \ \"{{=workflow.parameters['model-quantization-class'] == 'gpu-t4' ? '6' : '6'}}\"\
+      \n      memory: \"{{=workflow.parameters['model-quantization-class'] == 'gpu-t4'\
+      \ ? '22Gi' : '22Gi'}}\"\n      nvidia.com/gpu: \"{{=workflow.parameters['model-quantization-class']\
+      \ == 'gpu-t4' ? '1' : '1'}}\"\n    limits:\n      cpu: \"{{=workflow.parameters['model-quantization-class']\
+      \ == 'gpu-t4' ? '6' : '6'}}\"\n      memory: \"{{=workflow.parameters['model-quantization-class']\
+      \ == 'gpu-t4' ? '22Gi' : '22Gi'}}\"\n      nvidia.com/gpu: \"{{=workflow.parameters['model-quantization-class']\
+      \ == 'gpu-t4' ? '1' : '1'}}\"\n"
+    outputs:
+      parameters:
+      - name: quantization-result
+        valueFrom:
+          path: /work/quant_output/quantization_result.json
+  - name: model-registration-cpu
+    inputs:
+      parameters:
+      - name: image
+        valueFrom:
+          configMapKeyRef:
+            name: kubeline-static-pipeline-images
+            key: model-registration
+      - name: dataset-path-override
+        default: ''
+      - name: training-result
+    metadata:
+      labels:
+        platform.kubecore.io/project: vision
+        platform.kubecore.io/pipeline: kubeline-static
+        platform.kubecore.io/step: model-registration
+        platform.kubecore.io/compute-type: cpu
+        platform.kubecore.io/compute-class: '{{workflow.parameters.model-registration-class}}'
+    nodeSelector:
+      platform.kubecore.io/nodegroup-type: '{{workflow.parameters.model-registration-class}}'
+    tolerations:
+    - key: platform.kubecore.io/ml-workload
+      operator: Equal
+      effect: NoSchedule
+      value: cpu
+    serviceAccountName: argo-workflow
+    retryStrategy:
+      limit: '2'
+      retryPolicy: OnError
+      expression: lastRetry.exitCode != "137"
+      backoff:
+        duration: 30s
+        factor: '2'
+    activeDeadlineSeconds: 1800
+    container:
+      image: '{{inputs.parameters.image}}'
+      resources:
+        requests:
+          cpu: '7'
+          memory: 27Gi
+          ephemeral-storage: 2Gi
+        limits:
+          cpu: '7'
+          memory: 27Gi
+          ephemeral-storage: 4Gi
+      command: &id024
+      - python
+      - -c
+      args: &id025
+      - "import os, sys, subprocess, json, yaml\n\n# Config resolution: PIPELINE_CONFIG\
+        \ (platform-injected) overrides PARAMS_YAML.\npipeline_config = os.environ.get(\"\
+        PIPELINE_CONFIG\", \"\")\nparams_yaml = os.environ.get(\"PARAMS_YAML\", \"\
+        \")\nraw = pipeline_config.strip() if pipeline_config.strip() else params_yaml\n\
+        \nif not raw.strip():\n    print(\"ERROR: Neither PIPELINE_CONFIG nor PARAMS_YAML\
+        \ is set.\", flush=True)\n    sys.exit(1)\ntry:\n    cfg = yaml.safe_load(raw)\n\
+        except yaml.YAMLError as e:\n    print(f\"ERROR: Config is not valid YAML:\
+        \ {e}\", flush=True)\n    sys.exit(1)\n\ntr_raw = os.environ.get(\"TRAINING_RESULT\"\
+        , \"\")\nif not tr_raw.strip():\n    print(\"ERROR: TRAINING_RESULT input\
+        \ parameter is empty.\", flush=True)\n    sys.exit(1)\ntry:\n    tr = json.loads(tr_raw)\n\
+        except json.JSONDecodeError as e:\n    print(f\"ERROR: TRAINING_RESULT is\
+        \ not valid JSON: {e}\", flush=True)\n    sys.exit(1)\n\ndataset = cfg.get(\"\
+        dataset\") or {}\nmodel = cfg.get(\"model\") or {}\nregistration = cfg.get(\"\
+        registration\") or {}\n\nmlflow_run_id = tr.get(\"mlflow_run_id\")\nbest_checkpoint_s3\
+        \ = tr.get(\"best_checkpoint_s3\")\nif not mlflow_run_id or not best_checkpoint_s3:\n\
+        \    print(f\"ERROR: training_result missing mlflow_run_id or best_checkpoint_s3:\
+        \ {tr}\", flush=True)\n    sys.exit(1)\n\n# Derive last checkpoint path from\
+        \ best: replace best.pt with last.pt\nlast_checkpoint_s3 = best_checkpoint_s3.replace(\"\
+        /best.pt\", \"/last.pt\")\n\nflags = [\n    \"--mlflow-run-id\", mlflow_run_id,\n\
+        \    \"--best-checkpoint-path\", best_checkpoint_s3,\n    \"--last-checkpoint-path\"\
+        , last_checkpoint_s3,\n    \"--dataset-version\", str(dataset.get(\"version\"\
+        , \"\")),\n    \"--model-variant\", str(model.get(\"variant\", \"\")),\n]\n\
+        \n# Optional registration flags\nif registration.get(\"registered_model_name\"\
+        ):\n    flags += [\"--registered-model-name\", str(registration[\"registered_model_name\"\
+        ])]\nif registration.get(\"promote_to\"):\n    flags += [\"--promote-to\"\
+        , str(registration[\"promote_to\"])]\n\n# Optional lineage flags from training\
+        \ result\nif dataset.get(\"sample_size\") is not None:\n    flags += [\"--dataset-sample-size\"\
+        , str(dataset[\"sample_size\"])]\n\nfinal_map50 = tr.get(\"final_map50\")\n\
+        if final_map50 is not None:\n    flags += [\"--best-map50\", str(final_map50)]\n\
+        \nexported_models = tr.get(\"exported_models\")\nif exported_models:\n   \
+        \ flags += [\"--exported-models\", json.dumps(exported_models)]\n\nprint(f\"\
+        [model-registration] Running: model-registration {' '.join(flags)}\", flush=True)\n\
+        result = subprocess.run([\"model-registration\"] + flags)\nsys.exit(result.returncode)\n"
+      env:
+      - name: MLFLOW_TRACKING_URI
+        value: http://mlflow.internal.invalid
+      - name: LAKEFS_ENDPOINT
+        value: http://lakefs.internal.invalid
+      - name: LAKEFS_ACCESS_KEY
+        valueFrom:
+          secretKeyRef:
+            name: PLACEHOLDER-lakefs-admin
+            key: accessKeyId
+      - name: LAKEFS_SECRET_KEY
+        valueFrom:
+          secretKeyRef:
+            name: PLACEHOLDER-lakefs-admin
+            key: secretAccessKey
+      - name: MLFLOW_TRACKING_AUTH
+        value: zitadel
+      - name: ZITADEL_MACHINE_KEY_FILE
+        value: /etc/mlflow-svc/ZITADEL_MACHINE_KEY
+      - name: ZITADEL_DOMAIN
+        value: oidc.internal.invalid
+      - name: ZITADEL_MLFLOW_PROJECT_ID
+        value: PLACEHOLDER-oidc-project-id
+      - name: CHECKPOINT_BUCKET
+        value: PLACEHOLDER-bucket
+      - name: CHECKPOINT_PREFIX
+        value: main/checkpoints
+      - &id026
+        name: TRAINING_RESULT
+        value: '{{inputs.parameters.training-result}}'
+      - &id027
+        name: PARAMS_YAML
+        value: "dataset:\n  version: \"{{workflow.parameters.dataset-version}}\"\n\
+          \  sample_size: {{workflow.parameters.dataset-sample-size}}\nmodel:\n  variant:\
+          \ \"{{workflow.parameters.model-variant}}\"\nregistration:\n  registered_model_name:\
+          \ \"{{workflow.parameters.registered-model-name}}\"\n  promote_to: \"{{workflow.parameters.promote-to}}\"\
+          \n"
+      volumeMounts:
+      - name: mlflow-svc
+        mountPath: /etc/mlflow-svc
+        readOnly: true
+      - name: dshm
+        mountPath: /dev/shm
+    volumes:
+    - name: mlflow-svc
+      secret:
+        secretName: PLACEHOLDER-mlflow-svc
+        optional: true
+    - name: dshm
+      emptyDir:
+        medium: Memory
+        sizeLimit: 3Gi
+    podSpecPatch: "containers:\n- name: main\n  resources:\n    requests:\n      cpu:\
+      \ \"{{=workflow.parameters['model-registration-class'] == 'cpu-standard' ? '6'\
+      \ : workflow.parameters['model-registration-class'] == 'kubecorecpu' ? '6' :\
+      \ '6'}}\"\n      memory: \"{{=workflow.parameters['model-registration-class']\
+      \ == 'cpu-standard' ? '23Gi' : workflow.parameters['model-registration-class']\
+      \ == 'kubecorecpu' ? '23Gi' : '23Gi'}}\"\n    limits:\n      cpu: \"{{=workflow.parameters['model-registration-class']\
+      \ == 'cpu-standard' ? '6' : workflow.parameters['model-registration-class']\
+      \ == 'kubecorecpu' ? '6' : '6'}}\"\n      memory: \"{{=workflow.parameters['model-registration-class']\
+      \ == 'cpu-standard' ? '23Gi' : workflow.parameters['model-registration-class']\
+      \ == 'kubecorecpu' ? '23Gi' : '23Gi'}}\"\n"
+  - name: model-registration-gpu
+    inputs:
+      parameters:
+      - name: image
+        valueFrom:
+          configMapKeyRef:
+            name: kubeline-static-pipeline-images
+            key: model-registration
+      - name: dataset-path-override
+        default: ''
+      - name: training-result
+    metadata:
+      labels:
+        platform.kubecore.io/project: vision
+        platform.kubecore.io/pipeline: kubeline-static
+        platform.kubecore.io/step: model-registration
+        platform.kubecore.io/compute-type: gpu
+        platform.kubecore.io/compute-class: '{{workflow.parameters.model-registration-class}}'
+    nodeSelector:
+      platform.kubecore.io/nodegroup-type: '{{workflow.parameters.model-registration-class}}'
+    tolerations:
+    - key: platform.kubecore.io/ml-workload
+      operator: Equal
+      effect: NoSchedule
+      value: gpu
+    - key: nvidia.com/gpu
+      operator: Exists
+      effect: NoSchedule
+    serviceAccountName: argo-workflow
+    retryStrategy:
+      limit: '2'
+      retryPolicy: OnError
+      expression: lastRetry.exitCode != "137"
+      backoff:
+        duration: 30s
+        factor: '2'
+    activeDeadlineSeconds: 10800
+    container:
+      image: '{{inputs.parameters.image}}'
+      resources:
+        requests:
+          cpu: '7'
+          memory: 25Gi
+          ephemeral-storage: 10Gi
+          nvidia.com/gpu: '1'
+        limits:
+          cpu: '7'
+          memory: 25Gi
+          ephemeral-storage: 30Gi
+          nvidia.com/gpu: '1'
+      command: *id024
+      args: *id025
+      env:
+      - name: MLFLOW_TRACKING_URI
+        value: http://mlflow.internal.invalid
+      - name: LAKEFS_ENDPOINT
+        value: http://lakefs.internal.invalid
+      - name: LAKEFS_ACCESS_KEY
+        valueFrom:
+          secretKeyRef:
+            name: PLACEHOLDER-lakefs-admin
+            key: accessKeyId
+      - name: LAKEFS_SECRET_KEY
+        valueFrom:
+          secretKeyRef:
+            name: PLACEHOLDER-lakefs-admin
+            key: secretAccessKey
+      - name: MLFLOW_TRACKING_AUTH
+        value: zitadel
+      - name: ZITADEL_MACHINE_KEY_FILE
+        value: /etc/mlflow-svc/ZITADEL_MACHINE_KEY
+      - name: ZITADEL_DOMAIN
+        value: oidc.internal.invalid
+      - name: ZITADEL_MLFLOW_PROJECT_ID
+        value: PLACEHOLDER-oidc-project-id
+      - name: CHECKPOINT_BUCKET
+        value: PLACEHOLDER-bucket
+      - name: CHECKPOINT_PREFIX
+        value: main/checkpoints
+      - *id026
+      - *id027
+      volumeMounts:
+      - name: mlflow-svc
+        mountPath: /etc/mlflow-svc
+        readOnly: true
+      - name: dshm
+        mountPath: /dev/shm
+    volumes:
+    - name: mlflow-svc
+      secret:
+        secretName: PLACEHOLDER-mlflow-svc
+        optional: true
+    - name: dshm
+      emptyDir:
+        medium: Memory
+        sizeLimit: 2Gi
+    podSpecPatch: "containers:\n- name: main\n  resources:\n    requests:\n      cpu:\
+      \ \"{{=workflow.parameters['model-registration-class'] == 'gpu-t4' ? '6' : '6'}}\"\
+      \n      memory: \"{{=workflow.parameters['model-registration-class'] == 'gpu-t4'\
+      \ ? '22Gi' : '22Gi'}}\"\n      nvidia.com/gpu: \"{{=workflow.parameters['model-registration-class']\
+      \ == 'gpu-t4' ? '1' : '1'}}\"\n    limits:\n      cpu: \"{{=workflow.parameters['model-registration-class']\
+      \ == 'gpu-t4' ? '6' : '6'}}\"\n      memory: \"{{=workflow.parameters['model-registration-class']\
+      \ == 'gpu-t4' ? '22Gi' : '22Gi'}}\"\n      nvidia.com/gpu: \"{{=workflow.parameters['model-registration-class']\
+      \ == 'gpu-t4' ? '1' : '1'}}\"\n"
