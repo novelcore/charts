@@ -25,7 +25,7 @@ import tarfile
 import tempfile
 import urllib.request
 from dataclasses import dataclass
-from typing import Optional
+from typing import Callable, Optional
 
 import yaml
 
@@ -249,9 +249,11 @@ def _load(path):
 
 
 def render(name: str, connections: Optional[list], *, rendered: Optional[str] = None,
-           ref: Optional[str] = None) -> str:
+           ref: Optional[str] = None, ctx_override: Optional[Callable[[dict], dict]] = None) -> str:
     fx = FIXTURES[name]
     ctx = with_connections(_load(fx.context), connections)
+    if ctx_override is not None:
+        ctx = ctx_override(ctx)
     if fx.kind == "render-wft":
         if rendered is None:
             raise ValueError("render-wft fixtures need rendered=")
