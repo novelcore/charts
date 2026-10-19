@@ -145,6 +145,8 @@ spec:
         value: PLACEHOLDER-bucket
       - name: CHECKPOINT_PREFIX
         value: main/checkpoints
+      - name: KUBECORE_RUN_ID
+        value: '{{workflow.name}}'
       resources:
         requests:
           cpu: '7'
@@ -232,6 +234,8 @@ spec:
         value: PLACEHOLDER-bucket
       - name: CHECKPOINT_PREFIX
         value: main/checkpoints
+      - name: KUBECORE_RUN_ID
+        value: '{{workflow.name}}'
       resources:
         requests:
           cpu: '7'
@@ -317,6 +321,8 @@ spec:
         value: PLACEHOLDER-bucket
       - name: CHECKPOINT_PREFIX
         value: main/checkpoints
+      - name: KUBECORE_RUN_ID
+        value: '{{workflow.name}}'
       resources:
         requests:
           cpu: '7'
@@ -416,6 +422,8 @@ spec:
         value: PLACEHOLDER-bucket
       - name: CHECKPOINT_PREFIX
         value: main/checkpoints
+      - name: KUBECORE_RUN_ID
+        value: '{{workflow.name}}'
       resources:
         requests:
           cpu: '7'
@@ -517,6 +525,8 @@ spec:
         value: PLACEHOLDER-bucket
       - name: CHECKPOINT_PREFIX
         value: main/checkpoints
+      - name: KUBECORE_RUN_ID
+        value: '{{workflow.name}}'
       volumeMounts:
       - name: mlflow-svc
         mountPath: /etc/mlflow-svc
@@ -623,6 +633,8 @@ spec:
         value: PLACEHOLDER-bucket
       - name: CHECKPOINT_PREFIX
         value: main/checkpoints
+      - name: KUBECORE_RUN_ID
+        value: '{{workflow.name}}'
       volumeMounts:
       - name: mlflow-svc
         mountPath: /etc/mlflow-svc
@@ -718,6 +730,8 @@ spec:
         value: PLACEHOLDER-bucket
       - name: CHECKPOINT_PREFIX
         value: main/checkpoints
+      - name: KUBECORE_RUN_ID
+        value: '{{workflow.name}}'
       resources:
         requests:
           cpu: '7'
@@ -817,6 +831,8 @@ spec:
         value: PLACEHOLDER-bucket
       - name: CHECKPOINT_PREFIX
         value: main/checkpoints
+      - name: KUBECORE_RUN_ID
+        value: '{{workflow.name}}'
       resources:
         requests:
           cpu: '7'
@@ -1014,10 +1030,6 @@ spec:
     - name: data-ref
       description: 'Config: data.ref'
       value: main
-      enum:
-      - main
-      - exp-aug-v2
-      - v1.3.0
     - name: data-source
       description: 'Config: data.source'
       value: lakefs
