@@ -2859,13 +2859,6 @@ spec:
             yaml.safe_dump(doc, sys.stdout, sort_keys=False)
         CTXEOF
 
-        # Optional dataset-catalog probe output (for the data-ref enum). Best-effort.
-        CATALOG_ARG=""
-        CATALOG_PATH=$(find /tmp/gitops -path "*/${APP_NAME}/${GITOPS_BRANCH}/dataset-catalog.yaml" | head -1 || true)
-        if [ -n "$CATALOG_PATH" ] && [ -f "$CATALOG_PATH" ]; then
-          CATALOG_ARG="--catalog $CATALOG_PATH"
-        fi
-
         # Platform enhancer, isolated from the app checkout: see
         # kubecore-ci-workflows.platformEnhance (kubecore-operator#1161, #1375).
 {{ include "kubecore-ci-workflows.platformEnhance" . | indent 8 }}

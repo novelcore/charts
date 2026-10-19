@@ -170,8 +170,8 @@ the PR head, possibly a fork). Installing it (`pip install -e`) or importing
 from it (PYTHONPATH) ran that code next to the GitHub App token. The enhancer
 needs only the standard library and PyYAML, and reads its inputs as data.
 
-Caller: PyYAML installed, /tmp/context.yaml written, CATALOG_ARG set, the raw
-WFT at /workspace/out/raw-workflow-template.yaml. Writes
+Caller: PyYAML installed, /tmp/context.yaml written, the raw WFT at
+/workspace/out/raw-workflow-template.yaml. Writes
 /workspace/out/workflow-template.yaml. Fails loud: rendering with unknown
 enhancer code is not an option.
 */}}
@@ -211,7 +211,6 @@ OVERLAYEOF
 ( cd /tmp/kubecore-enhancer && python3 -m kubecore.enhance \
     --raw /workspace/out/raw-workflow-template.yaml \
     --context /tmp/context.yaml \
-    $CATALOG_ARG \
     --output /workspace/out/workflow-template.yaml )
 {{- end }}
 

@@ -195,9 +195,9 @@ spec:
         GITOPS_BRANCH="{{`{{workflow.parameters.gitops_branch}}`}}"
         APP_NAME="{{`{{workflow.parameters.app_name}}`}}"
 
-        # Real platform context: the app's pipeline-context.yaml (+ optional
-        # dataset-catalog.yaml) from the gitops repo — identical discovery to
-        # hera-enhance-commit so a PR renders exactly as the merge build will.
+        # Real platform context: the app's pipeline-context.yaml from the gitops
+        # repo — identical discovery to hera-enhance-commit so a PR renders
+        # exactly as the merge build will.
         REPO_URL="https://github.com/${ORG}/${GITOPS_REPO}.git"
         git clone --quiet --depth=1 --branch "${GITOPS_BRANCH}" "${REPO_URL}" /tmp/gitops
         git_assert_no_token /tmp/gitops
@@ -207,7 +207,6 @@ spec:
           echo "       (the KubeApp seeds it at creation — is the app still reconciling?)"
           exit 1
         fi
-        GITOPS_DIR=$(dirname "$CONTEXT_PATH")
         python3 - "$CONTEXT_PATH" > /tmp/context.yaml <<'CTXEOF'
         import sys, yaml
         doc = yaml.safe_load(open(sys.argv[1]))
@@ -217,10 +216,6 @@ spec:
         else:
             yaml.safe_dump(doc, sys.stdout, sort_keys=False)
         CTXEOF
-        CATALOG_ARG=""
-        if [ -f "${GITOPS_DIR}/dataset-catalog.yaml" ]; then
-          CATALOG_ARG="--catalog ${GITOPS_DIR}/dataset-catalog.yaml"
-        fi
 
         # Platform enhancer, isolated from the app checkout: see
         # kubecore-ci-workflows.platformEnhance (kubecore-operator#1161, #1375).
