@@ -2,7 +2,9 @@
 # Tests for the enhancer-drift re-render (kubecore-operator#1199): ml-ci-build
 # records the platform enhancer it rendered with (`enhancer-ref` in the app's
 # pipeline-images), and ml-ci-reconcile re-renders an app whose recorded ref is
-# not the chart's pin. Usage (from the repo root):
+# not the chart's pin. Also the force-mode "already satisfied" no-op: a forced
+# reconcile of a HEAD already built and rendered from the current context by
+# the pin submits nothing (kaos e2e a3c48d99). Usage (from the repo root):
 #
 #   helm template t charts/custom/kubecore-ci-workflows > /tmp/rendered.yaml
 #   bash charts/custom/kubecore-ci-workflows/tests/enhancer-drift/run.sh /tmp/rendered.yaml
@@ -122,9 +124,12 @@ reconcile_build() {
 }
 
 # run_drift: check-drift with the Argo placeholders filled and its fixed paths
-# moved into the sandbox. Sets OUT (stdout+stderr), NEEDS, RC.
+# moved into the sandbox; FORCE / WANT_CTX set the force and context_sha
+# parameters (default: the backstop). Sets OUT (stdout+stderr), NEEDS, RC.
 run_drift() {
   sed -e "s#{{workflow.namespace}}#ci#g" \
+      -e "s#{{workflow.parameters.force}}#${FORCE:-false}#g" \
+      -e "s#{{workflow.parameters.context_sha}}#${WANT_CTX:-}#g" \
       -e "s#{{workflow.parameters.app_name}}#${APP}#g" \
       -e "s#{{workflow.parameters.project_name}}#proj#g" \
       -e "s#{{workflow.parameters.branch}}#dev#g" \
@@ -197,6 +202,63 @@ new_case; cm "$OLD_PIN"
 jq '.data["last-built-sha"] = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"' "$T/cm.json" > "$T/c.tmp" \
   && mv "$T/c.tmp" "$T/cm.json"; run_drift
 expect_has "$OUT" "COMMIT DRIFT" "an unbuilt commit is still reported as commit drift first"
+
+# ── force: already satisfied ─────────────────────────────────────────────────
+# kaos e2e a3c48d99 (2026-10-19): the app-creation ci-sync (force) waited out
+# the webhook build and then rebuilt the same SHA. A HEAD that is built and
+# whose render recorded the current gitops context and the pinned enhancer is
+# already what the force asks for; anything unknown still forces.
+
+new_case; FORCE=true run_drift
+expect_eq "$RC/$NEEDS" "0/false" "force, HEAD built + rendered from the current context by the pin: no build"
+expect_has "$OUT" "FORCED but already satisfied — HEAD ${HEAD_SHA} built and rendered from the current context (${CTX_SHA:0:12}) by enhancer ${PIN}; nothing to do" "force satisfied: says why"
+
+new_case; FORCE=true WANT_CTX="$CTX_SHA" run_drift
+expect_eq "$RC/$NEEDS" "0/false" "force for the context already rendered (context_sha = recorded = gitops): no build"
+
+new_case; FORCE=true WANT_CTX="$(printf 'next' | sha256sum | cut -c1-64)" run_drift
+expect_eq "$RC/$NEEDS" "3/<unset>" "force for a context not yet in gitops: still waits (exit 3)"
+
+new_case
+jq '.data["last-built-sha"] = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"' "$T/cm.json" > "$T/c.tmp" \
+  && mv "$T/c.tmp" "$T/cm.json"; FORCE=true run_drift
+expect_eq "$RC/$NEEDS" "0/true" "force, last build is not HEAD: builds"
+expect_has "$OUT" "FORCED — app created" "force, last build is not HEAD: the usual FORCED line"
+
+new_case; jq 'del(.data["last-built-sha"])' "$T/cm.json" > "$T/c.tmp" && mv "$T/c.tmp" "$T/cm.json"
+FORCE=true run_drift
+expect_eq "$RC/$NEEDS" "0/true" "force, new app (no last-built-sha): builds"
+
+new_case; cm "$PIN" "$(printf 'old' | sha256sum | cut -c1-64)"; FORCE=true run_drift
+expect_eq "$RC/$NEEDS" "0/true" "force, recorded context-sha differs from gitops: builds"
+expect_has "$OUT" "not proven current" "force, not satisfied: says which input is unproven"
+
+new_case; cm "$PIN" "-"; FORCE=true run_drift
+expect_eq "$RC/$NEEDS" "0/true" "force, no context-sha recorded (unknown): builds"
+
+new_case; cm "$OLD_PIN"; FORCE=true run_drift
+expect_eq "$RC/$NEEDS" "0/true" "force, rendered by another enhancer: builds"
+
+new_case; cm "-"; FORCE=true run_drift
+expect_eq "$RC/$NEEDS" "0/true" "force, no enhancer-ref recorded (unknown): builds"
+
+new_case; : > "$T/gitops-context.yaml"; FORCE=true run_drift
+expect_eq "$RC/$NEEDS" "0/true" "force, gitops context empty/unreadable (unknown): builds"
+
+new_case
+cat > "$T/bin/curl" <<EOF
+#!/usr/bin/env bash
+case "\$*" in
+  *"/commits/dev"*) printf '{"sha": "%s"}' "$HEAD_SHA" ;;
+  *) exit 22 ;;
+esac
+EOF
+FORCE=true run_drift
+expect_eq "$RC/$NEEDS" "0/true" "force, gitops context fetch fails (unknown): builds"
+
+new_case; rm -f "$T/cm.json"; FORCE=true run_drift
+expect_eq "$RC" "0" "force, pipeline-images unreadable: never reaches the satisfied check"
+expect_eq "$NEEDS" "false" "force, pipeline-images unreadable: unchanged (gitops NotFound path)"
 
 # ── submit-build carries the pin ──────────────────────────────────────────────
 
