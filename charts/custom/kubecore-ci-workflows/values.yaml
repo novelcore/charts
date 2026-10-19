@@ -109,7 +109,7 @@ tooling:
   # kubectlImage (one pull per node). Runs ml-ci-build's detect-steps,
   # render-wft, hera-enhance-commit, patch-images, status and report,
   # ml-ci-pr-render's hera-enhance-gate, the status and gitops-notify steps of
-  # ci-build and ci-rc-build, the dataset catalog probe and the pending reaper.
+  # ci-build and ci-rc-build and the pending reaper.
   # Those used to `apk add` / `apt-get install` / `pip install` their tools, or
   # download yq and kustomize, when the pod started. python3 here is 3.14; the
   # platform enhancer and render_wft.py need only the standard library and

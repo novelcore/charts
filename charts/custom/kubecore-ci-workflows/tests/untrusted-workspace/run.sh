@@ -154,7 +154,7 @@ enhance_section() {
 for pair in "ml-ci-build hera-enhance-commit" "ml-ci-pr-render hera-enhance-gate"; do
   set -- $pair
   rm -f "$T"/PWNED-* "$T/workspace/out/workflow-template.yaml"
-  { echo 'set -e'; echo 'CATALOG_ARG=""'; enhance_section "$1" "$2"; } > "$T/enhance.sh"
+  { echo 'set -e'; enhance_section "$1" "$2"; } > "$T/enhance.sh"
   OUT=$(cd "$T" && env -u PYTHONPATH sh "$T/enhance.sh" 2>&1); RC=$?
   expect_eq "$RC" "0" "$2: enhance exits 0"
   ANN=$(yq '.metadata.annotations' "$T/workspace/out/workflow-template.yaml" 2>/dev/null)
