@@ -480,6 +480,19 @@ unavailable (a new pod may succeed: githubReportRetry retries exit 75), 1 on
 any other answer (a real refusal: retrying changes nothing). The token only
 travels in the AUTH header and is never logged.
 
+HTTP 404 returns 75 at once: the CI token does not reach the repository yet.
+It is the API side of the race gitClone (0.12.109) handles for the clone: a
+new app's repository joins the project's CI token scope after it is created,
+while its push webhook is already live. In kaos e2e run 1c114130 (2026-10-18,
+ml-ci-build-6mfoi, first build 228s after the app was created) the pending
+step's three calls all answered 404 at 12:35:15, the step exited 1 (not
+retried), and the success step posted its commit status fine at 12:38:43: no
+GitHub Deployment ever existed for the build. GitHub answers 404, not 403, for
+a repository a token cannot see, so 404 is that race, not a refusal. Retrying
+in this pod is pointless (AUTH holds the token read at start); a new pod mounts
+the re-scoped one, so 404 goes straight to githubReportRetry. 401/403/422 stay
+a refusal (1).
+
 Caller: AUTH and ACCEPT set; image has curl.
 */}}
 {{- define "kubecore-ci-workflows.ghApi" -}}
@@ -499,6 +512,10 @@ gh_api() {
               || printf '%s' "${GH_BODY}" | grep -qi 'secondary rate limit'; then _gr=1; fi ;;
     esac
     _gx=$(printf '%s' "${GH_BODY}" | tr -d '\n' | cut -c1-200)
+    if [ "${GH_CODE}" = 404 ]; then
+      echo "GitHub ${_gm} ${_gu#https://api.github.com} answered HTTP 404: ${_gx} — the CI token does not reach this repository yet: a new app's repository joins the project's CI token scope after it is created. Exiting 75 so the step retries with the re-scoped token." >&2
+      rm -rf "${_gt}"; return 75
+    fi
     if [ -z "${_gr}" ]; then
       echo "GitHub ${_gm} ${_gu#https://api.github.com} answered HTTP ${GH_CODE}: ${_gx}" >&2
       rm -rf "${_gt}"; return 1
@@ -523,11 +540,13 @@ ci-build, ci-rc-build and ml-ci-build (ml-ci-rc-build borrows ml-ci-build's
 by templateRef): ONE commit status with target_url into the Argo UI run, plus
 a Deployment rollup whose log/environment URL is the same run. pending creates
 the Deployment; success/failure resolve the Deployment created for this SHA +
-environment.
+environment, and create it themselves when none is listed after 5 lookups (the
+pending step could not create it, e.g. a brand-new repo the CI token did not
+reach yet: see ghApi).
 
 Every call goes through gh_api (ghApi above). A write that still fails no
 longer ends in a WARN and exit 0: the step exits 75 (GitHub unavailable, or
-still no Deployment listed for the SHA after 5 lookups; retried in a new pod by
+the CI token does not reach the repo yet (404); retried in a new pod by
 githubReportRetry) or 1 (GitHub refused), with the HTTP status in the log. Every caller runs
 the step with continueOn failed, so a reporting failure is a red status node
 in the Argo run, never a red (or stopped) build. The commit status and the
@@ -569,6 +588,16 @@ elif ! command -v jq >/dev/null; then
   echo "WARN: jq unavailable — commit status posted, deployment rollup skipped"
 else
   DEP_ID=""
+  # This run's Deployment for SHA + ENVIRONMENT. Sets DEP_ID on success.
+  create_deployment() {
+    if gh_api POST "${API}/deployments" \
+         "{\"ref\":\"${SHA}\",\"environment\":\"${ENVIRONMENT}\",\"auto_merge\":false,\"required_contexts\":[],\"transient_environment\":true,\"description\":\"{{`{{workflow.name}}`}}\"}"; then
+      DEP_ID=$(printf '%s' "${GH_BODY}" | jq -r 'if type == "object" then (.id // empty) else empty end' 2>/dev/null || true)
+      [ -n "${DEP_ID}" ] || report_failed 1 "GitHub created no ${ENVIRONMENT} Deployment for ${SHA}: $(printf '%s' "${GH_BODY}" | tr -d '\n' | cut -c1-200)"
+    else
+      report_failed $? "${ENVIRONMENT} Deployment not created for ${SHA}"
+    fi
+  }
   if [ "${STATE}" = "pending" ]; then
     # Self-heal: a run killed before its exit handler leaves its
     # Deployment in_progress forever. Before creating this run's
@@ -595,26 +624,30 @@ else
     else
       echo "WARN: ${ENVIRONMENT} Deployments not listed (HTTP ${GH_CODE}) — stale ones not inactivated"
     fi
-    if gh_api POST "${API}/deployments" \
-         "{\"ref\":\"${SHA}\",\"environment\":\"${ENVIRONMENT}\",\"auto_merge\":false,\"required_contexts\":[],\"transient_environment\":true,\"description\":\"{{`{{workflow.name}}`}}\"}"; then
-      DEP_ID=$(printf '%s' "${GH_BODY}" | jq -r 'if type == "object" then (.id // empty) else empty end' 2>/dev/null || true)
-      [ -n "${DEP_ID}" ] || report_failed 1 "GitHub created no ${ENVIRONMENT} Deployment for ${SHA}: $(printf '%s' "${GH_BODY}" | tr -d '\n' | cut -c1-200)"
-    else
-      report_failed $? "${ENVIRONMENT} Deployment not created for ${SHA}"
-    fi
+    create_deployment
     DEP_STATE="in_progress"
   else
     # An empty list is retried too (same 5 attempts, 2/4/8/16s): the list
     # endpoint can lag the create, and an empty answer may be what left
-    # e2e-suite-devmove-g77qv's Deployment in_progress. Still empty after
-    # that = exit 75, so a new pod tries again.
+    # e2e-suite-devmove-g77qv's Deployment in_progress.
+    #
+    # Still empty after that = the pending step never created one, so this
+    # step creates it (same payload) and posts the terminal status on it. In
+    # kaos e2e run 1c114130 (2026-10-18, ml-ci-build-6mfoi) the pending step's
+    # create got 404 (the CI token did not reach the brand-new repo yet, see
+    # ghApi), and this step used to exit 75 on the empty list, twice more in
+    # new pods, with the same answer: the build was green and no Deployment
+    # ever existed. The 5 lookups stay ahead of the create so a Deployment the
+    # list merely lags on is not duplicated.
     _ln=1; _lw=2
     while :; do
       if gh_api GET "${API}/deployments?sha=${SHA}&environment=${ENVIRONMENT}&per_page=1"; then
         DEP_ID=$(printf '%s' "${GH_BODY}" | jq -r 'if type == "array" then (.[0].id // empty) else empty end' 2>/dev/null || true)
         [ -z "${DEP_ID}" ] || break
         if [ "${_ln}" -ge 5 ]; then
-          report_failed 75 "no ${ENVIRONMENT} Deployment listed for ${SHA} after ${_ln} lookups (the pending step creates it: see its log) — it stays in_progress"
+          echo "GitHub lists no ${ENVIRONMENT} Deployment for ${SHA} after ${_ln} lookups (the pending step did not create it: see its log) — creating it for the ${STATE} status"
+          create_deployment
+          [ -z "${DEP_ID}" ] || echo "Created ${ENVIRONMENT} Deployment #${DEP_ID} for ${SHA}"
           break
         fi
         echo "GitHub lists no ${ENVIRONMENT} Deployment for ${SHA} yet (lookup ${_ln}/5), retrying in ${_lw}s" >&2
@@ -648,11 +681,17 @@ exit "${REPORT_RC}"
 
 {{/*
 The status step's retry: preemptionRetry plus exit 75, gh_api's "GitHub stayed
-unavailable" (see ghApi). Same limit and backoff (30s, then 60s), so an outage
-gets ~2 minutes on top of the in-pod retries. Re-running is safe: the commit
-status and the terminal Deployment status are idempotent, and a re-run pending
-step inactivates the Deployment an earlier attempt created before creating its
-own.
+unavailable" or "the CI token does not reach the repo yet" (404, see ghApi).
+Same limit and backoff (30s, then 60s) as cloneRetry, which waits out the same
+token re-scope for the clone (0.12.109): an outage gets ~2 minutes on top of
+the in-pod retries, a not-yet-reachable repo ~90s plus pod start-up. Not
+lengthened for the 404: the pending step runs before the clone, so a longer
+budget would hold the build back further, and a pending step that runs out of
+budget no longer loses the Deployment — the terminal step creates it (see
+githubStatusReport). Re-running is safe: the commit status and the terminal
+Deployment status are idempotent, a re-run pending step inactivates the
+Deployment an earlier attempt created before creating its own, and a re-run
+terminal step finds the Deployment an earlier attempt created.
 */}}
 {{- define "kubecore-ci-workflows.githubReportRetry" -}}
 retryStrategy:

@@ -4,7 +4,9 @@
 # in kaos e2e-suite-devmove-g77qv (2026-10-14) the success step's Deployment
 # lookup got no usable answer, logged "WARN: no argo-workflows-dev Deployment
 # resolved ... skipped deployment status", exited 0, and Deployment
-# 7054474542 stayed in_progress forever. Executes the rendered status script
+# 7054474542 stayed in_progress forever. A 404 is a brand-new repo the CI
+# token does not reach yet (kaos e2e 1c114130, 2026-10-18): exit 75, and the
+# terminal step creates a Deployment the pending step could not. Executes the rendered status script
 # of ci-build, ci-rc-build and ml-ci-build against a stub curl (and a stub
 # sleep that records the backoff). Usage (from the repo root):
 #
@@ -43,11 +45,12 @@ expect_not() {
 mkdir -p "$T/bin"
 cat > "$T/bin/curl" <<'STUB'
 #!/bin/sh
-out=""; hdr=""; method=GET; url=""
+out=""; hdr=""; method=GET; url=""; data=""
 while [ $# -gt 0 ]; do
   case "$1" in
     -o) out="$2"; shift ;; -D) hdr="$2"; shift ;; -X) method="$2"; shift ;;
-    -w|-d|-H|--connect-timeout|--max-time) shift ;;
+    -d) data="$2"; shift ;;
+    -w|-H|--connect-timeout|--max-time) shift ;;
     -*) ;; *) url="$1" ;;
   esac; shift
 done
@@ -62,6 +65,7 @@ while read -r m sub codes rafter; do
 done < "$STUB_DIR/plan"
 [ -n "$code" ] || { [ "$method" = POST ] && code=201 || code=200; }
 echo "$method $url $code" >> "$STUB_DIR/calls"
+[ -z "$data" ] || echo "$method $url $data" >> "$STUB_DIR/bodies"
 if [ "$code" = 000 ]; then echo "curl: (7) Failed to connect to api.github.com port 443" >&2; printf '000'; exit 7; fi
 : > "$hdr"; [ -n "$ra" ] && printf 'retry-after: %s\r\n' "$ra" >> "$hdr"
 case "$code" in
@@ -75,6 +79,7 @@ case "$code" in
          *) echo '{}' > "$out" ;;
        esac ;;
   403) echo '{"message":"Resource not accessible by integration"}' > "$out" ;;
+  404) echo '{"message":"Not Found"}' > "$out" ;;
   *) echo '{"message":"Server Error"}' > "$out" ;;
 esac
 printf '%s' "$code"
@@ -88,7 +93,7 @@ printf 'ghs_FAKE_TOKEN_never_logged' > "$T/token"
 
 # run WF STATE ENVIRONMENT, plan on stdin. Sets OUT, RC, CALLS, SLEEPS.
 run() {
-  rm -f "$T"/plan "$T"/calls "$T"/sleeps "$T"/count.*; cat > "$T/plan"; : > "$T/calls"; : > "$T/sleeps"
+  rm -f "$T"/plan "$T"/calls "$T"/sleeps "$T"/bodies "$T"/count.*; cat > "$T/plan"; : > "$T/calls"; : > "$T/sleeps"
   sed -e "s#/etc/github-token/token#$T/token#g" \
       -e "s#{{workflow.parameters.repo_url}}#https://github.com/acme/app.git#g" \
       -e "s#{{workflow.parameters.commit_sha}}#abc123#g" \
@@ -139,13 +144,38 @@ P
   expect_eq "$SLEEPS" "2 4 " "$wf failure: empty lookups back off 2s then 4s"
   expect_has "$OUT" "lists no argo-workflows-dev Deployment for abc123 yet (lookup 1/5), retrying in 2s" "$wf failure: each empty lookup is logged"
   expect_has "$CALLS" "POST https://api.github.com/repos/acme/app/deployments/7054474542/statuses 201" "$wf failure: the late-listed Deployment gets its terminal status"
+  # The e2e 1c114130 case: the pending step never created the Deployment
+  # (404, a brand-new repo), so the list stays [] — the terminal step creates
+  # it and posts its terminal status on it (it used to exit 75, three times).
   run "$wf" failure argo-workflows-dev <<'P'
 GET deployments?sha= 200e
 P
-  expect_eq "$RC" "75" "$wf failure: still [] after 5 lookups exits 75 (retried in a new pod)"
-  expect_eq "$SLEEPS" "2 4 8 16 " "$wf failure: 5 lookups, backoff 2/4/8/16s"
-  expect_has "$OUT" "no argo-workflows-dev Deployment listed for abc123 after 5 lookups" "$wf failure: the missing Deployment is logged"
-  expect_not "$CALLS" "deployments/7054474542/statuses" "$wf failure: no Deployment status is posted without an id"
+  expect_eq "$RC" "0" "$wf failure: still [] after 5 lookups creates the Deployment, exit 0"
+  expect_eq "$SLEEPS" "2 4 8 16 " "$wf failure: 5 lookups (backoff 2/4/8/16s) before creating"
+  expect_has "$OUT" "lists no argo-workflows-dev Deployment for abc123 after 5 lookups" "$wf failure: the missing Deployment is logged"
+  expect_eq "$(grep -c 'POST https://api.github.com/repos/acme/app/deployments 201' "$T/calls")" "1" "$wf failure: exactly one Deployment is created"
+  expect_has "$CALLS" "POST https://api.github.com/repos/acme/app/deployments/4242/statuses 201" "$wf failure: the failure status goes on the created Deployment"
+  expect_has "$OUT" "Posted deployment argo-workflows-dev#4242 status: failure" "$wf failure: the post on the created Deployment is reported"
+  run "$wf" success argo-workflows-dev <<'P'
+GET deployments?sha= 200e
+P
+  expect_eq "$RC" "0" "$wf success: no Deployment ever listed → created, exit 0"
+  expect_has "$CALLS" "POST https://api.github.com/repos/acme/app/deployments/4242/statuses 201" "$wf success: success posted on the created Deployment"
+  expect_has "$(cat "$T/bodies")" 'POST https://api.github.com/repos/acme/app/deployments {"ref":"abc123","environment":"argo-workflows-dev","auto_merge":false,"required_contexts":[],"transient_environment":true,"description":"wf-1"}' "$wf success: the terminal create uses the pending step's payload"
+  # The list lags, then shows the pending step's Deployment: no duplicate.
+  run "$wf" success argo-workflows-dev <<'P'
+GET deployments?sha= 200e,200e,200e,200
+P
+  expect_eq "$RC" "0" "$wf success: [] three times, then listed → exit 0"
+  expect_not "$CALLS" "POST https://api.github.com/repos/acme/app/deployments 201" "$wf success: a lagging list creates no duplicate"
+  expect_has "$CALLS" "POST https://api.github.com/repos/acme/app/deployments/7054474542/statuses 201" "$wf success: success posted on the listed Deployment"
+  # The terminal create can fail like any write: still a retried 75.
+  run "$wf" success argo-workflows-dev <<'P'
+GET deployments?sha= 200e
+POST /deployments 503
+P
+  expect_eq "$RC" "75" "$wf success: a terminal create that stays 503 exits 75"
+  expect_has "$OUT" "argo-workflows-dev Deployment not created for abc123" "$wf success: the failed create is logged"
 
   # 429 with Retry-After: the header wins over the backoff.
   run "$wf" success argo-workflows-dev <<'P'
@@ -181,6 +211,36 @@ P
   expect_eq "$RC" "0" "$wf pending: a failed stale listing is best-effort, a 500 on create is retried"
   expect_has "$OUT" "WARN: argo-workflows-dev Deployments not listed (HTTP 500)" "$wf pending: the listing failure is logged"
   expect_has "$CALLS" "POST https://api.github.com/repos/acme/app/deployments/4242/statuses 201" "$wf pending: the created Deployment goes in_progress"
+
+  # A brand-new repo the CI token does not reach yet answers 404 (kaos e2e
+  # 1c114130, ml-ci-build-6mfoi): exit 75, retried in a new pod, at once
+  # (an in-pod retry would reuse the same token).
+  run "$wf" pending argo-workflows-dev <<'P'
+POST /statuses/abc123 404
+GET deployments?environment= 404
+POST /deployments 404
+P
+  expect_eq "$RC" "75" "$wf pending: 404 on all three calls exits 75 (retried), not 1"
+  expect_eq "$SLEEPS" "" "$wf pending: a 404 is not retried in the pod"
+  expect_has "$OUT" "the CI token does not reach this repository yet" "$wf pending: the 404 is explained"
+  expect_has "$OUT" "ERROR: argo-workflows-dev Deployment not created for abc123 (HTTP 404)" "$wf pending: the failed create is named"
+  run "$wf" success argo-workflows-dev <<'P'
+GET deployments?sha= 404
+P
+  expect_eq "$RC" "75" "$wf success: a 404 lookup exits 75 (retried)"
+  expect_not "$CALLS" "POST https://api.github.com/repos/acme/app/deployments 201" "$wf success: a 404 lookup never creates a Deployment"
+  # Other refusals stay exit 1.
+  run "$wf" pending argo-workflows-dev <<'P'
+POST /statuses/abc123 403
+POST /deployments 403
+P
+  expect_eq "$RC.$SLEEPS" "1." "$wf pending: 403 stays exit 1, not retried"
+  for c in 401 422; do
+    run "$wf" pending argo-workflows-dev <<P
+POST /statuses/abc123 $c
+P
+    expect_eq "$RC" "1" "$wf pending: $c on the commit status stays exit 1"
+  done
 
   # environment "" = statuses only.
   run "$wf" success "" <<'P'
