@@ -62,6 +62,8 @@ spec:
         value: PLACEHOLDER-bucket
       - name: CHECKPOINT_PREFIX
         value: main/checkpoints
+      - name: KUBECORE_RUN_ID
+        value: '{{workflow.name}}'
       resources:
         requests:
           cpu: '7'
@@ -149,6 +151,8 @@ spec:
         value: PLACEHOLDER-bucket
       - name: CHECKPOINT_PREFIX
         value: main/checkpoints
+      - name: KUBECORE_RUN_ID
+        value: '{{workflow.name}}'
       resources:
         requests:
           cpu: '7'
@@ -298,53 +302,61 @@ spec:
       - -c
       - "\nSTAGEOUT = r\"\"\"\n# F-05 stage-out: the step's declared outputs (/work/output/<name>.json,\n\
         # what Argo would have read as outputs.parameters in-cluster) go to lakeFS\n\
-        # at hpc-outputs/{wf-uid}/{step}/ on the run's branch; the waiter fetches\n\
-        # them back into the twin's outputs so downstream steps see real values.\n\
-        import json, os, pathlib, urllib.parse, urllib.request\nbase = os.environ['LAKEFS_ENDPOINT'].rstrip('/')\
+        # at hpc-outputs/{wf-uid}/{step}/ on the project's outputs branch (the run's\n\
+        # dataset branch on a project without one); the waiter fetches them back\n\
+        # into the twin's outputs so downstream steps see real values.\nimport json,\
+        \ os, pathlib, urllib.parse, urllib.request\nbase = os.environ['LAKEFS_ENDPOINT'].rstrip('/')\
         \ + '/api/v1'\nH = {'Authorization': 'Bearer ' + os.environ['LAKEFS_BEARER_TOKEN']}\n\
-        repo = os.environ['DATASET_REPO']; branch = os.environ.get('DATASET_REF')\
-        \ or 'main'\nprefix = 'hpc-outputs/%s/%s/' % (os.environ['WF_UID'], os.environ['STEP_NAME'])\n\
-        out = pathlib.Path(os.environ['KAOS_WORK']) / 'output'\nfor name in [n for\
-        \ n in os.environ.get('STEP_OUTPUTS', '').split(',') if n]:\n    f = out /\
-        \ (name + '.json')\n    if not f.exists():\n        print('stage-out: no',\
-        \ f, flush=True); continue\n    data = f.read_bytes()\n    body = (b'--B\\\
-        r\\nContent-Disposition: form-data; name=\"content\"; filename=\"f\"\\r\\\
-        n'\n            b'Content-Type: application/octet-stream\\r\\n\\r\\n' + data\
-        \ + b'\\r\\n--B--\\r\\n')\n    q = urllib.parse.urlencode({'path': prefix\
-        \ + name + '.json'})\n    req = urllib.request.Request(base + '/repositories/%s/branches/%s/objects?%s'\
+        repo = os.environ['DATASET_REPO']\nbranch = os.environ.get('OUTPUTS_BRANCH')\
+        \ or os.environ.get('DATASET_REF') or 'main'\nprefix = 'hpc-outputs/%s/%s/'\
+        \ % (os.environ['WF_UID'], os.environ['STEP_NAME'])\nout = pathlib.Path(os.environ['KAOS_WORK'])\
+        \ / 'output'\nfor name in [n for n in os.environ.get('STEP_OUTPUTS', '').split(',')\
+        \ if n]:\n    f = out / (name + '.json')\n    if not f.exists():\n       \
+        \ print('stage-out: no', f, flush=True); continue\n    data = f.read_bytes()\n\
+        \    body = (b'--B\\r\\nContent-Disposition: form-data; name=\"content\";\
+        \ filename=\"f\"\\r\\n'\n            b'Content-Type: application/octet-stream\\\
+        r\\n\\r\\n' + data + b'\\r\\n--B--\\r\\n')\n    q = urllib.parse.urlencode({'path':\
+        \ prefix + name + '.json'})\n    req = urllib.request.Request(base + '/repositories/%s/branches/%s/objects?%s'\
         \ % (repo, branch, q),\n                                 data=body, method='POST',\n\
         \                                 headers=dict(H, **{'Content-Type': 'multipart/form-data;\
         \ boundary=B'}))\n    urllib.request.urlopen(req, timeout=120).read()\n  \
         \  print('stage-out:', name, len(data), 'bytes ->', prefix, flush=True)\n\"\
         \"\"\nimport base64, json, os, shlex, signal, sys, time, urllib.parse, urllib.request\n\
         \n# F-04 stage-in, run ON the compute node (system python3, stdlib only):\n\
-        # resolve ref -> commit, download every object of that version from the\n\
-        # lakeFS PUBLIC endpoint (bearer through oauth2-proxy \u2014 the in-cluster\n\
-        # S3-gateway/manifest streaming path is blocked by the SSO front\n# off-cluster)\
-        \ into a Lustre cache keyed by commit, parallel + resumable\n# (size-matched\
-        \ files are skipped, .part rename is atomic). Rides to the\n# node base64-encoded\
-        \ in the job environment.\nSTAGEIN = \"\"\"\nimport concurrent.futures, json,\
-        \ os, pathlib, sys, urllib.parse, urllib.request\nEP = os.environ['LAKEFS_ENDPOINT'].rstrip('/')\n\
+        # take the commit dataset-loading pinned (DATASET_COMMIT) or resolve\n# ref\
+        \ -> commit, download the dataset/ folder of that version (the whole ref\n\
+        # only for data uploaded before the dataset/ layout) from the lakeFS PUBLIC\n\
+        # endpoint (bearer through oauth2-proxy \u2014 the in-cluster S3-gateway/manifest\n\
+        # streaming path is blocked by the SSO front off-cluster) into a Lustre cache\n\
+        # keyed by commit, parallel + resumable (size-matched files are skipped,\n\
+        # .part rename is atomic). Rides to the node base64-encoded in the job\n#\
+        \ environment.\nSTAGEIN = \"\"\"\nimport concurrent.futures, json, os, pathlib,\
+        \ sys, urllib.parse, urllib.request\nEP = os.environ['LAKEFS_ENDPOINT'].rstrip('/')\n\
         H = {'Authorization': 'Bearer ' + os.environ['LAKEFS_BEARER_TOKEN']}\nREPO,\
         \ REF = os.environ['DATASET_REPO'], os.environ['DATASET_REF']\ndef get(url):\n\
         \    return urllib.request.urlopen(\n        urllib.request.Request(url, headers=H),\
         \ timeout=120)\nbase = EP + '/api/v1/repositories/' + urllib.parse.quote(REPO,\
-        \ safe='')\n# ref -> tip commit via the commit LOG (amount=1). GET /refs/{ref}\
-        \ does not\n# exist on our lakeFS version (404, live job 5143633) \u2014 the\
-        \ seeded loader's\n# /refs/{ref}/commits endpoint is the proven one.\ncommit\
-        \ = json.load(get(base + '/refs/' + urllib.parse.quote(REF, safe='')\n   \
-        \                    + '/commits?amount=1'))['results'][0]['id']\ndest = pathlib.Path(os.environ['DATASET_CACHE'])\
-        \ / REPO / commit\nopen(os.environ['DATASET_DIRFILE'], 'w').write(str(dest))\n\
-        if (dest / '.complete').exists():\n    print('stage-in: cache hit', dest,\
-        \ flush=True)\n    sys.exit(0)\nobjs, after = [], ''\nwhile True:\n    page\
-        \ = json.load(get(base + '/refs/' + commit + '/objects/ls?'\n            \
-        \             + urllib.parse.urlencode(\n                             {'amount':\
-        \ 1000, 'after': after})))\n    objs += [r for r in page.get('results') or\
-        \ []\n             if r.get('path_type') == 'object']\n    pg = page.get('pagination')\
-        \ or {}\n    if not pg.get('has_more'):\n        break\n    after = pg.get('next_offset')\
-        \ or ''\nprint('stage-in:', len(objs), 'objects @', commit[:12], flush=True)\n\
-        def fetch(o):\n    p = dest / o['path']\n    if p.exists() and p.stat().st_size\
-        \ == o.get('size_bytes'):\n        return 0\n    p.parent.mkdir(parents=True,\
+        \ safe='')\n# The commit dataset-loading pinned, so this step reads exactly\
+        \ what the\n# in-cluster steps read. Without one (older step code): ref ->\
+        \ tip commit via\n# the commit LOG (amount=1). GET /refs/{ref} does not exist\
+        \ on our lakeFS\n# version (404, live job 5143633) \u2014 /refs/{ref}/commits\
+        \ is the proven one.\ncommit = os.environ.get('DATASET_COMMIT') or json.load(\n\
+        \    get(base + '/refs/' + urllib.parse.quote(REF, safe='')\n        + '/commits?amount=1'))['results'][0]['id']\n\
+        dest = pathlib.Path(os.environ['DATASET_CACHE']) / REPO / commit\nopen(os.environ['DATASET_DIRFILE'],\
+        \ 'w').write(str(dest))\nif (dest / '.complete').exists():\n    print('stage-in:\
+        \ cache hit', dest, flush=True)\n    sys.exit(0)\ndef ls(prefix):\n    objs,\
+        \ after = [], ''\n    while True:\n        page = json.load(get(base + '/refs/'\
+        \ + commit + '/objects/ls?'\n                             + urllib.parse.urlencode(\n\
+        \                                 {'amount': 1000, 'after': after,\n     \
+        \                             'prefix': prefix})))\n        objs += [r for\
+        \ r in page.get('results') or []\n                 if r.get('path_type') ==\
+        \ 'object']\n        pg = page.get('pagination') or {}\n        if not pg.get('has_more'):\n\
+        \            return objs\n        after = pg.get('next_offset') or ''\n# Only\
+        \ the dataset: the branch may also hold other files (checkpoints of\n# older\
+        \ runs). Data uploaded before the dataset/ layout sits at the root.\nobjs\
+        \ = ls('dataset/') or ls('')\nprint('stage-in:', len(objs), 'objects @', commit[:12],\
+        \ flush=True)\ndef fetch(o):\n    p = dest / o['path']\n    if p.exists()\
+        \ and p.stat().st_size == o.get('size_bytes'):\n        return 0\n    p.parent.mkdir(parents=True,\
         \ exist_ok=True)\n    tmp = str(p) + '.part'\n    with get(base + '/refs/'\
         \ + commit + '/objects?'\n             + urllib.parse.urlencode({'path': o['path']}))\
         \ as r:\n        with open(tmp, 'wb') as f:\n            while True:\n   \
@@ -466,13 +478,24 @@ spec:
         \ as bare words and exited 2).\n# strict=False tolerates control characters\
         \ inside strings \u2014 belt-and-braces\n# for any substitution path the render-side\
         \ toJson escaping didn't cover.\ncmd = ' '.join(shlex.quote(t) for t in json.loads(\n\
-        \    os.environ.get('STEP_COMMAND') or '[]', strict=False))\n\njid = None\n\
-        \n\ndef find_active():\n    for j in (get(API + '/jobs').get('jobs') or []):\n\
-        \        st = j.get('job_state') or []\n        if j.get('name') == jobname\
-        \ and any(\n                x in ('PENDING', 'RUNNING', 'SUSPENDED') for x\
-        \ in st):\n            return j.get('job_id')\n    return None\n\n\ndef submit():\n\
-        \    HPC = hpc_class()\n    reg = ''\n    try:\n        r = urllib.request.Request(\n\
-        \            'http://metadata.google.internal/computeMetadata/v1/instance/'\n\
+        \    os.environ.get('STEP_COMMAND') or '[]', strict=False))\n\n\ndef pinned_commit():\n\
+        \    \"\"\"The lakeFS commit dataset-loading resolved. It rides in this step's\
+        \ own\n    command, already pair-aware: dataset-loading's --manifest-summary\n\
+        \    ({commit}), or model-training's --training-result ({dataset_commit})\
+        \ for\n    the steps after training. So the HPC copy stages exactly what the\n\
+        \    in-cluster steps read. \"\" when neither carries one (older step code).\"\
+        \"\"\n    toks = json.loads(os.environ.get('STEP_COMMAND') or '[]', strict=False)\n\
+        \    for flag, value in zip(toks, toks[1:]):\n        key = {'--manifest-summary':\
+        \ 'commit',\n               '--training-result': 'dataset_commit'}.get(flag)\n\
+        \        if key:\n            try:\n                commit = str(json.loads(value).get(key)\
+        \ or '')\n            except (ValueError, AttributeError):\n             \
+        \   commit = ''\n            if commit:\n                return commit\n \
+        \   return ''\n\njid = None\n\n\ndef find_active():\n    for j in (get(API\
+        \ + '/jobs').get('jobs') or []):\n        st = j.get('job_state') or []\n\
+        \        if j.get('name') == jobname and any(\n                x in ('PENDING',\
+        \ 'RUNNING', 'SUSPENDED') for x in st):\n            return j.get('job_id')\n\
+        \    return None\n\n\ndef submit():\n    HPC = hpc_class()\n    reg = ''\n\
+        \    try:\n        r = urllib.request.Request(\n            'http://metadata.google.internal/computeMetadata/v1/instance/'\n\
         \            'service-accounts/default/token',\n            headers={'Metadata-Flavor':\
         \ 'Google'})\n        reg = json.load(urllib.request.urlopen(r, timeout=5)).get(\n\
         \            'access_token', '')\n    except Exception as e:\n        print('no\
@@ -535,21 +558,28 @@ spec:
         \ or 0),\n           'STEP_CMD=' + cmd, 'STEP_WORKDIR=' + fetch_workdir(img,\
         \ reg),\n           'WF_UID=' + (os.environ.get('WF_UID') or ''),\n      \
         \     'STEP_NAME=' + (os.environ.get('STEP_NAME') or ''),\n           'STEP_OUTPUTS='\
-        \ + (os.environ.get('STEP_OUTPUTS') or '')]\n    global WALLET, WALLET_EXP\n\
-        \    wallet = WALLET = mint_wallet()\n    WALLET_EXP = wallet_exp(wallet)\n\
-        \    if wallet:\n        # Public endpoints only, short-lived bearer only\
-        \ (T-03). MLflow's\n        # client honors MLFLOW_TRACKING_TOKEN natively;\
-        \ the stage-in and any\n        # in-step lakeFS API calls ride the same bearer\
-        \ through oauth2-proxy.\n        mlflow_url = os.environ.get('MLFLOW_EXTERNAL_URL')\
-        \ or ''\n        lakefs_url = os.environ.get('LAKEFS_EXTERNAL_URL') or ''\n\
-        \        if mlflow_url:\n            env += ['MLFLOW_TRACKING_URI=' + mlflow_url,\n\
-        \                    'MLFLOW_TRACKING_TOKEN=' + wallet]\n        if lakefs_url:\n\
-        \            env += ['LAKEFS_ENDPOINT=' + lakefs_url,\n                  \
-        \  'LAKEFS_BEARER_TOKEN=' + wallet,\n                    'DATASET_REPO=' +\
-        \ (os.environ.get('DATASET_REPO') or ''),\n                    'DATASET_REF='\
-        \ + (os.environ.get('DATASET_REF') or ''),\n                    'STAGEIN_B64='\n\
-        \                    + base64.b64encode(STAGEIN.encode()).decode(),\n    \
-        \                'STAGEOUT_B64='\n                    + base64.b64encode(STAGEOUT.encode()).decode()]\n\
+        \ + (os.environ.get('STEP_OUTPUTS') or '')]\n    # Same checkpoint location\
+        \ + run id as the in-cluster copy; without them\n    # training fell back\
+        \ to {ref}/checkpoints/ on the dataset branch. Only when\n    # set: step\
+        \ code reads os.environ.get(..., default), so an empty value\n    # would\
+        \ override its own default.\n    env += [k + '=' + os.environ[k] for k in\n\
+        \            ('CHECKPOINT_BUCKET', 'CHECKPOINT_PREFIX', 'KUBECORE_RUN_ID')\n\
+        \            if os.environ.get(k)]\n    global WALLET, WALLET_EXP\n    wallet\
+        \ = WALLET = mint_wallet()\n    WALLET_EXP = wallet_exp(wallet)\n    if wallet:\n\
+        \        # Public endpoints only, short-lived bearer only (T-03). MLflow's\n\
+        \        # client honors MLFLOW_TRACKING_TOKEN natively; the stage-in and\
+        \ any\n        # in-step lakeFS API calls ride the same bearer through oauth2-proxy.\n\
+        \        mlflow_url = os.environ.get('MLFLOW_EXTERNAL_URL') or ''\n      \
+        \  lakefs_url = os.environ.get('LAKEFS_EXTERNAL_URL') or ''\n        if mlflow_url:\n\
+        \            env += ['MLFLOW_TRACKING_URI=' + mlflow_url,\n              \
+        \      'MLFLOW_TRACKING_TOKEN=' + wallet]\n        if lakefs_url:\n      \
+        \      env += ['LAKEFS_ENDPOINT=' + lakefs_url,\n                    'LAKEFS_BEARER_TOKEN='\
+        \ + wallet,\n                    'DATASET_REPO=' + (os.environ.get('DATASET_REPO')\
+        \ or ''),\n                    'DATASET_REF=' + (os.environ.get('DATASET_REF')\
+        \ or ''),\n                    'DATASET_COMMIT=' + pinned_commit(),\n    \
+        \                'OUTPUTS_BRANCH=' + (os.environ.get('OUTPUTS_BRANCH') or\
+        \ ''),\n                    'STAGEIN_B64='\n                    + base64.b64encode(STAGEIN.encode()).decode(),\n\
+        \                    'STAGEOUT_B64='\n                    + base64.b64encode(STAGEOUT.encode()).decode()]\n\
         \    body = {'job': {'name': jobname, 'partition': HPC['partition'],\n   \
         \                 'account': ident['account'],\n                    'qos':\
         \ HPC.get('qos') or 'default',\n                    'time_limit': int(os.environ.get('SLURM_TIME_LIMIT')\
@@ -580,49 +610,49 @@ spec:
         \    \"\"\"F-05: pull the step's staged-out outputs back into the twin.\"\"\
         \"\n    base = (os.environ.get('LAKEFS_EXTERNAL_URL') or '').rstrip('/')\n\
         \    repo = os.environ.get('DATASET_REPO') or ''\n    if not (OUTPUT_NAMES\
-        \ and base and repo and WALLET):\n        return\n    branch = os.environ.get('DATASET_REF')\
-        \ or 'main'\n    for n in OUTPUT_NAMES:\n        q = urllib.parse.urlencode({'path':\
-        \ 'hpc-outputs/%s/%s/%s.json' % (\n            os.environ.get('WF_UID', ''),\
-        \ os.environ.get('STEP_NAME', ''), n)})\n        try:\n            data =\
-        \ urllib.request.urlopen(urllib.request.Request(\n                base + '/api/v1/repositories/%s/refs/%s/objects?%s'\
-        \ % (repo, branch, q),\n                headers={'Authorization': 'Bearer\
-        \ ' + WALLET}), timeout=60).read()\n            open('/tmp/outputs/%s.json'\
-        \ % n, 'wb').write(data)\n            print('output', n, ':', len(data), 'bytes',\
-        \ flush=True)\n        except Exception as e:\n            print('output',\
-        \ n, 'not staged out (default {}):', e, flush=True)\n\n\nTERMINAL = ('COMPLETED',\
-        \ 'FAILED', 'CANCELLED', 'TIMEOUT', 'NODE_FAIL',\n            'PREEMPTED',\
-        \ 'OUT_OF_MEMORY')\n# The registry pull token (GCE metadata, 1 h) is minted\
-        \ at submit time and\n# cannot be refreshed inside a queued job, so every\
-        \ queue wait longer than an\n# hour costs one failed pull (exit 231) and a\
-        \ resubmission. Bounded, not\n# once: a second long wait after the first resubmit\
-        \ must not strand the run.\nPULL_RESUBMITS = 3\nresubmits = 0\nwhile True:\n\
-        \    time.sleep(30)\n    try:\n        job = (get(SDB + '/job/' + str(jid)).get('jobs')\
-        \ or [{}])[0]\n        st = (job.get('state') or {}).get('current') or []\n\
-        \        print('state:', st, flush=True)\n        if ('PENDING' in st and\
-        \ WALLET_EXP\n                and time.time() > WALLET_EXP - WALLET_MARGIN_S):\n\
-        \            print('wallet expires within', WALLET_MARGIN_S // 60,\n     \
-        \             'min and the job is still queued - resubmitting with a'\n  \
-        \                ' fresh wallet (queue position is lost, credentials are'\n\
-        \                  ' not)', flush=True)\n            cancel(jid)\n       \
-        \     jid = submit()\n            open('/tmp/slurm-job-id', 'w').write(str(jid))\n\
-        \            continue\n        if any(x in TERMINAL for x in st):\n      \
-        \      rc = ((job.get('exit_code') or {}).get('return_code')\n           \
-        \       or {}).get('number')\n            print('terminal:', st, 'exit:',\
-        \ rc, flush=True)\n            print('job comment:', job.get('comment'), flush=True)\n\
-        \            if 'FAILED' in st and rc == 231 and resubmits < PULL_RESUBMITS:\n\
-        \                # A cache-missing pull after a LONG queue wait runs with\
-        \ the\n                # registry token minted at submit time \u2014 GCP tokens\
-        \ live 1h,\n                # so it can be stale (live job 5143859: 3.5h queue\
-        \ -> 231;\n                # 5150371: 65 min queue -> 231). Resubmitting mints\n\
-        \                # everything fresh; queue age is lost only after an actual\n\
-        \                # failure.\n                resubmits += 1\n            \
-        \    print('pull failed - resubmitting with fresh credentials'\n         \
-        \             ' (%d/%d)' % (resubmits, PULL_RESUBMITS), flush=True)\n    \
-        \            jid = submit()\n                open('/tmp/slurm-job-id', 'w').write(str(jid))\n\
-        \                continue\n            if 'COMPLETED' in st:\n           \
-        \     fetch_outputs()\n            sys.exit(0 if ('COMPLETED' in st and rc\
-        \ in (0, None)) else 1)\n    except SystemExit:\n        raise\n    except\
-        \ Exception as e:\n        print('poll error (transient):', e, flush=True)\n"
+        \ and base and repo and WALLET):\n        return\n    branch = os.environ.get('OUTPUTS_BRANCH')\
+        \ or os.environ.get('DATASET_REF') or 'main'\n    for n in OUTPUT_NAMES:\n\
+        \        q = urllib.parse.urlencode({'path': 'hpc-outputs/%s/%s/%s.json' %\
+        \ (\n            os.environ.get('WF_UID', ''), os.environ.get('STEP_NAME',\
+        \ ''), n)})\n        try:\n            data = urllib.request.urlopen(urllib.request.Request(\n\
+        \                base + '/api/v1/repositories/%s/refs/%s/objects?%s' % (repo,\
+        \ branch, q),\n                headers={'Authorization': 'Bearer ' + WALLET}),\
+        \ timeout=60).read()\n            open('/tmp/outputs/%s.json' % n, 'wb').write(data)\n\
+        \            print('output', n, ':', len(data), 'bytes', flush=True)\n   \
+        \     except Exception as e:\n            print('output', n, 'not staged out\
+        \ (default {}):', e, flush=True)\n\n\nTERMINAL = ('COMPLETED', 'FAILED', 'CANCELLED',\
+        \ 'TIMEOUT', 'NODE_FAIL',\n            'PREEMPTED', 'OUT_OF_MEMORY')\n# The\
+        \ registry pull token (GCE metadata, 1 h) is minted at submit time and\n#\
+        \ cannot be refreshed inside a queued job, so every queue wait longer than\
+        \ an\n# hour costs one failed pull (exit 231) and a resubmission. Bounded,\
+        \ not\n# once: a second long wait after the first resubmit must not strand\
+        \ the run.\nPULL_RESUBMITS = 3\nresubmits = 0\nwhile True:\n    time.sleep(30)\n\
+        \    try:\n        job = (get(SDB + '/job/' + str(jid)).get('jobs') or [{}])[0]\n\
+        \        st = (job.get('state') or {}).get('current') or []\n        print('state:',\
+        \ st, flush=True)\n        if ('PENDING' in st and WALLET_EXP\n          \
+        \      and time.time() > WALLET_EXP - WALLET_MARGIN_S):\n            print('wallet\
+        \ expires within', WALLET_MARGIN_S // 60,\n                  'min and the\
+        \ job is still queued - resubmitting with a'\n                  ' fresh wallet\
+        \ (queue position is lost, credentials are'\n                  ' not)', flush=True)\n\
+        \            cancel(jid)\n            jid = submit()\n            open('/tmp/slurm-job-id',\
+        \ 'w').write(str(jid))\n            continue\n        if any(x in TERMINAL\
+        \ for x in st):\n            rc = ((job.get('exit_code') or {}).get('return_code')\n\
+        \                  or {}).get('number')\n            print('terminal:', st,\
+        \ 'exit:', rc, flush=True)\n            print('job comment:', job.get('comment'),\
+        \ flush=True)\n            if 'FAILED' in st and rc == 231 and resubmits <\
+        \ PULL_RESUBMITS:\n                # A cache-missing pull after a LONG queue\
+        \ wait runs with the\n                # registry token minted at submit time\
+        \ \u2014 GCP tokens live 1h,\n                # so it can be stale (live job\
+        \ 5143859: 3.5h queue -> 231;\n                # 5150371: 65 min queue ->\
+        \ 231). Resubmitting mints\n                # everything fresh; queue age\
+        \ is lost only after an actual\n                # failure.\n             \
+        \   resubmits += 1\n                print('pull failed - resubmitting with\
+        \ fresh credentials'\n                      ' (%d/%d)' % (resubmits, PULL_RESUBMITS),\
+        \ flush=True)\n                jid = submit()\n                open('/tmp/slurm-job-id',\
+        \ 'w').write(str(jid))\n                continue\n            if 'COMPLETED'\
+        \ in st:\n                fetch_outputs()\n            sys.exit(0 if ('COMPLETED'\
+        \ in st and rc in (0, None)) else 1)\n    except SystemExit:\n        raise\n\
+        \    except Exception as e:\n        print('poll error (transient):', e, flush=True)\n"
       volumeMounts:
       - name: mlflow-svc
         mountPath: /etc/mlflow-svc
@@ -677,6 +707,14 @@ spec:
         value: '{{workflow.parameters.lakefs-repo}}'
       - name: DATASET_REF
         value: ''
+      - name: OUTPUTS_BRANCH
+        value: ''
+      - name: CHECKPOINT_BUCKET
+        value: PLACEHOLDER-bucket
+      - name: CHECKPOINT_PREFIX
+        value: main/checkpoints
+      - name: KUBECORE_RUN_ID
+        value: '{{workflow.name}}'
     outputs:
       parameters:
       - name: slurm-job-id

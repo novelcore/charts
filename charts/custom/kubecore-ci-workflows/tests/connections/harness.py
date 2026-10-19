@@ -57,16 +57,15 @@ def _fx(kind, app, project, source, catalog=None):
 
 _YOLO = "hera-raw/yolo-pipelines-template.yaml"
 _HERA = "hera-raw/hera-pipeline-template.yaml"
-_DSC = "dataset-catalog.yaml"
 _KL = "kubeline-yolo-mlops.yaml"
 
 FIXTURES = {
-    "yolo-pipeline": _fx("hera", "yolo-pipeline", "vision", _YOLO, _DSC),
-    "data-clean": _fx("hera", "data-clean", "vision", _HERA, _DSC),
-    "dataset-gen-service": _fx("hera", "dataset-gen-service", "vision", _HERA, _DSC),
-    "yolo-vision-pipeline": _fx("hera", "yolo-vision-pipeline", "data-room", _YOLO, _DSC),
-    "yolo-meluxina-poc": _fx("hera", "yolo-meluxina-poc", "data-room", _YOLO, _DSC),
-    "demo": _fx("hera", "demo", "data-room", _HERA, _DSC),
+    "yolo-pipeline": _fx("hera", "yolo-pipeline", "vision", _YOLO),
+    "data-clean": _fx("hera", "data-clean", "vision", _HERA),
+    "dataset-gen-service": _fx("hera", "dataset-gen-service", "vision", _HERA),
+    "yolo-vision-pipeline": _fx("hera", "yolo-vision-pipeline", "data-room", _YOLO),
+    "yolo-meluxina-poc": _fx("hera", "yolo-meluxina-poc", "data-room", _YOLO),
+    "demo": _fx("hera", "demo", "data-room", _HERA),
     "kubeline-static": _fx("render-wft", "kubeline-static", "vision", _KL),
     "kubeline-static-hpc": _fx("render-wft", "kubeline-static-hpc", "data-room", _KL),
     "kubeline-live-hpc": _fx("render-wft", "kubeline-live-hpc", "data-room", "kubeline-live.yaml",
