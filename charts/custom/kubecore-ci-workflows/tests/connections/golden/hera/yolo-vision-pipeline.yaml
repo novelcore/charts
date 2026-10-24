@@ -1354,6 +1354,11 @@ spec:
       secret:
         secretName: meluxina-jwt
         optional: true
+    - name: meluxina-staging
+      secret:
+        secretName: meluxina-staging
+        defaultMode: 256
+        optional: true
     container:
       image: python:3.12-alpine
       command:
@@ -1380,27 +1385,28 @@ spec:
         \                                 headers=dict(H, **{'Content-Type': 'multipart/form-data;\
         \ boundary=B'}))\n    urllib.request.urlopen(req, timeout=120).read()\n  \
         \  print('stage-out:', name, len(data), 'bytes ->', prefix, flush=True)\n\"\
-        \"\"\nimport base64, json, os, shlex, signal, sys, time, urllib.parse, urllib.request\n\
-        \n# F-04 stage-in, run ON the compute node (system python3, stdlib only):\n\
-        # take the commit dataset-loading pinned (DATASET_COMMIT) or resolve\n# ref\
-        \ -> commit, download the dataset/ folder of that version (the whole ref\n\
-        # only for data uploaded before the dataset/ layout) from the lakeFS PUBLIC\n\
-        # endpoint (bearer through oauth2-proxy \u2014 the in-cluster S3-gateway/manifest\n\
-        # streaming path is blocked by the SSO front off-cluster) into a Lustre cache\n\
-        # keyed by commit, parallel + resumable (size-matched files are skipped,\n\
-        # .part rename is atomic). Rides to the node base64-encoded in the job\n#\
-        \ environment.\nSTAGEIN = \"\"\"\nimport concurrent.futures, json, os, pathlib,\
-        \ sys, urllib.parse, urllib.request\nEP = os.environ['LAKEFS_ENDPOINT'].rstrip('/')\n\
-        H = {'Authorization': 'Bearer ' + os.environ['LAKEFS_BEARER_TOKEN']}\nREPO,\
-        \ REF = os.environ['DATASET_REPO'], os.environ['DATASET_REF']\ndef get(url):\n\
-        \    return urllib.request.urlopen(\n        urllib.request.Request(url, headers=H),\
-        \ timeout=120)\nbase = EP + '/api/v1/repositories/' + urllib.parse.quote(REPO,\
-        \ safe='')\n# The commit dataset-loading pinned, so this step reads exactly\
-        \ what the\n# in-cluster steps read. Without one (older step code): ref ->\
-        \ tip commit via\n# the commit LOG (amount=1). GET /refs/{ref} does not exist\
-        \ on our lakeFS\n# version (404, live job 5143633) \u2014 /refs/{ref}/commits\
-        \ is the proven one.\ncommit = os.environ.get('DATASET_COMMIT') or json.load(\n\
-        \    get(base + '/refs/' + urllib.parse.quote(REF, safe='')\n        + '/commits?amount=1'))['results'][0]['id']\n\
+        \"\"\nimport base64, json, os, shlex, signal, subprocess, sys, threading,\
+        \ time, urllib.parse, urllib.request\n\n# F-04 stage-in, run ON the compute\
+        \ node (system python3, stdlib only):\n# take the commit dataset-loading pinned\
+        \ (DATASET_COMMIT) or resolve\n# ref -> commit, download the dataset/ folder\
+        \ of that version (the whole ref\n# only for data uploaded before the dataset/\
+        \ layout) from the lakeFS PUBLIC\n# endpoint (bearer through oauth2-proxy\
+        \ \u2014 the in-cluster S3-gateway/manifest\n# streaming path is blocked by\
+        \ the SSO front off-cluster) into a Lustre cache\n# keyed by commit, parallel\
+        \ + resumable (size-matched files are skipped,\n# .part rename is atomic).\
+        \ Rides to the node base64-encoded in the job\n# environment.\nSTAGEIN = \"\
+        \"\"\nimport concurrent.futures, json, os, pathlib, sys, urllib.parse, urllib.request\n\
+        EP = os.environ['LAKEFS_ENDPOINT'].rstrip('/')\nH = {'Authorization': 'Bearer\
+        \ ' + os.environ['LAKEFS_BEARER_TOKEN']}\nREPO, REF = os.environ['DATASET_REPO'],\
+        \ os.environ['DATASET_REF']\ndef get(url):\n    return urllib.request.urlopen(\n\
+        \        urllib.request.Request(url, headers=H), timeout=120)\nbase = EP +\
+        \ '/api/v1/repositories/' + urllib.parse.quote(REPO, safe='')\n# The commit\
+        \ dataset-loading pinned, so this step reads exactly what the\n# in-cluster\
+        \ steps read. Without one (older step code): ref -> tip commit via\n# the\
+        \ commit LOG (amount=1). GET /refs/{ref} does not exist on our lakeFS\n# version\
+        \ (404, live job 5143633) \u2014 /refs/{ref}/commits is the proven one.\n\
+        commit = os.environ.get('DATASET_COMMIT') or json.load(\n    get(base + '/refs/'\
+        \ + urllib.parse.quote(REF, safe='')\n        + '/commits?amount=1'))['results'][0]['id']\n\
         dest = pathlib.Path(os.environ['DATASET_CACHE']) / REPO / commit\nopen(os.environ['DATASET_DIRFILE'],\
         \ 'w').write(str(dest))\nif (dest / '.complete').exists():\n    print('stage-in:\
         \ cache hit', dest, flush=True)\n    sys.exit(0)\ndef ls(prefix):\n    objs,\
@@ -1549,12 +1555,132 @@ spec:
         \        if key:\n            try:\n                commit = str(json.loads(value).get(key)\
         \ or '')\n            except (ValueError, AttributeError):\n             \
         \   commit = ''\n            if commit:\n                return commit\n \
-        \   return ''\n\njid = None\n\n\ndef find_active():\n    for j in (get(API\
-        \ + '/jobs').get('jobs') or []):\n        st = j.get('job_state') or []\n\
-        \        if j.get('name') == jobname and any(\n                x in ('PENDING',\
-        \ 'RUNNING', 'SUSPENDED') for x in st):\n            return j.get('job_id')\n\
-        \    return None\n\n\ndef submit():\n    HPC = hpc_class()\n    reg = ''\n\
-        \    try:\n        r = urllib.request.Request(\n            'http://metadata.google.internal/computeMetadata/v1/instance/'\n\
+        \   return ''\n\n# PRD-HPC-1541 F-03: stage the pinned dataset commit into\
+        \ the project's Lustre\n# cache from a MeluXina LOGIN node before the GPU\
+        \ job is submitted, so the job\n# reads a resident copy instead of downloading\
+        \ on GPU time. The pod talks to\n# the stager the platform installed (~/.kaos/stager.py)\
+        \ through a\n# forced-command key that can run nothing else (Secret meluxina-staging:\
+        \ key +\n# verified host pin). The stager names a base (its newest ready commit\
+        \ of the\n# repo); the pod lists only the lakeFS diff base..commit, or the\
+        \ whole\n# dataset/ for a first copy, and streams one JSON line per file.\
+        \ Unchanged\n# files are hard links of the base. Bytes come from the lakeFS\
+        \ API with the\n# wallet bearer (sent once on stdin, held in memory only)\
+        \ until presigned URLs\n# are enabled (F-05). Any failure returns '' and the\
+        \ job stages in-job as\n# before, saying so (F-06).\nSTAGING_DIR = '/etc/meluxina-staging'\n\
+        LOGIN_HOST, LOGIN_PORT = 'login.lxp.lu', '8822'\nSTAGE_BUDGET_S = 4 * 3600\n\
+        EX_RETRY, EX_NOSPACE = 75, 76\n\n\ndef lakefs_pages(url, wallet, params):\n\
+        \    # Every object of a paginated lakeFS listing (objects/ls or diff).\n\
+        \    after = ''\n    while True:\n        q = urllib.parse.urlencode(dict(params,\
+        \ amount=1000, after=after))\n        page = json.load(urllib.request.urlopen(urllib.request.Request(\n\
+        \            url + '?' + q, headers={'Authorization': 'Bearer ' + wallet}),\
+        \ timeout=120))\n        for r in page.get('results') or []:\n           \
+        \ if r.get('path_type') == 'object':\n                yield r\n        pg\
+        \ = page.get('pagination') or {}\n        if not pg.get('has_more'):\n   \
+        \         return\n        after = pg.get('next_offset') or ''\n\n\ndef stage_plan(api,\
+        \ commit, base, prefix, wallet):\n    # (kind, path, size) per file the stager\
+        \ applies: the two-dot diff against\n    # the base (three-dot would be wrong\
+        \ when the base is not an ancestor), or\n    # every object of the commit\
+        \ for a first copy.\n    if base:\n        for d in lakefs_pages(api + '/refs/%s/diff/%s'\
+        \ % (base, commit), wallet,\n                              {'prefix': prefix,\
+        \ 'type': 'two_dot'}):\n            if d['type'] not in ('added', 'changed',\
+        \ 'removed'):\n                raise ValueError('unexpected diff entry %s\
+        \ for %s' % (d['type'], d['path']))\n            yield d['type'], d['path'],\
+        \ int(d.get('size_bytes') or 0)\n    else:\n        for o in lakefs_pages(api\
+        \ + '/refs/%s/objects/ls' % commit, wallet, {'prefix': prefix}):\n       \
+        \     yield 'added', o['path'], int(o.get('size_bytes') or 0)\n\n\ndef stager(words,\
+        \ feed=None):\n    # One stager subcommand on a login node: (exit code, JSON\
+        \ events). The\n    # feed's records are written while the stager downloads;\
+        \ a feed that\n    # fails mid-way closes stdin without the end record, which\
+        \ the stager\n    # keeps as resumable partial state (exit 75).\n    cmd =\
+        \ ['ssh', '-i', STAGING_DIR + '/id_ed25519', '-p', LOGIN_PORT,\n         \
+        \  '-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=yes',\n           '-o',\
+        \ 'UserKnownHostsFile=' + STAGING_DIR + '/known_hosts',\n           '-o',\
+        \ 'ConnectTimeout=20', '-o', 'ServerAliveInterval=30',\n           '-o', 'ServerAliveCountMax=4',\n\
+        \           hpc_identity()['user'] + '@' + LOGIN_HOST,\n           ' '.join(shlex.quote(str(w))\
+        \ for w in words)]\n    p = subprocess.Popen(cmd, stdin=subprocess.PIPE if\
+        \ feed is not None else subprocess.DEVNULL,\n                         stdout=subprocess.PIPE,\
+        \ stderr=subprocess.PIPE,\n                         universal_newlines=True)\n\
+        \    events = []\n\n    def read():\n        for line in p.stdout:\n     \
+        \       try:\n                ev = json.loads(line)\n            except ValueError:\n\
+        \                print('stager:', line.rstrip(), flush=True)\n           \
+        \     continue\n            events.append(ev)\n            print('stager:',\
+        \ json.dumps(ev, sort_keys=True), flush=True)\n    reader = threading.Thread(target=read,\
+        \ daemon=True)\n    reader.start()\n    failed = None\n    if feed is not\
+        \ None:\n        try:\n            for rec in feed:\n                p.stdin.write(json.dumps(rec)\
+        \ + '\\n')\n        except BrokenPipeError:\n            pass\n        except\
+        \ Exception as e:\n            failed = e\n        try:\n            p.stdin.close()\n\
+        \        except BrokenPipeError:\n            pass\n    rc = p.wait()\n  \
+        \  reader.join(30)\n    err = p.stderr.read().strip()\n    if err:\n     \
+        \   print('stager stderr:', err[-2000:], flush=True)\n    if failed is not\
+        \ None:\n        raise failed\n    return rc, events\n\n\ndef stage_once(repo,\
+        \ ref, commit, lakefs, wallet):\n    # One staging attempt. Returns (path,\
+        \ retry): the ready path, or '' with\n    # whether a later attempt can help.\n\
+        \    rc, ev = stager(['status', '--repo', repo, '--commit', commit, '--ref',\
+        \ ref])\n    st = next((e for e in reversed(ev) if e.get('event') == 'status'),\
+        \ None)\n    if rc != 0 or st is None:\n        return '', rc in (EX_RETRY,\
+        \ 255)\n    if st.get('ready'):\n        print('stage: cache hit', st['path'],\
+        \ flush=True)\n        return st['path'], False\n    api = lakefs + '/api/v1/repositories/'\
+        \ + urllib.parse.quote(repo, safe='')\n    # Only the dataset: the branch\
+        \ may also hold other files. Data uploaded\n    # before the dataset/ layout\
+        \ sits at the root (same rule as the stage-in).\n    prefix = 'dataset/' if\
+        \ next(lakefs_pages(api + '/refs/%s/objects/ls' % commit, wallet,\n      \
+        \                                       {'prefix': 'dataset/'}), None) else\
+        \ ''\n    base = st.get('base') if st.get('base') and st.get('base_prefix')\
+        \ == prefix else None\n    need_bytes = need_files = added = removed = 0\n\
+        \    for kind, _, size in stage_plan(api, commit, base, prefix, wallet):\n\
+        \        if kind == 'removed':\n            removed += 1\n            continue\n\
+        \        need_bytes += size\n        need_files += 1\n        added += kind\
+        \ == 'added'\n    files = (int(st.get('base_files') or 0) if base else 0)\
+        \ + added - removed\n    print('stage: %s@%s %s: %d files to fetch (%.1f MB),\
+        \ %d to delete, %d in the version'\n          % (repo, commit[:12], 'delta\
+        \ on ' + base[:12] if base else 'first copy',\n             need_files, need_bytes\
+        \ / 1e6, removed, files), flush=True)\n\n    def feed():\n        yield {'op':\
+        \ 'auth', 'authorization': 'Bearer ' + wallet}\n        for kind, path, size\
+        \ in stage_plan(api, commit, base, prefix, wallet):\n            if kind ==\
+        \ 'removed':\n                yield {'op': 'delete', 'path': path}\n     \
+        \       else:\n                yield {'op': 'fetch', 'path': path, 'size':\
+        \ size,\n                       'url': api + '/refs/' + commit + '/objects?'\n\
+        \                       + urllib.parse.urlencode({'path': path})}\n      \
+        \  yield {'op': 'end', 'files': files, 'bytes': need_bytes, 'ref': ref, 'prefix':\
+        \ prefix}\n    words = ['stage', '--repo', repo, '--commit', commit, '--ref',\
+        \ ref,\n             '--need-bytes', need_bytes, '--need-files', need_files]\n\
+        \    if base:\n        words += ['--base', base]\n    rc, ev = stager(words,\
+        \ feed())\n    done = next((e for e in reversed(ev) if e.get('event') == 'done'),\
+        \ None)\n    if rc == 0 and done:\n        return done['path'], False\n  \
+        \  if rc == EX_NOSPACE:\n        print('stage: NOT ENOUGH SPACE on MeluXina\
+        \ scratch for this version even after'\n              ' evicting unused versions\
+        \ - free space or raise the quota', flush=True)\n    return '', rc in (EX_RETRY,\
+        \ 255)\n\n\ndef stage_dataset():\n    # The resident path of the pinned commit,\
+        \ or '' (job stages in-job).\n    repo, commit = os.environ.get('DATASET_REPO')\
+        \ or '', pinned_commit()\n    ref = os.environ.get('DATASET_REF') or ''\n\
+        \    lakefs = (os.environ.get('LAKEFS_EXTERNAL_URL') or '').rstrip('/')\n\
+        \    if not (repo and commit and lakefs and os.path.exists(STAGING_DIR + '/id_ed25519')):\n\
+        \        print('stage: skipped (needs the dataset repo, a pinned commit, the\
+        \ lakeFS'\n              ' endpoint and the staging key) - the job stages\
+        \ in-job', flush=True)\n        return ''\n    wallet = mint_wallet()\n  \
+        \  if not wallet:\n        return ''\n    try:\n        if subprocess.call(['sh',\
+        \ '-c', 'command -v ssh >/dev/null || apk add --no-cache -q openssh-client'])\
+        \ != 0:\n            print('stage: no ssh client - the job stages in-job',\
+        \ flush=True)\n            return ''\n    except OSError as e:\n        print('stage:\
+        \ no ssh client (%s) - the job stages in-job' % e, flush=True)\n        return\
+        \ ''\n    deadline, attempt = time.time() + STAGE_BUDGET_S, 0\n    while True:\n\
+        \        attempt += 1\n        try:\n            path, retry = stage_once(repo,\
+        \ ref, commit, lakefs, wallet)\n        except Exception as e:\n         \
+        \   print('stage: attempt', attempt, 'failed:', e, flush=True)\n         \
+        \   path, retry = '', True\n        if path or not retry or time.time() >\
+        \ deadline:\n            break\n        time.sleep(min(60 * attempt, 600))\n\
+        \    if not path:\n        print('stage: NOT STAGED - the job will download\
+        \ the dataset in-job on GPU time',\n              flush=True)\n    return\
+        \ path\n\njid = None\n\n\ndef find_active():\n    for j in (get(API + '/jobs').get('jobs')\
+        \ or []):\n        st = j.get('job_state') or []\n        if j.get('name')\
+        \ == jobname and any(\n                x in ('PENDING', 'RUNNING', 'SUSPENDED')\
+        \ for x in st):\n            return j.get('job_id')\n    return None\n\n\n\
+        STAGED, STAGE_TRIED = '', False\n\n\ndef submit():\n    global STAGED, STAGE_TRIED\n\
+        \    HPC = hpc_class()\n    if not STAGE_TRIED:\n        # Once per pod: a\
+        \ resubmit reuses the staged copy (or the in-job\n        # fallback) instead\
+        \ of spending the staging budget again.\n        STAGE_TRIED = True\n    \
+        \    STAGED = stage_dataset()\n    reg = ''\n    try:\n        r = urllib.request.Request(\n\
+        \            'http://metadata.google.internal/computeMetadata/v1/instance/'\n\
         \            'service-accounts/default/token',\n            headers={'Metadata-Flavor':\
         \ 'Google'})\n        reg = json.load(urllib.request.urlopen(r, timeout=5)).get(\n\
         \            'access_token', '')\n    except Exception as e:\n        print('no\
@@ -1577,10 +1703,17 @@ spec:
         \      # F-04 stage-in: only when the wallet minted AND the run pins a\n \
         \       # dataset. Fails LOUDLY (exit 232) \u2014 silently missing data would\n\
         \        # surface as a cryptic training error hours later.\n        'DATASET_DIR=\"\
-        \"',\n        'if [ -n \"$LAKEFS_BEARER_TOKEN\" ] && [ -n \"$LAKEFS_ENDPOINT\"\
+        \"',\n        # PRD-1541 F-06: the copy staged from a login node, when ready.\
+        \ The\n        # marker is written last, so its presence means complete.\n\
+        \        'if [ -n \"$DATASET_STAGED\" ] && [ -f \"$DATASET_STAGED/.kaos-ready\"\
+        \ ]; then',\n        '  DATASET_DIR=$DATASET_STAGED; touch \"$DATASET_DIR/.kaos-used\"\
+        \ 2>/dev/null',\n        '  echo \"dataset: resident copy $DATASET_DIR\"',\n\
+        \        'elif [ -n \"$LAKEFS_BEARER_TOKEN\" ] && [ -n \"$LAKEFS_ENDPOINT\"\
         \ ] &&'\n        ' [ -n \"$DATASET_REPO\" ] && [ -n \"$DATASET_REF\" ] &&'\n\
         \        ' [ -n \"$STAGEIN_B64\" ] && command -v python3 >/dev/null; then',\n\
-        \        '  export DATASET_CACHE=$SCR/data-cache'\n        ' DATASET_DIRFILE=$SCR/kaos-tmp/ds-$SLURM_JOB_ID.dir',\n\
+        \        '  [ -n \"$DATASET_STAGED\" ] && echo \"dataset: WARNING staged copy\
+        \ $DATASET_STAGED'\n        ' not ready - downloading in-job on GPU time\"\
+        ',\n        '  export DATASET_CACHE=$SCR/data-cache'\n        ' DATASET_DIRFILE=$SCR/kaos-tmp/ds-$SLURM_JOB_ID.dir',\n\
         \        '  printf %s \"$STAGEIN_B64\" | base64 -d | python3 - || fail 232',\n\
         \        '  DATASET_DIR=$(cat \"$DATASET_DIRFILE\" 2>/dev/null)',\n      \
         \  'fi',\n        # Apptainer passes the host env through, so the wallet/endpoint\
@@ -1617,40 +1750,44 @@ spec:
         \ or 0),\n           'STEP_CMD=' + cmd, 'STEP_WORKDIR=' + fetch_workdir(img,\
         \ reg),\n           'WF_UID=' + (os.environ.get('WF_UID') or ''),\n      \
         \     'STEP_NAME=' + (os.environ.get('STEP_NAME') or ''),\n           'STEP_OUTPUTS='\
-        \ + (os.environ.get('STEP_OUTPUTS') or '')]\n    # Same checkpoint location\
-        \ + run id as the in-cluster copy; without them\n    # training fell back\
-        \ to {ref}/checkpoints/ on the dataset branch. Only when\n    # set: step\
-        \ code reads os.environ.get(..., default), so an empty value\n    # would\
-        \ override its own default.\n    env += [k + '=' + os.environ[k] for k in\n\
-        \            ('CHECKPOINT_BUCKET', 'CHECKPOINT_PREFIX', 'KUBECORE_RUN_ID')\n\
-        \            if os.environ.get(k)]\n    global WALLET, WALLET_EXP\n    wallet\
-        \ = WALLET = mint_wallet()\n    WALLET_EXP = wallet_exp(wallet)\n    if wallet:\n\
-        \        # Public endpoints only, short-lived bearer only (T-03). MLflow's\n\
-        \        # client honors MLFLOW_TRACKING_TOKEN natively; the stage-in and\
-        \ any\n        # in-step lakeFS API calls ride the same bearer through oauth2-proxy.\n\
-        \        mlflow_url = os.environ.get('MLFLOW_EXTERNAL_URL') or ''\n      \
-        \  lakefs_url = os.environ.get('LAKEFS_EXTERNAL_URL') or ''\n        if mlflow_url:\n\
-        \            env += ['MLFLOW_TRACKING_URI=' + mlflow_url,\n              \
-        \      'MLFLOW_TRACKING_TOKEN=' + wallet]\n        if lakefs_url:\n      \
-        \      env += ['LAKEFS_ENDPOINT=' + lakefs_url,\n                    'LAKEFS_BEARER_TOKEN='\
-        \ + wallet,\n                    'DATASET_REPO=' + (os.environ.get('DATASET_REPO')\
-        \ or ''),\n                    'DATASET_REF=' + (os.environ.get('DATASET_REF')\
-        \ or ''),\n                    'DATASET_COMMIT=' + pinned_commit(),\n    \
-        \                'OUTPUTS_BRANCH=' + (os.environ.get('OUTPUTS_BRANCH') or\
-        \ ''),\n                    'STAGEIN_B64='\n                    + base64.b64encode(STAGEIN.encode()).decode(),\n\
+        \ + (os.environ.get('STEP_OUTPUTS') or ''),\n           'DATASET_STAGED='\
+        \ + STAGED]\n    # Same checkpoint location + run id as the in-cluster copy;\
+        \ without them\n    # training fell back to {ref}/checkpoints/ on the dataset\
+        \ branch. Only when\n    # set: step code reads os.environ.get(..., default),\
+        \ so an empty value\n    # would override its own default.\n    env += [k\
+        \ + '=' + os.environ[k] for k in\n            ('CHECKPOINT_BUCKET', 'CHECKPOINT_PREFIX',\
+        \ 'KUBECORE_RUN_ID')\n            if os.environ.get(k)]\n    global WALLET,\
+        \ WALLET_EXP\n    wallet = WALLET = mint_wallet()\n    WALLET_EXP = wallet_exp(wallet)\n\
+        \    if wallet:\n        # Public endpoints only, short-lived bearer only\
+        \ (T-03). MLflow's\n        # client honors MLFLOW_TRACKING_TOKEN natively;\
+        \ the stage-in and any\n        # in-step lakeFS API calls ride the same bearer\
+        \ through oauth2-proxy.\n        mlflow_url = os.environ.get('MLFLOW_EXTERNAL_URL')\
+        \ or ''\n        lakefs_url = os.environ.get('LAKEFS_EXTERNAL_URL') or ''\n\
+        \        if mlflow_url:\n            env += ['MLFLOW_TRACKING_URI=' + mlflow_url,\n\
+        \                    'MLFLOW_TRACKING_TOKEN=' + wallet]\n        if lakefs_url:\n\
+        \            env += ['LAKEFS_ENDPOINT=' + lakefs_url,\n                  \
+        \  'LAKEFS_BEARER_TOKEN=' + wallet,\n                    'DATASET_REPO=' +\
+        \ (os.environ.get('DATASET_REPO') or ''),\n                    'DATASET_REF='\
+        \ + (os.environ.get('DATASET_REF') or ''),\n                    'DATASET_COMMIT='\
+        \ + pinned_commit(),\n                    'OUTPUTS_BRANCH=' + (os.environ.get('OUTPUTS_BRANCH')\
+        \ or ''),\n                    'STAGEIN_B64='\n                    + base64.b64encode(STAGEIN.encode()).decode(),\n\
         \                    'STAGEOUT_B64='\n                    + base64.b64encode(STAGEOUT.encode()).decode()]\n\
-        \    body = {'job': {'name': jobname, 'partition': HPC['partition'],\n   \
-        \                 'account': ident['account'],\n                    'qos':\
-        \ HPC.get('qos') or 'default',\n                    'time_limit': int(os.environ.get('SLURM_TIME_LIMIT')\
-        \ or 240),\n                    'current_working_directory': ident['home'],\n\
-        \                    'environment': env, 'tasks': 1, 'nodes': '1'},\n    \
-        \        'script': batch}\n    req = urllib.request.Request(API + '/job/submit',\n\
-        \                                 data=json.dumps(body).encode(),\n      \
-        \                           headers=hdrs(), method='POST')\n    resp = json.load(urllib.request.urlopen(req,\
-        \ timeout=30))\n    j = resp.get('job_id')\n    print('submitted job', j,\
-        \ 'errors:', resp.get('errors'), flush=True)\n    if not j:\n        sys.exit(1)\n\
-        \    return j\n\n\ndef cancel(j):\n    try:\n        urllib.request.urlopen(urllib.request.Request(\n\
-        \            API + '/job/' + str(j), headers=hdrs(), method='DELETE'), timeout=30)\n\
+        \    commit = pinned_commit()\n    body = {'job': {'name': jobname, 'partition':\
+        \ HPC['partition'],\n                    'account': ident['account'],\n  \
+        \                  'qos': HPC.get('qos') or 'default',\n                 \
+        \   'time_limit': int(os.environ.get('SLURM_TIME_LIMIT') or 240),\n      \
+        \              'current_working_directory': ident['home'],\n             \
+        \       'environment': env, 'tasks': 1, 'nodes': '1'},\n            'script':\
+        \ batch}\n    if commit:\n        # PRD-1541 D-06: the stager never evicts\
+        \ a commit a queued or running\n        # job names here (squeue %k).\n  \
+        \      body['job']['comment'] = 'kaos-commit=' + commit\n    req = urllib.request.Request(API\
+        \ + '/job/submit',\n                                 data=json.dumps(body).encode(),\n\
+        \                                 headers=hdrs(), method='POST')\n    resp\
+        \ = json.load(urllib.request.urlopen(req, timeout=30))\n    j = resp.get('job_id')\n\
+        \    print('submitted job', j, 'errors:', resp.get('errors'), flush=True)\n\
+        \    if not j:\n        sys.exit(1)\n    return j\n\n\ndef cancel(j):\n  \
+        \  try:\n        urllib.request.urlopen(urllib.request.Request(\n        \
+        \    API + '/job/' + str(j), headers=hdrs(), method='DELETE'), timeout=30)\n\
         \        print('cancelled job', j, flush=True)\n    except Exception as e:\n\
         \        print('cancel failed:', e, flush=True)\n\n\ndef on_term(signum, frame):\n\
         \    # Argo sends TERM on deadline/stop. A PENDING job never started \u2014\
@@ -1718,6 +1855,9 @@ spec:
         readOnly: true
       - name: meluxina-jwt
         mountPath: /etc/meluxina-jwt
+        readOnly: true
+      - name: meluxina-staging
+        mountPath: /etc/meluxina-staging
         readOnly: true
       env:
       - name: SLURM_TOKEN
