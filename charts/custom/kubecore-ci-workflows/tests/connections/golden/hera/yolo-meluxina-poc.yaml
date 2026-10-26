@@ -1408,7 +1408,8 @@ spec:
         commit = os.environ.get('DATASET_COMMIT') or json.load(\n    get(base + '/refs/'\
         \ + urllib.parse.quote(REF, safe='')\n        + '/commits?amount=1'))['results'][0]['id']\n\
         dest = pathlib.Path(os.environ['DATASET_CACHE']) / REPO / commit\nopen(os.environ['DATASET_DIRFILE'],\
-        \ 'w').write(str(dest))\nif (dest / '.complete').exists():\n    print('stage-in:\
+        \ 'w').write(str(dest))\nif (dest / '.complete').exists():\n    (dest / '.complete').touch()\
+        \            # last use, for the job's cache cleanup\n    print('stage-in:\
         \ cache hit', dest, flush=True)\n    sys.exit(0)\ndef ls(prefix):\n    objs,\
         \ after = [], ''\n    while True:\n        page = json.load(get(base + '/refs/'\
         \ + commit + '/objects/ls?'\n                             + urllib.parse.urlencode(\n\
@@ -1724,53 +1725,63 @@ spec:
         \        # (declared outputs), /work/runs, /work/dataset caches. Per-job scratch\n\
         \        # on Lustre, removed after a successful stage-out.\n        'export\
         \ KAOS_WORK=$SCR/kaos-work/$SLURM_JOB_ID; mkdir -p $KAOS_WORK/output',\n \
-        \       'BIND=\"$BIND -B $KAOS_WORK:/work\"',\n        'if [ ! -f \"$SIF\"\
-        \ ]; then',\n        # GCP token ONLY for GAR hosts: presenting it to Zot\
-        \ turns an\n        # anonymous-OK pull into 401 authentication required (live\
-        \ job\n        # 5140432 vs the anonymous F-01 pull that worked on the same\
-        \ repo).\n        '  case \"$IMAGE_REF\" in *-docker.pkg.dev/*)'\n       \
-        \ ' [ -n \"$REG_TOKEN\" ] && export'\n        ' APPTAINER_DOCKER_USERNAME=oauth2accesstoken'\n\
+        \       'BIND=\"$BIND -B $KAOS_WORK:/work\"',\n        # Last use of a cached\
+        \ SIF, before the cleanup below can see it.\n        'touch -c \"$SIF\"',\n\
+        \        'if [ ! -f \"$SIF\" ]; then',\n        # GCP token ONLY for GAR hosts:\
+        \ presenting it to Zot turns an\n        # anonymous-OK pull into 401 authentication\
+        \ required (live job\n        # 5140432 vs the anonymous F-01 pull that worked\
+        \ on the same repo).\n        '  case \"$IMAGE_REF\" in *-docker.pkg.dev/*)'\n\
+        \        ' [ -n \"$REG_TOKEN\" ] && export'\n        ' APPTAINER_DOCKER_USERNAME=oauth2accesstoken'\n\
         \        ' APPTAINER_DOCKER_PASSWORD=$REG_TOKEN;; esac',\n        '  apptainer\
         \ pull \"$SIF\" docker://$IMAGE_REF || fail 231',\n        'fi',\n       \
-        \ # Start in the image's WORKDIR (Apptainer ignores it; Docker does not).\n\
-        \        'PWD_OPT=\"\"; [ -n \"$STEP_WORKDIR\" ] && PWD_OPT=\"--pwd $STEP_WORKDIR\"\
-        ',\n        # --nv only on GPU classes: on the cpu/largemem partitions there\
-        \ is\n        # no driver to bind and the flag makes Apptainer warn or fail.\n\
-        \        'NV=\"\"; [ \"${HPC_GPUS:-0}\" -gt 0 ] && NV=\"--nv\"',\n       \
-        \ 'if [ -n \"$STEP_CMD\" ]; then apptainer exec $NV $PWD_OPT $BIND \"$SIF\"\
-        '\n        ' /bin/sh -c \"$STEP_CMD\"; else apptainer exec $NV $PWD_OPT $BIND\
-        \ \"$SIF\"'\n        ' /bin/sh -c \"nvidia-smi -L || nproc\"; fi',\n     \
-        \   'rc=$?',\n        'if [ -n \"$STEP_OUTPUTS\" ] && [ -n \"$STAGEOUT_B64\"\
-        \ ] && [ -n \"$LAKEFS_BEARER_TOKEN\" ]; then'\n        ' printf %s \"$STAGEOUT_B64\"\
-        \ | base64 -d | python3 - || echo \"stage-out failed (rc=$rc)\"; fi',\n  \
-        \      '[ $rc -eq 0 ] && rm -rf \"$KAOS_WORK\"',\n        '[ $rc -ne 0 ] &&\
-        \ fail $rc',\n        'exit 0',\n    ])\n    env = ['PATH=/usr/bin:/bin:/usr/local/bin',\
-        \ 'HOME=' + ident['home'],\n           'USER=' + ident['user'], 'IMAGE_REF='\
-        \ + img, 'REG_TOKEN=' + reg,\n           'HPC_GPUS=' + str(HPC.get('gpus')\
-        \ or 0),\n           'STEP_CMD=' + cmd, 'STEP_WORKDIR=' + fetch_workdir(img,\
-        \ reg),\n           'WF_UID=' + (os.environ.get('WF_UID') or ''),\n      \
-        \     'STEP_NAME=' + (os.environ.get('STEP_NAME') or ''),\n           'STEP_OUTPUTS='\
-        \ + (os.environ.get('STEP_OUTPUTS') or ''),\n           'DATASET_STAGED='\
-        \ + STAGED]\n    # Same checkpoint location + run id as the in-cluster copy;\
-        \ without them\n    # training fell back to {ref}/checkpoints/ on the dataset\
-        \ branch. Only when\n    # set: step code reads os.environ.get(..., default),\
-        \ so an empty value\n    # would override its own default.\n    env += [k\
-        \ + '=' + os.environ[k] for k in\n            ('CHECKPOINT_BUCKET', 'CHECKPOINT_PREFIX',\
-        \ 'KUBECORE_RUN_ID')\n            if os.environ.get(k)]\n    global WALLET,\
-        \ WALLET_EXP\n    wallet = WALLET = mint_wallet()\n    WALLET_EXP = wallet_exp(wallet)\n\
-        \    if wallet:\n        # Public endpoints only, short-lived bearer only\
-        \ (T-03). MLflow's\n        # client honors MLFLOW_TRACKING_TOKEN natively;\
-        \ the stage-in and any\n        # in-step lakeFS API calls ride the same bearer\
-        \ through oauth2-proxy.\n        mlflow_url = os.environ.get('MLFLOW_EXTERNAL_URL')\
-        \ or ''\n        lakefs_url = os.environ.get('LAKEFS_EXTERNAL_URL') or ''\n\
-        \        if mlflow_url:\n            env += ['MLFLOW_TRACKING_URI=' + mlflow_url,\n\
-        \                    'MLFLOW_TRACKING_TOKEN=' + wallet]\n        if lakefs_url:\n\
-        \            env += ['LAKEFS_ENDPOINT=' + lakefs_url,\n                  \
-        \  'LAKEFS_BEARER_TOKEN=' + wallet,\n                    'DATASET_REPO=' +\
-        \ (os.environ.get('DATASET_REPO') or ''),\n                    'DATASET_REF='\
-        \ + (os.environ.get('DATASET_REF') or ''),\n                    'DATASET_COMMIT='\
-        \ + pinned_commit(),\n                    'OUTPUTS_BRANCH=' + (os.environ.get('OUTPUTS_BRANCH')\
-        \ or ''),\n                    'STAGEIN_B64='\n                    + base64.b64encode(STAGEIN.encode()).decode(),\n\
+        \ # PRD-1541: the image and download caches share the allocation's scratch\n\
+        \        # quota with the dataset cache and only ever grew. This user's entries\n\
+        \        # unused for 14 days go: SIFs, Apptainer's layer cache, in-job\n\
+        \        # downloads. What this job uses was touched just above.\n       \
+        \ 'find $SCR/sif-cache -maxdepth 1 -name \"*.sif\" -user \"$USER\" -mtime\
+        \ +14 -delete 2>/dev/null',\n        'find $SCR/data-cache -mindepth 3 -maxdepth\
+        \ 3 -name .complete -user \"$USER\" -mtime +14'\n        ' -printf \"%h\\\\\
+        n\" 2>/dev/null | xargs -r rm -rf',\n        'apptainer cache clean --force\
+        \ --days 14 >/dev/null 2>&1',\n        # Start in the image's WORKDIR (Apptainer\
+        \ ignores it; Docker does not).\n        'PWD_OPT=\"\"; [ -n \"$STEP_WORKDIR\"\
+        \ ] && PWD_OPT=\"--pwd $STEP_WORKDIR\"',\n        # --nv only on GPU classes:\
+        \ on the cpu/largemem partitions there is\n        # no driver to bind and\
+        \ the flag makes Apptainer warn or fail.\n        'NV=\"\"; [ \"${HPC_GPUS:-0}\"\
+        \ -gt 0 ] && NV=\"--nv\"',\n        'if [ -n \"$STEP_CMD\" ]; then apptainer\
+        \ exec $NV $PWD_OPT $BIND \"$SIF\"'\n        ' /bin/sh -c \"$STEP_CMD\"; else\
+        \ apptainer exec $NV $PWD_OPT $BIND \"$SIF\"'\n        ' /bin/sh -c \"nvidia-smi\
+        \ -L || nproc\"; fi',\n        'rc=$?',\n        'if [ -n \"$STEP_OUTPUTS\"\
+        \ ] && [ -n \"$STAGEOUT_B64\" ] && [ -n \"$LAKEFS_BEARER_TOKEN\" ]; then'\n\
+        \        ' printf %s \"$STAGEOUT_B64\" | base64 -d | python3 - || echo \"\
+        stage-out failed (rc=$rc)\"; fi',\n        '[ $rc -eq 0 ] && rm -rf \"$KAOS_WORK\"\
+        ',\n        '[ $rc -ne 0 ] && fail $rc',\n        'exit 0',\n    ])\n    env\
+        \ = ['PATH=/usr/bin:/bin:/usr/local/bin', 'HOME=' + ident['home'],\n     \
+        \      'USER=' + ident['user'], 'IMAGE_REF=' + img, 'REG_TOKEN=' + reg,\n\
+        \           'HPC_GPUS=' + str(HPC.get('gpus') or 0),\n           'STEP_CMD='\
+        \ + cmd, 'STEP_WORKDIR=' + fetch_workdir(img, reg),\n           'WF_UID='\
+        \ + (os.environ.get('WF_UID') or ''),\n           'STEP_NAME=' + (os.environ.get('STEP_NAME')\
+        \ or ''),\n           'STEP_OUTPUTS=' + (os.environ.get('STEP_OUTPUTS') or\
+        \ ''),\n           'DATASET_STAGED=' + STAGED]\n    # Same checkpoint location\
+        \ + run id as the in-cluster copy; without them\n    # training fell back\
+        \ to {ref}/checkpoints/ on the dataset branch. Only when\n    # set: step\
+        \ code reads os.environ.get(..., default), so an empty value\n    # would\
+        \ override its own default.\n    env += [k + '=' + os.environ[k] for k in\n\
+        \            ('CHECKPOINT_BUCKET', 'CHECKPOINT_PREFIX', 'KUBECORE_RUN_ID')\n\
+        \            if os.environ.get(k)]\n    global WALLET, WALLET_EXP\n    wallet\
+        \ = WALLET = mint_wallet()\n    WALLET_EXP = wallet_exp(wallet)\n    if wallet:\n\
+        \        # Public endpoints only, short-lived bearer only (T-03). MLflow's\n\
+        \        # client honors MLFLOW_TRACKING_TOKEN natively; the stage-in and\
+        \ any\n        # in-step lakeFS API calls ride the same bearer through oauth2-proxy.\n\
+        \        mlflow_url = os.environ.get('MLFLOW_EXTERNAL_URL') or ''\n      \
+        \  lakefs_url = os.environ.get('LAKEFS_EXTERNAL_URL') or ''\n        if mlflow_url:\n\
+        \            env += ['MLFLOW_TRACKING_URI=' + mlflow_url,\n              \
+        \      'MLFLOW_TRACKING_TOKEN=' + wallet]\n        if lakefs_url:\n      \
+        \      env += ['LAKEFS_ENDPOINT=' + lakefs_url,\n                    'LAKEFS_BEARER_TOKEN='\
+        \ + wallet,\n                    'DATASET_REPO=' + (os.environ.get('DATASET_REPO')\
+        \ or ''),\n                    'DATASET_REF=' + (os.environ.get('DATASET_REF')\
+        \ or ''),\n                    'DATASET_COMMIT=' + pinned_commit(),\n    \
+        \                'OUTPUTS_BRANCH=' + (os.environ.get('OUTPUTS_BRANCH') or\
+        \ ''),\n                    'STAGEIN_B64='\n                    + base64.b64encode(STAGEIN.encode()).decode(),\n\
         \                    'STAGEOUT_B64='\n                    + base64.b64encode(STAGEOUT.encode()).decode()]\n\
         \    commit = pinned_commit()\n    body = {'job': {'name': jobname, 'partition':\
         \ HPC['partition'],\n                    'account': ident['account'],\n  \
