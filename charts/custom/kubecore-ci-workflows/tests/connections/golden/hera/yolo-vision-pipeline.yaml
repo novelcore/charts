@@ -1340,7 +1340,10 @@ spec:
     activeDeadlineSeconds: '{{inputs.parameters.deadline-seconds}}'
     retryStrategy:
       limit: '2'
-      retryPolicy: OnError
+      retryPolicy: Always
+      expression: lastRetry.status == 'Error' or lastRetry.message matches '.*(imminent
+        node shutdown|node is shutting down|node is draining|The node was low on resource|The
+        node had condition|Pod was rejected|Evicted|evicted|pod deleted|Pod was deleted).*'
     metadata:
       labels:
         platform.kubecore.io/compute-type: hpc
