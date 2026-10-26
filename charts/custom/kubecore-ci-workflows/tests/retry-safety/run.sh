@@ -115,5 +115,37 @@ for wf in ml-ci-build ci-build ci-rc-build; do
   expect_has "$OUT" "already exists on another commit" "$wf/tag: says why"
 done
 
+# ── tag push survives a GitHub 5xx ───────────────────────────────────────────
+
+# The origin refuses the first N pushes the way GitHub's 500 reads to git
+# ("remote rejected"); the sleeps between tries are skipped here.
+reject_pushes() {
+  printf '%s' "$1" > "$T/rejects"
+  cat > "$T/origin.git/hooks/pre-receive" <<HOOK
+#!/bin/sh
+n=\$(cat "$T/rejects"); [ "\$n" -gt 0 ] || exit 0
+echo \$((n - 1)) > "$T/rejects"; echo "Internal Server Error" >&2; exit 1
+HOOK
+  chmod +x "$T/origin.git/hooks/pre-receive"
+}
+
+for wf in ml-ci-build ci-build ci-rc-build; do
+  case "$wf" in ci-rc-build) TAG=v1.2.3-rc.1 ;; *) TAG=dev-v1.2.3-20261001-120000 ;; esac
+  new_origin
+  reject_pushes 2
+  script "$wf" tag | sed -e 's#sleep #: #' > "$T/tag.sh"
+  OUT=$(cd "$T" && sh "$T/tag.sh" 2>&1); RC=$?
+  expect_eq "$RC" "0" "$wf/tag: two GitHub 5xx on the push, then it lands"
+  expect_has "$OUT" "push failed (try 2/4)" "$wf/tag: says it retried"
+  expect_eq "$(git --git-dir="$T/origin.git" rev-parse "refs/tags/${TAG}^{commit}")" "$SHA" "$wf/tag: on commit_sha"
+
+  new_origin
+  reject_pushes 9
+  script "$wf" tag | sed -e 's#sleep #: #' > "$T/tag.sh"
+  OUT=$(cd "$T" && sh "$T/tag.sh" 2>&1); RC=$?
+  expect_eq "$RC" "1" "$wf/tag: a push that keeps failing still fails the step"
+  expect_has "$OUT" "push failed 4 times" "$wf/tag: after a bounded number of tries"
+done
+
 echo "retry-safety: ${PASSED} passed, ${FAILED} failed"
 exit "$FAILED"

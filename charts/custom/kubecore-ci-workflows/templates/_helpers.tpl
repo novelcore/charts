@@ -233,21 +233,38 @@ git init -q /tmp/tagrepo
 cd /tmp/tagrepo
 git config user.name "KubeCore CI"
 git config user.email "ci@kubecore.io"
-# A retried attempt may find the tag its predecessor already pushed (#1379):
-# the same commit is success, another commit is a real conflict.
-EXISTING=$(git ls-remote "${REPO_URL}" "refs/tags/${TAG}^{}" "refs/tags/${TAG}" | head -1 | cut -f1)
-if [ -n "${EXISTING}" ]; then
-  git fetch -q --depth=1 "${REPO_URL}" "refs/tags/${TAG}:refs/tags/${TAG}"
-  if [ "$(git rev-parse "refs/tags/${TAG}^{commit}")" != "${COMMIT}" ]; then
-    echo "Tag ${TAG} already exists on another commit"; exit 1
+# GitHub now and then answers a push with a 5xx ("remote: Internal Server
+# Error", kaos e2e-suite-zgbzw 2026-10-26). The step exits 1 on it, which its
+# retryStrategy rightly does not retry (it retries only lost pods), so the
+# push is tried up to TAG_PUSH_TRIES times here. Every try re-reads the tag
+# first, so a push GitHub applied before answering 5xx is found, not redone.
+TAG_PUSH_TRIES=4
+TRY=1
+while :; do
+  # A retried attempt may find the tag its predecessor already pushed (#1379):
+  # the same commit is success, another commit is a real conflict.
+  EXISTING=$(git ls-remote "${REPO_URL}" "refs/tags/${TAG}^{}" "refs/tags/${TAG}" | head -1 | cut -f1)
+  if [ -n "${EXISTING}" ]; then
+    git fetch -q --depth=1 "${REPO_URL}" "refs/tags/${TAG}:refs/tags/${TAG}"
+    if [ "$(git rev-parse "refs/tags/${TAG}^{commit}")" != "${COMMIT}" ]; then
+      echo "Tag ${TAG} already exists on another commit"; exit 1
+    fi
+    echo "Tagged: ${TAG} (already present on ${COMMIT})"
+    break
   fi
-  echo "Tagged: ${TAG} (already present on ${COMMIT})"
-else
-  git fetch -q --depth=1 "${REPO_URL}" "${COMMIT}"
-  git tag -a "${TAG}" -m "${TAG_MESSAGE}" "${COMMIT}"
-  git push -q "${REPO_URL}" "refs/tags/${TAG}"
-  echo "Tagged: ${TAG}"
-fi
+  if git fetch -q --depth=1 "${REPO_URL}" "${COMMIT}" \
+      && git tag -f -a "${TAG}" -m "${TAG_MESSAGE}" "${COMMIT}" \
+      && git push -q "${REPO_URL}" "refs/tags/${TAG}"; then
+    echo "Tagged: ${TAG}"
+    break
+  fi
+  if [ "${TRY}" -ge "${TAG_PUSH_TRIES}" ]; then
+    echo "Tag ${TAG}: push failed ${TRY} times"; exit 1
+  fi
+  echo "Tag ${TAG}: push failed (try ${TRY}/${TAG_PUSH_TRIES}), retrying in $((TRY * 15))s"
+  sleep $((TRY * 15))
+  TRY=$((TRY + 1))
+done
 {{- end }}
 
 {{/*
