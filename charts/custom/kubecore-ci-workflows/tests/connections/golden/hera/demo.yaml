@@ -777,33 +777,44 @@ spec:
         \ cannot be refreshed inside a queued job, so every queue wait longer than\
         \ an\n# hour costs one failed pull (exit 231) and a resubmission. Bounded,\
         \ not\n# once: a second long wait after the first resubmit must not strand\
-        \ the run.\nPULL_RESUBMITS = 3\nresubmits = 0\nwhile True:\n    time.sleep(30)\n\
-        \    try:\n        job = (get(SDB + '/job/' + str(jid)).get('jobs') or [{}])[0]\n\
-        \        st = (job.get('state') or {}).get('current') or []\n        print('state:',\
-        \ st, flush=True)\n        if ('PENDING' in st and WALLET_EXP\n          \
-        \      and time.time() > WALLET_EXP - WALLET_MARGIN_S):\n            print('wallet\
-        \ expires within', WALLET_MARGIN_S // 60,\n                  'min and the\
-        \ job is still queued - resubmitting with a'\n                  ' fresh wallet\
-        \ (queue position is lost, credentials are'\n                  ' not)', flush=True)\n\
-        \            cancel(jid)\n            jid = submit()\n            open('/tmp/slurm-job-id',\
-        \ 'w').write(str(jid))\n            continue\n        if any(x in TERMINAL\
-        \ for x in st):\n            rc = ((job.get('exit_code') or {}).get('return_code')\n\
-        \                  or {}).get('number')\n            print('terminal:', st,\
-        \ 'exit:', rc, flush=True)\n            print('job comment:', job.get('comment'),\
-        \ flush=True)\n            if 'FAILED' in st and rc == 231 and resubmits <\
-        \ PULL_RESUBMITS:\n                # A cache-missing pull after a LONG queue\
-        \ wait runs with the\n                # registry token minted at submit time\
-        \ \u2014 GCP tokens live 1h,\n                # so it can be stale (live job\
-        \ 5143859: 3.5h queue -> 231;\n                # 5150371: 65 min queue ->\
-        \ 231). Resubmitting mints\n                # everything fresh; queue age\
-        \ is lost only after an actual\n                # failure.\n             \
-        \   resubmits += 1\n                print('pull failed - resubmitting with\
-        \ fresh credentials'\n                      ' (%d/%d)' % (resubmits, PULL_RESUBMITS),\
-        \ flush=True)\n                jid = submit()\n                open('/tmp/slurm-job-id',\
-        \ 'w').write(str(jid))\n                continue\n            if 'COMPLETED'\
-        \ in st:\n                fetch_outputs()\n            sys.exit(0 if ('COMPLETED'\
-        \ in st and rc in (0, None)) else 1)\n    except SystemExit:\n        raise\n\
-        \    except Exception as e:\n        print('poll error (transient):', e, flush=True)\n"
+        \ the run.\nPULL_RESUBMITS = 3\nresubmits = 0\n# Why Slurm holds a queued\
+        \ job (Priority, Resources, AssocGrpGRESMinutes = the\n# allocation's GPU\
+        \ minutes are spent, ...): only slurmctld knows it, the\n# accounting record\
+        \ polled below does not. Printed when it changes, so a run\n# that never left\
+        \ the queue says why (kaos e2e 2026-10-26: two jobs PENDING\n# for the whole\
+        \ 2.5 h budget, reason unknown).\npending_reason = None\nwhile True:\n   \
+        \ time.sleep(30)\n    try:\n        job = (get(SDB + '/job/' + str(jid)).get('jobs')\
+        \ or [{}])[0]\n        st = (job.get('state') or {}).get('current') or []\n\
+        \        print('state:', st, flush=True)\n        if 'PENDING' in st:\n  \
+        \          try:\n                reason = (get(API + '/job/' + str(jid)).get('jobs')\n\
+        \                          or [{}])[0].get('state_reason') or ''\n       \
+        \     except Exception:\n                reason = pending_reason or ''\n \
+        \           if reason != pending_reason:\n                print('pending reason:',\
+        \ reason, flush=True)\n                pending_reason = reason\n        if\
+        \ ('PENDING' in st and WALLET_EXP\n                and time.time() > WALLET_EXP\
+        \ - WALLET_MARGIN_S):\n            print('wallet expires within', WALLET_MARGIN_S\
+        \ // 60,\n                  'min and the job is still queued - resubmitting\
+        \ with a'\n                  ' fresh wallet (queue position is lost, credentials\
+        \ are'\n                  ' not)', flush=True)\n            cancel(jid)\n\
+        \            jid = submit()\n            open('/tmp/slurm-job-id', 'w').write(str(jid))\n\
+        \            continue\n        if any(x in TERMINAL for x in st):\n      \
+        \      rc = ((job.get('exit_code') or {}).get('return_code')\n           \
+        \       or {}).get('number')\n            print('terminal:', st, 'exit:',\
+        \ rc, flush=True)\n            print('job comment:', job.get('comment'), flush=True)\n\
+        \            if 'FAILED' in st and rc == 231 and resubmits < PULL_RESUBMITS:\n\
+        \                # A cache-missing pull after a LONG queue wait runs with\
+        \ the\n                # registry token minted at submit time \u2014 GCP tokens\
+        \ live 1h,\n                # so it can be stale (live job 5143859: 3.5h queue\
+        \ -> 231;\n                # 5150371: 65 min queue -> 231). Resubmitting mints\n\
+        \                # everything fresh; queue age is lost only after an actual\n\
+        \                # failure.\n                resubmits += 1\n            \
+        \    print('pull failed - resubmitting with fresh credentials'\n         \
+        \             ' (%d/%d)' % (resubmits, PULL_RESUBMITS), flush=True)\n    \
+        \            jid = submit()\n                open('/tmp/slurm-job-id', 'w').write(str(jid))\n\
+        \                continue\n            if 'COMPLETED' in st:\n           \
+        \     fetch_outputs()\n            sys.exit(0 if ('COMPLETED' in st and rc\
+        \ in (0, None)) else 1)\n    except SystemExit:\n        raise\n    except\
+        \ Exception as e:\n        print('poll error (transient):', e, flush=True)\n"
       volumeMounts:
       - name: mlflow-svc
         mountPath: /etc/mlflow-svc
