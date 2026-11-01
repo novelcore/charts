@@ -2863,6 +2863,50 @@ spec:
         # kubecore-ci-workflows.platformEnhance (kubecore-operator#1161, #1375).
 {{ include "kubecore-ci-workflows.platformEnhance" . | indent 8 }}
 
+        # DATASETS (PRD novelcore/kaos#1283 D-05): offer the project's datasets in
+        # the `dataset` dropdown — <dataset>@<vN> newest first and <dataset>@latest,
+        # the default dataset first; the default is its newest version. This trusted step reads kaos-lake's read-only
+        # catalog with its own projected service-account token (names and versions,
+        # never data); the untrusted render above never sees a credential. A
+        # catalog that cannot be read leaves the parameter free text, never a red
+        # build.
+        python3 - /workspace/out/workflow-template.yaml /tmp/context.yaml /var/run/secrets/kaos-lake/token <<'DSEOF'
+        import json, sys, urllib.request
+        import yaml
+        wft_path, ctx_path, token_path = sys.argv[1:4]
+        wft = yaml.safe_load(open(wft_path))
+        params = (wft["spec"].get("arguments") or {}).get("parameters") or []
+        param = next((p for p in params if p.get("name") == "dataset"), None)
+        if param is None:
+            print("datasets: the pipeline declares no dataset parameter")
+            sys.exit(0)
+        endpoint = (((yaml.safe_load(open(ctx_path)) or {}).get("lakefs") or {}).get("endpoint") or "").rstrip("/")
+        try:
+            req = urllib.request.Request(endpoint + "/kaos/v1/catalog",
+                                         headers={"Authorization": "Bearer " + open(token_path).read().strip()})
+            datasets = json.load(urllib.request.urlopen(req, timeout=20)).get("datasets") or []
+        except Exception as exc:  # noqa: BLE001
+            print(f"datasets: catalog not read ({type(exc).__name__}: {exc}); the dataset parameter stays free text")
+            sys.exit(0)
+        datasets.sort(key=lambda d: (not d.get("default"), d.get("name", "")))
+        choices, default = [], ""
+        for d in datasets:
+            versions = [f"{d['name']}@{v['tag']}" for v in d.get("versions") or []]
+            choices += versions + [f"{d['name']}@latest"]
+            if d.get("default") and not default:
+                default = versions[0] if versions else f"{d['name']}@latest"
+        if not choices:
+            print("datasets: the project has no dataset yet; the dataset parameter stays free text")
+            sys.exit(0)
+        param["enum"] = choices
+        # Default to the default dataset's newest released version (a pinned version
+        # reproduces); keep a template default that names a specific offered version.
+        if param.get("value") not in choices or str(param.get("value")).endswith("@latest"):
+            param["value"] = default or choices[0]
+        yaml.safe_dump(wft, open(wft_path, "w"), sort_keys=False)
+        print(f"datasets: {len(choices)} choices from {len(datasets)} datasets, default {param['value']}")
+        DSEOF
+
         # GATE: structural release-hygiene checks (fail before committing so a bad
         # render can't silently replace the live WFT). Duplicate params, non-
         # container templates, and GPU steps missing nvidia.com/gpu are hard errors.
@@ -2985,6 +3029,19 @@ spec:
       - name: github-token
         mountPath: /etc/github-token
         readOnly: true
+      - name: kaos-lake-token
+        mountPath: /var/run/secrets/kaos-lake
+        readOnly: true
+    # The step's own service-account token for kaos-lake's dataset catalog (PRD
+    # novelcore/kaos#1283 D-05): audience-bound, short-lived, read-only use.
+    volumes:
+    - name: kaos-lake-token
+      projected:
+        sources:
+        - serviceAccountToken:
+            audience: {{ .Values.kaosLake.workloadAudience | quote }}
+            expirationSeconds: 600
+            path: token
 
   - name: patch-images
 {{ include "kubecore-ci-workflows.preemptionRetry" . | indent 4 }}
