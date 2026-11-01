@@ -49,7 +49,7 @@ spec:
   # could never get past its second step. This was invisible until 0.12.86 let the
   # workflow start at all (before that it was rejected at spec validation), and
   # ci-rc-build was the ONLY one of the four CI templates not using a claim:
-  # ci-build, ml-ci-build and ml-ci-rc-build all declare volumeClaimTemplates.
+  # ci-build and ml-ci-build both declare volumeClaimTemplates.
   #
   # volumeClaimGC is set explicitly rather than inherited: Argo's default is
   # OnWorkflowSuccess, so a FAILED build keeps its claim — and because

@@ -3213,8 +3213,6 @@ spec:
     # Every GitHub call retries transient answers; a write that still fails
     # fails this step, and every caller runs it with continueOn failed, so a
     # reporting failure is a red status node, never a red build.
-    # Shared by ml-ci-rc-build via templateRef with context
-    # kubecore-ml-ci/rc + environment ml-rc.
     inputs:
       parameters:
       - name: state
@@ -3428,7 +3426,7 @@ spec:
           *)  echo "report: comment on ${TARGET} FAILED, GitHub answered ${CODE}: $(jq -r '.message // .' /tmp/post.json 2>/dev/null | head -c 300)" ;;
         esac
       volumeMounts:
-      # Every caller (ml-ci-build, ml-ci-pr-render, ml-ci-rc-build, ci-build,
+      # Every caller (ml-ci-build, ml-ci-pr-render, ci-build,
       # rc) declares a `workspace` volume, so this mount is always satisfiable;
       # only the PR gate writes report-extra.md into it today.
       - name: workspace
