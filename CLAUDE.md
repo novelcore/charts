@@ -24,11 +24,13 @@ This allows tracking drift from upstream sources.
 
 ### CI/CD Automation
 
-Three GitHub Actions workflows handle the full lifecycle:
+There are **no GitHub Actions** in this repository (platform rule: all CI runs in Argo Workflows). The pipeline lives in the `novelcore/kaos` repo, `kubetools/system/argo-workflows/ci/overlays/dev/charts-ci/`, and runs on the dev hub:
 
-1. **release-charts.yml**: Triggers on push to main, packages all charts and publishes to gh-pages branch
-2. **sync-external-charts.yml**: Runs daily at 2 AM UTC, syncs charts based on `scripts/synch-config.yaml` config
-3. **validate-charts.yml**: Runs on PRs, performs linting, security scanning with Trivy, and installation testing
+1. **charts-validate**: every open PR head gets a `charts/validate` commit status (pending, then success/failure) whose link opens the Argo run. It runs the chart test suites under `charts/custom/*/tests`, `ct lint`, and renders every changed chart.
+2. **charts-release**: every commit on `main` gets a `charts/release` status; the run packages all charts, updates `gh-pages` (retention, `helm repo index`) and pushes `kubecore-observability-rules` to GHCR when a PAT is configured.
+3. **External chart sync** is manual: `scripts/sync-chart.sh` (the old daily workflow read a `sync-config.yaml` that does not exist, so it never synced anything).
+
+A poller (`charts-poll`, every 2 minutes) submits the runs, so a status can appear up to two minutes after a push or merge.
 
 ## Common Commands
 
@@ -101,7 +103,7 @@ sync:
   autoMerge: false
 ```
 
-To add new external chart: add repository entry (if new), add chart entry, commit changes. Daily sync workflow will create PR with updates.
+To add new external chart: add repository entry (if new), add chart entry, commit changes. Run `scripts/sync-chart.sh` to pull it in, then open a PR.
 
 ### ct.yaml
 
@@ -147,9 +149,8 @@ This custom chart bundles Argo CD with Argo Rollouts as a dependency:
 2. Add repository if not present
 3. Add chart with name, repository, version
 4. Commit and push
-5. Either wait for daily sync or manually trigger workflow
-6. Review PR created by sync workflow
-7. Merge PR to trigger release workflow
+5. Run `scripts/sync-chart.sh` and open a PR
+6. Wait for the `charts/validate` status, then merge the PR to trigger `charts-release`
 
 ### Updating Custom Chart
 
@@ -195,17 +196,16 @@ All scripts include requirement checks and will error with helpful messages if t
 
 ## Security Notes
 
-- All charts are scanned with Trivy in CI/CD
 - Never commit sensitive files: `.env`, `*.key`, `*.pem`, `secrets.yaml`
 - External charts are reviewed via PR before merge
-- GitHub secrets used for automation tokens
+- CI credentials are the org GitHub App token mounted in the Argo CI pods; none live in this repository
 
 ## Important File Locations
 
 - Chart definitions: `charts/{custom,external}/*/Chart.yaml`
 - Chart values: `charts/{custom,external}/*/values.yaml`
 - External sync config: `scripts/synch-config.yaml`
-- CI/CD workflows: `.github/workflows/*.yml`
+- CI/CD: Argo Workflows, defined in `novelcore/kaos` (`kubetools/system/argo-workflows/ci/overlays/dev/charts-ci/`)
 - Helper scripts: `scripts/*.sh`
 - Testing config: `ct.yaml`
 - YAML linting: `.yamllint.yaml`

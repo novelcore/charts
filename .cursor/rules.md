@@ -21,7 +21,7 @@ charts/
 ├── scripts/
 │   ├── sync-chart.sh   # Manual chart synchronization script
 │   └── synch-config.yaml # External chart sync configuration
-├── .github/workflows/  # CI/CD automation
+├── (no .github/: CI runs in Argo Workflows, defined in novelcore/kaos)
 ├── init.sh            # Repository initialization script
 └── README.md          # Main documentation
 ```
@@ -125,39 +125,15 @@ For immediate sync needs, use the sync script:
 ./scripts/sync-chart.sh bitnami postgresql 12.1.5
 ```
 
-## CI/CD Workflows
+## CI/CD
 
-### 1. Release Charts Workflow (`release-charts.yml`)
+There are no GitHub Actions. CI runs in Argo Workflows (defined in `novelcore/kaos`,
+`kubetools/system/argo-workflows/ci/overlays/dev/charts-ci/`) and reports as commit statuses.
 
-**Triggers**: Push to main branch affecting charts/, manual dispatch
-**Purpose**: Package and publish all charts to GitHub Pages
-
-**Process**:
-- Packages all custom and external charts
-- Updates Helm repository index
-- Publishes to GitHub Pages at `https://novelcore.github.io/charts/`
-
-### 2. Sync External Charts Workflow (`sync-external-charts.yml`)
-
-**Triggers**: Daily at 2 AM UTC, manual dispatch with optional parameters
-**Purpose**: Automatically sync external charts from upstream repositories
-
-**Features**:
-- Reads configuration from `synch-config.yaml`
-- Creates pull requests for chart updates
-- Supports syncing specific charts or all configured charts
-- Adds sync metadata to Chart.yaml files
-
-### 3. Validate Charts Workflow (`validate-charts.yml`)
-
-**Triggers**: Pull requests and pushes affecting charts/
-**Purpose**: Comprehensive chart validation and testing
-
-**Validation Steps**:
-- Chart linting with `helm lint`
-- Chart testing with `ct` (chart-testing)
-- Security scanning with Trivy
-- Installation testing in kind cluster
+- `charts/validate` on every open PR: chart test suites, `ct lint`, render of changed charts.
+- `charts/release` on every commit on `main`: package all charts, update `gh-pages` and the index at
+  `https://novelcore.github.io/charts/`, push `kubecore-observability-rules` to GHCR when a token exists.
+- External chart sync is manual (`scripts/sync-chart.sh`); there is no scheduled job.
 
 ## Repository Usage Patterns
 
@@ -190,8 +166,7 @@ helm install my-release novelcore/<chart-name>
 2. **External Chart Management**:
    - Update `synch-config.yaml`
    - Use manual sync for immediate needs
-   - Monitor sync workflow PRs
-   - Review and merge sync updates
+   - Review and merge the PRs you open for sync updates
 
 ## Security Considerations
 
@@ -233,7 +208,7 @@ helm install my-release novelcore/<chart-name>
 - `charts/custom/**/Chart.yaml`: Custom chart definitions
 - `charts/external/**/Chart.yaml`: External chart definitions (with syncMetadata)
 - `scripts/synch-config.yaml`: External chart sync configuration
-- `.github/workflows/*.yml`: CI/CD automation
+- CI/CD: Argo Workflows in `novelcore/kaos` (`kubetools/system/argo-workflows/ci/overlays/dev/charts-ci/`)
 - `*.tgz`: Packaged chart files (ignored in git)
 - `values.yaml`: Chart configuration files
 
