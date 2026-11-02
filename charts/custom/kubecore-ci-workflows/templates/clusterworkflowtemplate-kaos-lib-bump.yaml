@@ -1,0 +1,108 @@
+{{/*
+kaos-lib-bump-pr — the platform's bump job (PRD novelcore/kaos#1147, contract
+kubecore-operator study/kubecore/package-delivery-design.md).
+
+An app whose desired kaos-lib version is outside its .kaos/compat.yaml range is
+not rebuilt (state needs-migration; the operator raises the KubeApp condition
+KaosLibBumpRequested, target status.ml.kaosLib.desired). This template opens
+the ONE pull request that moves it, in the app repo, with the same per-org CI
+GitHub App token every other GitHub-writing CI step here uses
+(github.tokenSecretName):
+
+  branch  kaos-lib/bump-<version>, off `branch` (the branch the CI builds)
+  change  .kaos/compat.yaml -> kaos-lib: ">=X.Y,<next series>" (comments kept)
+  body    what merging / closing does + the version's CHANGELOG.md section, read
+          from the package source the spec names (a git archive: that repository
+          at that commit; a GitHub release wheel: that release's notes; ==X.Y.Z:
+          kaosLib.changelogUrl)
+
+Idempotent: a pull request ever opened for the branch (open, closed or merged)
+means no second one, so a client who closes it is not asked again for that
+version. Opening (or finding) the pull request for a version closes every other
+open kaos-lib/bump-* pull request of the repo as superseded and deletes its
+branch. A git version (git-<sha>) has no range to bump and opens nothing.
+
+Logic and tests: files/kaos-lib.py `bump`, tests/kaos-lib (a fake GitHub).
+
+When: the operator raises KubeApp condition KaosLibBumpRequested=True (unpinned
+apps only), target status.ml.kaosLib.desired. That condition lives on the hub;
+this template runs on the app's pool, with the pool's CI token. Until the hub
+submits it automatically (the way the k8smlapp composition renders the
+{app}-ci-sync Workflow onto the pool: see the PR description), it is submitted
+per app, in the project's CI namespace:
+  argo submit -n <project>-ci --from clusterworkflowtemplate/kaos-lib-bump-pr \
+    -p app_name=<app> -p project_name=<project> -p version=0.3.0 \
+    -p spec='@ https://github.com/kaos-io/kaos-lib/releases/download/v0.3.0/<wheel>'
+Re-submitting is safe: the job is idempotent.
+*/}}
+apiVersion: argoproj.io/v1alpha1
+kind: ClusterWorkflowTemplate
+metadata:
+  name: kaos-lib-bump-pr
+  labels:
+    {{- include "kubecore-ci-workflows.labels" . | nindent 4 }}
+spec:
+  serviceAccountName: {{ include "kubecore-ci-workflows.serviceAccountName" . }}
+  entrypoint: bump
+  # The system pool, as ml-ci-reconcile: the job needs only the GitHub API.
+  nodeSelector:
+    platform.kubecore.io/system: "true"
+  {{- with .Values.tolerations }}
+  tolerations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  ttlStrategy:
+    secondsAfterCompletion: {{ .Values.workflow.ttlStrategy.secondsAfterCompletion }}
+  podGC:
+    strategy: {{ .Values.workflow.podGC.strategy }}
+  arguments:
+    parameters:
+    - name: app_name
+    - name: project_name
+    # Empty: {github.org}/{project}-{app}, the way the githubapp composition names it.
+    - name: repo_url
+      value: ""
+    - name: branch
+      value: dev
+    # The target: status.ml.kaosLib.desired and its version (==X.Y.Z -> X.Y.Z).
+    - name: version
+    - name: spec
+  volumes:
+  - name: github-token
+    secret:
+      secretName: {{ .Values.github.tokenSecretName }}
+  templates:
+  - name: bump
+{{ include "kubecore-ci-workflows.preemptionRetry" . | indent 4 }}
+    container:
+      image: {{ .Values.tooling.toolboxImage | default "alpine/k8s:1.36.4" }}
+      {{- include "kubecore-ci-workflows.resources" .Values.tooling.resources | nindent 6 }}
+      command: [sh, -c]
+      # Data, not script: the parameters reach the script as env vars.
+      env:
+      - name: APP
+        value: "{{`{{workflow.parameters.app_name}}`}}"
+      - name: PROJECT
+        value: "{{`{{workflow.parameters.project_name}}`}}"
+      - name: REPO_URL
+        value: "{{`{{workflow.parameters.repo_url}}`}}"
+      - name: BASE
+        value: "{{`{{workflow.parameters.branch}}`}}"
+      - name: VERSION
+        value: "{{`{{workflow.parameters.version}}`}}"
+      - name: SPEC
+        value: "{{`{{workflow.parameters.spec}}`}}"
+      args:
+      - |
+        set -eu
+        case "${REPO_URL}" in
+          https://github.com/*) SLUG=$(printf '%s' "${REPO_URL}" | sed -E 's|https://github.com/||; s|\.git$||') ;;
+          *) SLUG="{{ .Values.github.org }}/${PROJECT}-${APP}" ;;
+        esac
+{{ include "kubecore-ci-workflows.kaosLibScript" . | indent 8 }}
+        python3 -I /tmp/kaos-lib.py bump --slug "${SLUG}" --base "${BASE}" --version "${VERSION}" \
+          --spec "${SPEC}" --changelog-url "{{ .Values.kaosLib.changelogUrl }}"
+      volumeMounts:
+      - name: github-token
+        mountPath: /etc/github-token
+        readOnly: true

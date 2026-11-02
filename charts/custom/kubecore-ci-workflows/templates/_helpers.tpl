@@ -718,3 +718,15 @@ retryStrategy:
     duration: "30s"
     factor: "2"
 {{- end }}
+
+{{/*
+kaos-lib delivery (PRD novelcore/kaos#1147): writes files/kaos-lib.py to
+/tmp/kaos-lib.py, the CI side of the contract (the spec a build installs, what it
+reports back in pipeline-images, the support verdict, the bump pull request).
+Tested in tests/kaos-lib. Caller: python3 + PyYAML (tooling.toolboxImage).
+*/}}
+{{- define "kubecore-ci-workflows.kaosLibScript" -}}
+cat > /tmp/kaos-lib.py <<'KAOSLIBEOF'
+{{ .Files.Get "files/kaos-lib.py" }}
+KAOSLIBEOF
+{{- end }}

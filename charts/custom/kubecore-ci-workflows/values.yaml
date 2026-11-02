@@ -278,6 +278,11 @@ pendingReaper:
   pendingMaxSeconds: 2700   # 45m — a step Pending this long is capacity-stuck, not queued
   terminateGraceSeconds: 1200  # 20m — shutdown recorded but unhonored = controller desync
 
+# kaos-lib delivery (PRD novelcore/kaos#1147): where kaos-lib-bump-pr reads the
+# release notes of a ==X.Y.Z version (a git archive spec names its own source).
+kaosLib:
+  changelogUrl: https://raw.githubusercontent.com/kaos-io/kaos-lib/main/CHANGELOG.md
+
 # Platform enhancer (kubecore-operator#1161): ml-ci-build and ml-ci-pr-render run
 # kubecore.enhance from THIS pinned copy (the template repo's kubecore/), overlaid
 # on the app's vendored kubecore/ (kept for local dev only). Bump `ref` to roll

@@ -176,6 +176,18 @@ spec:
           name: ml-ci-build
           template: version
           clusterScope: true
+    # A release of an app on an unsupported kaos-lib is refused (PRD
+    # novelcore/kaos#1147): kaos-lib-support fails, so nothing is built or
+    # promoted. It also posts the kaos-lib/support commit status.
+    - - name: kaos-lib-support
+        templateRef:
+          name: ml-ci-build
+          template: kaos-lib-support
+          clusterScope: true
+        arguments:
+          parameters:
+          - name: refuse_unsupported
+            value: "true"
     - - name: build-push
         templateRef:
           name: ml-ci-build
@@ -192,6 +204,8 @@ spec:
             value: "{{`{{steps.version.outputs.parameters.image_tag}}`}}"
           - name: new_version
             value: "{{`{{steps.version.outputs.parameters.new_version}}`}}"
+          - name: kaos_lib_package
+            value: "{{`{{steps.detect-steps.outputs.parameters.kaos_lib_package}}`}}"
         withParam: "{{`{{steps.detect-steps.outputs.parameters.changed_steps}}`}}"
     - - name: render-wft
         templateRef:
@@ -217,6 +231,10 @@ spec:
             value: "{{`{{steps.version.outputs.parameters.image_tag}}`}}"
           - name: changed_steps
             value: "{{`{{steps.detect-steps.outputs.parameters.changed_steps}}`}}"
+          - name: kaos_lib_record
+            value: "{{`{{steps.detect-steps.outputs.parameters.kaos_lib_record}}`}}"
+          - name: kaos_lib_compat
+            value: "{{`{{steps.detect-steps.outputs.parameters.kaos_lib_compat}}`}}"
     - - name: status
         # Reporting only: a GitHub write that fails after its retries is a red
         # node here, never a failed (or stopped) build.
