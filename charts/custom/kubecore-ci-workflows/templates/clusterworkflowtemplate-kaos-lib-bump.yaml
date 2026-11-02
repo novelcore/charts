@@ -13,7 +13,7 @@ GitHub App token every other GitHub-writing CI step here uses
   change  .kaos/compat.yaml -> kaos-lib: ">=X.Y,<next series>" (comments kept)
   body    what merging / closing does + the version's CHANGELOG.md section, read
           from the package source the spec names (a git archive: that repository
-          at that commit; a GitHub release wheel: that release's notes; ==X.Y.Z:
+          at that commit; a GitHub release asset or tag archive: that release's notes; ==X.Y.Z:
           kaosLib.changelogUrl)
 
 Idempotent: a pull request ever opened for the branch (open, closed or merged)
@@ -24,16 +24,29 @@ branch. A git version (git-<sha>) has no range to bump and opens nothing.
 
 Logic and tests: files/kaos-lib.py `bump`, tests/kaos-lib (a fake GitHub).
 
-When: the operator raises KubeApp condition KaosLibBumpRequested=True (unpinned
-apps only), target status.ml.kaosLib.desired. That condition lives on the hub;
-this template runs on the app's pool, with the pool's CI token. Until the hub
-submits it automatically (the way the k8smlapp composition renders the
-{app}-ci-sync Workflow onto the pool: see the PR description), it is submitted
-per app, in the project's CI namespace:
+PARAMETER CONTRACT (the k8smlapp composition renders one Workflow per app per
+version referencing this template, when the operator passes kaosLib.bumpTo
+{spec, version} into the XR, i.e. while KaosLibBumpRequested=True; pinned apps
+get none):
+  app           the app name (as ci-sync's app_name)                  required
+  version       the target version, X.Y.Z (bumpTo.version)            required
+  spec          the target requirement, as built (bumpTo.spec), e.g.
+                kaos-lib[zitadel] @ https://github.com/kaos-io/kaos-lib/releases/<download>/vX.Y.Z/<wheel>
+                                                                       required
+  project_name  the project (as ci-sync's project_name); the app repo
+                is {github.org}/{project_name}-{app}                  required
+  branch        the branch the CI builds and the PR targets (ci-sync's
+                branch, the app's dev branch)                         default dev
+  repo_url      https://github.com/<owner>/<repo>[.git] to override
+                the derived repo                                      default ""
+Run it in the project's CI namespace with the pool's CI token (github-token
+volume; ci-sync's serviceAccountName/volumes work as they are). Idempotent per
+version: re-submitting it, or a second Workflow for the same version, opens
+nothing new. A Workflow name per version (e.g. {app}-kaos-lib-bump-{version})
+keeps one run per version; a new version's run closes the older bump PR.
+By hand:
   argo submit -n <project>-ci --from clusterworkflowtemplate/kaos-lib-bump-pr \
-    -p app_name=<app> -p project_name=<project> -p version=0.3.0 \
-    -p spec='@ https://github.com/kaos-io/kaos-lib/releases/download/v0.3.0/<wheel>'
-Re-submitting is safe: the job is idempotent.
+    -p app=<app> -p project_name=<project> -p version=0.3.0 -p spec='<requirement>'
 */}}
 apiVersion: argoproj.io/v1alpha1
 kind: ClusterWorkflowTemplate
@@ -57,14 +70,14 @@ spec:
     strategy: {{ .Values.workflow.podGC.strategy }}
   arguments:
     parameters:
-    - name: app_name
+    - name: app
     - name: project_name
     # Empty: {github.org}/{project}-{app}, the way the githubapp composition names it.
     - name: repo_url
       value: ""
     - name: branch
       value: dev
-    # The target: status.ml.kaosLib.desired and its version (==X.Y.Z -> X.Y.Z).
+    # The target: kaosLib.bumpTo (status.ml.kaosLib.desired and its version).
     - name: version
     - name: spec
   volumes:
@@ -81,7 +94,7 @@ spec:
       # Data, not script: the parameters reach the script as env vars.
       env:
       - name: APP
-        value: "{{`{{workflow.parameters.app_name}}`}}"
+        value: "{{`{{workflow.parameters.app}}`}}"
       - name: PROJECT
         value: "{{`{{workflow.parameters.project_name}}`}}"
       - name: REPO_URL

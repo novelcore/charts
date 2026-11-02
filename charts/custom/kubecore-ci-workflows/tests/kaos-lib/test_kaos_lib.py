@@ -22,9 +22,11 @@ kl = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(kl)
 
 SHA = "0136a205a82fbe4ed4a82037329e048f58e7e740"
-GIT = f"@ https://github.com/novelcore/hera-pipeline-template/archive/{SHA}.zip#subdirectory=packages/kubecore"
-LIB = f"@ https://github.com/kaos-io/kaos-lib/archive/{'b' * 40}.zip"
-WHEEL = "@ https://github.com/kaos-io/kaos-lib/releases/download/v0.3.0/kaos_lib-0.3.0-py3-none-any.whl"
+# A spec is the whole requirement: name + extras + ==X.Y.Z or @ <url>.
+GIT = f"kubecore[zitadel] @ https://github.com/novelcore/hera-pipeline-template/archive/{SHA}.zip#subdirectory=packages/kubecore"
+LIB = f"kaos-lib @ https://github.com/kaos-io/kaos-lib/archive/{'b' * 40}.zip"
+WHEEL = "kaos-lib[zitadel] @ https://github.com/kaos-io/kaos-lib/releases/download/v0.3.0/kaos_lib-0.3.0-py3-none-any.whl"
+TAG = "kaos-lib[zitadel] @ https://github.com/kaos-io/kaos-lib/archive/refs/tags/v0.3.0.zip"
 
 
 def ctx_file(tmp_path, kaos_lib=None):
@@ -54,7 +56,7 @@ def app_repo(tmp_path, compat=">=0.2,<0.3", steps=("steps/a", "steps/b"), manage
 def test_a_spec_the_images_do_not_have_rebuilds_the_steps_that_declare_the_arg(tmp_path):
     repo = app_repo(tmp_path)
     d = kl.decide(kl.load_context(ctx_file(tmp_path, {"spec": GIT, "version": "git-0136a205a82f"})),
-                  "==0.2.0", kl.read_compat(repo), kl.managed(repo, ["steps/a", "steps/b"]))
+                  "kaos-lib==0.2.0", kl.read_compat(repo), kl.managed(repo, ["steps/a", "steps/b"]))
     assert d["spec"] == GIT and d["record"] == GIT and d["rebuild"] is True
     assert d["managed"] == ["steps/a"] and d["compat"] == ">=0.2,<0.3"
 
@@ -66,18 +68,30 @@ def test_the_spec_already_built_rebuilds_nothing(tmp_path):
 
 
 def test_a_context_without_kaos_lib_changes_nothing(tmp_path):
-    d = kl.decide(kl.load_context(ctx_file(tmp_path)), "==0.2.0", ">=0.2", ["steps/a"])
+    d = kl.decide(kl.load_context(ctx_file(tmp_path)), "kaos-lib==0.2.0", ">=0.2", ["steps/a"])
     assert (d["spec"], d["record"], d["rebuild"]) == ("", "", False)
 
 
-def test_a_github_release_wheel_is_built(tmp_path):
-    d = kl.decide(kl.load_context(ctx_file(tmp_path, {"spec": WHEEL, "version": "0.3.0"})), "", "", ["steps/a"])
-    assert d["spec"] == WHEEL and d["rebuild"]
+@pytest.mark.parametrize("spec", [WHEEL, TAG, LIB, GIT, "kaos-lib==0.3.0", "kaos-lib[zitadel]==0.3.0",
+                                  "kaos-lib[zitadel,x] ==0.3.0",
+                                  "kaos-lib @ https://github.com/kaos-io/kaos-lib/releases/download/v0.3.0/kaos_lib-0.3.0.tar.gz"])
+def test_every_requirement_form_is_built_as_it_is(tmp_path, spec):
+    d = kl.decide(kl.load_context(ctx_file(tmp_path, {"spec": spec, "version": "0.3.0"})), "", "", ["steps/a"])
+    assert d["spec"] == spec and d["record"] == spec and d["rebuild"]
 
 
-@pytest.mark.parametrize("bad", ["latest", ">=0.3", '==0.3.0"; id; "', "@ https://evil/x.zip",
-                                 f"@ https://github.com/x/y/archive/{SHA}.zip$(id)", "==0.3",
-                                 WHEEL + " ; id", "@ https://evil.example/releases/download/v1.0.0/x.whl"])
+def test_the_comparison_is_exact_string_equality(tmp_path):
+    """Moving from the kubecore name to kaos-lib at the same commit is a move: it rebuilds."""
+    other = GIT.replace("kubecore[zitadel]", "kaos-lib[zitadel]")
+    d = kl.decide(kl.load_context(ctx_file(tmp_path, {"spec": other})), GIT, "", ["steps/a"])
+    assert d["rebuild"] is True
+
+
+@pytest.mark.parametrize("bad", ["latest", ">=0.3", "==0.3.0", '==0.3.0"; id; "', "kaos-lib @ https://evil/x.zip",
+                                 WHEEL.split(" ", 1)[1], "kaos-lib  @ https://github.com/x/y/archive/refs/tags/v1.0.0.zip",
+                                 "kaos-lib[zitadel] >=0.3", "kaos-lib==0.3.0; python_version>'3'",
+                                 f"kaos-lib @ https://github.com/x/y/archive/{SHA}.zip$(id)", "kaos-lib==0.3",
+                                 WHEEL + " ; id", "kaos-lib @ https://evil.example/releases/download/v1.0.0/x.whl"])
 def test_a_spec_outside_the_operator_pattern_is_refused_never_built(tmp_path, bad):
     d = kl.decide(kl.load_context(ctx_file(tmp_path, {"spec": bad})), "", "", ["steps/a"])
     assert (d["spec"], d["record"]) == ("", "") and d["reason"].startswith("REFUSED")
@@ -94,10 +108,10 @@ def test_the_cli_prints_the_decision(tmp_path, capsys):
     repo = app_repo(tmp_path)
     steps = tmp_path / "steps.txt"
     steps.write_text("steps/a\nsteps/b\n")
-    kl.main(["decide", "--context", str(ctx_file(tmp_path, {"spec": "==0.2.1"})), "--recorded", "==0.2.0",
+    kl.main(["decide", "--context", str(ctx_file(tmp_path, {"spec": "kaos-lib==0.2.1"})), "--recorded", "kaos-lib==0.2.0",
              "--repo", str(repo), "--steps", str(steps)])
     out = json.loads(capsys.readouterr().out)
-    assert out["spec"] == "==0.2.1" and out["rebuild"] and out["compat"] == ">=0.2,<0.3"
+    assert out["spec"] == "kaos-lib==0.2.1" and out["rebuild"] and out["compat"] == ">=0.2,<0.3"
 
 
 def test_context_prints_the_delivered_spec(tmp_path, capsys):
@@ -173,7 +187,7 @@ def test_changelog_url_follows_the_archive():
     assert kl.changelog_url(GIT, "D") == (
         f"https://raw.githubusercontent.com/novelcore/hera-pipeline-template/{SHA}/packages/kubecore/CHANGELOG.md")
     assert kl.changelog_url(LIB, "D") == f"https://raw.githubusercontent.com/kaos-io/kaos-lib/{'b' * 40}/CHANGELOG.md"
-    assert kl.changelog_url("==0.3.0", "D") == "D"
+    assert kl.changelog_url("kaos-lib==0.3.0", "D") == "D"
 
 
 def test_release_notes_take_one_section():
@@ -284,7 +298,7 @@ def github(monkeypatch):
     srv.shutdown()
 
 
-def run_bump(fake, version="0.3.0", spec="==0.3.0"):
+def run_bump(fake, version="0.3.0", spec="kaos-lib[zitadel]==0.3.0"):
     return kl.bump(kl.GitHub("tok", fake.api), fake.slug, "dev", version, spec, "https://changelog", log=lambda m: None)
 
 
@@ -314,7 +328,7 @@ def test_a_closed_or_merged_bump_is_never_reopened(github, merged):
 def test_a_newer_version_closes_the_superseded_bump(github):
     old = github.pr("kaos-lib/bump-0.3.0")
     other = github.pr("feature/x")
-    out = run_bump(github, version="0.4.0", spec="==0.4.0")
+    out = run_bump(github, version="0.4.0", spec="kaos-lib[zitadel]==0.4.0")
     assert out["action"] == "opened" and out["closed"] == [old]
     assert github.prs[old - 1]["state"] == "closed" and github.prs[other - 1]["state"] == "open"
     assert "refs/heads/kaos-lib/bump-0.3.0" not in github.refs
@@ -341,3 +355,9 @@ def test_a_git_version_opens_nothing(github):
 def test_a_release_wheel_takes_its_notes_from_the_github_release(github):
     run_bump(github, spec=WHEEL)
     assert "- **Migration**: from the release" in github.prs[0]["body"]
+
+
+def test_a_tag_archive_takes_its_notes_from_the_github_release(github):
+    run_bump(github, spec=TAG)
+    assert "- **Migration**: from the release" in github.prs[0]["body"]
+    assert f"Package: `{TAG}`" in github.prs[0]["body"]

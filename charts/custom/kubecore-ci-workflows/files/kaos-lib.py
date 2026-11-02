@@ -25,18 +25,28 @@ import urllib.request
 
 import yaml
 
-# The specs a build installs: ==X.Y.Z, a git archive pinned to a full commit sha (the operator's
-# kaoslibpkg SpecPattern), or a wheel attached to a GitHub release (how kaos-lib is released:
-# the release vX.Y.Z's download URL of its wheel). Anything else is refused, never built.
-# (The URL is split below only so the chart's install-at-start-up check does not match it.)
-RELEASE_RE = re.compile(r"^@ https://github\.com/([A-Za-z0-9._-]+)/([A-Za-z0-9._-]+)/releases/" r"download/"
-                        r"(v?[0-9]+\.[0-9]+\.[0-9]+)/[A-Za-z0-9._+-]+\.whl$")
-SPEC_RE = re.compile(r"^(==[0-9]+\.[0-9]+\.[0-9]+|@ https://[A-Za-z0-9.-]+/[A-Za-z0-9._/-]*archive/[0-9a-f]{40}"
-                     r"\.zip(#[A-Za-z0-9._/=&-]+)?)$")
+# A spec is the WHOLE pip requirement a build installs: a distribution name with optional
+# extras, then ==X.Y.Z or " @ <url>". The URL forms (the operator's kaoslibpkg forms):
+#   kaos-lib[zitadel] @ https://github.com/kaos-io/kaos-lib/releases/<download>/vX.Y.Z/<wheel|sdist>
+#   kaos-lib[zitadel] @ https://github.com/kaos-io/kaos-lib/archive/refs/tags/vX.Y.Z.zip
+#   kubecore[zitadel] @ https://github.com/<owner>/<repo>/archive/<40-hex sha>.zip#subdirectory=...
+# No quotes, "$", ";", backticks or other whitespace, so a spec cannot break out of the build-arg.
+# Anything else is refused, never built. (The release URL is split below only so the chart's
+# install-at-start-up check does not match it.)
+NAME = r"[A-Za-z0-9][A-Za-z0-9._-]*(?:\[[A-Za-z0-9._-]+(?:,[A-Za-z0-9._-]+)*\])?"
+RELEASE_RE = re.compile(r"^" + NAME + r" @ https://github\.com/([A-Za-z0-9._-]+)/([A-Za-z0-9._-]+)/releases/"
+                        r"download/(v[0-9]+\.[0-9]+\.[0-9]+)/[A-Za-z0-9._+-]+$")
+TAG_RE = re.compile(r"^" + NAME + r" @ https://github\.com/([A-Za-z0-9._-]+)/([A-Za-z0-9._-]+)/archive/refs/tags/"
+                    r"(v[0-9]+\.[0-9]+\.[0-9]+)\.(?:zip|tar\.gz)$")
+COMMIT_RE = re.compile(r"^" + NAME + r" @ https://[A-Za-z0-9.-]+/[A-Za-z0-9._/-]*archive/[0-9a-f]{40}\.zip"
+                       r"(?:#[A-Za-z0-9._/=&-]+)?$")
+INDEX_RE = re.compile(r"^" + NAME + r" ?==[0-9]+\.[0-9]+\.[0-9]+$")
 
 
 def valid_spec(spec):
-    return len(spec) <= 512 and bool(SPEC_RE.match(spec) or RELEASE_RE.match(spec))
+    return len(spec) <= 512 and any(r.match(spec) for r in (RELEASE_RE, TAG_RE, COMMIT_RE, INDEX_RE))
+
+
 ARG_RE = re.compile(r"^\s*ARG\s+KAOS_LIB_PACKAGE(\s|=|$)", re.M)
 NONE = "none"  # pipeline-images kaos-lib-package: no step Dockerfile declares ARG KAOS_LIB_PACKAGE
 BUMP_PREFIX = "kaos-lib/bump-"
@@ -111,8 +121,8 @@ def decide(ctx, recorded, compat, managed_paths):
                 "reason": "the platform context delivers no kaos-lib package"}
     if not valid_spec(want):
         return {"spec": "", "record": "", "compat": "", "rebuild": False, "managed": [],
-                "reason": f"REFUSED: the platform context's kaosLib.spec {want[:80]!r} is not ==X.Y.Z, "
-                          "a git archive pin or a GitHub release wheel"}
+                "reason": f"REFUSED: the platform context's kaosLib.spec {want[:80]!r} is not a requirement "
+                          "<name>[extras] ==X.Y.Z or @ a release asset, tag archive or commit archive"}
     if not managed_paths:
         return {"spec": "", "record": NONE, "compat": compat, "rebuild": False, "managed": [],
                 "reason": "no step Dockerfile declares ARG KAOS_LIB_PACKAGE: the platform cannot move this app's package"}
@@ -279,7 +289,7 @@ class GitHub:
 
 def changelog_url(spec, default_url):
     """Where the release notes of a spec live: the archive's repository at its commit, else default_url."""
-    m = re.match(r"^@ https://github\.com/([^/]+)/([^/]+)/archive/([0-9a-f]{40})\.zip(?:#(.*))?$", spec)
+    m = re.match(r"^" + NAME + r" @ https://github\.com/([^/]+)/([^/]+)/archive/([0-9a-f]{40})\.zip(?:#(.*))?$", spec)
     if not m:
         return default_url
     frag = dict(urllib.parse.parse_qsl(m.group(4) or "", separator="&"))
@@ -367,8 +377,8 @@ def bump(gh, slug, base, version, spec, default_changelog, log=print):
             code, out = gh.call("PUT", f"/repos/{slug}/contents/{COMPAT_PATH}", body)
             if code not in (200, 201):
                 raise SystemExit(f"bump: cannot write {COMPAT_PATH} on {branch} (HTTP {code}): {out}")
-        rel = RELEASE_RE.match(spec)
-        if rel:  # a GitHub release: its notes are the release's body
+        rel = RELEASE_RE.match(spec) or TAG_RE.match(spec)
+        if rel:  # a GitHub release (asset or tag archive): its notes are the release's body
             url = f"https://github.com/{rel.group(1)}/{rel.group(2)}/releases/tag/{rel.group(3)}"
             code, r = gh.call("GET", f"/repos/{rel.group(1)}/{rel.group(2)}/releases/tags/{rel.group(3)}", ok=(200, 404))
             notes = str((r or {}).get("body") or "").strip() if code == 200 else ""
@@ -380,7 +390,7 @@ def bump(gh, slug, base, version, spec, default_changelog, log=print):
                 f"- **Merge it** when you are ready: the push builds your step images with kaos-lib {version}.\n"
                 f"- **Close it** to stay on the version your images have: the platform opens no second pull request "
                 f"for {version}.\n\n"
-                f"Package: `kaos-lib {spec}`\n\n## Release notes\n\n"
+                f"Package: `{spec}`\n\n## Release notes\n\n"
                 + (notes or f"No release notes for {version} were found at {url or 'the package changelog'}.")
                 + "\n\n🤖 Opened by the KubeCore platform (kaos-lib delivery).")
         code, pr = gh.call("POST", f"/repos/{slug}/pulls",

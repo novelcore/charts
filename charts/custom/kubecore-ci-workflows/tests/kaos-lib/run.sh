@@ -24,8 +24,9 @@ FAILED=0
 PASSED=0
 APP=app1
 SHA40=0136a205a82fbe4ed4a82037329e048f58e7e740
-SPEC="@ https://github.com/novelcore/hera-pipeline-template/archive/${SHA40}.zip#subdirectory=packages/kubecore"
-OLD="==0.2.0"
+# A spec is the whole requirement (name, extras, @ url or ==version).
+SPEC="kubecore[zitadel] @ https://github.com/novelcore/hera-pipeline-template/archive/${SHA40}.zip#subdirectory=packages/kubecore"
+OLD="kaos-lib==0.2.0"
 HEAD_SHA=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 
 expect_eq() {
@@ -82,7 +83,7 @@ detect_case() {
   printf 'token' > "$T/token"
   printf 'hera' > "$T/workspace/frontend"
   ( cd "$T/workspace/repo"
-    printf 'FROM python:3.11-slim\nARG KAOS_LIB_PACKAGE="==0.2.0"\nRUN pip install "kubecore ${KAOS_LIB_PACKAGE}"\n' > steps/a/Dockerfile
+    printf 'FROM python:3.11-slim\nARG KAOS_LIB_PACKAGE="kubecore==0.2.0"\nRUN pip install "${KAOS_LIB_PACKAGE}"\n' > steps/a/Dockerfile
     printf 'FROM python:3.11-slim\nRUN true\n' > steps/b/Dockerfile
     printf 'kaos-lib: ">=0.2,<0.3"\n' > .kaos/compat.yaml
     git init -q && git add -A && git -c user.email=t@t -c user.name=t commit -qm one \
@@ -131,7 +132,7 @@ expect_eq "$KL_PKG" "$SPEC" "detect-steps: a step that rebuilds for its own reas
 detect_case "-"; context_cm "$T/fixture/kubeapps/${APP}/main/pipeline-context.yaml" "-"; run_detect
 expect_eq "$KL_PKG/$KL_REC/$CHANGED" "//[]" "detect-steps: a context without kaosLib changes nothing"
 
-detect_case "-"; context_cm "$T/fixture/kubeapps/${APP}/main/pipeline-context.yaml" '==0.3.0"; touch /tmp/pwned; "'; run_detect
+detect_case "-"; context_cm "$T/fixture/kubeapps/${APP}/main/pipeline-context.yaml" 'kaos-lib==0.3.0"; touch /tmp/pwned; "'; run_detect
 expect_eq "$KL_PKG/$KL_REC" "/" "detect-steps: a spec outside the operator pattern is refused"
 expect_has "$OUT" "REFUSED" "detect-steps: the refusal is loud"
 
@@ -152,7 +153,7 @@ expect_eq "$ENVV" "{{inputs.parameters.kaos_lib_package}}" "build-push: the spec
 expect_not "$BUILD_SRC" "inputs.parameters.kaos_lib_package" "build-push: the script never splices the spec"
 run_build() {  # run_build SPEC DECLARES_ARG
   T=$(mktemp -d "${BASE_TMP}/build-XXXXXX"); mkdir -p "$T/workspace/repo/steps/a"
-  if [ "$2" = yes ]; then printf 'FROM x\nARG KAOS_LIB_PACKAGE="==0.2.0"\n' > "$T/workspace/repo/steps/a/Dockerfile"
+  if [ "$2" = yes ]; then printf 'FROM x\nARG KAOS_LIB_PACKAGE="kubecore==0.2.0"\n' > "$T/workspace/repo/steps/a/Dockerfile"
   else printf 'FROM x\n' > "$T/workspace/repo/steps/a/Dockerfile"; fi
   printf '#!/bin/sh\nfor a in "$@"; do printf "%%s\\n" "$a"; done > %s/args\n' "$T" > "$T/executor"; chmod +x "$T/executor"
   sed -e "s#/kaniko/executor#${T}/executor#g" -e "s#/workspace#${T}/workspace#g" \
@@ -270,6 +271,8 @@ expect_eq "$RC/$NEEDS/$KREF" "0/true/$REF" "reconcile: the context delivers anot
 expect_has "$OUT" "KAOS-LIB DRIFT" "reconcile: says why"
 drift_case "-" "$SPEC"; run_drift
 expect_eq "$NEEDS" "true" "reconcile: images built before the record existed: rebuild once"
+drift_case "${SPEC/kubecore\[zitadel\]/kaos-lib[zitadel]}" "$SPEC"; run_drift
+expect_eq "$NEEDS" "true" "reconcile: exact string equality: the same URL under another name is drift"
 drift_case "none" "$SPEC"; run_drift
 expect_eq "$NEEDS" "false" "reconcile: no Dockerfile declares the ARG (none): nothing to rebuild"
 drift_case "$OLD" "-"; run_drift
@@ -290,7 +293,7 @@ SUP_SRC="${BASE_TMP}/support.src"; src ml-ci-build kaos-lib-support > "$SUP_SRC"
 SUPPORT='{"version": "0.4.0", "supported": ">=0.3", "deprecated": [{"range": "<0.3", "unsupported_after": "2099-01-01"}]}'
 support_case() {  # support_case VERSION SUPPORT_JSON REFUSE
   T=$(mktemp -d "${BASE_TMP}/support-XXXXXX"); mkdir -p "$T/bin" "$T/fixture/kubeapps/${APP}/main"; printf 'token' > "$T/token"
-  context_cm "$T/fixture/kubeapps/${APP}/main/pipeline-context.yaml" "==$1" "$2" "$1"
+  context_cm "$T/fixture/kubeapps/${APP}/main/pipeline-context.yaml" "kaos-lib[zitadel]==$1" "$2" "$1"
   cat > "$T/bin/git" <<EOF
 #!/usr/bin/env bash
 if [ "\$1" = clone ]; then dst="\${@: -1}"; mkdir -p "\$dst"; cp -r "$T/fixture/." "\$dst/"; exit 0; fi
@@ -347,6 +350,10 @@ for p in kaos_lib_package; do
   V=$(yq 'select(.metadata.name == "ml-ci-rc-build") | .spec.templates[] | select(.name == "ml-ci-rc-build") | .steps[][] | select(.name == "build-push") | .arguments.parameters[] | select(.name == "kaos_lib_package") | .value' "$RENDERED")
   expect_eq "$V" "{{steps.detect-steps.outputs.parameters.kaos_lib_package}}" "ml-ci-rc-build: builds with the same spec"
 done
+PARAMS=$(yq 'select(.metadata.name == "kaos-lib-bump-pr") | [.spec.arguments.parameters[].name] | join(" ")' "$RENDERED" | grep -v '^---$' | grep .)
+expect_eq "$PARAMS" "app project_name repo_url branch version spec" "kaos-lib-bump-pr: the parameter contract the composition renders against"
+REQUIRED=$(yq 'select(.metadata.name == "kaos-lib-bump-pr") | [.spec.arguments.parameters[] | select(has("value") | not) | .name] | join(" ")' "$RENDERED" | grep -v '^---$' | grep .)
+expect_eq "$REQUIRED" "app project_name version spec" "kaos-lib-bump-pr: app, project_name, version and spec are required"
 BUMP=$(src kaos-lib-bump-pr bump)
 expect_not "$BUMP" "{{workflow.parameters" "kaos-lib-bump-pr: parameters reach the script as env vars only"
 expect_has "$BUMP" "kaos-lib.py bump" "kaos-lib-bump-pr: runs the tested bump"
