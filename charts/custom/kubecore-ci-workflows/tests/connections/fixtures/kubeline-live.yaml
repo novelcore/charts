@@ -76,13 +76,13 @@ pipeline:
     description: Total training epochs.
   - name: batch-size
     default: '16'
-    description: Training batch size. Use -1 for Ultralytics auto-batch.
+    description: Training batch size. Use -1 for the training library auto-batch.
   - name: image-size
     default: '640'
     description: Input image resolution in pixels (must be a multiple of 32).
   - name: learning-rate
     default: '0.01'
-    description: Initial learning rate (Ultralytics lr0).
+    description: Initial learning rate (lr0).
   - name: cos-lr
     default: 'true'
     enum:
@@ -98,7 +98,7 @@ pipeline:
     - SGD
     - Adam
     - AdamW
-    description: Gradient optimizer. SGD is the Ultralytics default for YOLO.
+    description: Gradient optimizer. SGD is the training library default for YOLO.
   - name: momentum
     default: '0.937'
     description: SGD momentum or Adam beta1.
@@ -119,7 +119,7 @@ pipeline:
     description: Label smoothing epsilon [0.0, 1.0). Reduces overconfidence.
   - name: nbs
     default: '64'
-    description: Nominal batch size. Ultralytics scales gradients so effective LR
+    description: Nominal batch size. The training library scales gradients so effective LR
       matches this batch size.
   - name: freeze
     default: ''
@@ -243,7 +243,7 @@ pipeline:
     - ptq
     - qat
     description: 'Quantization mode: ''none'' skips both qat-finetune and model-quantization;
-      ''ptq'' runs Ultralytics INT8 export; ''qat'' runs PT2E QAT fine-tune then model-quantization.'
+      ''ptq'' runs the training library INT8 export; ''qat'' runs PT2E QAT fine-tune then model-quantization.'
   - name: quantization-image-size
     default: '640'
     description: Input image size for quantization. Must match training image-size.
