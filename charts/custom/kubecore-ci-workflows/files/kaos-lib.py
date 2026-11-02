@@ -27,6 +27,8 @@ import yaml
 
 # A spec is the WHOLE pip requirement a build installs: a distribution name with optional
 # extras, then ==X.Y.Z or " @ <url>". The URL forms (the operator's kaoslibpkg forms):
+#   kaos-lib[zitadel] @ https://<region>-python.pkg.dev/.../kaos_lib-X.Y.Z[rcN]-py3-none-any.whl[#sha256=<hex>]
+#     (the platform registry, kaos-lib-rc / kaos-lib: what the kaos-lib CI publishes and recommends)
 #   kaos-lib[zitadel] @ https://github.com/kaos-io/kaos-lib/releases/<download>/vX.Y.Z/<wheel|sdist>
 #   kaos-lib[zitadel] @ https://github.com/kaos-io/kaos-lib/archive/refs/tags/vX.Y.Z.zip
 #   kubecore[zitadel] @ https://github.com/<owner>/<repo>/archive/<40-hex sha>.zip#subdirectory=...
@@ -41,10 +43,25 @@ TAG_RE = re.compile(r"^" + NAME + r" @ https://github\.com/([A-Za-z0-9._-]+)/([A
 COMMIT_RE = re.compile(r"^" + NAME + r" @ https://[A-Za-z0-9.-]+/[A-Za-z0-9._/-]*archive/[0-9a-f]{40}\.zip"
                        r"(?:#[A-Za-z0-9._/=&-]+)?$")
 INDEX_RE = re.compile(r"^" + NAME + r" ?==[0-9]+\.[0-9]+\.[0-9]+$")
+REGISTRY_RE = re.compile(r"^" + NAME + r" @ https://([a-z0-9-]+)-python\.pkg\.dev/([A-Za-z0-9._/-]+)/kaos_lib-"
+                         r"([0-9]+\.[0-9]+\.[0-9]+(?:rc[0-9]+)?)-py3-none-any\.whl(?:#sha256=[0-9a-f]{64})?$")
+# Where the kaos-lib CI writes one record per release: <rc|stable>/<tag>/release.json (with `notes`).
+RELEASES_BASE = "https://storage.googleapis.com/kaos-dev-511509-kaos-lib"
 
 
 def valid_spec(spec):
-    return len(spec) <= 512 and any(r.match(spec) for r in (RELEASE_RE, TAG_RE, COMMIT_RE, INDEX_RE))
+    return len(spec) <= 512 and any(r.match(spec) for r in (REGISTRY_RE, RELEASE_RE, TAG_RE, COMMIT_RE, INDEX_RE))
+
+
+def registry_record_url(spec, base=RELEASES_BASE):
+    """The public release record of a registry wheel spec (its notes, sha256s), or "" for other forms."""
+    m = REGISTRY_RE.match(spec)
+    if not m:
+        return ""
+    version = m.group(3)
+    rel, _, rc = version.partition("rc")
+    tag = f"v{rel}-rc.{rc}" if rc else f"v{rel}"
+    return f"{base}/{'rc' if rc else 'stable'}/{tag}/release.json"
 
 
 ARG_RE = re.compile(r"^\s*ARG\s+KAOS_LIB_PACKAGE(\s|=|$)", re.M)
@@ -135,24 +152,39 @@ def decide(ctx, recorded, compat, managed_paths):
 
 # ---------------------------------------------------------------- versions and specifiers
 
+VERSION_RE = re.compile(r"([0-9]+(?:\.[0-9]+)*)(?:rc([0-9]+))?")
+
+
 def parse_version(v):
-    v = str(v).strip()
-    if not re.fullmatch(r"[0-9]+(\.[0-9]+)*", v):
-        raise ValueError(f"{v!r} is not a plain X.Y.Z release version")
-    return [int(x) for x in v.split(".")]
+    """The release part of X.Y.Z or X.Y.ZrcN (an rc of the kaos-lib prerelease channel)."""
+    m = VERSION_RE.fullmatch(str(v).strip())
+    if not m:
+        raise ValueError(f"{v!r} is not a plain X.Y.Z or X.Y.ZrcN version")
+    return [int(x) for x in m.group(1).split(".")]
+
+
+def _key(v):
+    """PEP 440 order, as the operator's kaoslibpkg: X.Y.ZrcN sorts just BEFORE X.Y.Z."""
+    m = VERSION_RE.fullmatch(str(v).strip())
+    if not m:
+        raise ValueError(f"{v!r} is not a plain X.Y.Z or X.Y.ZrcN version")
+    return [int(x) for x in m.group(1).split(".")], (0, int(m.group(2))) if m.group(2) else (1, 0)
 
 
 def _cmp(a, b):
-    n = max(len(a), len(b))
-    a, b = a + [0] * (n - len(a)), b + [0] * (n - len(b))
-    return (a > b) - (a < b)
+    """Compare two version strings (X.Y.Z or X.Y.ZrcN)."""
+    (ra, sa), (rb, sb) = _key(a), _key(b)
+    n = max(len(ra), len(rb))
+    ka, kb = (ra + [0] * (n - len(ra)), sa), (rb + [0] * (n - len(rb)), sb)
+    return (ka > kb) - (ka < kb)
 
 
 def contains(specifier, version):
-    """PEP 440 specifier membership for plain release versions (==, !=, <=, >=, <, >, ~=, ===, .*)."""
+    """PEP 440 specifier membership for X.Y.Z and X.Y.ZrcN (==, !=, <=, >=, <, >, ~=, ===, .*); an rc
+    counts as itself, so >=0.4 does not hold 0.4.0rc1 (the operator's rule too)."""
     v = parse_version(version)
     for clause in [c.strip() for c in str(specifier).split(",") if c.strip()]:
-        m = re.fullmatch(r"(===|==|!=|<=|>=|~=|<|>)\s*([0-9][0-9.]*)(\.\*)?", clause)
+        m = re.fullmatch(r"(===|==|!=|<=|>=|~=|<|>)\s*([0-9][0-9.]*(?:rc[0-9]+)?)(\.\*)?", clause)
         if not m:
             raise ValueError(f"cannot read the specifier clause {clause!r}")
         op, target, wild = m.group(1), m.group(2).rstrip("."), bool(m.group(3))
@@ -164,21 +196,21 @@ def contains(specifier, version):
             ok = prefix == t
             ok = ok if op == "==" else not ok
         elif op in ("==", "==="):
-            ok = _cmp(v, t) == 0
+            ok = _cmp(version, target) == 0
         elif op == "!=":
-            ok = _cmp(v, t) != 0
+            ok = _cmp(version, target) != 0
         elif op == "<=":
-            ok = _cmp(v, t) <= 0
+            ok = _cmp(version, target) <= 0
         elif op == ">=":
-            ok = _cmp(v, t) >= 0
+            ok = _cmp(version, target) >= 0
         elif op == "<":
-            ok = _cmp(v, t) < 0
+            ok = _cmp(version, target) < 0
         elif op == ">":
-            ok = _cmp(v, t) > 0
+            ok = _cmp(version, target) > 0
         else:  # ~=X.Y[.Z]: >= X.Y[.Z] and the same release up to the last component
             if len(t) < 2:
                 raise ValueError(f"{clause!r}: ~= needs at least X.Y")
-            ok = _cmp(v, t) >= 0 and v[:len(t) - 1] == t[:-1]
+            ok = _cmp(version, target) >= 0 and v[:len(t) - 1] == t[:-1]
         if not ok:
             return False
     return True
@@ -236,7 +268,7 @@ def support_verdict(version, support, today=None):
     if not in_window:
         return {"verdict": "unsupported", "message": f"kaos-lib {version} is outside the supported range {supported}"}
     try:
-        behind = bool(newest) and _cmp(v, parse_version(newest)) < 0
+        behind = bool(newest) and _cmp(version, newest) < 0
     except ValueError:
         behind = False
     if behind:
@@ -378,7 +410,14 @@ def bump(gh, slug, base, version, spec, default_changelog, log=print):
             if code not in (200, 201):
                 raise SystemExit(f"bump: cannot write {COMPAT_PATH} on {branch} (HTTP {code}): {out}")
         rel = RELEASE_RE.match(spec) or TAG_RE.match(spec)
-        if rel:  # a GitHub release (asset or tag archive): its notes are the release's body
+        record_url = registry_record_url(spec)
+        if record_url:  # the platform registry: the release record carries the CHANGELOG section
+            url = record_url
+            try:
+                notes = str((json.loads(fetch(url) or "{}") or {}).get("notes") or "").strip()
+            except ValueError:
+                notes = ""
+        elif rel:  # a GitHub release (asset or tag archive): its notes are the release's body
             url = f"https://github.com/{rel.group(1)}/{rel.group(2)}/releases/tag/{rel.group(3)}"
             code, r = gh.call("GET", f"/repos/{rel.group(1)}/{rel.group(2)}/releases/tags/{rel.group(3)}", ok=(200, 404))
             notes = str((r or {}).get("body") or "").strip() if code == 200 else ""

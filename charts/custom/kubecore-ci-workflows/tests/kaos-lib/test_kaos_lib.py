@@ -27,6 +27,9 @@ GIT = f"kubecore[zitadel] @ https://github.com/novelcore/hera-pipeline-template/
 LIB = f"kaos-lib @ https://github.com/kaos-io/kaos-lib/archive/{'b' * 40}.zip"
 WHEEL = "kaos-lib[zitadel] @ https://github.com/kaos-io/kaos-lib/releases/download/v0.3.0/kaos_lib-0.3.0-py3-none-any.whl"
 TAG = "kaos-lib[zitadel] @ https://github.com/kaos-io/kaos-lib/archive/refs/tags/v0.3.0.zip"
+AR = "https://europe-west1-python.pkg.dev/kaos-dev-511509"
+REG = f"kaos-lib[zitadel] @ {AR}/kaos-lib/kaos-lib/kaos_lib-0.4.0-py3-none-any.whl#sha256={'c' * 64}"
+REG_RC = f"kaos-lib[zitadel] @ {AR}/kaos-lib-rc/kaos-lib/kaos_lib-0.4.0rc3-py3-none-any.whl"
 
 
 def ctx_file(tmp_path, kaos_lib=None):
@@ -72,7 +75,7 @@ def test_a_context_without_kaos_lib_changes_nothing(tmp_path):
     assert (d["spec"], d["record"], d["rebuild"]) == ("", "", False)
 
 
-@pytest.mark.parametrize("spec", [WHEEL, TAG, LIB, GIT, "kaos-lib==0.3.0", "kaos-lib[zitadel]==0.3.0",
+@pytest.mark.parametrize("spec", [REG, REG_RC, WHEEL, TAG, LIB, GIT, "kaos-lib==0.3.0", "kaos-lib[zitadel]==0.3.0",
                                   "kaos-lib[zitadel,x] ==0.3.0",
                                   "kaos-lib @ https://github.com/kaos-io/kaos-lib/releases/download/v0.3.0/kaos_lib-0.3.0.tar.gz"])
 def test_every_requirement_form_is_built_as_it_is(tmp_path, spec):
@@ -125,6 +128,9 @@ def test_context_prints_the_delivered_spec(tmp_path, capsys):
     (">=0.2,<0.3", "0.2.9", True), (">=0.2,<0.3", "0.3.0", False), ("==0.2.4", "0.2.4", True),
     ("==0.2.*", "0.2.7", True), ("==0.2.*", "0.3.0", False), ("!=0.2.5", "0.2.5", False),
     ("~=0.2.3", "0.2.9", True), ("~=0.2.3", "0.3.0", False), ("~=1.4", "1.9", True), (">0.2", "0.2.0", False),
+    # rcs of the prerelease channel sort just before their final, as in the operator
+    (">=0.4", "0.4.0rc1", False), ("<0.4", "0.4.0rc1", True), (">=0.3,<0.5", "0.4.0rc2", True),
+    ("==0.4.0rc2", "0.4.0rc2", True), (">0.4.0rc2", "0.4.0rc10", True), ("<0.4.0", "0.4.0rc99", True),
 ])
 def test_specifiers(specifier, version, ok):
     assert kl.contains(specifier, version) is ok
@@ -147,6 +153,24 @@ DAY = datetime.date(2026, 11, 2)
     ("0.4.0", "current"), ("0.3.1", "behind"), ("0.2.0", "deprecated"), ("git-0136a205a82f", "unknown")])
 def test_support_verdicts(version, verdict):
     assert kl.support_verdict(version, SUPPORT, DAY)["verdict"] == verdict
+
+
+@pytest.mark.parametrize("version,newest,verdict", [("0.4.0rc1", "0.4.0", "behind"), ("0.4.0rc1", "0.4.0rc2", "behind"),
+                                                    ("0.4.0rc2", "0.4.0rc2", "current"), ("0.4.0", "0.4.0rc5", "current")])
+def test_support_verdicts_order_rcs(version, newest, verdict):
+    assert kl.support_verdict(version, dict(SUPPORT, version=newest), DAY)["verdict"] == verdict
+
+
+@pytest.mark.parametrize("bad", [REG.replace("-python.pkg.dev", "-docker.pkg.dev"), REG.replace(AR, "https://evil.example/x"),
+                                 REG_RC.replace("-py3-none-any.whl", ".tar.gz"), REG[:-1], REG_RC + "#egg=x"])
+def test_registry_specs_outside_the_operator_pattern_are_refused(bad):
+    assert not kl.valid_spec(bad)
+
+
+def test_registry_record_url_names_the_channel_and_tag():
+    assert kl.registry_record_url(REG) == f"{kl.RELEASES_BASE}/stable/v0.4.0/release.json"
+    assert kl.registry_record_url(REG_RC) == f"{kl.RELEASES_BASE}/rc/v0.4.0-rc.3/release.json"
+    assert kl.registry_record_url(WHEEL) == "" and kl.registry_record_url(GIT) == ""
 
 
 def test_a_deprecated_version_past_its_deadline_is_unsupported():
@@ -350,6 +374,18 @@ def test_an_app_without_compat_gets_the_file(monkeypatch, github):
 def test_a_git_version_opens_nothing(github):
     assert run_bump(github, version="git-0136a205a82f", spec=GIT)["action"] == "refused"
     assert github.calls == []
+
+
+def test_a_registry_wheel_takes_its_notes_from_the_release_record(github, monkeypatch):
+    seen = []
+
+    def fetch(url):
+        seen.append(url)
+        return json.dumps({"notes": "### Added\n- layouts"})
+    monkeypatch.setattr(kl, "fetch", fetch)
+    run_bump(github, version="0.4.0", spec=REG)
+    assert seen == [f"{kl.RELEASES_BASE}/stable/v0.4.0/release.json"]
+    assert "### Added\n- layouts" in github.prs[0]["body"] and f"Package: `{REG}`" in github.prs[0]["body"]
 
 
 def test_a_release_wheel_takes_its_notes_from_the_github_release(github):
