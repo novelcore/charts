@@ -2,15 +2,16 @@ apiVersion: v1
 entries:
   argo-cd:
   - annotations:
-      artifacthub.io/changes: |
-        - kind: added
-          description: Add condition for rootpath in NOTES.txt
-      artifacthub.io/signKey: |
-        fingerprint: 2B8F22F57260EFA67BE1C5824B11F800CD9D2252
+      artifacthub.io/changes: "- kind: added\n  description: Add condition for rootpath\
+        \ in NOTES.txt\n"
+      artifacthub.io/signKey: 'fingerprint: 2B8F22F57260EFA67BE1C5824B11F800CD9D2252
+
         url: https://argoproj.github.io/argo-helm/pgp_keys.asc
+
+        '
     apiVersion: v2
     appVersion: v3.0.12
-    created: "2026-11-03T01:15:49.350551032Z"
+    created: '2026-11-03T01:15:49.350551032Z'
     dependencies:
     - condition: redis-ha.enabled
       name: redis-ha
@@ -38,15 +39,16 @@ entries:
     version: 8.2.5
   argo-cd-with-rollouts:
   - annotations:
-      artifacthub.io/changes: |
-        - kind: added
-          description: Add condition for rootpath in NOTES.txt
-      artifacthub.io/signKey: |
-        fingerprint: 2B8F22F57260EFA67BE1C5824B11F800CD9D2252
+      artifacthub.io/changes: "- kind: added\n  description: Add condition for rootpath\
+        \ in NOTES.txt\n"
+      artifacthub.io/signKey: 'fingerprint: 2B8F22F57260EFA67BE1C5824B11F800CD9D2252
+
         url: https://argoproj.github.io/argo-helm/pgp_keys.asc
+
+        '
     apiVersion: v2
     appVersion: v3.0.12
-    created: "2026-11-03T01:15:49.383057359Z"
+    created: '2026-11-03T01:15:49.383057359Z'
     dependencies:
     - condition: redis-ha.enabled
       name: redis-ha
@@ -78,15 +80,16 @@ entries:
     version: 8.2.5
   argo-events:
   - annotations:
-      artifacthub.io/changes: |
-        - kind: changed
-          description: Bump argo-events to v1.9.6
-      artifacthub.io/signKey: |
-        fingerprint: 2B8F22F57260EFA67BE1C5824B11F800CD9D2252
+      artifacthub.io/changes: "- kind: changed\n  description: Bump argo-events to\
+        \ v1.9.6\n"
+      artifacthub.io/signKey: 'fingerprint: 2B8F22F57260EFA67BE1C5824B11F800CD9D2252
+
         url: https://argoproj.github.io/argo-helm/pgp_keys.asc
+
+        '
     apiVersion: v2
     appVersion: v1.9.6
-    created: "2026-11-03T01:15:49.386359312Z"
+    created: '2026-11-03T01:15:49.386359312Z'
     description: A Helm chart for Argo Events, the event-driven workflow automation
       framework
     digest: b27e2c77fdb024508b4519b87b3c5a332d0da1532e0a7f4ebddb5a9fe548bd0b
@@ -106,15 +109,16 @@ entries:
     version: 2.4.15
   argo-rollouts:
   - annotations:
-      artifacthub.io/changes: |
-        - kind: added
-          description: support dnsConfig for controller and dashboard pods
-      artifacthub.io/signKey: |
-        fingerprint: 2B8F22F57260EFA67BE1C5824B11F800CD9D2252
+      artifacthub.io/changes: "- kind: added\n  description: support dnsConfig for\
+        \ controller and dashboard pods\n"
+      artifacthub.io/signKey: 'fingerprint: 2B8F22F57260EFA67BE1C5824B11F800CD9D2252
+
         url: https://argoproj.github.io/argo-helm/pgp_keys.asc
+
+        '
     apiVersion: v2
     appVersion: v1.8.3
-    created: "2026-11-03T01:15:49.394985939Z"
+    created: '2026-11-03T01:15:49.394985939Z'
     description: A Helm chart for Argo Rollouts
     digest: 32c80c937a3257f37a3e99fd2e5197b56b2d3836b5c39d257ef83b4e5d15881c
     home: https://github.com/argoproj/argo-helm
@@ -133,15 +137,16 @@ entries:
     version: 2.40.3
   argo-workflows:
   - annotations:
-      artifacthub.io/changes: |
-        - kind: fixed
-          description: Fix yamllint error 'trailing spaces'
-      artifacthub.io/signKey: |
-        fingerprint: 2B8F22F57260EFA67BE1C5824B11F800CD9D2252
+      artifacthub.io/changes: "- kind: fixed\n  description: Fix yamllint error 'trailing\
+        \ spaces'\n"
+      artifacthub.io/signKey: 'fingerprint: 2B8F22F57260EFA67BE1C5824B11F800CD9D2252
+
         url: https://argoproj.github.io/argo-helm/pgp_keys.asc
+
+        '
     apiVersion: v2
     appVersion: v3.6.5
-    created: "2026-11-03T01:15:49.403491493Z"
+    created: '2026-11-03T01:15:49.403491493Z'
     description: A Helm chart for Argo Workflows
     digest: 43665a62577b2fc8076c759bca738b72c9be837c7c551e38ddeb0897e4d126f2
     home: https://github.com/argoproj/argo-helm
@@ -159,7 +164,7 @@ entries:
   atlas-operator:
   - apiVersion: v2
     appVersion: 0.7.7
-    created: "2026-11-03T01:15:49.404697281Z"
+    created: '2026-11-03T01:15:49.404697281Z'
     description: The Atlas Kubernetes Operator
     digest: 0b7d3b6107a4536ce13cc6e05bacca453065327ddcb3414fa20efda345f09d43
     name: atlas-operator
@@ -171,13 +176,15 @@ entries:
   - annotations:
       artifacthub.io/category: security
       artifacthub.io/license: Apache-2.0
-      artifacthub.io/prerelease: "false"
-      artifacthub.io/signKey: |
-        fingerprint: 1020CF3C033D4F35BAE1C19E1226061C665DF13E
+      artifacthub.io/prerelease: 'false'
+      artifacthub.io/signKey: 'fingerprint: 1020CF3C033D4F35BAE1C19E1226061C665DF13E
+
         url: https://cert-manager.io/public-keys/cert-manager-keyring-2021-09-20-1020CF3C033D4F35BAE1C19E1226061C665DF13E.gpg
+
+        '
     apiVersion: v2
     appVersion: v1.17.1
-    created: "2026-11-03T01:15:49.41802306Z"
+    created: '2026-11-03T01:15:49.41802306Z'
     description: A Helm chart for cert-manager
     digest: 6a6540abbdc964c05f7b762542fb296ad9acb654ce87887cfab09c5572d9b222
     home: https://cert-manager.io
@@ -201,7 +208,7 @@ entries:
   crossplane:
   - apiVersion: v1
     appVersion: 1.20.0
-    created: "2026-11-03T01:15:49.423480458Z"
+    created: '2026-11-03T01:15:49.423480458Z'
     description: Crossplane is an open source Kubernetes add-on that enables platform
       teams to assemble infrastructure from multiple vendors, and expose higher level
       self-service APIs for application teams to consume.
@@ -241,11 +248,11 @@ entries:
   eck-operator:
   - apiVersion: v2
     appVersion: 3.0.0
-    created: "2026-11-03T01:15:49.435656812Z"
+    created: '2026-11-03T01:15:49.435656812Z'
     dependencies:
     - condition: installCRDs
       name: eck-operator-crds
-      repository: ""
+      repository: ''
       version: 3.0.0
     description: Elastic Cloud on Kubernetes (ECK) operator
     digest: ce5fa621bba2faff2d5ee93809668b41fb89b0202b5b7b531fc451af1659a692
@@ -272,7 +279,7 @@ entries:
   everest:
   - apiVersion: v2
     appVersion: 1.6.0
-    created: "2026-11-03T01:15:49.552095785Z"
+    created: '2026-11-03T01:15:49.552095785Z'
     dependencies:
     - name: common
       repository: file://charts/common
@@ -313,29 +320,21 @@ entries:
   gitops-promoter:
   - annotations:
       artifacthub.io/category: integration-delivery
-      artifacthub.io/changes: |
-        - kind: fixed
-          description: "Restore tini as PID 1 to eliminate zombie git-remote-https process accumulation"
-        - kind: fixed
-          description: "Add shareProcessNamespace to ensure pause container reaps orphaned processes"
-        - kind: changed
-          description: "Reduce maxConcurrentReconciles from 10 to 3 to lower git subprocess burst rate"
-        - kind: added
-          description: "Add GIT_HTTP_LOW_SPEED_LIMIT/TIME env vars to kill stalled git HTTPS connections"
-      artifacthub.io/images: |-
-        - name: gitops-promoter
-          image: quay.io/argoprojlabs/gitops-promoter:v0.22.6
-        - name: kube-rbac-proxy
-          image: quay.io/brancz/kube-rbac-proxy:v0.20.2
+      artifacthub.io/changes: "- kind: fixed\n  description: \"Restore tini as PID\
+        \ 1 to eliminate zombie git-remote-https process accumulation\"\n- kind: fixed\n\
+        \  description: \"Add shareProcessNamespace to ensure pause container reaps\
+        \ orphaned processes\"\n- kind: changed\n  description: \"Reduce maxConcurrentReconciles\
+        \ from 10 to 3 to lower git subprocess burst rate\"\n- kind: added\n  description:\
+        \ \"Add GIT_HTTP_LOW_SPEED_LIMIT/TIME env vars to kill stalled git HTTPS connections\"\
+        \n"
+      artifacthub.io/images: "- name: gitops-promoter\n  image: quay.io/argoprojlabs/gitops-promoter:v0.22.6\n\
+        - name: kube-rbac-proxy\n  image: quay.io/brancz/kube-rbac-proxy:v0.20.2"
       artifacthub.io/license: Apache-2.0
-      artifacthub.io/links: |-
-        - name: GitOps Promoter Documentation
-          url: https://github.com/argoproj-labs/gitops-promoter/blob/main/README.md
-        - name: Release Notes
-          url: https://github.com/argoproj-labs/gitops-promoter/releases/tag/v0.22.6
+      artifacthub.io/links: "- name: GitOps Promoter Documentation\n  url: https://github.com/argoproj-labs/gitops-promoter/blob/main/README.md\n\
+        - name: Release Notes\n  url: https://github.com/argoproj-labs/gitops-promoter/releases/tag/v0.22.6"
     apiVersion: v2
     appVersion: 0.22.6
-    created: "2026-11-03T01:15:49.605036829Z"
+    created: '2026-11-03T01:15:49.605036829Z'
     description: A Helm chart for GitOps Promoter - A tool for promoting changes between
       environments in GitOps workflows
     digest: 6e9cbccf1d6151cae4f318f5a371ac906d7aa147f289d975e10a0123078ef0ef
@@ -359,23 +358,16 @@ entries:
     version: 0.8.3
   - annotations:
       artifacthub.io/category: integration-delivery
-      artifacthub.io/changes: |
-        - kind: changed
-          description: "Updated GitOps Promoter to v0.20.3"
-      artifacthub.io/images: |-
-        - name: gitops-promoter
-          image: quay.io/argoprojlabs/gitops-promoter:v0.22.6
-        - name: kube-rbac-proxy
-          image: quay.io/brancz/kube-rbac-proxy:v0.20.2
+      artifacthub.io/changes: "- kind: changed\n  description: \"Updated GitOps Promoter\
+        \ to v0.20.3\"\n"
+      artifacthub.io/images: "- name: gitops-promoter\n  image: quay.io/argoprojlabs/gitops-promoter:v0.22.6\n\
+        - name: kube-rbac-proxy\n  image: quay.io/brancz/kube-rbac-proxy:v0.20.2"
       artifacthub.io/license: Apache-2.0
-      artifacthub.io/links: |-
-        - name: GitOps Promoter Documentation
-          url: https://github.com/argoproj-labs/gitops-promoter/blob/main/README.md
-        - name: Release Notes
-          url: https://github.com/argoproj-labs/gitops-promoter/releases/tag/v0.22.6
+      artifacthub.io/links: "- name: GitOps Promoter Documentation\n  url: https://github.com/argoproj-labs/gitops-promoter/blob/main/README.md\n\
+        - name: Release Notes\n  url: https://github.com/argoproj-labs/gitops-promoter/releases/tag/v0.22.6"
     apiVersion: v2
     appVersion: 0.22.6
-    created: "2026-11-03T01:15:49.589179224Z"
+    created: '2026-11-03T01:15:49.589179224Z'
     description: A Helm chart for GitOps Promoter - A tool for promoting changes between
       environments in GitOps workflows
     digest: 48533cd08f8b341f71b00ffee4b7db4fc483aa6062a5779316640981733ce162
@@ -399,23 +391,16 @@ entries:
     version: 0.8.2
   - annotations:
       artifacthub.io/category: integration-delivery
-      artifacthub.io/changes: |
-        - kind: changed
-          description: "Updated GitOps Promoter to v0.20.3"
-      artifacthub.io/images: |-
-        - name: gitops-promoter
-          image: quay.io/argoprojlabs/gitops-promoter:v0.22.6
-        - name: kube-rbac-proxy
-          image: quay.io/brancz/kube-rbac-proxy:v0.20.2
+      artifacthub.io/changes: "- kind: changed\n  description: \"Updated GitOps Promoter\
+        \ to v0.20.3\"\n"
+      artifacthub.io/images: "- name: gitops-promoter\n  image: quay.io/argoprojlabs/gitops-promoter:v0.22.6\n\
+        - name: kube-rbac-proxy\n  image: quay.io/brancz/kube-rbac-proxy:v0.20.2"
       artifacthub.io/license: Apache-2.0
-      artifacthub.io/links: |-
-        - name: GitOps Promoter Documentation
-          url: https://github.com/argoproj-labs/gitops-promoter/blob/main/README.md
-        - name: Release Notes
-          url: https://github.com/argoproj-labs/gitops-promoter/releases/tag/v0.22.6
+      artifacthub.io/links: "- name: GitOps Promoter Documentation\n  url: https://github.com/argoproj-labs/gitops-promoter/blob/main/README.md\n\
+        - name: Release Notes\n  url: https://github.com/argoproj-labs/gitops-promoter/releases/tag/v0.22.6"
     apiVersion: v2
     appVersion: 0.22.6
-    created: "2026-11-03T01:15:49.580704018Z"
+    created: '2026-11-03T01:15:49.580704018Z'
     description: A Helm chart for GitOps Promoter - A tool for promoting changes between
       environments in GitOps workflows
     digest: 5c078a753b69368feb01d4f3d805380d2e7333232225a698d7acd8a1ebbb86be
@@ -439,25 +424,17 @@ entries:
     version: 0.8.1
   - annotations:
       artifacthub.io/category: integration-delivery
-      artifacthub.io/changes: |
-        - kind: changed
-          description: "Updated GitOps Promoter to v0.20.3"
-      artifacthub.io/images: |
-        - name: gitops-promoter
-          image: quay.io/argoprojlabs/gitops-promoter:v0.20.3
-        - name: kube-rbac-proxy
-          image: quay.io/brancz/kube-rbac-proxy:v0.17.0
-        - name: git-fetch-daemon
-          image: alpine/git:2.47.0
+      artifacthub.io/changes: "- kind: changed\n  description: \"Updated GitOps Promoter\
+        \ to v0.20.3\"\n"
+      artifacthub.io/images: "- name: gitops-promoter\n  image: quay.io/argoprojlabs/gitops-promoter:v0.20.3\n\
+        - name: kube-rbac-proxy\n  image: quay.io/brancz/kube-rbac-proxy:v0.17.0\n\
+        - name: git-fetch-daemon\n  image: alpine/git:2.47.0\n"
       artifacthub.io/license: Apache-2.0
-      artifacthub.io/links: |
-        - name: GitOps Promoter Documentation
-          url: https://github.com/argoproj-labs/gitops-promoter/blob/main/README.md
-        - name: Release Notes
-          url: https://github.com/argoproj-labs/gitops-promoter/releases/tag/v0.20.3
+      artifacthub.io/links: "- name: GitOps Promoter Documentation\n  url: https://github.com/argoproj-labs/gitops-promoter/blob/main/README.md\n\
+        - name: Release Notes\n  url: https://github.com/argoproj-labs/gitops-promoter/releases/tag/v0.20.3\n"
     apiVersion: v2
     appVersion: 0.20.3
-    created: "2026-11-03T01:15:49.569532986Z"
+    created: '2026-11-03T01:15:49.569532986Z'
     description: A Helm chart for GitOps Promoter - A tool for promoting changes between
       environments in GitOps workflows
     digest: 643fae5a94850b873d5938b15a244489c322ddd74295730d90dab76c3f48ba2a
@@ -481,29 +458,20 @@ entries:
     version: 0.8.0
   - annotations:
       artifacthub.io/category: integration-delivery
-      artifacthub.io/changes: |
-        - kind: changed
-          description: "Updated GitOps Promoter to v0.17.0"
-        - kind: changed
-          description: "Increased default memory limits to 2Gi (limit) and 1Gi (request) to prevent OOM issues with large projects"
-        - kind: fixed
-          description: "Fixed OOM crashes when managing multiple promotion strategies"
-      artifacthub.io/images: |
-        - name: gitops-promoter
-          image: quay.io/argoprojlabs/gitops-promoter:v0.17.0
-        - name: kube-rbac-proxy
-          image: quay.io/brancz/kube-rbac-proxy:v0.17.0
-        - name: git-fetch-daemon
-          image: alpine/git:2.47.0
+      artifacthub.io/changes: "- kind: changed\n  description: \"Updated GitOps Promoter\
+        \ to v0.17.0\"\n- kind: changed\n  description: \"Increased default memory\
+        \ limits to 2Gi (limit) and 1Gi (request) to prevent OOM issues with large\
+        \ projects\"\n- kind: fixed\n  description: \"Fixed OOM crashes when managing\
+        \ multiple promotion strategies\"\n"
+      artifacthub.io/images: "- name: gitops-promoter\n  image: quay.io/argoprojlabs/gitops-promoter:v0.17.0\n\
+        - name: kube-rbac-proxy\n  image: quay.io/brancz/kube-rbac-proxy:v0.17.0\n\
+        - name: git-fetch-daemon\n  image: alpine/git:2.47.0\n"
       artifacthub.io/license: Apache-2.0
-      artifacthub.io/links: |
-        - name: GitOps Promoter Documentation
-          url: https://github.com/argoproj-labs/gitops-promoter/blob/main/README.md
-        - name: Release Notes
-          url: https://github.com/argoproj-labs/gitops-promoter/releases/tag/v0.17.0
+      artifacthub.io/links: "- name: GitOps Promoter Documentation\n  url: https://github.com/argoproj-labs/gitops-promoter/blob/main/README.md\n\
+        - name: Release Notes\n  url: https://github.com/argoproj-labs/gitops-promoter/releases/tag/v0.17.0\n"
     apiVersion: v2
     appVersion: 0.17.0
-    created: "2026-11-03T01:15:49.558466746Z"
+    created: '2026-11-03T01:15:49.558466746Z'
     description: A Helm chart for GitOps Promoter - A tool for promoting changes between
       environments in GitOps workflows
     digest: 890d9627171bf017c0a2c4cf18902970847dee9eba7179ff37ea3fe98f751b86
@@ -528,7 +496,7 @@ entries:
   grafana-operator:
   - apiVersion: v2
     appVersion: v5.17.1
-    created: "2026-11-03T01:15:49.615168985Z"
+    created: '2026-11-03T01:15:49.615168985Z'
     description: Helm chart for the Grafana Operator
     digest: 3c8a18fc16ce4e5ed4a96abf009ce95660bb2131e55c6c382e58d4889f1694f4
     name: grafana-operator
@@ -540,15 +508,12 @@ entries:
   - annotations:
       artifacthub.io/category: integration-delivery
       artifacthub.io/license: Apache-2.0
-      artifacthub.io/links: |
-        - name: GitHub Repository
-          url: https://github.com/novelcore/kaos-osr-edge-operator
-        - name: PRD
-          url: https://github.com/novelcore/kaos-osr-edge-operator/blob/main/knowledge/prds/1-osr-edge-operator.md
+      artifacthub.io/links: "- name: GitHub Repository\n  url: https://github.com/novelcore/kaos-osr-edge-operator\n\
+        - name: PRD\n  url: https://github.com/novelcore/kaos-osr-edge-operator/blob/main/knowledge/prds/1-osr-edge-operator.md\n"
       kubebuilder.io/generated-by: kubebuilder
     apiVersion: v2
     appVersion: 0.4.1
-    created: "2026-11-03T01:15:49.661419805Z"
+    created: '2026-11-03T01:15:49.661419805Z'
     description: Kubernetes operator that observes a workload cluster's CRDs and Custom
       Resources and pushes a normalised knowledge graph to the KAOS control plane
       (PRD-1 OSR Edge Operator).
@@ -578,15 +543,12 @@ entries:
   - annotations:
       artifacthub.io/category: integration-delivery
       artifacthub.io/license: Apache-2.0
-      artifacthub.io/links: |
-        - name: GitHub Repository
-          url: https://github.com/novelcore/kaos-osr-edge-operator
-        - name: PRD
-          url: https://github.com/novelcore/kaos-osr-edge-operator/blob/main/knowledge/prds/1-osr-edge-operator.md
+      artifacthub.io/links: "- name: GitHub Repository\n  url: https://github.com/novelcore/kaos-osr-edge-operator\n\
+        - name: PRD\n  url: https://github.com/novelcore/kaos-osr-edge-operator/blob/main/knowledge/prds/1-osr-edge-operator.md\n"
       kubebuilder.io/generated-by: kubebuilder
     apiVersion: v2
     appVersion: 0.4.0
-    created: "2026-11-03T01:15:49.656704235Z"
+    created: '2026-11-03T01:15:49.656704235Z'
     description: Kubernetes operator that observes a workload cluster's CRDs and Custom
       Resources and pushes a normalised knowledge graph to the KAOS control plane
       (PRD-1 OSR Edge Operator).
@@ -616,15 +578,12 @@ entries:
   - annotations:
       artifacthub.io/category: integration-delivery
       artifacthub.io/license: Apache-2.0
-      artifacthub.io/links: |
-        - name: GitHub Repository
-          url: https://github.com/novelcore/kaos-osr-edge-operator
-        - name: PRD
-          url: https://github.com/novelcore/kaos-osr-edge-operator/blob/main/knowledge/prds/1-osr-edge-operator.md
+      artifacthub.io/links: "- name: GitHub Repository\n  url: https://github.com/novelcore/kaos-osr-edge-operator\n\
+        - name: PRD\n  url: https://github.com/novelcore/kaos-osr-edge-operator/blob/main/knowledge/prds/1-osr-edge-operator.md\n"
       kubebuilder.io/generated-by: kubebuilder
     apiVersion: v2
     appVersion: 0.3.0
-    created: "2026-11-03T01:15:49.648991865Z"
+    created: '2026-11-03T01:15:49.648991865Z'
     description: Kubernetes operator that observes a workload cluster's CRDs and Custom
       Resources and pushes a normalised knowledge graph to the KAOS control plane
       (PRD-1 OSR Edge Operator).
@@ -654,15 +613,12 @@ entries:
   - annotations:
       artifacthub.io/category: integration-delivery
       artifacthub.io/license: Apache-2.0
-      artifacthub.io/links: |
-        - name: GitHub Repository
-          url: https://github.com/novelcore/kaos-osr-edge-operator
-        - name: PRD
-          url: https://github.com/novelcore/kaos-osr-edge-operator/blob/main/knowledge/prds/1-osr-edge-operator.md
+      artifacthub.io/links: "- name: GitHub Repository\n  url: https://github.com/novelcore/kaos-osr-edge-operator\n\
+        - name: PRD\n  url: https://github.com/novelcore/kaos-osr-edge-operator/blob/main/knowledge/prds/1-osr-edge-operator.md\n"
       kubebuilder.io/generated-by: kubebuilder
     apiVersion: v2
     appVersion: 0.2.0
-    created: "2026-11-03T01:15:49.642649464Z"
+    created: '2026-11-03T01:15:49.642649464Z'
     description: Kubernetes operator that observes a workload cluster's CRDs and Custom
       Resources and pushes a normalised knowledge graph to the KAOS control plane
       (PRD-1 OSR Edge Operator).
@@ -692,15 +648,12 @@ entries:
   - annotations:
       artifacthub.io/category: integration-delivery
       artifacthub.io/license: Apache-2.0
-      artifacthub.io/links: |
-        - name: GitHub Repository
-          url: https://github.com/novelcore/kaos-osr-edge-operator
-        - name: PRD
-          url: https://github.com/novelcore/kaos-osr-edge-operator/blob/main/knowledge/prds/1-osr-edge-operator.md
+      artifacthub.io/links: "- name: GitHub Repository\n  url: https://github.com/novelcore/kaos-osr-edge-operator\n\
+        - name: PRD\n  url: https://github.com/novelcore/kaos-osr-edge-operator/blob/main/knowledge/prds/1-osr-edge-operator.md\n"
       kubebuilder.io/generated-by: kubebuilder
     apiVersion: v2
     appVersion: 0.1.5
-    created: "2026-11-03T01:15:49.638289822Z"
+    created: '2026-11-03T01:15:49.638289822Z'
     description: Kubernetes operator that observes a workload cluster's CRDs and Custom
       Resources and pushes a normalised knowledge graph to the KAOS control plane
       (PRD-1 OSR Edge Operator).
@@ -730,15 +683,12 @@ entries:
   - annotations:
       artifacthub.io/category: integration-delivery
       artifacthub.io/license: Apache-2.0
-      artifacthub.io/links: |
-        - name: GitHub Repository
-          url: https://github.com/novelcore/kaos-osr-edge-operator
-        - name: PRD
-          url: https://github.com/novelcore/kaos-osr-edge-operator/blob/main/knowledge/prds/1-osr-edge-operator.md
+      artifacthub.io/links: "- name: GitHub Repository\n  url: https://github.com/novelcore/kaos-osr-edge-operator\n\
+        - name: PRD\n  url: https://github.com/novelcore/kaos-osr-edge-operator/blob/main/knowledge/prds/1-osr-edge-operator.md\n"
       kubebuilder.io/generated-by: kubebuilder
     apiVersion: v2
     appVersion: 0.1.4
-    created: "2026-11-03T01:15:49.633970777Z"
+    created: '2026-11-03T01:15:49.633970777Z'
     description: Kubernetes operator that observes a workload cluster's CRDs and Custom
       Resources and pushes a normalised knowledge graph to the KAOS control plane
       (PRD-1 OSR Edge Operator).
@@ -768,15 +718,12 @@ entries:
   - annotations:
       artifacthub.io/category: integration-delivery
       artifacthub.io/license: Apache-2.0
-      artifacthub.io/links: |
-        - name: GitHub Repository
-          url: https://github.com/novelcore/kaos-osr-edge-operator
-        - name: PRD
-          url: https://github.com/novelcore/kaos-osr-edge-operator/blob/main/knowledge/prds/1-osr-edge-operator.md
+      artifacthub.io/links: "- name: GitHub Repository\n  url: https://github.com/novelcore/kaos-osr-edge-operator\n\
+        - name: PRD\n  url: https://github.com/novelcore/kaos-osr-edge-operator/blob/main/knowledge/prds/1-osr-edge-operator.md\n"
       kubebuilder.io/generated-by: kubebuilder
     apiVersion: v2
     appVersion: 0.1.3
-    created: "2026-11-03T01:15:49.629719354Z"
+    created: '2026-11-03T01:15:49.629719354Z'
     description: Kubernetes operator that observes a workload cluster's CRDs and Custom
       Resources and pushes a normalised knowledge graph to the KAOS control plane
       (PRD-1 OSR Edge Operator).
@@ -806,15 +753,12 @@ entries:
   - annotations:
       artifacthub.io/category: integration-delivery
       artifacthub.io/license: Apache-2.0
-      artifacthub.io/links: |
-        - name: GitHub Repository
-          url: https://github.com/novelcore/kaos-osr-edge-operator
-        - name: PRD
-          url: https://github.com/novelcore/kaos-osr-edge-operator/blob/main/knowledge/prds/1-osr-edge-operator.md
+      artifacthub.io/links: "- name: GitHub Repository\n  url: https://github.com/novelcore/kaos-osr-edge-operator\n\
+        - name: PRD\n  url: https://github.com/novelcore/kaos-osr-edge-operator/blob/main/knowledge/prds/1-osr-edge-operator.md\n"
       kubebuilder.io/generated-by: kubebuilder
     apiVersion: v2
     appVersion: 0.1.2
-    created: "2026-11-03T01:15:49.625419864Z"
+    created: '2026-11-03T01:15:49.625419864Z'
     description: Kubernetes operator that observes a workload cluster's CRDs and Custom
       Resources and pushes a normalised knowledge graph to the KAOS control plane
       (PRD-1 OSR Edge Operator).
@@ -844,15 +788,12 @@ entries:
   - annotations:
       artifacthub.io/category: integration-delivery
       artifacthub.io/license: Apache-2.0
-      artifacthub.io/links: |
-        - name: GitHub Repository
-          url: https://github.com/novelcore/kaos-osr-edge-operator
-        - name: PRD
-          url: https://github.com/novelcore/kaos-osr-edge-operator/blob/main/knowledge/prds/1-osr-edge-operator.md
+      artifacthub.io/links: "- name: GitHub Repository\n  url: https://github.com/novelcore/kaos-osr-edge-operator\n\
+        - name: PRD\n  url: https://github.com/novelcore/kaos-osr-edge-operator/blob/main/knowledge/prds/1-osr-edge-operator.md\n"
       kubebuilder.io/generated-by: kubebuilder
     apiVersion: v2
     appVersion: 0.1.1
-    created: "2026-11-03T01:15:49.621503352Z"
+    created: '2026-11-03T01:15:49.621503352Z'
     description: Kubernetes operator that observes a workload cluster's CRDs and Custom
       Resources and pushes a normalised knowledge graph to the KAOS control plane
       (PRD-1 OSR Edge Operator).
@@ -882,7 +823,7 @@ entries:
   keda:
   - apiVersion: v2
     appVersion: 2.17.0
-    created: "2026-11-03T01:15:49.677471126Z"
+    created: '2026-11-03T01:15:49.677471126Z'
     description: Event-based autoscaler for workloads on Kubernetes
     digest: d9d220890e76feb8b1d10336058063b07eafdfd56864b03403b3cf13265d4f0b
     home: https://github.com/kedacore/keda
@@ -904,7 +845,7 @@ entries:
   kubecore-ci-workflows:
   - apiVersion: v2
     appVersion: 0.9.9
-    created: "2026-11-03T01:15:49.76855587Z"
+    created: '2026-11-03T01:15:49.76855587Z'
     description: Argo Workflows CI pipeline templates for KubeCore platform
     digest: 31d443c53aa0a359a8e97883cd161724f085468c1f9bb4f8d2b334a6be9a3188
     home: https://github.com/novelcore/charts
@@ -926,7 +867,7 @@ entries:
     version: 0.12.126
   - apiVersion: v2
     appVersion: 0.9.9
-    created: "2026-11-03T01:15:49.759543956Z"
+    created: '2026-11-03T01:15:49.759543956Z'
     description: Argo Workflows CI pipeline templates for KubeCore platform
     digest: bb91adaa9dd6278c66feafdfffd0f3e3854597d901b3c1259d487e4b83896ff2
     home: https://github.com/novelcore/charts
@@ -948,7 +889,7 @@ entries:
     version: 0.12.125
   - apiVersion: v2
     appVersion: 0.9.9
-    created: "2026-11-03T01:15:49.749892989Z"
+    created: '2026-11-03T01:15:49.749892989Z'
     description: Argo Workflows CI pipeline templates for KubeCore platform
     digest: e61816be8aa8d59d70fc621c510cb4ded270085a43cd8992cb5e2c5ee6be98ca
     home: https://github.com/novelcore/charts
@@ -970,7 +911,7 @@ entries:
     version: 0.12.124
   - apiVersion: v2
     appVersion: 0.9.9
-    created: "2026-11-03T01:15:49.743395594Z"
+    created: '2026-11-03T01:15:49.743395594Z'
     description: Argo Workflows CI pipeline templates for KubeCore platform
     digest: 0565bd0fc3e9ae247697650a41f456227d868321d83f64f72b7f1a665a1ba218
     home: https://github.com/novelcore/charts
@@ -992,7 +933,7 @@ entries:
     version: 0.12.123
   - apiVersion: v2
     appVersion: 0.9.9
-    created: "2026-11-03T01:15:49.734325172Z"
+    created: '2026-11-03T01:15:49.734325172Z'
     description: Argo Workflows CI pipeline templates for KubeCore platform
     digest: 476403565f4db0290cc2830fe22bf47db1ab023ec3117561f8d4a499f20fcbf2
     home: https://github.com/novelcore/charts
@@ -1014,7 +955,7 @@ entries:
     version: 0.12.122
   - apiVersion: v2
     appVersion: 0.9.9
-    created: "2026-11-03T01:15:49.723725497Z"
+    created: '2026-11-03T01:15:49.723725497Z'
     description: Argo Workflows CI pipeline templates for KubeCore platform
     digest: 44d86e28a7d635b9d17cdae030a1c78e0c49c4912a68bc9f4ac039c11e612814
     home: https://github.com/novelcore/charts
@@ -1036,7 +977,7 @@ entries:
     version: 0.12.121
   - apiVersion: v2
     appVersion: 0.9.9
-    created: "2026-11-03T01:15:49.716616717Z"
+    created: '2026-11-03T01:15:49.716616717Z'
     description: Argo Workflows CI pipeline templates for KubeCore platform
     digest: 30866dd69d2cee21c1883d29d0f8fa0aecf7f4d13f7b95c2b332f9c62f1fa31e
     home: https://github.com/novelcore/charts
@@ -1058,7 +999,7 @@ entries:
     version: 0.12.120
   - apiVersion: v2
     appVersion: 0.9.9
-    created: "2026-11-03T01:15:49.708593496Z"
+    created: '2026-11-03T01:15:49.708593496Z'
     description: Argo Workflows CI pipeline templates for KubeCore platform
     digest: 0c318e3ce44b98bfb8a45aed209840a539a2f064b34303b85d1a1c04ad6a3117
     home: https://github.com/novelcore/charts
@@ -1080,7 +1021,7 @@ entries:
     version: 0.12.119
   - apiVersion: v2
     appVersion: 0.9.9
-    created: "2026-11-03T01:15:49.699436938Z"
+    created: '2026-11-03T01:15:49.699436938Z'
     description: Argo Workflows CI pipeline templates for KubeCore platform
     digest: a352519032b64b56b38396a13c4842f79a63137073df9ba8a519a7d219ce2de6
     home: https://github.com/novelcore/charts
@@ -1102,7 +1043,7 @@ entries:
     version: 0.12.118
   - apiVersion: v2
     appVersion: 0.9.9
-    created: "2026-11-03T01:15:49.688184809Z"
+    created: '2026-11-03T01:15:49.688184809Z'
     description: Argo Workflows CI pipeline templates for KubeCore platform
     digest: 8bf56e654dd4af73cb60dee46db34e8f899e366b2f821882be89093170000f27
     home: https://github.com/novelcore/charts
@@ -1122,10 +1063,516 @@ entries:
     urls:
     - https://novelcore.github.io/charts/kubecore-ci-workflows-0.12.117.tgz
     version: 0.12.117
+  - apiVersion: v2
+    appVersion: 0.9.9
+    created: '2026-11-03T01:05:25.072444408Z'
+    description: Argo Workflows CI pipeline templates for KubeCore platform
+    digest: 080000df0bfde69b761f0fc552a249ae4188381d83e188cbd48d058aad8ec5a8
+    home: https://github.com/novelcore/charts
+    keywords:
+    - ci-cd
+    - argo-workflows
+    - buildkit
+    - kubecore
+    kubeVersion: '>=1.26.0-0'
+    maintainers:
+    - email: platform@novelcore.io
+      name: Novelcore Platform Team
+    name: kubecore-ci-workflows
+    sources:
+    - https://github.com/novelcore/charts
+    type: application
+    urls:
+    - https://novelcore.github.io/charts/kubecore-ci-workflows-0.12.116.tgz
+    version: 0.12.116
+  - apiVersion: v2
+    appVersion: 0.9.9
+    created: '2026-11-03T00:57:38.151086842Z'
+    description: Argo Workflows CI pipeline templates for KubeCore platform
+    digest: 39706ecd060d9dc5d437b10f59231e2eba05d7c96fa38001d1b374b07c379992
+    home: https://github.com/novelcore/charts
+    keywords:
+    - ci-cd
+    - argo-workflows
+    - buildkit
+    - kubecore
+    kubeVersion: '>=1.26.0-0'
+    maintainers:
+    - email: platform@novelcore.io
+      name: Novelcore Platform Team
+    name: kubecore-ci-workflows
+    sources:
+    - https://github.com/novelcore/charts
+    type: application
+    urls:
+    - https://novelcore.github.io/charts/kubecore-ci-workflows-0.12.115.tgz
+    version: 0.12.115
+  - apiVersion: v2
+    appVersion: 0.9.9
+    created: '2026-11-03T00:46:53.03081182Z'
+    description: Argo Workflows CI pipeline templates for KubeCore platform
+    digest: ba83babf0777917abfb4944c47f8c36e308760d3009d092b1ba81badc03b9b08
+    home: https://github.com/novelcore/charts
+    keywords:
+    - ci-cd
+    - argo-workflows
+    - buildkit
+    - kubecore
+    kubeVersion: '>=1.26.0-0'
+    maintainers:
+    - email: platform@novelcore.io
+      name: Novelcore Platform Team
+    name: kubecore-ci-workflows
+    sources:
+    - https://github.com/novelcore/charts
+    type: application
+    urls:
+    - https://novelcore.github.io/charts/kubecore-ci-workflows-0.12.114.tgz
+    version: 0.12.114
+  - apiVersion: v2
+    appVersion: 0.9.9
+    created: '2026-11-02T23:50:33.066224037Z'
+    description: Argo Workflows CI pipeline templates for KubeCore platform
+    digest: 00153e5429d1dc19b2e3f53b903782104cfcc46068e89f2974101b9a535fa47f
+    home: https://github.com/novelcore/charts
+    keywords:
+    - ci-cd
+    - argo-workflows
+    - buildkit
+    - kubecore
+    kubeVersion: '>=1.26.0-0'
+    maintainers:
+    - email: platform@novelcore.io
+      name: Novelcore Platform Team
+    name: kubecore-ci-workflows
+    sources:
+    - https://github.com/novelcore/charts
+    type: application
+    urls:
+    - https://novelcore.github.io/charts/kubecore-ci-workflows-0.12.113.tgz
+    version: 0.12.113
+  - apiVersion: v2
+    appVersion: 0.9.9
+    created: '2026-11-02T23:45:47.45886909Z'
+    description: Argo Workflows CI pipeline templates for KubeCore platform
+    digest: 11e1165c307224f0b193de8df389f1e8b35b5c672933ec220d448323f33e16f2
+    home: https://github.com/novelcore/charts
+    keywords:
+    - ci-cd
+    - argo-workflows
+    - buildkit
+    - kubecore
+    kubeVersion: '>=1.26.0-0'
+    maintainers:
+    - email: platform@novelcore.io
+      name: Novelcore Platform Team
+    name: kubecore-ci-workflows
+    sources:
+    - https://github.com/novelcore/charts
+    type: application
+    urls:
+    - https://novelcore.github.io/charts/kubecore-ci-workflows-0.12.112.tgz
+    version: 0.12.112
+  - apiVersion: v2
+    appVersion: 0.9.9
+    created: '2026-10-27T01:21:58.156437097+02:00'
+    description: Argo Workflows CI pipeline templates for KubeCore platform
+    digest: b4034dff210e0e59b73bc15a9f0a06e7fc87cbfdea05b071a9bc15c8873e0fb2
+    home: https://github.com/novelcore/charts
+    keywords:
+    - ci-cd
+    - argo-workflows
+    - buildkit
+    - kubecore
+    kubeVersion: '>=1.26.0-0'
+    maintainers:
+    - email: platform@novelcore.io
+      name: Novelcore Platform Team
+    name: kubecore-ci-workflows
+    sources:
+    - https://github.com/novelcore/charts
+    type: application
+    urls:
+    - https://novelcore.github.io/charts/kubecore-ci-workflows-0.12.111.tgz
+    version: 0.12.111
+  - apiVersion: v2
+    appVersion: 0.9.9
+    created: '2026-10-26T19:14:00.159841968+02:00'
+    description: Argo Workflows CI pipeline templates for KubeCore platform
+    digest: 1a21cb0be18c434356c7ab3205111593232dd6751f95e375eff5db3589df7e5b
+    home: https://github.com/novelcore/charts
+    keywords:
+    - ci-cd
+    - argo-workflows
+    - buildkit
+    - kubecore
+    kubeVersion: '>=1.26.0-0'
+    maintainers:
+    - email: platform@novelcore.io
+      name: Novelcore Platform Team
+    name: kubecore-ci-workflows
+    sources:
+    - https://github.com/novelcore/charts
+    type: application
+    urls:
+    - https://novelcore.github.io/charts/kubecore-ci-workflows-0.12.110.tgz
+    version: 0.12.110
+  - apiVersion: v2
+    appVersion: 0.9.9
+    created: '2026-10-26T12:36:40.061058019+02:00'
+    description: Argo Workflows CI pipeline templates for KubeCore platform
+    digest: 641e8b04761b13c05ced126884cb86304a6330e1f1d8edd49656328ab0052556
+    home: https://github.com/novelcore/charts
+    keywords:
+    - ci-cd
+    - argo-workflows
+    - buildkit
+    - kubecore
+    kubeVersion: '>=1.26.0-0'
+    maintainers:
+    - email: platform@novelcore.io
+      name: Novelcore Platform Team
+    name: kubecore-ci-workflows
+    sources:
+    - https://github.com/novelcore/charts
+    type: application
+    urls:
+    - https://novelcore.github.io/charts/kubecore-ci-workflows-0.12.109.tgz
+    version: 0.12.109
+  - apiVersion: v2
+    appVersion: 0.9.9
+    created: '2026-10-25T19:01:35.444780943+02:00'
+    description: Argo Workflows CI pipeline templates for KubeCore platform
+    digest: 8c2c52d6785f95549d5f6bd9f89932e69478c0301852aa135386d2873d190a14
+    home: https://github.com/novelcore/charts
+    keywords:
+    - ci-cd
+    - argo-workflows
+    - buildkit
+    - kubecore
+    kubeVersion: '>=1.26.0-0'
+    maintainers:
+    - email: platform@novelcore.io
+      name: Novelcore Platform Team
+    name: kubecore-ci-workflows
+    sources:
+    - https://github.com/novelcore/charts
+    type: application
+    urls:
+    - https://novelcore.github.io/charts/kubecore-ci-workflows-0.12.108.tgz
+    version: 0.12.108
+  - apiVersion: v2
+    appVersion: 0.9.9
+    created: '2026-10-19T20:22:49.561899809Z'
+    description: Argo Workflows CI pipeline templates for KubeCore platform
+    digest: 460a44fbb3554ef9af857211aa19fafb5c1351698fb134d695c1a0eca930fe22
+    home: https://github.com/novelcore/charts
+    keywords:
+    - ci-cd
+    - argo-workflows
+    - buildkit
+    - kubecore
+    kubeVersion: '>=1.26.0-0'
+    maintainers:
+    - email: platform@novelcore.io
+      name: Novelcore Platform Team
+    name: kubecore-ci-workflows
+    sources:
+    - https://github.com/novelcore/charts
+    type: application
+    urls:
+    - https://novelcore.github.io/charts/kubecore-ci-workflows-0.12.107.tgz
+    version: 0.12.107
+  - apiVersion: v2
+    appVersion: 0.9.9
+    created: '2026-10-19T17:41:07.519571938Z'
+    description: Argo Workflows CI pipeline templates for KubeCore platform
+    digest: 05cf072ca8f67ed04361fc0ddd98107c46ec73a79443a3207a525063779a548d
+    home: https://github.com/novelcore/charts
+    keywords:
+    - ci-cd
+    - argo-workflows
+    - buildkit
+    - kubecore
+    kubeVersion: '>=1.26.0-0'
+    maintainers:
+    - email: platform@novelcore.io
+      name: Novelcore Platform Team
+    name: kubecore-ci-workflows
+    sources:
+    - https://github.com/novelcore/charts
+    type: application
+    urls:
+    - https://novelcore.github.io/charts/kubecore-ci-workflows-0.12.106.tgz
+    version: 0.12.106
+  - apiVersion: v2
+    appVersion: 0.9.9
+    created: '2026-10-19T12:58:32.761150162Z'
+    description: Argo Workflows CI pipeline templates for KubeCore platform
+    digest: 92d0c540dea4503b81c4d0203bd5dec30463ab6135ecad26306564086ba0f31a
+    home: https://github.com/novelcore/charts
+    keywords:
+    - ci-cd
+    - argo-workflows
+    - buildkit
+    - kubecore
+    kubeVersion: '>=1.26.0-0'
+    maintainers:
+    - email: platform@novelcore.io
+      name: Novelcore Platform Team
+    name: kubecore-ci-workflows
+    sources:
+    - https://github.com/novelcore/charts
+    type: application
+    urls:
+    - https://novelcore.github.io/charts/kubecore-ci-workflows-0.12.105.tgz
+    version: 0.12.105
+  - apiVersion: v2
+    appVersion: 0.9.9
+    created: '2026-10-17T17:31:39.95111101Z'
+    description: Argo Workflows CI pipeline templates for KubeCore platform
+    digest: f56d9ed6a91c4fb2cbefb78baf7d9c394c71c6c94e3c2f01c633319242719cce
+    home: https://github.com/novelcore/charts
+    keywords:
+    - ci-cd
+    - argo-workflows
+    - buildkit
+    - kubecore
+    kubeVersion: '>=1.26.0-0'
+    maintainers:
+    - email: platform@novelcore.io
+      name: Novelcore Platform Team
+    name: kubecore-ci-workflows
+    sources:
+    - https://github.com/novelcore/charts
+    type: application
+    urls:
+    - https://novelcore.github.io/charts/kubecore-ci-workflows-0.12.104.tgz
+    version: 0.12.104
+  - apiVersion: v2
+    appVersion: 0.9.9
+    created: '2026-10-16T10:42:13.55691368Z'
+    description: Argo Workflows CI pipeline templates for KubeCore platform
+    digest: d3f36b37dca4a828ba186b3a4831d14b23b0c006412b775875b760b1202c009d
+    home: https://github.com/novelcore/charts
+    keywords:
+    - ci-cd
+    - argo-workflows
+    - buildkit
+    - kubecore
+    kubeVersion: '>=1.26.0-0'
+    maintainers:
+    - email: platform@novelcore.io
+      name: Novelcore Platform Team
+    name: kubecore-ci-workflows
+    sources:
+    - https://github.com/novelcore/charts
+    type: application
+    urls:
+    - https://novelcore.github.io/charts/kubecore-ci-workflows-0.12.103.tgz
+    version: 0.12.103
+  - apiVersion: v2
+    appVersion: 0.9.9
+    created: '2026-10-12T22:26:14.480227053Z'
+    description: Argo Workflows CI pipeline templates for KubeCore platform
+    digest: 1b290754b591c43c254e7a04834a18ddc55b83599e0b884cbfb6fff88c3fabd5
+    home: https://github.com/novelcore/charts
+    keywords:
+    - ci-cd
+    - argo-workflows
+    - buildkit
+    - kubecore
+    kubeVersion: '>=1.26.0-0'
+    maintainers:
+    - email: platform@novelcore.io
+      name: Novelcore Platform Team
+    name: kubecore-ci-workflows
+    sources:
+    - https://github.com/novelcore/charts
+    type: application
+    urls:
+    - https://novelcore.github.io/charts/kubecore-ci-workflows-0.12.102.tgz
+    version: 0.12.102
+  - apiVersion: v2
+    appVersion: 0.9.9
+    created: '2026-10-11T08:28:45.647497846Z'
+    description: Argo Workflows CI pipeline templates for KubeCore platform
+    digest: c969e5d363246c62c381ebe8172ba7ae93a99d44d922d7aeb006355168849597
+    home: https://github.com/novelcore/charts
+    keywords:
+    - ci-cd
+    - argo-workflows
+    - buildkit
+    - kubecore
+    kubeVersion: '>=1.26.0-0'
+    maintainers:
+    - email: platform@novelcore.io
+      name: Novelcore Platform Team
+    name: kubecore-ci-workflows
+    sources:
+    - https://github.com/novelcore/charts
+    type: application
+    urls:
+    - https://novelcore.github.io/charts/kubecore-ci-workflows-0.12.101.tgz
+    version: 0.12.101
+  - apiVersion: v2
+    appVersion: 0.9.9
+    created: '2026-10-11T06:36:22.842803512Z'
+    description: Argo Workflows CI pipeline templates for KubeCore platform
+    digest: aef8a8b74bfc8cdd374492b68558109c5034c0fa33c50e95a65280beb9ae3d9c
+    home: https://github.com/novelcore/charts
+    keywords:
+    - ci-cd
+    - argo-workflows
+    - buildkit
+    - kubecore
+    kubeVersion: '>=1.26.0-0'
+    maintainers:
+    - email: platform@novelcore.io
+      name: Novelcore Platform Team
+    name: kubecore-ci-workflows
+    sources:
+    - https://github.com/novelcore/charts
+    type: application
+    urls:
+    - https://novelcore.github.io/charts/kubecore-ci-workflows-0.12.100.tgz
+    version: 0.12.100
+  - apiVersion: v2
+    appVersion: 0.9.9
+    created: '2026-10-09T19:39:38.746926973Z'
+    description: Argo Workflows CI pipeline templates for KubeCore platform
+    digest: c72450a2ff8648d8f7daf9bbd078afffa8486d56408c238c20c74dcc183f081b
+    home: https://github.com/novelcore/charts
+    keywords:
+    - ci-cd
+    - argo-workflows
+    - buildkit
+    - kubecore
+    kubeVersion: '>=1.26.0-0'
+    maintainers:
+    - email: platform@novelcore.io
+      name: Novelcore Platform Team
+    name: kubecore-ci-workflows
+    sources:
+    - https://github.com/novelcore/charts
+    type: application
+    urls:
+    - https://novelcore.github.io/charts/kubecore-ci-workflows-0.12.99.tgz
+    version: 0.12.99
+  - apiVersion: v2
+    appVersion: 0.9.9
+    created: '2026-10-09T13:08:36.249195509Z'
+    description: Argo Workflows CI pipeline templates for KubeCore platform
+    digest: 20bdfc6e1c16b8382632957fabce44cdd7abefd8f9783158f11c0f1c2af37645
+    home: https://github.com/novelcore/charts
+    keywords:
+    - ci-cd
+    - argo-workflows
+    - buildkit
+    - kubecore
+    kubeVersion: '>=1.26.0-0'
+    maintainers:
+    - email: platform@novelcore.io
+      name: Novelcore Platform Team
+    name: kubecore-ci-workflows
+    sources:
+    - https://github.com/novelcore/charts
+    type: application
+    urls:
+    - https://novelcore.github.io/charts/kubecore-ci-workflows-0.12.98.tgz
+    version: 0.12.98
+  - apiVersion: v2
+    appVersion: 0.9.9
+    created: '2026-10-07T22:26:42.043565638Z'
+    description: Argo Workflows CI pipeline templates for KubeCore platform
+    digest: 7bfefa22920d56beea51e19f799ac31ef9dd5ed6d337eede1947be9daa8aa5ca
+    home: https://github.com/novelcore/charts
+    keywords:
+    - ci-cd
+    - argo-workflows
+    - buildkit
+    - kubecore
+    kubeVersion: '>=1.26.0-0'
+    maintainers:
+    - email: platform@novelcore.io
+      name: Novelcore Platform Team
+    name: kubecore-ci-workflows
+    sources:
+    - https://github.com/novelcore/charts
+    type: application
+    urls:
+    - https://novelcore.github.io/charts/kubecore-ci-workflows-0.12.97.tgz
+    version: 0.12.97
+  - apiVersion: v2
+    appVersion: 0.9.9
+    created: '2026-10-07T19:31:34.28430833Z'
+    description: Argo Workflows CI pipeline templates for KubeCore platform
+    digest: d3336036bc4804bd0ccd1c70501261ef7debf384574129ac4d8749eb1345ed12
+    home: https://github.com/novelcore/charts
+    keywords:
+    - ci-cd
+    - argo-workflows
+    - buildkit
+    - kubecore
+    kubeVersion: '>=1.26.0-0'
+    maintainers:
+    - email: platform@novelcore.io
+      name: Novelcore Platform Team
+    name: kubecore-ci-workflows
+    sources:
+    - https://github.com/novelcore/charts
+    type: application
+    urls:
+    - https://novelcore.github.io/charts/kubecore-ci-workflows-0.12.96.tgz
+    version: 0.12.96
+  - apiVersion: v2
+    appVersion: 0.9.9
+    created: '2026-10-07T18:44:41.36221092Z'
+    description: Argo Workflows CI pipeline templates for KubeCore platform
+    digest: 000358d18e0fe6d11ec15e00a70ae4d7e1b557ffecdfffbea1fa65a6adac5fff
+    home: https://github.com/novelcore/charts
+    keywords:
+    - ci-cd
+    - argo-workflows
+    - buildkit
+    - kubecore
+    kubeVersion: '>=1.26.0-0'
+    maintainers:
+    - email: platform@novelcore.io
+      name: Novelcore Platform Team
+    name: kubecore-ci-workflows
+    sources:
+    - https://github.com/novelcore/charts
+    type: application
+    urls:
+    - https://novelcore.github.io/charts/kubecore-ci-workflows-0.12.95.tgz
+    version: 0.12.95
+  - apiVersion: v2
+    appVersion: 0.9.9
+    created: '2026-10-07T15:38:01.809981273Z'
+    description: Argo Workflows CI pipeline templates for KubeCore platform
+    digest: 92e3542dee536d8801ebe9a795b570de78fb59203e5f0fc5c3d698a26c49c415
+    home: https://github.com/novelcore/charts
+    keywords:
+    - ci-cd
+    - argo-workflows
+    - buildkit
+    - kubecore
+    kubeVersion: '>=1.26.0-0'
+    maintainers:
+    - email: platform@novelcore.io
+      name: Novelcore Platform Team
+    name: kubecore-ci-workflows
+    sources:
+    - https://github.com/novelcore/charts
+    type: application
+    urls:
+    - https://novelcore.github.io/charts/kubecore-ci-workflows-0.12.93.tgz
+    version: 0.12.93
   kubecore-e2e-canary:
   - apiVersion: v2
     appVersion: 0.1.0
-    created: "2026-11-03T01:15:49.769568041Z"
+    created: '2026-11-03T01:15:49.769568041Z'
     description: E2E-only fault-injection canary for KubeCore pools. One tiny Deployment
       whose readiness probe fails until a rendered instant (readyAfter), so a Helm
       upgrade with `wait` can be made to time out on purpose and the platform's rollbackLimit
@@ -1151,7 +1598,7 @@ entries:
   kubecore-observability-rules:
   - apiVersion: v2
     appVersion: 1.0.0
-    created: "2026-11-03T01:15:49.800845889Z"
+    created: '2026-11-03T01:15:49.800845889Z'
     description: KubeCore observability rules and dashboards from external sources
     digest: e7fa785e5bf4449823d0f06ca56c7f802a98111aa80642127779e4a05dbd6f8b
     home: https://github.com/novelcore/kubecore-operator
@@ -1175,7 +1622,7 @@ entries:
     version: 0.2.0
   - apiVersion: v2
     appVersion: 1.0.0
-    created: "2026-11-03T01:15:49.785367863Z"
+    created: '2026-11-03T01:15:49.785367863Z'
     description: KubeCore observability rules and dashboards from external sources
     digest: fa114ab63e8942707225e81fbf1007bfd3a68d49dc2d7f7dbb498da261101983
     home: https://github.com/novelcore/kubecore-operator
@@ -1198,22 +1645,18 @@ entries:
   kubecore-operator:
   - annotations:
       artifacthub.io/category: automation
-      artifacthub.io/changes: |
-        - kind: changed
-          description: "Changed XEKS Cluster, ClusterAuth, and NodeGroup deletionPolicy from Orphan to Delete for proper AWS resource cleanup"
-        - kind: fixed
-          description: "Fixed XEKS deletion blocking issue caused by orphaned AWS resources preventing subnet deletion"
+      artifacthub.io/changes: "- kind: changed\n  description: \"Changed XEKS Cluster,\
+        \ ClusterAuth, and NodeGroup deletionPolicy from Orphan to Delete for proper\
+        \ AWS resource cleanup\"\n- kind: fixed\n  description: \"Fixed XEKS deletion\
+        \ blocking issue caused by orphaned AWS resources preventing subnet deletion\"\
+        \n"
       artifacthub.io/license: Apache-2.0
-      artifacthub.io/links: |
-        - name: GitHub Repository
-          url: https://github.com/novelcore/kubecore-operator
-        - name: Documentation
-          url: https://github.com/novelcore/kubecore-operator/blob/main/README.md
-        - name: Release Notes
-          url: https://github.com/novelcore/kubecore-operator/releases
+      artifacthub.io/links: "- name: GitHub Repository\n  url: https://github.com/novelcore/kubecore-operator\n\
+        - name: Documentation\n  url: https://github.com/novelcore/kubecore-operator/blob/main/README.md\n\
+        - name: Release Notes\n  url: https://github.com/novelcore/kubecore-operator/releases\n"
     apiVersion: v2
     appVersion: 0.108.6
-    created: "2026-11-03T01:15:49.959642028Z"
+    created: '2026-11-03T01:15:49.959642028Z'
     description: A sophisticated Kubernetes operator that implements a four-layer
       framework architecture for provisioning and managing cloud infrastructure through
       Crossplane compositions.
@@ -1243,22 +1686,18 @@ entries:
     version: 0.108.6
   - annotations:
       artifacthub.io/category: automation
-      artifacthub.io/changes: |
-        - kind: changed
-          description: "Changed XEKS Cluster, ClusterAuth, and NodeGroup deletionPolicy from Orphan to Delete for proper AWS resource cleanup"
-        - kind: fixed
-          description: "Fixed XEKS deletion blocking issue caused by orphaned AWS resources preventing subnet deletion"
+      artifacthub.io/changes: "- kind: changed\n  description: \"Changed XEKS Cluster,\
+        \ ClusterAuth, and NodeGroup deletionPolicy from Orphan to Delete for proper\
+        \ AWS resource cleanup\"\n- kind: fixed\n  description: \"Fixed XEKS deletion\
+        \ blocking issue caused by orphaned AWS resources preventing subnet deletion\"\
+        \n"
       artifacthub.io/license: Apache-2.0
-      artifacthub.io/links: |
-        - name: GitHub Repository
-          url: https://github.com/novelcore/kubecore-operator
-        - name: Documentation
-          url: https://github.com/novelcore/kubecore-operator/blob/main/README.md
-        - name: Release Notes
-          url: https://github.com/novelcore/kubecore-operator/releases
+      artifacthub.io/links: "- name: GitHub Repository\n  url: https://github.com/novelcore/kubecore-operator\n\
+        - name: Documentation\n  url: https://github.com/novelcore/kubecore-operator/blob/main/README.md\n\
+        - name: Release Notes\n  url: https://github.com/novelcore/kubecore-operator/releases\n"
     apiVersion: v2
     appVersion: 0.108.5
-    created: "2026-11-03T01:15:49.94684566Z"
+    created: '2026-11-03T01:15:49.94684566Z'
     description: A sophisticated Kubernetes operator that implements a four-layer
       framework architecture for provisioning and managing cloud infrastructure through
       Crossplane compositions.
@@ -1288,22 +1727,18 @@ entries:
     version: 0.108.5
   - annotations:
       artifacthub.io/category: automation
-      artifacthub.io/changes: |
-        - kind: changed
-          description: "Changed XEKS Cluster, ClusterAuth, and NodeGroup deletionPolicy from Orphan to Delete for proper AWS resource cleanup"
-        - kind: fixed
-          description: "Fixed XEKS deletion blocking issue caused by orphaned AWS resources preventing subnet deletion"
+      artifacthub.io/changes: "- kind: changed\n  description: \"Changed XEKS Cluster,\
+        \ ClusterAuth, and NodeGroup deletionPolicy from Orphan to Delete for proper\
+        \ AWS resource cleanup\"\n- kind: fixed\n  description: \"Fixed XEKS deletion\
+        \ blocking issue caused by orphaned AWS resources preventing subnet deletion\"\
+        \n"
       artifacthub.io/license: Apache-2.0
-      artifacthub.io/links: |
-        - name: GitHub Repository
-          url: https://github.com/novelcore/kubecore-operator
-        - name: Documentation
-          url: https://github.com/novelcore/kubecore-operator/blob/main/README.md
-        - name: Release Notes
-          url: https://github.com/novelcore/kubecore-operator/releases
+      artifacthub.io/links: "- name: GitHub Repository\n  url: https://github.com/novelcore/kubecore-operator\n\
+        - name: Documentation\n  url: https://github.com/novelcore/kubecore-operator/blob/main/README.md\n\
+        - name: Release Notes\n  url: https://github.com/novelcore/kubecore-operator/releases\n"
     apiVersion: v2
     appVersion: 0.108.4
-    created: "2026-11-03T01:15:49.929302008Z"
+    created: '2026-11-03T01:15:49.929302008Z'
     description: A sophisticated Kubernetes operator that implements a four-layer
       framework architecture for provisioning and managing cloud infrastructure through
       Crossplane compositions.
@@ -1333,22 +1768,18 @@ entries:
     version: 0.108.4
   - annotations:
       artifacthub.io/category: automation
-      artifacthub.io/changes: |
-        - kind: changed
-          description: "Changed XEKS Cluster, ClusterAuth, and NodeGroup deletionPolicy from Orphan to Delete for proper AWS resource cleanup"
-        - kind: fixed
-          description: "Fixed XEKS deletion blocking issue caused by orphaned AWS resources preventing subnet deletion"
+      artifacthub.io/changes: "- kind: changed\n  description: \"Changed XEKS Cluster,\
+        \ ClusterAuth, and NodeGroup deletionPolicy from Orphan to Delete for proper\
+        \ AWS resource cleanup\"\n- kind: fixed\n  description: \"Fixed XEKS deletion\
+        \ blocking issue caused by orphaned AWS resources preventing subnet deletion\"\
+        \n"
       artifacthub.io/license: Apache-2.0
-      artifacthub.io/links: |
-        - name: GitHub Repository
-          url: https://github.com/novelcore/kubecore-operator
-        - name: Documentation
-          url: https://github.com/novelcore/kubecore-operator/blob/main/README.md
-        - name: Release Notes
-          url: https://github.com/novelcore/kubecore-operator/releases
+      artifacthub.io/links: "- name: GitHub Repository\n  url: https://github.com/novelcore/kubecore-operator\n\
+        - name: Documentation\n  url: https://github.com/novelcore/kubecore-operator/blob/main/README.md\n\
+        - name: Release Notes\n  url: https://github.com/novelcore/kubecore-operator/releases\n"
     apiVersion: v2
     appVersion: 0.108.3
-    created: "2026-11-03T01:15:49.914523438Z"
+    created: '2026-11-03T01:15:49.914523438Z'
     description: A sophisticated Kubernetes operator that implements a four-layer
       framework architecture for provisioning and managing cloud infrastructure through
       Crossplane compositions.
@@ -1378,22 +1809,18 @@ entries:
     version: 0.108.3
   - annotations:
       artifacthub.io/category: automation
-      artifacthub.io/changes: |
-        - kind: changed
-          description: "Changed XEKS Cluster, ClusterAuth, and NodeGroup deletionPolicy from Orphan to Delete for proper AWS resource cleanup"
-        - kind: fixed
-          description: "Fixed XEKS deletion blocking issue caused by orphaned AWS resources preventing subnet deletion"
+      artifacthub.io/changes: "- kind: changed\n  description: \"Changed XEKS Cluster,\
+        \ ClusterAuth, and NodeGroup deletionPolicy from Orphan to Delete for proper\
+        \ AWS resource cleanup\"\n- kind: fixed\n  description: \"Fixed XEKS deletion\
+        \ blocking issue caused by orphaned AWS resources preventing subnet deletion\"\
+        \n"
       artifacthub.io/license: Apache-2.0
-      artifacthub.io/links: |
-        - name: GitHub Repository
-          url: https://github.com/novelcore/kubecore-operator
-        - name: Documentation
-          url: https://github.com/novelcore/kubecore-operator/blob/main/README.md
-        - name: Release Notes
-          url: https://github.com/novelcore/kubecore-operator/releases
+      artifacthub.io/links: "- name: GitHub Repository\n  url: https://github.com/novelcore/kubecore-operator\n\
+        - name: Documentation\n  url: https://github.com/novelcore/kubecore-operator/blob/main/README.md\n\
+        - name: Release Notes\n  url: https://github.com/novelcore/kubecore-operator/releases\n"
     apiVersion: v2
     appVersion: 0.108.2
-    created: "2026-11-03T01:15:49.903129086Z"
+    created: '2026-11-03T01:15:49.903129086Z'
     description: A sophisticated Kubernetes operator that implements a four-layer
       framework architecture for provisioning and managing cloud infrastructure through
       Crossplane compositions.
@@ -1423,22 +1850,18 @@ entries:
     version: 0.108.2
   - annotations:
       artifacthub.io/category: automation
-      artifacthub.io/changes: |
-        - kind: changed
-          description: "Changed XEKS Cluster, ClusterAuth, and NodeGroup deletionPolicy from Orphan to Delete for proper AWS resource cleanup"
-        - kind: fixed
-          description: "Fixed XEKS deletion blocking issue caused by orphaned AWS resources preventing subnet deletion"
+      artifacthub.io/changes: "- kind: changed\n  description: \"Changed XEKS Cluster,\
+        \ ClusterAuth, and NodeGroup deletionPolicy from Orphan to Delete for proper\
+        \ AWS resource cleanup\"\n- kind: fixed\n  description: \"Fixed XEKS deletion\
+        \ blocking issue caused by orphaned AWS resources preventing subnet deletion\"\
+        \n"
       artifacthub.io/license: Apache-2.0
-      artifacthub.io/links: |
-        - name: GitHub Repository
-          url: https://github.com/novelcore/kubecore-operator
-        - name: Documentation
-          url: https://github.com/novelcore/kubecore-operator/blob/main/README.md
-        - name: Release Notes
-          url: https://github.com/novelcore/kubecore-operator/releases
+      artifacthub.io/links: "- name: GitHub Repository\n  url: https://github.com/novelcore/kubecore-operator\n\
+        - name: Documentation\n  url: https://github.com/novelcore/kubecore-operator/blob/main/README.md\n\
+        - name: Release Notes\n  url: https://github.com/novelcore/kubecore-operator/releases\n"
     apiVersion: v2
     appVersion: 0.108.1
-    created: "2026-11-03T01:15:49.886277607Z"
+    created: '2026-11-03T01:15:49.886277607Z'
     description: A sophisticated Kubernetes operator that implements a four-layer
       framework architecture for provisioning and managing cloud infrastructure through
       Crossplane compositions.
@@ -1468,22 +1891,18 @@ entries:
     version: 0.108.1
   - annotations:
       artifacthub.io/category: automation
-      artifacthub.io/changes: |
-        - kind: changed
-          description: "Changed XEKS Cluster, ClusterAuth, and NodeGroup deletionPolicy from Orphan to Delete for proper AWS resource cleanup"
-        - kind: fixed
-          description: "Fixed XEKS deletion blocking issue caused by orphaned AWS resources preventing subnet deletion"
+      artifacthub.io/changes: "- kind: changed\n  description: \"Changed XEKS Cluster,\
+        \ ClusterAuth, and NodeGroup deletionPolicy from Orphan to Delete for proper\
+        \ AWS resource cleanup\"\n- kind: fixed\n  description: \"Fixed XEKS deletion\
+        \ blocking issue caused by orphaned AWS resources preventing subnet deletion\"\
+        \n"
       artifacthub.io/license: Apache-2.0
-      artifacthub.io/links: |
-        - name: GitHub Repository
-          url: https://github.com/novelcore/kubecore-operator
-        - name: Documentation
-          url: https://github.com/novelcore/kubecore-operator/blob/main/README.md
-        - name: Release Notes
-          url: https://github.com/novelcore/kubecore-operator/releases
+      artifacthub.io/links: "- name: GitHub Repository\n  url: https://github.com/novelcore/kubecore-operator\n\
+        - name: Documentation\n  url: https://github.com/novelcore/kubecore-operator/blob/main/README.md\n\
+        - name: Release Notes\n  url: https://github.com/novelcore/kubecore-operator/releases\n"
     apiVersion: v2
     appVersion: 0.108.0
-    created: "2026-11-03T01:15:49.873689334Z"
+    created: '2026-11-03T01:15:49.873689334Z'
     description: A sophisticated Kubernetes operator that implements a four-layer
       framework architecture for provisioning and managing cloud infrastructure through
       Crossplane compositions.
@@ -1513,22 +1932,18 @@ entries:
     version: 0.108.0
   - annotations:
       artifacthub.io/category: automation
-      artifacthub.io/changes: |
-        - kind: changed
-          description: "Changed XEKS Cluster, ClusterAuth, and NodeGroup deletionPolicy from Orphan to Delete for proper AWS resource cleanup"
-        - kind: fixed
-          description: "Fixed XEKS deletion blocking issue caused by orphaned AWS resources preventing subnet deletion"
+      artifacthub.io/changes: "- kind: changed\n  description: \"Changed XEKS Cluster,\
+        \ ClusterAuth, and NodeGroup deletionPolicy from Orphan to Delete for proper\
+        \ AWS resource cleanup\"\n- kind: fixed\n  description: \"Fixed XEKS deletion\
+        \ blocking issue caused by orphaned AWS resources preventing subnet deletion\"\
+        \n"
       artifacthub.io/license: Apache-2.0
-      artifacthub.io/links: |
-        - name: GitHub Repository
-          url: https://github.com/novelcore/kubecore-operator
-        - name: Documentation
-          url: https://github.com/novelcore/kubecore-operator/blob/main/README.md
-        - name: Release Notes
-          url: https://github.com/novelcore/kubecore-operator/releases
+      artifacthub.io/links: "- name: GitHub Repository\n  url: https://github.com/novelcore/kubecore-operator\n\
+        - name: Documentation\n  url: https://github.com/novelcore/kubecore-operator/blob/main/README.md\n\
+        - name: Release Notes\n  url: https://github.com/novelcore/kubecore-operator/releases\n"
     apiVersion: v2
     appVersion: 0.107.9
-    created: "2026-11-03T01:15:49.851789851Z"
+    created: '2026-11-03T01:15:49.851789851Z'
     description: A sophisticated Kubernetes operator that implements a four-layer
       framework architecture for provisioning and managing cloud infrastructure through
       Crossplane compositions.
@@ -1558,22 +1973,18 @@ entries:
     version: 0.107.9
   - annotations:
       artifacthub.io/category: automation
-      artifacthub.io/changes: |
-        - kind: changed
-          description: "Changed XEKS Cluster, ClusterAuth, and NodeGroup deletionPolicy from Orphan to Delete for proper AWS resource cleanup"
-        - kind: fixed
-          description: "Fixed XEKS deletion blocking issue caused by orphaned AWS resources preventing subnet deletion"
+      artifacthub.io/changes: "- kind: changed\n  description: \"Changed XEKS Cluster,\
+        \ ClusterAuth, and NodeGroup deletionPolicy from Orphan to Delete for proper\
+        \ AWS resource cleanup\"\n- kind: fixed\n  description: \"Fixed XEKS deletion\
+        \ blocking issue caused by orphaned AWS resources preventing subnet deletion\"\
+        \n"
       artifacthub.io/license: Apache-2.0
-      artifacthub.io/links: |
-        - name: GitHub Repository
-          url: https://github.com/novelcore/kubecore-operator
-        - name: Documentation
-          url: https://github.com/novelcore/kubecore-operator/blob/main/README.md
-        - name: Release Notes
-          url: https://github.com/novelcore/kubecore-operator/releases
+      artifacthub.io/links: "- name: GitHub Repository\n  url: https://github.com/novelcore/kubecore-operator\n\
+        - name: Documentation\n  url: https://github.com/novelcore/kubecore-operator/blob/main/README.md\n\
+        - name: Release Notes\n  url: https://github.com/novelcore/kubecore-operator/releases\n"
     apiVersion: v2
     appVersion: 0.107.8
-    created: "2026-11-03T01:15:49.828440527Z"
+    created: '2026-11-03T01:15:49.828440527Z'
     description: A sophisticated Kubernetes operator that implements a four-layer
       framework architecture for provisioning and managing cloud infrastructure through
       Crossplane compositions.
@@ -1603,22 +2014,18 @@ entries:
     version: 0.107.8
   - annotations:
       artifacthub.io/category: automation
-      artifacthub.io/changes: |
-        - kind: changed
-          description: "Changed XEKS Cluster, ClusterAuth, and NodeGroup deletionPolicy from Orphan to Delete for proper AWS resource cleanup"
-        - kind: fixed
-          description: "Fixed XEKS deletion blocking issue caused by orphaned AWS resources preventing subnet deletion"
+      artifacthub.io/changes: "- kind: changed\n  description: \"Changed XEKS Cluster,\
+        \ ClusterAuth, and NodeGroup deletionPolicy from Orphan to Delete for proper\
+        \ AWS resource cleanup\"\n- kind: fixed\n  description: \"Fixed XEKS deletion\
+        \ blocking issue caused by orphaned AWS resources preventing subnet deletion\"\
+        \n"
       artifacthub.io/license: Apache-2.0
-      artifacthub.io/links: |
-        - name: GitHub Repository
-          url: https://github.com/novelcore/kubecore-operator
-        - name: Documentation
-          url: https://github.com/novelcore/kubecore-operator/blob/main/README.md
-        - name: Release Notes
-          url: https://github.com/novelcore/kubecore-operator/releases
+      artifacthub.io/links: "- name: GitHub Repository\n  url: https://github.com/novelcore/kubecore-operator\n\
+        - name: Documentation\n  url: https://github.com/novelcore/kubecore-operator/blob/main/README.md\n\
+        - name: Release Notes\n  url: https://github.com/novelcore/kubecore-operator/releases\n"
     apiVersion: v2
     appVersion: 0.107.7
-    created: "2026-11-03T01:15:49.815884031Z"
+    created: '2026-11-03T01:15:49.815884031Z'
     description: A sophisticated Kubernetes operator that implements a four-layer
       framework architecture for provisioning and managing cloud infrastructure through
       Crossplane compositions.
@@ -1646,10 +2053,1732 @@ entries:
     urls:
     - https://novelcore.github.io/charts/kubecore-operator-0.107.7.tgz
     version: 0.107.7
+  - annotations:
+      artifacthub.io/category: automation
+      artifacthub.io/changes: "- kind: changed\n  description: \"Changed XEKS Cluster,\
+        \ ClusterAuth, and NodeGroup deletionPolicy from Orphan to Delete for proper\
+        \ AWS resource cleanup\"\n- kind: fixed\n  description: \"Fixed XEKS deletion\
+        \ blocking issue caused by orphaned AWS resources preventing subnet deletion\"\
+        \n"
+      artifacthub.io/license: Apache-2.0
+      artifacthub.io/links: "- name: GitHub Repository\n  url: https://github.com/novelcore/kubecore-operator\n\
+        - name: Documentation\n  url: https://github.com/novelcore/kubecore-operator/blob/main/README.md\n\
+        - name: Release Notes\n  url: https://github.com/novelcore/kubecore-operator/releases\n"
+    apiVersion: v2
+    appVersion: 0.107.6
+    created: '2026-10-12T19:11:49.556340369Z'
+    description: A sophisticated Kubernetes operator that implements a four-layer
+      framework architecture for provisioning and managing cloud infrastructure through
+      Crossplane compositions.
+    digest: 02e472409c2d79fab1bb497e09eff045a1c2283d9a7d4de41b80a5330f0f4d85
+    home: https://github.com/novelcore/kubecore-operator
+    icon: https://github.com/novelcore/kubecore-operator/raw/main/docs/icon.png
+    keywords:
+    - kubernetes
+    - kubecore
+    - operator
+    - crossplane
+    - infrastructure
+    - gitops
+    - platform
+    - kubecore
+    - infrastructure-as-code
+    kubeVersion: '>=1.20.0-0'
+    maintainers:
+    - email: platform@novelcore.io
+      name: Novelcore Platform Team
+    name: kubecore-operator
+    sources:
+    - https://github.com/novelcore/kubecore-operator
+    type: application
+    urls:
+    - https://novelcore.github.io/charts/kubecore-operator-0.107.6.tgz
+    version: 0.107.6
+  - annotations:
+      artifacthub.io/category: automation
+      artifacthub.io/changes: "- kind: changed\n  description: \"Changed XEKS Cluster,\
+        \ ClusterAuth, and NodeGroup deletionPolicy from Orphan to Delete for proper\
+        \ AWS resource cleanup\"\n- kind: fixed\n  description: \"Fixed XEKS deletion\
+        \ blocking issue caused by orphaned AWS resources preventing subnet deletion\"\
+        \n"
+      artifacthub.io/license: Apache-2.0
+      artifacthub.io/links: "- name: GitHub Repository\n  url: https://github.com/novelcore/kubecore-operator\n\
+        - name: Documentation\n  url: https://github.com/novelcore/kubecore-operator/blob/main/README.md\n\
+        - name: Release Notes\n  url: https://github.com/novelcore/kubecore-operator/releases\n"
+    apiVersion: v2
+    appVersion: 0.107.5
+    created: '2026-10-12T03:51:00.656866451Z'
+    description: A sophisticated Kubernetes operator that implements a four-layer
+      framework architecture for provisioning and managing cloud infrastructure through
+      Crossplane compositions.
+    digest: d88e6c07535608aa9fccb3446cc6c882af87faaf4024001ffd3325aa3c61fa0a
+    home: https://github.com/novelcore/kubecore-operator
+    icon: https://github.com/novelcore/kubecore-operator/raw/main/docs/icon.png
+    keywords:
+    - kubernetes
+    - kubecore
+    - operator
+    - crossplane
+    - infrastructure
+    - gitops
+    - platform
+    - kubecore
+    - infrastructure-as-code
+    kubeVersion: '>=1.20.0-0'
+    maintainers:
+    - email: platform@novelcore.io
+      name: Novelcore Platform Team
+    name: kubecore-operator
+    sources:
+    - https://github.com/novelcore/kubecore-operator
+    type: application
+    urls:
+    - https://novelcore.github.io/charts/kubecore-operator-0.107.5.tgz
+    version: 0.107.5
+  - annotations:
+      artifacthub.io/category: automation
+      artifacthub.io/changes: "- kind: changed\n  description: \"Changed XEKS Cluster,\
+        \ ClusterAuth, and NodeGroup deletionPolicy from Orphan to Delete for proper\
+        \ AWS resource cleanup\"\n- kind: fixed\n  description: \"Fixed XEKS deletion\
+        \ blocking issue caused by orphaned AWS resources preventing subnet deletion\"\
+        \n"
+      artifacthub.io/license: Apache-2.0
+      artifacthub.io/links: "- name: GitHub Repository\n  url: https://github.com/novelcore/kubecore-operator\n\
+        - name: Documentation\n  url: https://github.com/novelcore/kubecore-operator/blob/main/README.md\n\
+        - name: Release Notes\n  url: https://github.com/novelcore/kubecore-operator/releases\n"
+    apiVersion: v2
+    appVersion: 0.107.4
+    created: '2026-10-12T03:25:27.901872613Z'
+    description: A sophisticated Kubernetes operator that implements a four-layer
+      framework architecture for provisioning and managing cloud infrastructure through
+      Crossplane compositions.
+    digest: c37e078d791ba00ea94b49b394dfd8ac21041aed52d0abb0abeeb2dd5e9592c1
+    home: https://github.com/novelcore/kubecore-operator
+    icon: https://github.com/novelcore/kubecore-operator/raw/main/docs/icon.png
+    keywords:
+    - kubernetes
+    - kubecore
+    - operator
+    - crossplane
+    - infrastructure
+    - gitops
+    - platform
+    - kubecore
+    - infrastructure-as-code
+    kubeVersion: '>=1.20.0-0'
+    maintainers:
+    - email: platform@novelcore.io
+      name: Novelcore Platform Team
+    name: kubecore-operator
+    sources:
+    - https://github.com/novelcore/kubecore-operator
+    type: application
+    urls:
+    - https://novelcore.github.io/charts/kubecore-operator-0.107.4.tgz
+    version: 0.107.4
+  - annotations:
+      artifacthub.io/category: automation
+      artifacthub.io/changes: "- kind: changed\n  description: \"Changed XEKS Cluster,\
+        \ ClusterAuth, and NodeGroup deletionPolicy from Orphan to Delete for proper\
+        \ AWS resource cleanup\"\n- kind: fixed\n  description: \"Fixed XEKS deletion\
+        \ blocking issue caused by orphaned AWS resources preventing subnet deletion\"\
+        \n"
+      artifacthub.io/license: Apache-2.0
+      artifacthub.io/links: "- name: GitHub Repository\n  url: https://github.com/novelcore/kubecore-operator\n\
+        - name: Documentation\n  url: https://github.com/novelcore/kubecore-operator/blob/main/README.md\n\
+        - name: Release Notes\n  url: https://github.com/novelcore/kubecore-operator/releases\n"
+    apiVersion: v2
+    appVersion: 0.107.3
+    created: '2026-10-12T01:51:32.734108737Z'
+    description: A sophisticated Kubernetes operator that implements a four-layer
+      framework architecture for provisioning and managing cloud infrastructure through
+      Crossplane compositions.
+    digest: f44f4bfb518e5725506841df9d9d6795d5ea60afd6adeea45331ab5a4f58c539
+    home: https://github.com/novelcore/kubecore-operator
+    icon: https://github.com/novelcore/kubecore-operator/raw/main/docs/icon.png
+    keywords:
+    - kubernetes
+    - kubecore
+    - operator
+    - crossplane
+    - infrastructure
+    - gitops
+    - platform
+    - kubecore
+    - infrastructure-as-code
+    kubeVersion: '>=1.20.0-0'
+    maintainers:
+    - email: platform@novelcore.io
+      name: Novelcore Platform Team
+    name: kubecore-operator
+    sources:
+    - https://github.com/novelcore/kubecore-operator
+    type: application
+    urls:
+    - https://novelcore.github.io/charts/kubecore-operator-0.107.3.tgz
+    version: 0.107.3
+  - annotations:
+      artifacthub.io/category: automation
+      artifacthub.io/changes: "- kind: changed\n  description: \"Changed XEKS Cluster,\
+        \ ClusterAuth, and NodeGroup deletionPolicy from Orphan to Delete for proper\
+        \ AWS resource cleanup\"\n- kind: fixed\n  description: \"Fixed XEKS deletion\
+        \ blocking issue caused by orphaned AWS resources preventing subnet deletion\"\
+        \n"
+      artifacthub.io/license: Apache-2.0
+      artifacthub.io/links: "- name: GitHub Repository\n  url: https://github.com/novelcore/kubecore-operator\n\
+        - name: Documentation\n  url: https://github.com/novelcore/kubecore-operator/blob/main/README.md\n\
+        - name: Release Notes\n  url: https://github.com/novelcore/kubecore-operator/releases\n"
+    apiVersion: v2
+    appVersion: 0.107.2
+    created: '2026-10-11T15:55:04.832707204Z'
+    description: A sophisticated Kubernetes operator that implements a four-layer
+      framework architecture for provisioning and managing cloud infrastructure through
+      Crossplane compositions.
+    digest: 31838baed889b18a00f0afa91022360c5522c5db692562547fa9db2267e26426
+    home: https://github.com/novelcore/kubecore-operator
+    icon: https://github.com/novelcore/kubecore-operator/raw/main/docs/icon.png
+    keywords:
+    - kubernetes
+    - kubecore
+    - operator
+    - crossplane
+    - infrastructure
+    - gitops
+    - platform
+    - kubecore
+    - infrastructure-as-code
+    kubeVersion: '>=1.20.0-0'
+    maintainers:
+    - email: platform@novelcore.io
+      name: Novelcore Platform Team
+    name: kubecore-operator
+    sources:
+    - https://github.com/novelcore/kubecore-operator
+    type: application
+    urls:
+    - https://novelcore.github.io/charts/kubecore-operator-0.107.2.tgz
+    version: 0.107.2
+  - annotations:
+      artifacthub.io/category: automation
+      artifacthub.io/changes: "- kind: changed\n  description: \"Changed XEKS Cluster,\
+        \ ClusterAuth, and NodeGroup deletionPolicy from Orphan to Delete for proper\
+        \ AWS resource cleanup\"\n- kind: fixed\n  description: \"Fixed XEKS deletion\
+        \ blocking issue caused by orphaned AWS resources preventing subnet deletion\"\
+        \n"
+      artifacthub.io/license: Apache-2.0
+      artifacthub.io/links: "- name: GitHub Repository\n  url: https://github.com/novelcore/kubecore-operator\n\
+        - name: Documentation\n  url: https://github.com/novelcore/kubecore-operator/blob/main/README.md\n\
+        - name: Release Notes\n  url: https://github.com/novelcore/kubecore-operator/releases\n"
+    apiVersion: v2
+    appVersion: 0.107.1
+    created: '2026-10-11T15:00:31.393126837Z'
+    description: A sophisticated Kubernetes operator that implements a four-layer
+      framework architecture for provisioning and managing cloud infrastructure through
+      Crossplane compositions.
+    digest: f8f60e0f0ffaa4da6d894806bed7e80d02d4a806318309a32e45b2390ea10724
+    home: https://github.com/novelcore/kubecore-operator
+    icon: https://github.com/novelcore/kubecore-operator/raw/main/docs/icon.png
+    keywords:
+    - kubernetes
+    - kubecore
+    - operator
+    - crossplane
+    - infrastructure
+    - gitops
+    - platform
+    - kubecore
+    - infrastructure-as-code
+    kubeVersion: '>=1.20.0-0'
+    maintainers:
+    - email: platform@novelcore.io
+      name: Novelcore Platform Team
+    name: kubecore-operator
+    sources:
+    - https://github.com/novelcore/kubecore-operator
+    type: application
+    urls:
+    - https://novelcore.github.io/charts/kubecore-operator-0.107.1.tgz
+    version: 0.107.1
+  - annotations:
+      artifacthub.io/category: automation
+      artifacthub.io/changes: "- kind: changed\n  description: \"Changed XEKS Cluster,\
+        \ ClusterAuth, and NodeGroup deletionPolicy from Orphan to Delete for proper\
+        \ AWS resource cleanup\"\n- kind: fixed\n  description: \"Fixed XEKS deletion\
+        \ blocking issue caused by orphaned AWS resources preventing subnet deletion\"\
+        \n"
+      artifacthub.io/license: Apache-2.0
+      artifacthub.io/links: "- name: GitHub Repository\n  url: https://github.com/novelcore/kubecore-operator\n\
+        - name: Documentation\n  url: https://github.com/novelcore/kubecore-operator/blob/main/README.md\n\
+        - name: Release Notes\n  url: https://github.com/novelcore/kubecore-operator/releases\n"
+    apiVersion: v2
+    appVersion: 0.107.0
+    created: '2026-10-11T13:06:13.875121977Z'
+    description: A sophisticated Kubernetes operator that implements a four-layer
+      framework architecture for provisioning and managing cloud infrastructure through
+      Crossplane compositions.
+    digest: 79c73ab15347e010f295291444ddd0aae6fa973384a242fead2cb5830bc7389b
+    home: https://github.com/novelcore/kubecore-operator
+    icon: https://github.com/novelcore/kubecore-operator/raw/main/docs/icon.png
+    keywords:
+    - kubernetes
+    - kubecore
+    - operator
+    - crossplane
+    - infrastructure
+    - gitops
+    - platform
+    - kubecore
+    - infrastructure-as-code
+    kubeVersion: '>=1.20.0-0'
+    maintainers:
+    - email: platform@novelcore.io
+      name: Novelcore Platform Team
+    name: kubecore-operator
+    sources:
+    - https://github.com/novelcore/kubecore-operator
+    type: application
+    urls:
+    - https://novelcore.github.io/charts/kubecore-operator-0.107.0.tgz
+    version: 0.107.0
+  - annotations:
+      artifacthub.io/category: automation
+      artifacthub.io/changes: "- kind: changed\n  description: \"Changed XEKS Cluster,\
+        \ ClusterAuth, and NodeGroup deletionPolicy from Orphan to Delete for proper\
+        \ AWS resource cleanup\"\n- kind: fixed\n  description: \"Fixed XEKS deletion\
+        \ blocking issue caused by orphaned AWS resources preventing subnet deletion\"\
+        \n"
+      artifacthub.io/license: Apache-2.0
+      artifacthub.io/links: "- name: GitHub Repository\n  url: https://github.com/novelcore/kubecore-operator\n\
+        - name: Documentation\n  url: https://github.com/novelcore/kubecore-operator/blob/main/README.md\n\
+        - name: Release Notes\n  url: https://github.com/novelcore/kubecore-operator/releases\n"
+    apiVersion: v2
+    appVersion: 0.106.5
+    created: '2026-10-11T12:33:35.483132861Z'
+    description: A sophisticated Kubernetes operator that implements a four-layer
+      framework architecture for provisioning and managing cloud infrastructure through
+      Crossplane compositions.
+    digest: a43ee85644f61b1512371eb7b6219ea1103258d9a7b6bb12bb381a09c95a7f57
+    home: https://github.com/novelcore/kubecore-operator
+    icon: https://github.com/novelcore/kubecore-operator/raw/main/docs/icon.png
+    keywords:
+    - kubernetes
+    - kubecore
+    - operator
+    - crossplane
+    - infrastructure
+    - gitops
+    - platform
+    - kubecore
+    - infrastructure-as-code
+    kubeVersion: '>=1.20.0-0'
+    maintainers:
+    - email: platform@novelcore.io
+      name: Novelcore Platform Team
+    name: kubecore-operator
+    sources:
+    - https://github.com/novelcore/kubecore-operator
+    type: application
+    urls:
+    - https://novelcore.github.io/charts/kubecore-operator-0.106.5.tgz
+    version: 0.106.5
+  - annotations:
+      artifacthub.io/category: automation
+      artifacthub.io/changes: "- kind: changed\n  description: \"Changed XEKS Cluster,\
+        \ ClusterAuth, and NodeGroup deletionPolicy from Orphan to Delete for proper\
+        \ AWS resource cleanup\"\n- kind: fixed\n  description: \"Fixed XEKS deletion\
+        \ blocking issue caused by orphaned AWS resources preventing subnet deletion\"\
+        \n"
+      artifacthub.io/license: Apache-2.0
+      artifacthub.io/links: "- name: GitHub Repository\n  url: https://github.com/novelcore/kubecore-operator\n\
+        - name: Documentation\n  url: https://github.com/novelcore/kubecore-operator/blob/main/README.md\n\
+        - name: Release Notes\n  url: https://github.com/novelcore/kubecore-operator/releases\n"
+    apiVersion: v2
+    appVersion: 0.106.4
+    created: '2026-10-11T08:03:47.345926646Z'
+    description: A sophisticated Kubernetes operator that implements a four-layer
+      framework architecture for provisioning and managing cloud infrastructure through
+      Crossplane compositions.
+    digest: e1637d19cd2b4114d9b891b423f50f8b931483a9695b87b288cdbc03cca424cd
+    home: https://github.com/novelcore/kubecore-operator
+    icon: https://github.com/novelcore/kubecore-operator/raw/main/docs/icon.png
+    keywords:
+    - kubernetes
+    - kubecore
+    - operator
+    - crossplane
+    - infrastructure
+    - gitops
+    - platform
+    - kubecore
+    - infrastructure-as-code
+    kubeVersion: '>=1.20.0-0'
+    maintainers:
+    - email: platform@novelcore.io
+      name: Novelcore Platform Team
+    name: kubecore-operator
+    sources:
+    - https://github.com/novelcore/kubecore-operator
+    type: application
+    urls:
+    - https://novelcore.github.io/charts/kubecore-operator-0.106.4.tgz
+    version: 0.106.4
+  - annotations:
+      artifacthub.io/category: automation
+      artifacthub.io/changes: "- kind: changed\n  description: \"Changed XEKS Cluster,\
+        \ ClusterAuth, and NodeGroup deletionPolicy from Orphan to Delete for proper\
+        \ AWS resource cleanup\"\n- kind: fixed\n  description: \"Fixed XEKS deletion\
+        \ blocking issue caused by orphaned AWS resources preventing subnet deletion\"\
+        \n"
+      artifacthub.io/license: Apache-2.0
+      artifacthub.io/links: "- name: GitHub Repository\n  url: https://github.com/novelcore/kubecore-operator\n\
+        - name: Documentation\n  url: https://github.com/novelcore/kubecore-operator/blob/main/README.md\n\
+        - name: Release Notes\n  url: https://github.com/novelcore/kubecore-operator/releases\n"
+    apiVersion: v2
+    appVersion: 0.106.3
+    created: '2026-10-11T04:24:12.13298284Z'
+    description: A sophisticated Kubernetes operator that implements a four-layer
+      framework architecture for provisioning and managing cloud infrastructure through
+      Crossplane compositions.
+    digest: 4636f17f0cea8d2896a4f9139eeb95e779edbd49543c0e94162211d0996f788a
+    home: https://github.com/novelcore/kubecore-operator
+    icon: https://github.com/novelcore/kubecore-operator/raw/main/docs/icon.png
+    keywords:
+    - kubernetes
+    - kubecore
+    - operator
+    - crossplane
+    - infrastructure
+    - gitops
+    - platform
+    - kubecore
+    - infrastructure-as-code
+    kubeVersion: '>=1.20.0-0'
+    maintainers:
+    - email: platform@novelcore.io
+      name: Novelcore Platform Team
+    name: kubecore-operator
+    sources:
+    - https://github.com/novelcore/kubecore-operator
+    type: application
+    urls:
+    - https://novelcore.github.io/charts/kubecore-operator-0.106.3.tgz
+    version: 0.106.3
+  - annotations:
+      artifacthub.io/category: automation
+      artifacthub.io/changes: "- kind: changed\n  description: \"Changed XEKS Cluster,\
+        \ ClusterAuth, and NodeGroup deletionPolicy from Orphan to Delete for proper\
+        \ AWS resource cleanup\"\n- kind: fixed\n  description: \"Fixed XEKS deletion\
+        \ blocking issue caused by orphaned AWS resources preventing subnet deletion\"\
+        \n"
+      artifacthub.io/license: Apache-2.0
+      artifacthub.io/links: "- name: GitHub Repository\n  url: https://github.com/novelcore/kubecore-operator\n\
+        - name: Documentation\n  url: https://github.com/novelcore/kubecore-operator/blob/main/README.md\n\
+        - name: Release Notes\n  url: https://github.com/novelcore/kubecore-operator/releases\n"
+    apiVersion: v2
+    appVersion: 0.106.2
+    created: '2026-10-11T03:34:02.130500506Z'
+    description: A sophisticated Kubernetes operator that implements a four-layer
+      framework architecture for provisioning and managing cloud infrastructure through
+      Crossplane compositions.
+    digest: 576aeb2d23449215b70da513ff80b2a54ec493eae4f7861a372bc8de27b1642d
+    home: https://github.com/novelcore/kubecore-operator
+    icon: https://github.com/novelcore/kubecore-operator/raw/main/docs/icon.png
+    keywords:
+    - kubernetes
+    - kubecore
+    - operator
+    - crossplane
+    - infrastructure
+    - gitops
+    - platform
+    - kubecore
+    - infrastructure-as-code
+    kubeVersion: '>=1.20.0-0'
+    maintainers:
+    - email: platform@novelcore.io
+      name: Novelcore Platform Team
+    name: kubecore-operator
+    sources:
+    - https://github.com/novelcore/kubecore-operator
+    type: application
+    urls:
+    - https://novelcore.github.io/charts/kubecore-operator-0.106.2.tgz
+    version: 0.106.2
+  - annotations:
+      artifacthub.io/category: automation
+      artifacthub.io/changes: "- kind: changed\n  description: \"Changed XEKS Cluster,\
+        \ ClusterAuth, and NodeGroup deletionPolicy from Orphan to Delete for proper\
+        \ AWS resource cleanup\"\n- kind: fixed\n  description: \"Fixed XEKS deletion\
+        \ blocking issue caused by orphaned AWS resources preventing subnet deletion\"\
+        \n"
+      artifacthub.io/license: Apache-2.0
+      artifacthub.io/links: "- name: GitHub Repository\n  url: https://github.com/novelcore/kubecore-operator\n\
+        - name: Documentation\n  url: https://github.com/novelcore/kubecore-operator/blob/main/README.md\n\
+        - name: Release Notes\n  url: https://github.com/novelcore/kubecore-operator/releases\n"
+    apiVersion: v2
+    appVersion: 0.106.1
+    created: '2026-10-11T00:56:16.071877271Z'
+    description: A sophisticated Kubernetes operator that implements a four-layer
+      framework architecture for provisioning and managing cloud infrastructure through
+      Crossplane compositions.
+    digest: 10a0343c4d01a74cf0b70ce1a9e48286b0d8e7e2b60914acd1d6951b5f1e3217
+    home: https://github.com/novelcore/kubecore-operator
+    icon: https://github.com/novelcore/kubecore-operator/raw/main/docs/icon.png
+    keywords:
+    - kubernetes
+    - kubecore
+    - operator
+    - crossplane
+    - infrastructure
+    - gitops
+    - platform
+    - kubecore
+    - infrastructure-as-code
+    kubeVersion: '>=1.20.0-0'
+    maintainers:
+    - email: platform@novelcore.io
+      name: Novelcore Platform Team
+    name: kubecore-operator
+    sources:
+    - https://github.com/novelcore/kubecore-operator
+    type: application
+    urls:
+    - https://novelcore.github.io/charts/kubecore-operator-0.106.1.tgz
+    version: 0.106.1
+  - annotations:
+      artifacthub.io/category: automation
+      artifacthub.io/changes: "- kind: changed\n  description: \"Changed XEKS Cluster,\
+        \ ClusterAuth, and NodeGroup deletionPolicy from Orphan to Delete for proper\
+        \ AWS resource cleanup\"\n- kind: fixed\n  description: \"Fixed XEKS deletion\
+        \ blocking issue caused by orphaned AWS resources preventing subnet deletion\"\
+        \n"
+      artifacthub.io/license: Apache-2.0
+      artifacthub.io/links: "- name: GitHub Repository\n  url: https://github.com/novelcore/kubecore-operator\n\
+        - name: Documentation\n  url: https://github.com/novelcore/kubecore-operator/blob/main/README.md\n\
+        - name: Release Notes\n  url: https://github.com/novelcore/kubecore-operator/releases\n"
+    apiVersion: v2
+    appVersion: 0.106.0
+    created: '2026-10-10T04:03:59.651691437Z'
+    description: A sophisticated Kubernetes operator that implements a four-layer
+      framework architecture for provisioning and managing cloud infrastructure through
+      Crossplane compositions.
+    digest: 6e8dd2108b729c62807e5ef88270bb6e973a6bbf6537e4f4c26289e2c9d7946c
+    home: https://github.com/novelcore/kubecore-operator
+    icon: https://github.com/novelcore/kubecore-operator/raw/main/docs/icon.png
+    keywords:
+    - kubernetes
+    - kubecore
+    - operator
+    - crossplane
+    - infrastructure
+    - gitops
+    - platform
+    - kubecore
+    - infrastructure-as-code
+    kubeVersion: '>=1.20.0-0'
+    maintainers:
+    - email: platform@novelcore.io
+      name: Novelcore Platform Team
+    name: kubecore-operator
+    sources:
+    - https://github.com/novelcore/kubecore-operator
+    type: application
+    urls:
+    - https://novelcore.github.io/charts/kubecore-operator-0.106.0.tgz
+    version: 0.106.0
+  - annotations:
+      artifacthub.io/category: automation
+      artifacthub.io/changes: "- kind: changed\n  description: \"Changed XEKS Cluster,\
+        \ ClusterAuth, and NodeGroup deletionPolicy from Orphan to Delete for proper\
+        \ AWS resource cleanup\"\n- kind: fixed\n  description: \"Fixed XEKS deletion\
+        \ blocking issue caused by orphaned AWS resources preventing subnet deletion\"\
+        \n"
+      artifacthub.io/license: Apache-2.0
+      artifacthub.io/links: "- name: GitHub Repository\n  url: https://github.com/novelcore/kubecore-operator\n\
+        - name: Documentation\n  url: https://github.com/novelcore/kubecore-operator/blob/main/README.md\n\
+        - name: Release Notes\n  url: https://github.com/novelcore/kubecore-operator/releases\n"
+    apiVersion: v2
+    appVersion: 0.105.8
+    created: '2026-10-09T20:36:15.633257741Z'
+    description: A sophisticated Kubernetes operator that implements a four-layer
+      framework architecture for provisioning and managing cloud infrastructure through
+      Crossplane compositions.
+    digest: 090f067475b67bb08ee4e07853a996756adb0b61c62d59213348ee1635c979d3
+    home: https://github.com/novelcore/kubecore-operator
+    icon: https://github.com/novelcore/kubecore-operator/raw/main/docs/icon.png
+    keywords:
+    - kubernetes
+    - kubecore
+    - operator
+    - crossplane
+    - infrastructure
+    - gitops
+    - platform
+    - kubecore
+    - infrastructure-as-code
+    kubeVersion: '>=1.20.0-0'
+    maintainers:
+    - email: platform@novelcore.io
+      name: Novelcore Platform Team
+    name: kubecore-operator
+    sources:
+    - https://github.com/novelcore/kubecore-operator
+    type: application
+    urls:
+    - https://novelcore.github.io/charts/kubecore-operator-0.105.8.tgz
+    version: 0.105.8
+  - annotations:
+      artifacthub.io/category: automation
+      artifacthub.io/changes: "- kind: changed\n  description: \"Changed XEKS Cluster,\
+        \ ClusterAuth, and NodeGroup deletionPolicy from Orphan to Delete for proper\
+        \ AWS resource cleanup\"\n- kind: fixed\n  description: \"Fixed XEKS deletion\
+        \ blocking issue caused by orphaned AWS resources preventing subnet deletion\"\
+        \n"
+      artifacthub.io/license: Apache-2.0
+      artifacthub.io/links: "- name: GitHub Repository\n  url: https://github.com/novelcore/kubecore-operator\n\
+        - name: Documentation\n  url: https://github.com/novelcore/kubecore-operator/blob/main/README.md\n\
+        - name: Release Notes\n  url: https://github.com/novelcore/kubecore-operator/releases\n"
+    apiVersion: v2
+    appVersion: 0.105.7
+    created: '2026-10-09T20:20:48.456044898Z'
+    description: A sophisticated Kubernetes operator that implements a four-layer
+      framework architecture for provisioning and managing cloud infrastructure through
+      Crossplane compositions.
+    digest: 5b5014732faf0fe152e78bca196f7a8376b4c66e3844bbb7d3a256cf6bf550c1
+    home: https://github.com/novelcore/kubecore-operator
+    icon: https://github.com/novelcore/kubecore-operator/raw/main/docs/icon.png
+    keywords:
+    - kubernetes
+    - kubecore
+    - operator
+    - crossplane
+    - infrastructure
+    - gitops
+    - platform
+    - kubecore
+    - infrastructure-as-code
+    kubeVersion: '>=1.20.0-0'
+    maintainers:
+    - email: platform@novelcore.io
+      name: Novelcore Platform Team
+    name: kubecore-operator
+    sources:
+    - https://github.com/novelcore/kubecore-operator
+    type: application
+    urls:
+    - https://novelcore.github.io/charts/kubecore-operator-0.105.7.tgz
+    version: 0.105.7
+  - annotations:
+      artifacthub.io/category: automation
+      artifacthub.io/changes: "- kind: changed\n  description: \"Changed XEKS Cluster,\
+        \ ClusterAuth, and NodeGroup deletionPolicy from Orphan to Delete for proper\
+        \ AWS resource cleanup\"\n- kind: fixed\n  description: \"Fixed XEKS deletion\
+        \ blocking issue caused by orphaned AWS resources preventing subnet deletion\"\
+        \n"
+      artifacthub.io/license: Apache-2.0
+      artifacthub.io/links: "- name: GitHub Repository\n  url: https://github.com/novelcore/kubecore-operator\n\
+        - name: Documentation\n  url: https://github.com/novelcore/kubecore-operator/blob/main/README.md\n\
+        - name: Release Notes\n  url: https://github.com/novelcore/kubecore-operator/releases\n"
+    apiVersion: v2
+    appVersion: 0.105.6
+    created: '2026-10-09T19:58:14.118259891Z'
+    description: A sophisticated Kubernetes operator that implements a four-layer
+      framework architecture for provisioning and managing cloud infrastructure through
+      Crossplane compositions.
+    digest: 414396a023cc3b3e30d7ed79037efdbf5344a0efa983d2234b591ee8585d4205
+    home: https://github.com/novelcore/kubecore-operator
+    icon: https://github.com/novelcore/kubecore-operator/raw/main/docs/icon.png
+    keywords:
+    - kubernetes
+    - kubecore
+    - operator
+    - crossplane
+    - infrastructure
+    - gitops
+    - platform
+    - kubecore
+    - infrastructure-as-code
+    kubeVersion: '>=1.20.0-0'
+    maintainers:
+    - email: platform@novelcore.io
+      name: Novelcore Platform Team
+    name: kubecore-operator
+    sources:
+    - https://github.com/novelcore/kubecore-operator
+    type: application
+    urls:
+    - https://novelcore.github.io/charts/kubecore-operator-0.105.6.tgz
+    version: 0.105.6
+  - annotations:
+      artifacthub.io/category: automation
+      artifacthub.io/changes: "- kind: changed\n  description: \"Changed XEKS Cluster,\
+        \ ClusterAuth, and NodeGroup deletionPolicy from Orphan to Delete for proper\
+        \ AWS resource cleanup\"\n- kind: fixed\n  description: \"Fixed XEKS deletion\
+        \ blocking issue caused by orphaned AWS resources preventing subnet deletion\"\
+        \n"
+      artifacthub.io/license: Apache-2.0
+      artifacthub.io/links: "- name: GitHub Repository\n  url: https://github.com/novelcore/kubecore-operator\n\
+        - name: Documentation\n  url: https://github.com/novelcore/kubecore-operator/blob/main/README.md\n\
+        - name: Release Notes\n  url: https://github.com/novelcore/kubecore-operator/releases\n"
+    apiVersion: v2
+    appVersion: 0.105.5
+    created: '2026-10-09T17:04:49.12774018Z'
+    description: A sophisticated Kubernetes operator that implements a four-layer
+      framework architecture for provisioning and managing cloud infrastructure through
+      Crossplane compositions.
+    digest: 92f1e99a0e48ad96356d7612cc3fc5e564490e93cd4f35cd053cabcf24e221e3
+    home: https://github.com/novelcore/kubecore-operator
+    icon: https://github.com/novelcore/kubecore-operator/raw/main/docs/icon.png
+    keywords:
+    - kubernetes
+    - kubecore
+    - operator
+    - crossplane
+    - infrastructure
+    - gitops
+    - platform
+    - kubecore
+    - infrastructure-as-code
+    kubeVersion: '>=1.20.0-0'
+    maintainers:
+    - email: platform@novelcore.io
+      name: Novelcore Platform Team
+    name: kubecore-operator
+    sources:
+    - https://github.com/novelcore/kubecore-operator
+    type: application
+    urls:
+    - https://novelcore.github.io/charts/kubecore-operator-0.105.5.tgz
+    version: 0.105.5
+  - annotations:
+      artifacthub.io/category: automation
+      artifacthub.io/changes: "- kind: changed\n  description: \"Changed XEKS Cluster,\
+        \ ClusterAuth, and NodeGroup deletionPolicy from Orphan to Delete for proper\
+        \ AWS resource cleanup\"\n- kind: fixed\n  description: \"Fixed XEKS deletion\
+        \ blocking issue caused by orphaned AWS resources preventing subnet deletion\"\
+        \n"
+      artifacthub.io/license: Apache-2.0
+      artifacthub.io/links: "- name: GitHub Repository\n  url: https://github.com/novelcore/kubecore-operator\n\
+        - name: Documentation\n  url: https://github.com/novelcore/kubecore-operator/blob/main/README.md\n\
+        - name: Release Notes\n  url: https://github.com/novelcore/kubecore-operator/releases\n"
+    apiVersion: v2
+    appVersion: 0.105.4
+    created: '2026-10-09T15:53:38.85850867Z'
+    description: A sophisticated Kubernetes operator that implements a four-layer
+      framework architecture for provisioning and managing cloud infrastructure through
+      Crossplane compositions.
+    digest: 3219988029f61d684d71d3a94e91a7362bfcb972ffe9e41819539e00f3b13180
+    home: https://github.com/novelcore/kubecore-operator
+    icon: https://github.com/novelcore/kubecore-operator/raw/main/docs/icon.png
+    keywords:
+    - kubernetes
+    - kubecore
+    - operator
+    - crossplane
+    - infrastructure
+    - gitops
+    - platform
+    - kubecore
+    - infrastructure-as-code
+    kubeVersion: '>=1.20.0-0'
+    maintainers:
+    - email: platform@novelcore.io
+      name: Novelcore Platform Team
+    name: kubecore-operator
+    sources:
+    - https://github.com/novelcore/kubecore-operator
+    type: application
+    urls:
+    - https://novelcore.github.io/charts/kubecore-operator-0.105.4.tgz
+    version: 0.105.4
+  - annotations:
+      artifacthub.io/category: automation
+      artifacthub.io/changes: "- kind: changed\n  description: \"Changed XEKS Cluster,\
+        \ ClusterAuth, and NodeGroup deletionPolicy from Orphan to Delete for proper\
+        \ AWS resource cleanup\"\n- kind: fixed\n  description: \"Fixed XEKS deletion\
+        \ blocking issue caused by orphaned AWS resources preventing subnet deletion\"\
+        \n"
+      artifacthub.io/license: Apache-2.0
+      artifacthub.io/links: "- name: GitHub Repository\n  url: https://github.com/novelcore/kubecore-operator\n\
+        - name: Documentation\n  url: https://github.com/novelcore/kubecore-operator/blob/main/README.md\n\
+        - name: Release Notes\n  url: https://github.com/novelcore/kubecore-operator/releases\n"
+    apiVersion: v2
+    appVersion: 0.105.3
+    created: '2026-10-09T15:39:33.650557703Z'
+    description: A sophisticated Kubernetes operator that implements a four-layer
+      framework architecture for provisioning and managing cloud infrastructure through
+      Crossplane compositions.
+    digest: b72ba28e821dd3e0f7e3f583cc31c73f512020ebcca643585b698492ce13e9ff
+    home: https://github.com/novelcore/kubecore-operator
+    icon: https://github.com/novelcore/kubecore-operator/raw/main/docs/icon.png
+    keywords:
+    - kubernetes
+    - kubecore
+    - operator
+    - crossplane
+    - infrastructure
+    - gitops
+    - platform
+    - kubecore
+    - infrastructure-as-code
+    kubeVersion: '>=1.20.0-0'
+    maintainers:
+    - email: platform@novelcore.io
+      name: Novelcore Platform Team
+    name: kubecore-operator
+    sources:
+    - https://github.com/novelcore/kubecore-operator
+    type: application
+    urls:
+    - https://novelcore.github.io/charts/kubecore-operator-0.105.3.tgz
+    version: 0.105.3
+  - annotations:
+      artifacthub.io/category: automation
+      artifacthub.io/changes: "- kind: changed\n  description: \"Changed XEKS Cluster,\
+        \ ClusterAuth, and NodeGroup deletionPolicy from Orphan to Delete for proper\
+        \ AWS resource cleanup\"\n- kind: fixed\n  description: \"Fixed XEKS deletion\
+        \ blocking issue caused by orphaned AWS resources preventing subnet deletion\"\
+        \n"
+      artifacthub.io/license: Apache-2.0
+      artifacthub.io/links: "- name: GitHub Repository\n  url: https://github.com/novelcore/kubecore-operator\n\
+        - name: Documentation\n  url: https://github.com/novelcore/kubecore-operator/blob/main/README.md\n\
+        - name: Release Notes\n  url: https://github.com/novelcore/kubecore-operator/releases\n"
+    apiVersion: v2
+    appVersion: 0.105.2
+    created: '2026-10-09T15:13:06.570448597Z'
+    description: A sophisticated Kubernetes operator that implements a four-layer
+      framework architecture for provisioning and managing cloud infrastructure through
+      Crossplane compositions.
+    digest: cdbbffbbd9bc6e1c9665dc11095e6b7442ff994eb5aa82a0eb887f86a841f35d
+    home: https://github.com/novelcore/kubecore-operator
+    icon: https://github.com/novelcore/kubecore-operator/raw/main/docs/icon.png
+    keywords:
+    - kubernetes
+    - kubecore
+    - operator
+    - crossplane
+    - infrastructure
+    - gitops
+    - platform
+    - kubecore
+    - infrastructure-as-code
+    kubeVersion: '>=1.20.0-0'
+    maintainers:
+    - email: platform@novelcore.io
+      name: Novelcore Platform Team
+    name: kubecore-operator
+    sources:
+    - https://github.com/novelcore/kubecore-operator
+    type: application
+    urls:
+    - https://novelcore.github.io/charts/kubecore-operator-0.105.2.tgz
+    version: 0.105.2
+  - annotations:
+      artifacthub.io/category: automation
+      artifacthub.io/changes: "- kind: changed\n  description: \"Changed XEKS Cluster,\
+        \ ClusterAuth, and NodeGroup deletionPolicy from Orphan to Delete for proper\
+        \ AWS resource cleanup\"\n- kind: fixed\n  description: \"Fixed XEKS deletion\
+        \ blocking issue caused by orphaned AWS resources preventing subnet deletion\"\
+        \n"
+      artifacthub.io/license: Apache-2.0
+      artifacthub.io/links: "- name: GitHub Repository\n  url: https://github.com/novelcore/kubecore-operator\n\
+        - name: Documentation\n  url: https://github.com/novelcore/kubecore-operator/blob/main/README.md\n\
+        - name: Release Notes\n  url: https://github.com/novelcore/kubecore-operator/releases\n"
+    apiVersion: v2
+    appVersion: 0.105.1
+    created: '2026-10-09T14:46:59.326246741Z'
+    description: A sophisticated Kubernetes operator that implements a four-layer
+      framework architecture for provisioning and managing cloud infrastructure through
+      Crossplane compositions.
+    digest: 95b43de5e95c9f016f72d93789b24ec0d13877e402ce6c7cd65d5a05698a5e46
+    home: https://github.com/novelcore/kubecore-operator
+    icon: https://github.com/novelcore/kubecore-operator/raw/main/docs/icon.png
+    keywords:
+    - kubernetes
+    - kubecore
+    - operator
+    - crossplane
+    - infrastructure
+    - gitops
+    - platform
+    - kubecore
+    - infrastructure-as-code
+    kubeVersion: '>=1.20.0-0'
+    maintainers:
+    - email: platform@novelcore.io
+      name: Novelcore Platform Team
+    name: kubecore-operator
+    sources:
+    - https://github.com/novelcore/kubecore-operator
+    type: application
+    urls:
+    - https://novelcore.github.io/charts/kubecore-operator-0.105.1.tgz
+    version: 0.105.1
+  - annotations:
+      artifacthub.io/category: automation
+      artifacthub.io/changes: "- kind: changed\n  description: \"Changed XEKS Cluster,\
+        \ ClusterAuth, and NodeGroup deletionPolicy from Orphan to Delete for proper\
+        \ AWS resource cleanup\"\n- kind: fixed\n  description: \"Fixed XEKS deletion\
+        \ blocking issue caused by orphaned AWS resources preventing subnet deletion\"\
+        \n"
+      artifacthub.io/license: Apache-2.0
+      artifacthub.io/links: "- name: GitHub Repository\n  url: https://github.com/novelcore/kubecore-operator\n\
+        - name: Documentation\n  url: https://github.com/novelcore/kubecore-operator/blob/main/README.md\n\
+        - name: Release Notes\n  url: https://github.com/novelcore/kubecore-operator/releases\n"
+    apiVersion: v2
+    appVersion: 0.105.0
+    created: '2026-10-09T14:06:42.939777107Z'
+    description: A sophisticated Kubernetes operator that implements a four-layer
+      framework architecture for provisioning and managing cloud infrastructure through
+      Crossplane compositions.
+    digest: 09a08a377e487490d41e25c9aefa7d9bc7912221a4e63dc0f8d335240948269e
+    home: https://github.com/novelcore/kubecore-operator
+    icon: https://github.com/novelcore/kubecore-operator/raw/main/docs/icon.png
+    keywords:
+    - kubernetes
+    - kubecore
+    - operator
+    - crossplane
+    - infrastructure
+    - gitops
+    - platform
+    - kubecore
+    - infrastructure-as-code
+    kubeVersion: '>=1.20.0-0'
+    maintainers:
+    - email: platform@novelcore.io
+      name: Novelcore Platform Team
+    name: kubecore-operator
+    sources:
+    - https://github.com/novelcore/kubecore-operator
+    type: application
+    urls:
+    - https://novelcore.github.io/charts/kubecore-operator-0.105.0.tgz
+    version: 0.105.0
+  - annotations:
+      artifacthub.io/category: automation
+      artifacthub.io/changes: "- kind: changed\n  description: \"Changed XEKS Cluster,\
+        \ ClusterAuth, and NodeGroup deletionPolicy from Orphan to Delete for proper\
+        \ AWS resource cleanup\"\n- kind: fixed\n  description: \"Fixed XEKS deletion\
+        \ blocking issue caused by orphaned AWS resources preventing subnet deletion\"\
+        \n"
+      artifacthub.io/license: Apache-2.0
+      artifacthub.io/links: "- name: GitHub Repository\n  url: https://github.com/novelcore/kubecore-operator\n\
+        - name: Documentation\n  url: https://github.com/novelcore/kubecore-operator/blob/main/README.md\n\
+        - name: Release Notes\n  url: https://github.com/novelcore/kubecore-operator/releases\n"
+    apiVersion: v2
+    appVersion: 0.104.6
+    created: '2026-10-09T11:11:07.200017982Z'
+    description: A sophisticated Kubernetes operator that implements a four-layer
+      framework architecture for provisioning and managing cloud infrastructure through
+      Crossplane compositions.
+    digest: c6c04c6abe50e76c80c96eaabdd465d30f4adbb93cb63facab80e508a1ce9d63
+    home: https://github.com/novelcore/kubecore-operator
+    icon: https://github.com/novelcore/kubecore-operator/raw/main/docs/icon.png
+    keywords:
+    - kubernetes
+    - kubecore
+    - operator
+    - crossplane
+    - infrastructure
+    - gitops
+    - platform
+    - kubecore
+    - infrastructure-as-code
+    kubeVersion: '>=1.20.0-0'
+    maintainers:
+    - email: platform@novelcore.io
+      name: Novelcore Platform Team
+    name: kubecore-operator
+    sources:
+    - https://github.com/novelcore/kubecore-operator
+    type: application
+    urls:
+    - https://novelcore.github.io/charts/kubecore-operator-0.104.6.tgz
+    version: 0.104.6
+  - annotations:
+      artifacthub.io/category: automation
+      artifacthub.io/changes: "- kind: changed\n  description: \"Changed XEKS Cluster,\
+        \ ClusterAuth, and NodeGroup deletionPolicy from Orphan to Delete for proper\
+        \ AWS resource cleanup\"\n- kind: fixed\n  description: \"Fixed XEKS deletion\
+        \ blocking issue caused by orphaned AWS resources preventing subnet deletion\"\
+        \n"
+      artifacthub.io/license: Apache-2.0
+      artifacthub.io/links: "- name: GitHub Repository\n  url: https://github.com/novelcore/kubecore-operator\n\
+        - name: Documentation\n  url: https://github.com/novelcore/kubecore-operator/blob/main/README.md\n\
+        - name: Release Notes\n  url: https://github.com/novelcore/kubecore-operator/releases\n"
+    apiVersion: v2
+    appVersion: 0.104.5
+    created: '2026-10-09T09:57:38.552184764Z'
+    description: A sophisticated Kubernetes operator that implements a four-layer
+      framework architecture for provisioning and managing cloud infrastructure through
+      Crossplane compositions.
+    digest: fc874d2c70b97f6d893823f70431da8780cbc710f37a67e063f3b3ecb6e936c3
+    home: https://github.com/novelcore/kubecore-operator
+    icon: https://github.com/novelcore/kubecore-operator/raw/main/docs/icon.png
+    keywords:
+    - kubernetes
+    - kubecore
+    - operator
+    - crossplane
+    - infrastructure
+    - gitops
+    - platform
+    - kubecore
+    - infrastructure-as-code
+    kubeVersion: '>=1.20.0-0'
+    maintainers:
+    - email: platform@novelcore.io
+      name: Novelcore Platform Team
+    name: kubecore-operator
+    sources:
+    - https://github.com/novelcore/kubecore-operator
+    type: application
+    urls:
+    - https://novelcore.github.io/charts/kubecore-operator-0.104.5.tgz
+    version: 0.104.5
+  - annotations:
+      artifacthub.io/category: automation
+      artifacthub.io/changes: "- kind: changed\n  description: \"Changed XEKS Cluster,\
+        \ ClusterAuth, and NodeGroup deletionPolicy from Orphan to Delete for proper\
+        \ AWS resource cleanup\"\n- kind: fixed\n  description: \"Fixed XEKS deletion\
+        \ blocking issue caused by orphaned AWS resources preventing subnet deletion\"\
+        \n"
+      artifacthub.io/license: Apache-2.0
+      artifacthub.io/links: "- name: GitHub Repository\n  url: https://github.com/novelcore/kubecore-operator\n\
+        - name: Documentation\n  url: https://github.com/novelcore/kubecore-operator/blob/main/README.md\n\
+        - name: Release Notes\n  url: https://github.com/novelcore/kubecore-operator/releases\n"
+    apiVersion: v2
+    appVersion: 0.104.4
+    created: '2026-10-08T12:43:18.501649671Z'
+    description: A sophisticated Kubernetes operator that implements a four-layer
+      framework architecture for provisioning and managing cloud infrastructure through
+      Crossplane compositions.
+    digest: 73974c7193d61a01b8ed5d94548919469daf0de289461de0496a10b61d194b6c
+    home: https://github.com/novelcore/kubecore-operator
+    icon: https://github.com/novelcore/kubecore-operator/raw/main/docs/icon.png
+    keywords:
+    - kubernetes
+    - kubecore
+    - operator
+    - crossplane
+    - infrastructure
+    - gitops
+    - platform
+    - kubecore
+    - infrastructure-as-code
+    kubeVersion: '>=1.20.0-0'
+    maintainers:
+    - email: platform@novelcore.io
+      name: Novelcore Platform Team
+    name: kubecore-operator
+    sources:
+    - https://github.com/novelcore/kubecore-operator
+    type: application
+    urls:
+    - https://novelcore.github.io/charts/kubecore-operator-0.104.4.tgz
+    version: 0.104.4
+  - annotations:
+      artifacthub.io/category: automation
+      artifacthub.io/changes: "- kind: changed\n  description: \"Changed XEKS Cluster,\
+        \ ClusterAuth, and NodeGroup deletionPolicy from Orphan to Delete for proper\
+        \ AWS resource cleanup\"\n- kind: fixed\n  description: \"Fixed XEKS deletion\
+        \ blocking issue caused by orphaned AWS resources preventing subnet deletion\"\
+        \n"
+      artifacthub.io/license: Apache-2.0
+      artifacthub.io/links: "- name: GitHub Repository\n  url: https://github.com/novelcore/kubecore-operator\n\
+        - name: Documentation\n  url: https://github.com/novelcore/kubecore-operator/blob/main/README.md\n\
+        - name: Release Notes\n  url: https://github.com/novelcore/kubecore-operator/releases\n"
+    apiVersion: v2
+    appVersion: 0.104.3
+    created: '2026-10-08T12:02:12.48768547Z'
+    description: A sophisticated Kubernetes operator that implements a four-layer
+      framework architecture for provisioning and managing cloud infrastructure through
+      Crossplane compositions.
+    digest: 4765c5d76aee39729dd5bc7952f574da611de2911e01e25066d1fdbd6e2d5741
+    home: https://github.com/novelcore/kubecore-operator
+    icon: https://github.com/novelcore/kubecore-operator/raw/main/docs/icon.png
+    keywords:
+    - kubernetes
+    - kubecore
+    - operator
+    - crossplane
+    - infrastructure
+    - gitops
+    - platform
+    - kubecore
+    - infrastructure-as-code
+    kubeVersion: '>=1.20.0-0'
+    maintainers:
+    - email: platform@novelcore.io
+      name: Novelcore Platform Team
+    name: kubecore-operator
+    sources:
+    - https://github.com/novelcore/kubecore-operator
+    type: application
+    urls:
+    - https://novelcore.github.io/charts/kubecore-operator-0.104.3.tgz
+    version: 0.104.3
+  - annotations:
+      artifacthub.io/category: automation
+      artifacthub.io/changes: "- kind: changed\n  description: \"Changed XEKS Cluster,\
+        \ ClusterAuth, and NodeGroup deletionPolicy from Orphan to Delete for proper\
+        \ AWS resource cleanup\"\n- kind: fixed\n  description: \"Fixed XEKS deletion\
+        \ blocking issue caused by orphaned AWS resources preventing subnet deletion\"\
+        \n"
+      artifacthub.io/license: Apache-2.0
+      artifacthub.io/links: "- name: GitHub Repository\n  url: https://github.com/novelcore/kubecore-operator\n\
+        - name: Documentation\n  url: https://github.com/novelcore/kubecore-operator/blob/main/README.md\n\
+        - name: Release Notes\n  url: https://github.com/novelcore/kubecore-operator/releases\n"
+    apiVersion: v2
+    appVersion: 0.104.2
+    created: '2026-10-08T10:06:00.177365763Z'
+    description: A sophisticated Kubernetes operator that implements a four-layer
+      framework architecture for provisioning and managing cloud infrastructure through
+      Crossplane compositions.
+    digest: 63d7f253a74a129ab5421d421e08a04eb08c480e160a046b54fa546d55870bb3
+    home: https://github.com/novelcore/kubecore-operator
+    icon: https://github.com/novelcore/kubecore-operator/raw/main/docs/icon.png
+    keywords:
+    - kubernetes
+    - kubecore
+    - operator
+    - crossplane
+    - infrastructure
+    - gitops
+    - platform
+    - kubecore
+    - infrastructure-as-code
+    kubeVersion: '>=1.20.0-0'
+    maintainers:
+    - email: platform@novelcore.io
+      name: Novelcore Platform Team
+    name: kubecore-operator
+    sources:
+    - https://github.com/novelcore/kubecore-operator
+    type: application
+    urls:
+    - https://novelcore.github.io/charts/kubecore-operator-0.104.2.tgz
+    version: 0.104.2
+  - annotations:
+      artifacthub.io/category: automation
+      artifacthub.io/changes: "- kind: changed\n  description: \"Changed XEKS Cluster,\
+        \ ClusterAuth, and NodeGroup deletionPolicy from Orphan to Delete for proper\
+        \ AWS resource cleanup\"\n- kind: fixed\n  description: \"Fixed XEKS deletion\
+        \ blocking issue caused by orphaned AWS resources preventing subnet deletion\"\
+        \n"
+      artifacthub.io/license: Apache-2.0
+      artifacthub.io/links: "- name: GitHub Repository\n  url: https://github.com/novelcore/kubecore-operator\n\
+        - name: Documentation\n  url: https://github.com/novelcore/kubecore-operator/blob/main/README.md\n\
+        - name: Release Notes\n  url: https://github.com/novelcore/kubecore-operator/releases\n"
+    apiVersion: v2
+    appVersion: 0.104.1
+    created: '2026-10-08T01:17:34.044983744Z'
+    description: A sophisticated Kubernetes operator that implements a four-layer
+      framework architecture for provisioning and managing cloud infrastructure through
+      Crossplane compositions.
+    digest: 96fb08853696fcf9e3c159527e444bcd5d1c241546dea2514f9a23e514ee698c
+    home: https://github.com/novelcore/kubecore-operator
+    icon: https://github.com/novelcore/kubecore-operator/raw/main/docs/icon.png
+    keywords:
+    - kubernetes
+    - kubecore
+    - operator
+    - crossplane
+    - infrastructure
+    - gitops
+    - platform
+    - kubecore
+    - infrastructure-as-code
+    kubeVersion: '>=1.20.0-0'
+    maintainers:
+    - email: platform@novelcore.io
+      name: Novelcore Platform Team
+    name: kubecore-operator
+    sources:
+    - https://github.com/novelcore/kubecore-operator
+    type: application
+    urls:
+    - https://novelcore.github.io/charts/kubecore-operator-0.104.1.tgz
+    version: 0.104.1
+  - annotations:
+      artifacthub.io/category: automation
+      artifacthub.io/changes: "- kind: changed\n  description: \"Changed XEKS Cluster,\
+        \ ClusterAuth, and NodeGroup deletionPolicy from Orphan to Delete for proper\
+        \ AWS resource cleanup\"\n- kind: fixed\n  description: \"Fixed XEKS deletion\
+        \ blocking issue caused by orphaned AWS resources preventing subnet deletion\"\
+        \n"
+      artifacthub.io/license: Apache-2.0
+      artifacthub.io/links: "- name: GitHub Repository\n  url: https://github.com/novelcore/kubecore-operator\n\
+        - name: Documentation\n  url: https://github.com/novelcore/kubecore-operator/blob/main/README.md\n\
+        - name: Release Notes\n  url: https://github.com/novelcore/kubecore-operator/releases\n"
+    apiVersion: v2
+    appVersion: 0.104.0
+    created: '2026-10-08T00:44:23.266769671Z'
+    description: A sophisticated Kubernetes operator that implements a four-layer
+      framework architecture for provisioning and managing cloud infrastructure through
+      Crossplane compositions.
+    digest: aff989b947b891de608ab0e8fa137220ac28255d2513c386d60da7724ced67df
+    home: https://github.com/novelcore/kubecore-operator
+    icon: https://github.com/novelcore/kubecore-operator/raw/main/docs/icon.png
+    keywords:
+    - kubernetes
+    - kubecore
+    - operator
+    - crossplane
+    - infrastructure
+    - gitops
+    - platform
+    - kubecore
+    - infrastructure-as-code
+    kubeVersion: '>=1.20.0-0'
+    maintainers:
+    - email: platform@novelcore.io
+      name: Novelcore Platform Team
+    name: kubecore-operator
+    sources:
+    - https://github.com/novelcore/kubecore-operator
+    type: application
+    urls:
+    - https://novelcore.github.io/charts/kubecore-operator-0.104.0.tgz
+    version: 0.104.0
+  - annotations:
+      artifacthub.io/category: automation
+      artifacthub.io/changes: "- kind: changed\n  description: \"Changed XEKS Cluster,\
+        \ ClusterAuth, and NodeGroup deletionPolicy from Orphan to Delete for proper\
+        \ AWS resource cleanup\"\n- kind: fixed\n  description: \"Fixed XEKS deletion\
+        \ blocking issue caused by orphaned AWS resources preventing subnet deletion\"\
+        \n"
+      artifacthub.io/license: Apache-2.0
+      artifacthub.io/links: "- name: GitHub Repository\n  url: https://github.com/novelcore/kubecore-operator\n\
+        - name: Documentation\n  url: https://github.com/novelcore/kubecore-operator/blob/main/README.md\n\
+        - name: Release Notes\n  url: https://github.com/novelcore/kubecore-operator/releases\n"
+    apiVersion: v2
+    appVersion: 0.103.13
+    created: '2026-10-08T00:28:07.593325511Z'
+    description: A sophisticated Kubernetes operator that implements a four-layer
+      framework architecture for provisioning and managing cloud infrastructure through
+      Crossplane compositions.
+    digest: 0799dc35e4a32cbc165b15d4e1369afe8add2f90c2d68b2c91da6ab188b63166
+    home: https://github.com/novelcore/kubecore-operator
+    icon: https://github.com/novelcore/kubecore-operator/raw/main/docs/icon.png
+    keywords:
+    - kubernetes
+    - kubecore
+    - operator
+    - crossplane
+    - infrastructure
+    - gitops
+    - platform
+    - kubecore
+    - infrastructure-as-code
+    kubeVersion: '>=1.20.0-0'
+    maintainers:
+    - email: platform@novelcore.io
+      name: Novelcore Platform Team
+    name: kubecore-operator
+    sources:
+    - https://github.com/novelcore/kubecore-operator
+    type: application
+    urls:
+    - https://novelcore.github.io/charts/kubecore-operator-0.103.13.tgz
+    version: 0.103.13
+  - annotations:
+      artifacthub.io/category: automation
+      artifacthub.io/changes: "- kind: changed\n  description: \"Changed XEKS Cluster,\
+        \ ClusterAuth, and NodeGroup deletionPolicy from Orphan to Delete for proper\
+        \ AWS resource cleanup\"\n- kind: fixed\n  description: \"Fixed XEKS deletion\
+        \ blocking issue caused by orphaned AWS resources preventing subnet deletion\"\
+        \n"
+      artifacthub.io/license: Apache-2.0
+      artifacthub.io/links: "- name: GitHub Repository\n  url: https://github.com/novelcore/kubecore-operator\n\
+        - name: Documentation\n  url: https://github.com/novelcore/kubecore-operator/blob/main/README.md\n\
+        - name: Release Notes\n  url: https://github.com/novelcore/kubecore-operator/releases\n"
+    apiVersion: v2
+    appVersion: 0.103.12
+    created: '2026-10-07T20:42:18.987987612Z'
+    description: A sophisticated Kubernetes operator that implements a four-layer
+      framework architecture for provisioning and managing cloud infrastructure through
+      Crossplane compositions.
+    digest: 9482d4e44e94849425331b1a3914f7cfef08537ddc83b0747bc1ebeaf6e5a5ec
+    home: https://github.com/novelcore/kubecore-operator
+    icon: https://github.com/novelcore/kubecore-operator/raw/main/docs/icon.png
+    keywords:
+    - kubernetes
+    - kubecore
+    - operator
+    - crossplane
+    - infrastructure
+    - gitops
+    - platform
+    - kubecore
+    - infrastructure-as-code
+    kubeVersion: '>=1.20.0-0'
+    maintainers:
+    - email: platform@novelcore.io
+      name: Novelcore Platform Team
+    name: kubecore-operator
+    sources:
+    - https://github.com/novelcore/kubecore-operator
+    type: application
+    urls:
+    - https://novelcore.github.io/charts/kubecore-operator-0.103.12.tgz
+    version: 0.103.12
+  - annotations:
+      artifacthub.io/category: automation
+      artifacthub.io/changes: "- kind: changed\n  description: \"Changed XEKS Cluster,\
+        \ ClusterAuth, and NodeGroup deletionPolicy from Orphan to Delete for proper\
+        \ AWS resource cleanup\"\n- kind: fixed\n  description: \"Fixed XEKS deletion\
+        \ blocking issue caused by orphaned AWS resources preventing subnet deletion\"\
+        \n"
+      artifacthub.io/license: Apache-2.0
+      artifacthub.io/links: "- name: GitHub Repository\n  url: https://github.com/novelcore/kubecore-operator\n\
+        - name: Documentation\n  url: https://github.com/novelcore/kubecore-operator/blob/main/README.md\n\
+        - name: Release Notes\n  url: https://github.com/novelcore/kubecore-operator/releases\n"
+    apiVersion: v2
+    appVersion: 0.103.11
+    created: '2026-10-07T19:56:11.580594993Z'
+    description: A sophisticated Kubernetes operator that implements a four-layer
+      framework architecture for provisioning and managing cloud infrastructure through
+      Crossplane compositions.
+    digest: 27cdf3d03745942222ab9afba047d3d07525fa068d1b8abed60ad72a7dfed8c6
+    home: https://github.com/novelcore/kubecore-operator
+    icon: https://github.com/novelcore/kubecore-operator/raw/main/docs/icon.png
+    keywords:
+    - kubernetes
+    - kubecore
+    - operator
+    - crossplane
+    - infrastructure
+    - gitops
+    - platform
+    - kubecore
+    - infrastructure-as-code
+    kubeVersion: '>=1.20.0-0'
+    maintainers:
+    - email: platform@novelcore.io
+      name: Novelcore Platform Team
+    name: kubecore-operator
+    sources:
+    - https://github.com/novelcore/kubecore-operator
+    type: application
+    urls:
+    - https://novelcore.github.io/charts/kubecore-operator-0.103.11.tgz
+    version: 0.103.11
+  - annotations:
+      artifacthub.io/category: automation
+      artifacthub.io/changes: "- kind: changed\n  description: \"Changed XEKS Cluster,\
+        \ ClusterAuth, and NodeGroup deletionPolicy from Orphan to Delete for proper\
+        \ AWS resource cleanup\"\n- kind: fixed\n  description: \"Fixed XEKS deletion\
+        \ blocking issue caused by orphaned AWS resources preventing subnet deletion\"\
+        \n"
+      artifacthub.io/license: Apache-2.0
+      artifacthub.io/links: "- name: GitHub Repository\n  url: https://github.com/novelcore/kubecore-operator\n\
+        - name: Documentation\n  url: https://github.com/novelcore/kubecore-operator/blob/main/README.md\n\
+        - name: Release Notes\n  url: https://github.com/novelcore/kubecore-operator/releases\n"
+    apiVersion: v2
+    appVersion: 0.103.10
+    created: '2026-10-07T19:35:40.325346231Z'
+    description: A sophisticated Kubernetes operator that implements a four-layer
+      framework architecture for provisioning and managing cloud infrastructure through
+      Crossplane compositions.
+    digest: 0ff67e8ee1be0878c750d50fd5779fc66e436501d81367f16a90a5d7cd817244
+    home: https://github.com/novelcore/kubecore-operator
+    icon: https://github.com/novelcore/kubecore-operator/raw/main/docs/icon.png
+    keywords:
+    - kubernetes
+    - kubecore
+    - operator
+    - crossplane
+    - infrastructure
+    - gitops
+    - platform
+    - kubecore
+    - infrastructure-as-code
+    kubeVersion: '>=1.20.0-0'
+    maintainers:
+    - email: platform@novelcore.io
+      name: Novelcore Platform Team
+    name: kubecore-operator
+    sources:
+    - https://github.com/novelcore/kubecore-operator
+    type: application
+    urls:
+    - https://novelcore.github.io/charts/kubecore-operator-0.103.10.tgz
+    version: 0.103.10
+  - annotations:
+      artifacthub.io/category: automation
+      artifacthub.io/changes: "- kind: changed\n  description: \"Changed XEKS Cluster,\
+        \ ClusterAuth, and NodeGroup deletionPolicy from Orphan to Delete for proper\
+        \ AWS resource cleanup\"\n- kind: fixed\n  description: \"Fixed XEKS deletion\
+        \ blocking issue caused by orphaned AWS resources preventing subnet deletion\"\
+        \n"
+      artifacthub.io/license: Apache-2.0
+      artifacthub.io/links: "- name: GitHub Repository\n  url: https://github.com/novelcore/kubecore-operator\n\
+        - name: Documentation\n  url: https://github.com/novelcore/kubecore-operator/blob/main/README.md\n\
+        - name: Release Notes\n  url: https://github.com/novelcore/kubecore-operator/releases\n"
+    apiVersion: v2
+    appVersion: 0.103.9
+    created: '2026-10-07T19:10:35.572048039Z'
+    description: A sophisticated Kubernetes operator that implements a four-layer
+      framework architecture for provisioning and managing cloud infrastructure through
+      Crossplane compositions.
+    digest: 732683c479949bc0c251a1ceac9d5cd9da96e74c682cb61fafe106a92f9995c2
+    home: https://github.com/novelcore/kubecore-operator
+    icon: https://github.com/novelcore/kubecore-operator/raw/main/docs/icon.png
+    keywords:
+    - kubernetes
+    - kubecore
+    - operator
+    - crossplane
+    - infrastructure
+    - gitops
+    - platform
+    - kubecore
+    - infrastructure-as-code
+    kubeVersion: '>=1.20.0-0'
+    maintainers:
+    - email: platform@novelcore.io
+      name: Novelcore Platform Team
+    name: kubecore-operator
+    sources:
+    - https://github.com/novelcore/kubecore-operator
+    type: application
+    urls:
+    - https://novelcore.github.io/charts/kubecore-operator-0.103.9.tgz
+    version: 0.103.9
+  - annotations:
+      artifacthub.io/category: automation
+      artifacthub.io/changes: "- kind: changed\n  description: \"Changed XEKS Cluster,\
+        \ ClusterAuth, and NodeGroup deletionPolicy from Orphan to Delete for proper\
+        \ AWS resource cleanup\"\n- kind: fixed\n  description: \"Fixed XEKS deletion\
+        \ blocking issue caused by orphaned AWS resources preventing subnet deletion\"\
+        \n"
+      artifacthub.io/license: Apache-2.0
+      artifacthub.io/links: "- name: GitHub Repository\n  url: https://github.com/novelcore/kubecore-operator\n\
+        - name: Documentation\n  url: https://github.com/novelcore/kubecore-operator/blob/main/README.md\n\
+        - name: Release Notes\n  url: https://github.com/novelcore/kubecore-operator/releases\n"
+    apiVersion: v2
+    appVersion: 0.103.8
+    created: '2026-10-07T18:59:46.525577743Z'
+    description: A sophisticated Kubernetes operator that implements a four-layer
+      framework architecture for provisioning and managing cloud infrastructure through
+      Crossplane compositions.
+    digest: b67fff81277f242a259909f330fa523a6b4b4bd8648d7783297e0572cb6b48b2
+    home: https://github.com/novelcore/kubecore-operator
+    icon: https://github.com/novelcore/kubecore-operator/raw/main/docs/icon.png
+    keywords:
+    - kubernetes
+    - kubecore
+    - operator
+    - crossplane
+    - infrastructure
+    - gitops
+    - platform
+    - kubecore
+    - infrastructure-as-code
+    kubeVersion: '>=1.20.0-0'
+    maintainers:
+    - email: platform@novelcore.io
+      name: Novelcore Platform Team
+    name: kubecore-operator
+    sources:
+    - https://github.com/novelcore/kubecore-operator
+    type: application
+    urls:
+    - https://novelcore.github.io/charts/kubecore-operator-0.103.8.tgz
+    version: 0.103.8
+  - annotations:
+      artifacthub.io/category: automation
+      artifacthub.io/changes: "- kind: changed\n  description: \"Changed XEKS Cluster,\
+        \ ClusterAuth, and NodeGroup deletionPolicy from Orphan to Delete for proper\
+        \ AWS resource cleanup\"\n- kind: fixed\n  description: \"Fixed XEKS deletion\
+        \ blocking issue caused by orphaned AWS resources preventing subnet deletion\"\
+        \n"
+      artifacthub.io/license: Apache-2.0
+      artifacthub.io/links: "- name: GitHub Repository\n  url: https://github.com/novelcore/kubecore-operator\n\
+        - name: Documentation\n  url: https://github.com/novelcore/kubecore-operator/blob/main/README.md\n\
+        - name: Release Notes\n  url: https://github.com/novelcore/kubecore-operator/releases\n"
+    apiVersion: v2
+    appVersion: 0.103.7
+    created: '2026-10-07T18:54:02.99936247Z'
+    description: A sophisticated Kubernetes operator that implements a four-layer
+      framework architecture for provisioning and managing cloud infrastructure through
+      Crossplane compositions.
+    digest: 7eff521456b6b8bef3460612e0abe6a48d6e40b1f18e416871b8882ffd2bbe74
+    home: https://github.com/novelcore/kubecore-operator
+    icon: https://github.com/novelcore/kubecore-operator/raw/main/docs/icon.png
+    keywords:
+    - kubernetes
+    - kubecore
+    - operator
+    - crossplane
+    - infrastructure
+    - gitops
+    - platform
+    - kubecore
+    - infrastructure-as-code
+    kubeVersion: '>=1.20.0-0'
+    maintainers:
+    - email: platform@novelcore.io
+      name: Novelcore Platform Team
+    name: kubecore-operator
+    sources:
+    - https://github.com/novelcore/kubecore-operator
+    type: application
+    urls:
+    - https://novelcore.github.io/charts/kubecore-operator-0.103.7.tgz
+    version: 0.103.7
+  - annotations:
+      artifacthub.io/category: automation
+      artifacthub.io/changes: "- kind: changed\n  description: \"Changed XEKS Cluster,\
+        \ ClusterAuth, and NodeGroup deletionPolicy from Orphan to Delete for proper\
+        \ AWS resource cleanup\"\n- kind: fixed\n  description: \"Fixed XEKS deletion\
+        \ blocking issue caused by orphaned AWS resources preventing subnet deletion\"\
+        \n"
+      artifacthub.io/license: Apache-2.0
+      artifacthub.io/links: "- name: GitHub Repository\n  url: https://github.com/novelcore/kubecore-operator\n\
+        - name: Documentation\n  url: https://github.com/novelcore/kubecore-operator/blob/main/README.md\n\
+        - name: Release Notes\n  url: https://github.com/novelcore/kubecore-operator/releases\n"
+    apiVersion: v2
+    appVersion: 0.103.6
+    created: '2026-10-07T10:11:40.603708341Z'
+    description: A sophisticated Kubernetes operator that implements a four-layer
+      framework architecture for provisioning and managing cloud infrastructure through
+      Crossplane compositions.
+    digest: cd26432baf12eec6f17dc86ae757c765a6562614209e54126fe4c88c73e6180b
+    home: https://github.com/novelcore/kubecore-operator
+    icon: https://github.com/novelcore/kubecore-operator/raw/main/docs/icon.png
+    keywords:
+    - kubernetes
+    - kubecore
+    - operator
+    - crossplane
+    - infrastructure
+    - gitops
+    - platform
+    - kubecore
+    - infrastructure-as-code
+    kubeVersion: '>=1.20.0-0'
+    maintainers:
+    - email: platform@novelcore.io
+      name: Novelcore Platform Team
+    name: kubecore-operator
+    sources:
+    - https://github.com/novelcore/kubecore-operator
+    type: application
+    urls:
+    - https://novelcore.github.io/charts/kubecore-operator-0.103.6.tgz
+    version: 0.103.6
+  - annotations:
+      artifacthub.io/category: automation
+      artifacthub.io/changes: "- kind: changed\n  description: \"Changed XEKS Cluster,\
+        \ ClusterAuth, and NodeGroup deletionPolicy from Orphan to Delete for proper\
+        \ AWS resource cleanup\"\n- kind: fixed\n  description: \"Fixed XEKS deletion\
+        \ blocking issue caused by orphaned AWS resources preventing subnet deletion\"\
+        \n"
+      artifacthub.io/license: Apache-2.0
+      artifacthub.io/links: "- name: GitHub Repository\n  url: https://github.com/novelcore/kubecore-operator\n\
+        - name: Documentation\n  url: https://github.com/novelcore/kubecore-operator/blob/main/README.md\n\
+        - name: Release Notes\n  url: https://github.com/novelcore/kubecore-operator/releases\n"
+    apiVersion: v2
+    appVersion: 0.103.5
+    created: '2026-10-07T07:32:18.538551709Z'
+    description: A sophisticated Kubernetes operator that implements a four-layer
+      framework architecture for provisioning and managing cloud infrastructure through
+      Crossplane compositions.
+    digest: 17be1de4437e879f266e263cf7e3519716536e5fa072481d12e818e98de59599
+    home: https://github.com/novelcore/kubecore-operator
+    icon: https://github.com/novelcore/kubecore-operator/raw/main/docs/icon.png
+    keywords:
+    - kubernetes
+    - kubecore
+    - operator
+    - crossplane
+    - infrastructure
+    - gitops
+    - platform
+    - kubecore
+    - infrastructure-as-code
+    kubeVersion: '>=1.20.0-0'
+    maintainers:
+    - email: platform@novelcore.io
+      name: Novelcore Platform Team
+    name: kubecore-operator
+    sources:
+    - https://github.com/novelcore/kubecore-operator
+    type: application
+    urls:
+    - https://novelcore.github.io/charts/kubecore-operator-0.103.5.tgz
+    version: 0.103.5
+  - annotations:
+      artifacthub.io/category: automation
+      artifacthub.io/changes: "- kind: changed\n  description: \"Changed XEKS Cluster,\
+        \ ClusterAuth, and NodeGroup deletionPolicy from Orphan to Delete for proper\
+        \ AWS resource cleanup\"\n- kind: fixed\n  description: \"Fixed XEKS deletion\
+        \ blocking issue caused by orphaned AWS resources preventing subnet deletion\"\
+        \n"
+      artifacthub.io/license: Apache-2.0
+      artifacthub.io/links: "- name: GitHub Repository\n  url: https://github.com/novelcore/kubecore-operator\n\
+        - name: Documentation\n  url: https://github.com/novelcore/kubecore-operator/blob/main/README.md\n\
+        - name: Release Notes\n  url: https://github.com/novelcore/kubecore-operator/releases\n"
+    apiVersion: v2
+    appVersion: 0.103.4
+    created: '2026-10-06T22:52:47.007353967Z'
+    description: A sophisticated Kubernetes operator that implements a four-layer
+      framework architecture for provisioning and managing cloud infrastructure through
+      Crossplane compositions.
+    digest: 18308dfa8891a7460b2aa731c3dee7f982a0070266a6cbe60154bfc4b8f5b8a9
+    home: https://github.com/novelcore/kubecore-operator
+    icon: https://github.com/novelcore/kubecore-operator/raw/main/docs/icon.png
+    keywords:
+    - kubernetes
+    - kubecore
+    - operator
+    - crossplane
+    - infrastructure
+    - gitops
+    - platform
+    - kubecore
+    - infrastructure-as-code
+    kubeVersion: '>=1.20.0-0'
+    maintainers:
+    - email: platform@novelcore.io
+      name: Novelcore Platform Team
+    name: kubecore-operator
+    sources:
+    - https://github.com/novelcore/kubecore-operator
+    type: application
+    urls:
+    - https://novelcore.github.io/charts/kubecore-operator-0.103.4.tgz
+    version: 0.103.4
+  - annotations:
+      artifacthub.io/category: automation
+      artifacthub.io/changes: "- kind: changed\n  description: \"Changed XEKS Cluster,\
+        \ ClusterAuth, and NodeGroup deletionPolicy from Orphan to Delete for proper\
+        \ AWS resource cleanup\"\n- kind: fixed\n  description: \"Fixed XEKS deletion\
+        \ blocking issue caused by orphaned AWS resources preventing subnet deletion\"\
+        \n"
+      artifacthub.io/license: Apache-2.0
+      artifacthub.io/links: "- name: GitHub Repository\n  url: https://github.com/novelcore/kubecore-operator\n\
+        - name: Documentation\n  url: https://github.com/novelcore/kubecore-operator/blob/main/README.md\n\
+        - name: Release Notes\n  url: https://github.com/novelcore/kubecore-operator/releases\n"
+    apiVersion: v2
+    appVersion: 0.103.3
+    created: '2026-10-06T19:57:37.536973252Z'
+    description: A sophisticated Kubernetes operator that implements a four-layer
+      framework architecture for provisioning and managing cloud infrastructure through
+      Crossplane compositions.
+    digest: 0b23615318dd3d025fd10fee33f8d187e6855eeb30c2aea285c8e56f1e5c0ad3
+    home: https://github.com/novelcore/kubecore-operator
+    icon: https://github.com/novelcore/kubecore-operator/raw/main/docs/icon.png
+    keywords:
+    - kubernetes
+    - kubecore
+    - operator
+    - crossplane
+    - infrastructure
+    - gitops
+    - platform
+    - kubecore
+    - infrastructure-as-code
+    kubeVersion: '>=1.20.0-0'
+    maintainers:
+    - email: platform@novelcore.io
+      name: Novelcore Platform Team
+    name: kubecore-operator
+    sources:
+    - https://github.com/novelcore/kubecore-operator
+    type: application
+    urls:
+    - https://novelcore.github.io/charts/kubecore-operator-0.103.3.tgz
+    version: 0.103.3
+  - annotations:
+      artifacthub.io/category: automation
+      artifacthub.io/changes: "- kind: changed\n  description: \"Changed XEKS Cluster,\
+        \ ClusterAuth, and NodeGroup deletionPolicy from Orphan to Delete for proper\
+        \ AWS resource cleanup\"\n- kind: fixed\n  description: \"Fixed XEKS deletion\
+        \ blocking issue caused by orphaned AWS resources preventing subnet deletion\"\
+        \n"
+      artifacthub.io/license: Apache-2.0
+      artifacthub.io/links: "- name: GitHub Repository\n  url: https://github.com/novelcore/kubecore-operator\n\
+        - name: Documentation\n  url: https://github.com/novelcore/kubecore-operator/blob/main/README.md\n\
+        - name: Release Notes\n  url: https://github.com/novelcore/kubecore-operator/releases\n"
+    apiVersion: v2
+    appVersion: 0.103.2
+    created: '2026-10-06T18:52:07.777704994Z'
+    description: A sophisticated Kubernetes operator that implements a four-layer
+      framework architecture for provisioning and managing cloud infrastructure through
+      Crossplane compositions.
+    digest: 11e6b99f5fda1dde130f45612982783c95d6a7cea065efa7f7dd219316ec5adf
+    home: https://github.com/novelcore/kubecore-operator
+    icon: https://github.com/novelcore/kubecore-operator/raw/main/docs/icon.png
+    keywords:
+    - kubernetes
+    - kubecore
+    - operator
+    - crossplane
+    - infrastructure
+    - gitops
+    - platform
+    - kubecore
+    - infrastructure-as-code
+    kubeVersion: '>=1.20.0-0'
+    maintainers:
+    - email: platform@novelcore.io
+      name: Novelcore Platform Team
+    name: kubecore-operator
+    sources:
+    - https://github.com/novelcore/kubecore-operator
+    type: application
+    urls:
+    - https://novelcore.github.io/charts/kubecore-operator-0.103.2.tgz
+    version: 0.103.2
+  - annotations:
+      artifacthub.io/category: automation
+      artifacthub.io/changes: "- kind: changed\n  description: \"Changed XEKS Cluster,\
+        \ ClusterAuth, and NodeGroup deletionPolicy from Orphan to Delete for proper\
+        \ AWS resource cleanup\"\n- kind: fixed\n  description: \"Fixed XEKS deletion\
+        \ blocking issue caused by orphaned AWS resources preventing subnet deletion\"\
+        \n"
+      artifacthub.io/license: Apache-2.0
+      artifacthub.io/links: "- name: GitHub Repository\n  url: https://github.com/novelcore/kubecore-operator\n\
+        - name: Documentation\n  url: https://github.com/novelcore/kubecore-operator/blob/main/README.md\n\
+        - name: Release Notes\n  url: https://github.com/novelcore/kubecore-operator/releases\n"
+    apiVersion: v2
+    appVersion: 0.103.1
+    created: '2026-10-06T17:59:41.884827388Z'
+    description: A sophisticated Kubernetes operator that implements a four-layer
+      framework architecture for provisioning and managing cloud infrastructure through
+      Crossplane compositions.
+    digest: d1f25d5195a61ed642aa35e917961ffbfe65e5a1c3af892d29eee197e26e0b87
+    home: https://github.com/novelcore/kubecore-operator
+    icon: https://github.com/novelcore/kubecore-operator/raw/main/docs/icon.png
+    keywords:
+    - kubernetes
+    - kubecore
+    - operator
+    - crossplane
+    - infrastructure
+    - gitops
+    - platform
+    - kubecore
+    - infrastructure-as-code
+    kubeVersion: '>=1.20.0-0'
+    maintainers:
+    - email: platform@novelcore.io
+      name: Novelcore Platform Team
+    name: kubecore-operator
+    sources:
+    - https://github.com/novelcore/kubecore-operator
+    type: application
+    urls:
+    - https://novelcore.github.io/charts/kubecore-operator-0.103.1.tgz
+    version: 0.103.1
   milvus-operator:
   - apiVersion: v2
     appVersion: 1.2.5
-    created: "2026-11-03T01:15:50.025969168Z"
+    created: '2026-11-03T01:15:50.025969168Z'
     dependencies:
     - condition: cert-manager.enabled
       name: cert-manager
@@ -1673,20 +3802,15 @@ entries:
   minio-operator:
   - annotations:
       category: Infrastructure
-      images: |
-        - name: kes
-          image: docker.io/bitnami/kes:2025.3.12-debian-12-r5
-        - name: minio
-          image: docker.io/bitnami/minio:2025.4.8-debian-12-r0
-        - name: minio-operator
-          image: docker.io/bitnami/minio-operator:7.0.1-debian-12-r4
-        - name: minio-operator-sidecar
-          image: docker.io/bitnami/minio-operator-sidecar:7.0.1-debian-12-r4
+      images: "- name: kes\n  image: docker.io/bitnami/kes:2025.3.12-debian-12-r5\n\
+        - name: minio\n  image: docker.io/bitnami/minio:2025.4.8-debian-12-r0\n- name:\
+        \ minio-operator\n  image: docker.io/bitnami/minio-operator:7.0.1-debian-12-r4\n\
+        - name: minio-operator-sidecar\n  image: docker.io/bitnami/minio-operator-sidecar:7.0.1-debian-12-r4\n"
       licenses: Apache-2.0
       tanzuCategory: service
     apiVersion: v2
     appVersion: 7.0.1
-    created: "2026-11-03T01:15:50.041389723Z"
+    created: '2026-11-03T01:15:50.041389723Z'
     dependencies:
     - name: common
       repository: oci://registry-1.docker.io/bitnamicharts
@@ -1714,61 +3838,39 @@ entries:
     version: 0.1.5
   mlflow:
   - annotations:
-      artifacthub.io/changes: |-
-        - kind: changed
-          description: Major version upgrade required actions documentation updated
-          links:
-            - name: Github Issue
-              url: https://github.com/community-charts/helm-charts/issues/129
-        - kind: added
-          description: Add service.enabled configuration to disable service creation
-        - kind: added
-          description: Add extra pod labels configuration with extraPodLabels field
-          links:
-            - name: Github Issue
-              url: https://github.com/community-charts/helm-charts/issues/130
-      artifacthub.io/containsSecurityUpdates: "false"
-      artifacthub.io/images: |
-        - name: mlflow
-          image: burakince/mlflow:3.1.0
+      artifacthub.io/changes: "- kind: changed\n  description: Major version upgrade\
+        \ required actions documentation updated\n  links:\n    - name: Github Issue\n\
+        \      url: https://github.com/community-charts/helm-charts/issues/129\n-\
+        \ kind: added\n  description: Add service.enabled configuration to disable\
+        \ service creation\n- kind: added\n  description: Add extra pod labels configuration\
+        \ with extraPodLabels field\n  links:\n    - name: Github Issue\n      url:\
+        \ https://github.com/community-charts/helm-charts/issues/130"
+      artifacthub.io/containsSecurityUpdates: 'false'
+      artifacthub.io/images: "- name: mlflow\n  image: burakince/mlflow:3.1.0\n"
       artifacthub.io/license: MIT
-      artifacthub.io/links: |
-        - name: Chart Source
-          url: https://github.com/community-charts/helm-charts
-        - name: Upstream Project
-          url: https://github.com/burakince/mlflow
-      artifacthub.io/maintainers: |
-        - name: burakince
-          email: burak.ince@linux.org.tr
-      artifacthub.io/operator: "false"
-      artifacthub.io/prerelease: "false"
-      artifacthub.io/screenshots: |
-        - title: Quickstart UI screenshot
-          url: https://raw.githubusercontent.com/mlflow/mlflow/refs/heads/master/docs/static/images/quickstart/quickstart_ui_screenshot.png
-        - title: OSS registry 1 register
-          url: https://raw.githubusercontent.com/mlflow/mlflow/refs/heads/master/docs/static/images/oss_registry_1_register.png
-        - title: OSS Registry 2 dialog
-          url: https://raw.githubusercontent.com/mlflow/mlflow/refs/heads/master/docs/static/images/oss_registry_2_dialog.png
-        - title: OSS Registry 3 overview
-          url: https://raw.githubusercontent.com/mlflow/mlflow/refs/heads/master/docs/static/images/oss_registry_3_overview.png
-        - title: OSS Registry 3b version
-          url: https://raw.githubusercontent.com/mlflow/mlflow/refs/heads/master/docs/static/images/oss_registry_3b_version.png
-        - title: OSS Registry 4 version
-          url: https://raw.githubusercontent.com/mlflow/mlflow/refs/heads/master/docs/static/images/oss_registry_4_model.png
-        - title: OSS Registry 4b version
-          url: https://raw.githubusercontent.com/mlflow/mlflow/refs/heads/master/docs/static/images/oss_registry_4b_model_alias.png
-        - title: OSS Registry 5 transition
-          url: https://raw.githubusercontent.com/mlflow/mlflow/refs/heads/master/docs/static/images/oss_registry_5_version.png
-        - title: OSS Registry 6 transition
-          url: https://raw.githubusercontent.com/mlflow/mlflow/refs/heads/master/docs/static/images/oss_registry_6_version.png
-        - title: Experiment compare
-          url: https://raw.githubusercontent.com/mlflow/mlflow/refs/heads/master/docs/static/images/tutorial-compare.png
-      artifacthub.io/signKey: |
-        fingerprint: 939B1A0ED8AAA8E722ACCDB3B6A012EE8A76426A
+      artifacthub.io/links: "- name: Chart Source\n  url: https://github.com/community-charts/helm-charts\n\
+        - name: Upstream Project\n  url: https://github.com/burakince/mlflow\n"
+      artifacthub.io/maintainers: "- name: burakince\n  email: burak.ince@linux.org.tr\n"
+      artifacthub.io/operator: 'false'
+      artifacthub.io/prerelease: 'false'
+      artifacthub.io/screenshots: "- title: Quickstart UI screenshot\n  url: https://raw.githubusercontent.com/mlflow/mlflow/refs/heads/master/docs/static/images/quickstart/quickstart_ui_screenshot.png\n\
+        - title: OSS registry 1 register\n  url: https://raw.githubusercontent.com/mlflow/mlflow/refs/heads/master/docs/static/images/oss_registry_1_register.png\n\
+        - title: OSS Registry 2 dialog\n  url: https://raw.githubusercontent.com/mlflow/mlflow/refs/heads/master/docs/static/images/oss_registry_2_dialog.png\n\
+        - title: OSS Registry 3 overview\n  url: https://raw.githubusercontent.com/mlflow/mlflow/refs/heads/master/docs/static/images/oss_registry_3_overview.png\n\
+        - title: OSS Registry 3b version\n  url: https://raw.githubusercontent.com/mlflow/mlflow/refs/heads/master/docs/static/images/oss_registry_3b_version.png\n\
+        - title: OSS Registry 4 version\n  url: https://raw.githubusercontent.com/mlflow/mlflow/refs/heads/master/docs/static/images/oss_registry_4_model.png\n\
+        - title: OSS Registry 4b version\n  url: https://raw.githubusercontent.com/mlflow/mlflow/refs/heads/master/docs/static/images/oss_registry_4b_model_alias.png\n\
+        - title: OSS Registry 5 transition\n  url: https://raw.githubusercontent.com/mlflow/mlflow/refs/heads/master/docs/static/images/oss_registry_5_version.png\n\
+        - title: OSS Registry 6 transition\n  url: https://raw.githubusercontent.com/mlflow/mlflow/refs/heads/master/docs/static/images/oss_registry_6_version.png\n\
+        - title: Experiment compare\n  url: https://raw.githubusercontent.com/mlflow/mlflow/refs/heads/master/docs/static/images/tutorial-compare.png\n"
+      artifacthub.io/signKey: 'fingerprint: 939B1A0ED8AAA8E722ACCDB3B6A012EE8A76426A
+
         url: https://keybase.io/communitycharts/pgp_keys.asc
+
+        '
     apiVersion: v2
     appVersion: 3.1.0
-    created: "2026-11-03T01:15:50.167680647Z"
+    created: '2026-11-03T01:15:50.167680647Z'
     dependencies:
     - condition: postgresql.enabled
       name: postgresql
@@ -1811,7 +3913,7 @@ entries:
   pg-operator:
   - apiVersion: v2
     appVersion: 2.6.0
-    created: "2026-11-03T01:15:50.195306158Z"
+    created: '2026-11-03T01:15:50.195306158Z'
     description: A Helm chart to deploy the Percona Operator for PostgreSQL
     digest: b1bd25bdf14d7f88dc93cb912d8cbc74e4c7483e87a1313d8e16bbb693ee4eb2
     home: https://docs.percona.com/percona-operator-for-postgresql/2.0/
@@ -1837,12 +3939,10 @@ entries:
   prometheus-node-exporter:
   - annotations:
       artifacthub.io/license: Apache-2.0
-      artifacthub.io/links: |
-        - name: Chart Source
-          url: https://github.com/prometheus-community/helm-charts
+      artifacthub.io/links: "- name: Chart Source\n  url: https://github.com/prometheus-community/helm-charts\n"
     apiVersion: v2
     appVersion: 1.9.1
-    created: "2026-11-03T01:15:50.198482212Z"
+    created: '2026-11-03T01:15:50.198482212Z'
     description: A Helm chart for prometheus node-exporter
     digest: af2f63c13e1e01157d4a976e4d515553261722bab55a81fae4791cbee9162b93
     home: https://github.com/prometheus/node_exporter/
@@ -1870,7 +3970,7 @@ entries:
   strimzi-kafka-operator:
   - apiVersion: v2
     appVersion: 0.46.0
-    created: "2026-11-03T01:15:50.220595747Z"
+    created: '2026-11-03T01:15:50.220595747Z'
     description: 'Strimzi: Apache Kafka running on Kubernetes'
     digest: 363f0f3317a1069d4ef73a57283935f7de51077e27739bef37712b681c77dad5
     home: https://strimzi.io/
@@ -1902,11 +4002,11 @@ entries:
   teleport-cluster:
   - apiVersion: v2
     appVersion: 17.5.2
-    created: "2026-11-03T01:15:50.239075309Z"
+    created: '2026-11-03T01:15:50.239075309Z'
     dependencies:
     - alias: operator
       name: teleport-operator
-      repository: ""
+      repository: ''
       version: 17.5.2
     description: Teleport is an access platform for your infrastructure
     digest: 28f3923c056af602afac48cf2b9c6d038cb01075ce9efd8c57d07237743e3cac
@@ -1920,7 +4020,7 @@ entries:
   teleport-kube-agent:
   - apiVersion: v2
     appVersion: 17.5.2
-    created: "2026-11-03T01:15:50.262673586Z"
+    created: '2026-11-03T01:15:50.262673586Z'
     description: Teleport provides a secure SSH, Kubernetes, database and application
       remote access solution that doesn't get in the way.
     digest: 0d134a206d6dbaf74ca078a9c19ca92b3c10566a3d48d5a9a426a7ae14942207
@@ -1933,15 +4033,16 @@ entries:
     version: 17.5.2
   traefik:
   - annotations:
-      artifacthub.io/changes: "- \"fix: do not quote protocol on pod ports\"\n- \"fix(tracing):
-        \U0001F41B multiple response or request headers\"\n- \"feat: ✨ Oracle Cloud
-        marketplace integration\"\n- \"feat(deps): update traefik docker tag to v3.3.5\"\n-
-        \"feat!: add port name template functions\"\n- \"chore(release): :rocket:
-        publish traefik 35.0.0\"\n- \"chore(helpers): :bookmark: update hub proxy
-        corresponding versions\"\n- \"chore(ci): :bug: should fail on test error\"\n"
+      artifacthub.io/changes: "- \"fix: do not quote protocol on pod ports\"\n- \"\
+        fix(tracing): \U0001F41B multiple response or request headers\"\n- \"feat:\
+        \ \u2728 Oracle Cloud marketplace integration\"\n- \"feat(deps): update traefik\
+        \ docker tag to v3.3.5\"\n- \"feat!: add port name template functions\"\n\
+        - \"chore(release): :rocket: publish traefik 35.0.0\"\n- \"chore(helpers):\
+        \ :bookmark: update hub proxy corresponding versions\"\n- \"chore(ci): :bug:\
+        \ should fail on test error\"\n"
     apiVersion: v2
     appVersion: v3.3.5
-    created: "2026-11-03T01:15:50.315588718Z"
+    created: '2026-11-03T01:15:50.315588718Z'
     description: A Traefik based Kubernetes ingress controller
     digest: 7eb449b6fe2be3fbc72be1b6e679737a0e50897c7d844729d97165f3906c16f2
     home: https://traefik.io/
@@ -1970,21 +4071,17 @@ entries:
   victoria-metrics-agent:
   - annotations:
       artifacthub.io/category: monitoring-logging
-      artifacthub.io/changes: |
-        - Support wildcard in ingress hostname. See [this issue](https://github.com/VictoriaMetrics/helm-charts/issues/2134).
+      artifacthub.io/changes: '- Support wildcard in ingress hostname. See [this issue](https://github.com/VictoriaMetrics/helm-charts/issues/2134).
+
+        '
       artifacthub.io/license: Apache-2.0
-      artifacthub.io/links: |
-        - name: Sources
-          url: https://github.com/VictoriaMetrics/helm-charts/tree/master/charts/victoria-metrics-agent
-        - name: Charts repo
-          url: https://victoriametrics.github.io/helm-charts/
-        - name: Docs
-          url: https://docs.victoriametrics.com/vmagent
-        - name: Changelog
-          url: https://docs.victoriametrics.com/changelog
+      artifacthub.io/links: "- name: Sources\n  url: https://github.com/VictoriaMetrics/helm-charts/tree/master/charts/victoria-metrics-agent\n\
+        - name: Charts repo\n  url: https://victoriametrics.github.io/helm-charts/\n\
+        - name: Docs\n  url: https://docs.victoriametrics.com/vmagent\n- name: Changelog\n\
+        \  url: https://docs.victoriametrics.com/changelog\n"
     apiVersion: v2
     appVersion: v1.115.0
-    created: "2026-11-03T01:15:50.321924975Z"
+    created: '2026-11-03T01:15:50.321924975Z'
     dependencies:
     - name: victoria-metrics-common
       repository: https://victoriametrics.github.io/helm-charts
@@ -2016,21 +4113,17 @@ entries:
   victoria-metrics-cluster:
   - annotations:
       artifacthub.io/category: monitoring-logging
-      artifacthub.io/changes: |
-        - Support wildcard in ingress hostname. See [this issue](https://github.com/VictoriaMetrics/helm-charts/issues/2134).
+      artifacthub.io/changes: '- Support wildcard in ingress hostname. See [this issue](https://github.com/VictoriaMetrics/helm-charts/issues/2134).
+
+        '
       artifacthub.io/license: Apache-2.0
-      artifacthub.io/links: |
-        - name: Sources
-          url: https://github.com/VictoriaMetrics/helm-charts/tree/master/charts/victoria-metrics-cluster
-        - name: Charts repo
-          url: https://victoriametrics.github.io/helm-charts/
-        - name: Docs
-          url: https://docs.victoriametrics.com/cluster-victoriametrics
-        - name: Changelog
-          url: https://docs.victoriametrics.com/changelog
+      artifacthub.io/links: "- name: Sources\n  url: https://github.com/VictoriaMetrics/helm-charts/tree/master/charts/victoria-metrics-cluster\n\
+        - name: Charts repo\n  url: https://victoriametrics.github.io/helm-charts/\n\
+        - name: Docs\n  url: https://docs.victoriametrics.com/cluster-victoriametrics\n\
+        - name: Changelog\n  url: https://docs.victoriametrics.com/changelog\n"
     apiVersion: v2
     appVersion: v1.115.0
-    created: "2026-11-03T01:15:50.331415304Z"
+    created: '2026-11-03T01:15:50.331415304Z'
     dependencies:
     - name: victoria-metrics-common
       repository: https://victoriametrics.github.io/helm-charts
@@ -2061,4 +4154,4 @@ entries:
     urls:
     - https://novelcore.github.io/charts/victoria-metrics-cluster-0.20.1.tgz
     version: 0.20.1
-generated: "2026-11-03T01:15:49.288712976Z"
+generated: '2026-11-03T01:15:49.288712976Z'
