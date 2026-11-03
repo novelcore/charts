@@ -272,6 +272,8 @@ FANOUT_SRC="${BASE_TMP}/fanout.src"
 yq 'select(.kind == "ClusterWorkflowTemplate" and .metadata.name == "ml-ci-dataset-release")
     | .spec.templates[] | select(.name == "fan-out") | .container.args[0]' "$RENDERED" > "$FANOUT_SRC"
 expect_eq "$(test -s "$FANOUT_SRC" && echo yes)" "yes" "ml-ci-dataset-release has a fan-out step"
+expect_eq "$(yq 'select(.kind == "ClusterWorkflowTemplate" and .metadata.name == "ml-ci-dataset-release") | .spec.serviceAccountName' "$RENDERED")" \
+  "dataset-release-sa" "the template pins its own account (an absent serviceAccountName in a submitted Workflow cannot fall back to default)"
 expect_eq "$(yq 'select(.kind == "ClusterWorkflowTemplate" and .metadata.name == "ml-ci-dataset-release") | .spec.synchronization.mutexes[0].name' "$RENDERED")" \
   "dataset-release" "at most one fan-out at a time"
 
