@@ -1899,12 +1899,21 @@ spec:
         \ a commit a queued or running\n        # job names here (squeue %k).\n  \
         \      body['job']['comment'] = 'kaos-commit=' + commit\n    req = urllib.request.Request(API\
         \ + '/job/submit',\n                                 data=json.dumps(body).encode(),\n\
-        \                                 headers=hdrs(), method='POST')\n    resp\
-        \ = json.load(urllib.request.urlopen(req, timeout=30))\n    j = resp.get('job_id')\n\
-        \    print('submitted job', j, 'errors:', resp.get('errors'), flush=True)\n\
-        \    if not j:\n        sys.exit(1)\n    return j\n\n\ndef cancel(j):\n  \
-        \  try:\n        urllib.request.urlopen(urllib.request.Request(\n        \
-        \    API + '/job/' + str(j), headers=hdrs(), method='DELETE'), timeout=30)\n\
+        \                                 headers=hdrs(), method='POST')\n    try:\n\
+        \        resp = json.load(urllib.request.urlopen(req, timeout=30))\n    except\
+        \ urllib.error.HTTPError as e:\n        print('job submit refused:', submit_refusal(e),\
+        \ flush=True)\n        sys.exit(1)\n    j = resp.get('job_id')\n    print('submitted\
+        \ job', j, 'errors:', resp.get('errors'), flush=True)\n    if not j:\n   \
+        \     sys.exit(1)\n    return j\n\n\ndef submit_refusal(e):\n    \"\"\"slurmrestd\
+        \ refuses a job with an HTTP error whose body names why\n    (errors/warnings:\
+        \ an account, partition or QOS it rejects, a time limit\n    above the QOS);\
+        \ without it the step dies on a bare 'HTTP Error 500'.\"\"\"\n    try:\n \
+        \       why = json.loads(e.read().decode(errors='replace') or '{}')\n    except\
+        \ Exception:\n        why = {}\n    if not isinstance(why, dict):\n      \
+        \  why = {}\n    return 'HTTP %s %s' % (e.code, {k: why.get(k) for k in ('errors',\
+        \ 'warnings')\n                                     if why.get(k)} or '(no\
+        \ reason in the body)')\n\n\ndef cancel(j):\n    try:\n        urllib.request.urlopen(urllib.request.Request(\n\
+        \            API + '/job/' + str(j), headers=hdrs(), method='DELETE'), timeout=30)\n\
         \        print('cancelled job', j, flush=True)\n    except Exception as e:\n\
         \        print('cancel failed:', e, flush=True)\n\n\ndef on_term(signum, frame):\n\
         \    # Argo sends TERM on deadline/stop. A PENDING job never started — cancel\n\

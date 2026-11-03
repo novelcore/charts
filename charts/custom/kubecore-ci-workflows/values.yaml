@@ -92,6 +92,12 @@ ciSecretsPrep:
 # `apk add jq`) first. On a pool's CPU-saturated e2-standard-2 system node that
 # BestEffort install took 9-18 minutes before ~5s of logic, which held up a new
 # ML app's first build by 17.5 minutes (dev hub e2e, 2026-10-11).
+# kaos-lake (PRD novelcore/kaos#1283 D-05): the audience of the service-account token the
+# trusted render step presents to kaos-lake's dataset catalog. It must equal the stack's
+# kaos.workload_identity.audience.
+kaosLake:
+  workloadAudience: kaos-lake
+
 tooling:
   # kubectl + jq + curl, busybox sh. Runs the two check-drift steps. The same
   # image family as the projectmlstack composition's kubectl/jq steps. kubectl
@@ -280,4 +286,4 @@ pendingReaper:
 # (kubecore-operator#1199). Must be a full 40-character commit sha.
 platformEnhancer:
   repo: novelcore/hera-mlops-template
-  ref: 606ddc8c9efaf606ae2c7c983d03a9cd84c80918
+  ref: 61c8c26464acd8279adc6aabef767d20844b1e17
