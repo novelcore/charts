@@ -692,7 +692,7 @@ spec:
   # no userns gymnastics — works identically on COS, Ubuntu, EKS, kind.
   # Switched from rootless BuildKit because BuildKit's overlayfs snapshot
   # copy-up performs poorly on GKE Container-Optimized OS for multi-GB
-  # images (e.g. PyTorch + ultralytics), getting stuck in "exporting
+  # images (e.g. PyTorch plus a training library), getting stuck in "exporting
   # layers" indefinitely. Kaniko's flat tar-based layer model handles
   # large images consistently.
   - name: build-push
@@ -1054,6 +1054,8 @@ spec:
         # Argo brace delimiters as variables so Helm does not parse them.
         OB = chr(123) + chr(123)
         CB = chr(125) + chr(125)
+
+{{ include "kubecore-ci-workflows.stepToken" . | indent 8 }}
 
         kubeline_path = os.environ['KUBELINE_PATH']
         context_path = os.environ['CONTEXT_PATH']
@@ -2149,6 +2151,8 @@ spec:
                 }
             }
 
+            add_step_token(wft, ctx)
+
             os.makedirs(os.path.dirname(wft_out), exist_ok=True)
             with open(wft_out, 'w') as f:
                 yaml.dump(wft, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
@@ -2757,6 +2761,8 @@ spec:
                 'templates': templates,
             }
         }
+
+        add_step_token(wft, ctx)
 
         os.makedirs(os.path.dirname(wft_out), exist_ok=True)
         with open(wft_out, 'w') as f:
@@ -3452,8 +3458,6 @@ spec:
     # Every GitHub call retries transient answers; a write that still fails
     # fails this step, and every caller runs it with continueOn failed, so a
     # reporting failure is a red status node, never a red build.
-    # Shared by ml-ci-rc-build via templateRef with context
-    # kubecore-ml-ci/rc + environment ml-rc.
     inputs:
       parameters:
       - name: state
@@ -3667,7 +3671,7 @@ spec:
           *)  echo "report: comment on ${TARGET} FAILED, GitHub answered ${CODE}: $(jq -r '.message // .' /tmp/post.json 2>/dev/null | head -c 300)" ;;
         esac
       volumeMounts:
-      # Every caller (ml-ci-build, ml-ci-pr-render, ml-ci-rc-build, ci-build,
+      # Every caller (ml-ci-build, ml-ci-pr-render, ci-build,
       # rc) declares a `workspace` volume, so this mount is always satisfiable;
       # only the PR gate writes report-extra.md into it today.
       - name: workspace

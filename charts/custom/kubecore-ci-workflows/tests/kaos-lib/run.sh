@@ -8,8 +8,8 @@
 #   - ml-ci-build patch-images: records kaos-lib-package / kaos-lib-compat;
 #   - ml-ci-reconcile check-drift: KAOS-LIB DRIFT (rebuild when the context's
 #     kaosLib.spec is not what the images have; one attempt per spec per hour);
-#   - kaos-lib-support: the kaos-lib/support commit status, and the release
-#     refusal (ml-ci-rc-build) when unsupported;
+#   - kaos-lib-support: the kaos-lib/support commit status (the release
+#     refusal lived in ml-ci-rc-build, removed as unreferenced in 0.12.124);
 #   - the wiring: rc/pr-render borrow it, the bump job takes data as env.
 # files/kaos-lib.py itself: test_kaos_lib.py (pytest). Usage (from the repo root):
 #
@@ -336,19 +336,9 @@ expect_has "$TARGET" 'RUN_URL="${ARGO_BASE}/workflows/' "support: the status lin
 
 # ── wiring ───────────────────────────────────────────────────────────────────
 
-RC_STEP=$(yq 'select(.metadata.name == "ml-ci-rc-build") | .spec.templates[] | select(.name == "ml-ci-rc-build")
-              | .steps[][] | select(.name == "kaos-lib-support") | [.templateRef.template, (.continueOn.failed // false), .arguments.parameters[0].value] | join("/")' "$RENDERED" | grep -v '^---$' | grep .)
-expect_eq "$RC_STEP" "kaos-lib-support/false/true" "ml-ci-rc-build: refuses an unsupported release (no continueOn)"
-RC_ORDER=$(yq 'select(.metadata.name == "ml-ci-rc-build") | .spec.templates[] | select(.name == "ml-ci-rc-build") | [.steps[][] .name] | join(" ")' "$RENDERED")
-case "$RC_ORDER" in *"kaos-lib-support build-push"*) PASSED=$((PASSED + 1)); echo "PASS: ml-ci-rc-build: the check runs before anything is built";;
-  *) FAILED=$((FAILED + 1)); echo "FAIL: ml-ci-rc-build order: $RC_ORDER";; esac
 for wf in ml-ci-build ml-ci-pr-render; do
   S=$(yq "select(.metadata.name == \"$wf\") | .spec.templates[] | select(.name == \"$wf\") | .steps[][] | select(.name == \"kaos-lib-support\") | (.continueOn.failed // false)" "$RENDERED")
   expect_eq "$S" "true" "$wf: posts kaos-lib/support, reporting only"
-done
-for p in kaos_lib_package; do
-  V=$(yq 'select(.metadata.name == "ml-ci-rc-build") | .spec.templates[] | select(.name == "ml-ci-rc-build") | .steps[][] | select(.name == "build-push") | .arguments.parameters[] | select(.name == "kaos_lib_package") | .value' "$RENDERED")
-  expect_eq "$V" "{{steps.detect-steps.outputs.parameters.kaos_lib_package}}" "ml-ci-rc-build: builds with the same spec"
 done
 PARAMS=$(yq 'select(.metadata.name == "kaos-lib-bump-pr") | [.spec.arguments.parameters[].name] | join(" ")' "$RENDERED" | grep -v '^---$' | grep .)
 expect_eq "$PARAMS" "app project_name repo_url branch version spec" "kaos-lib-bump-pr: the parameter contract the composition renders against"

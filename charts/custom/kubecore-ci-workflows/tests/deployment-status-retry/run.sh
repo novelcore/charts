@@ -251,7 +251,7 @@ done
 
 # Every caller runs the status step with continueOn failed: reporting never
 # turns a build red, stops its gitops-notify, or skips the exit handler's run-report.
-for wf in ci-build ci-rc-build ml-ci-build ml-ci-rc-build; do
+for wf in ci-build ci-rc-build ml-ci-build; do
   N=$(yq "select(.kind == \"ClusterWorkflowTemplate\" and .metadata.name == \"$wf\") | .. | select(type == \"!!map\" and ((.template == \"status\" and (has(\"clusterScope\") | not)) or .templateRef.template == \"status\")) | .continueOn.failed" "$RENDERED" | sort | uniq -c | tr -s ' ')
   expect_eq "$N" " 3 true" "$wf: all 3 status callers run with continueOn failed"
 done
