@@ -1,0 +1,99 @@
+{{/*
+ml-ci-dataset-release — a dataset changed; re-render the project's ML pipelines
+(PRD novelcore/kaos#1283 D-05).
+
+A pipeline's `dataset` dropdown (<repo>@vN, <repo>@latest) is rendered from
+kaos-lake's catalog by ml-ci-build's hera-enhance-commit, at render time only.
+Nothing re-rendered it when a version was released, so a new dataset-x@v2
+appeared only after the next commit. kaos-lake now creates ONE Workflow of this
+template in the project's CI namespace (as dataset-release-sa, which the
+githubproject composition renders with exactly the rights below) when a `vN` tag
+of a dataset-* repository is created or deleted, a repository is labelled a
+dataset, or a dataset is deleted; a burst of releases is one Workflow.
+
+For each ML app of the project (the {app}-ci-reconciler CronWorkflows that use
+ml-ci-reconcile; only this namespace's, so only this project's) it creates a
+Workflow from the CronWorkflow's own spec with dataset_event=true. That is the
+hourly backstop's check run now, not a new render path: ml-ci-reconcile compares
+the datasets the live pipeline was rendered with (dataset-sha) with the catalog
+and submits ml-ci-build to re-render on DATASET DRIFT, so an app whose datasets
+did not change costs one cheap pod, and an event that is lost is caught by the
+next hourly poll.
+
+At most one fan-out runs at a time, and the per-app run takes a mutex of its
+own: two events in a row never race to submit two builds.
+*/}}
+apiVersion: argoproj.io/v1alpha1
+kind: ClusterWorkflowTemplate
+metadata:
+  name: ml-ci-dataset-release
+  labels:
+    {{- include "kubecore-ci-workflows.labels" . | nindent 4 }}
+spec:
+  serviceAccountName: dataset-release-sa
+  entrypoint: fan-out
+  # One fan-out at a time per CI namespace: a second queues behind the first.
+  synchronization:
+    mutexes:
+    - name: dataset-release
+  # System pool, like ml-ci-reconcile: it needs kubectl and jq only.
+  nodeSelector:
+    platform.kubecore.io/system: "true"
+  {{- with .Values.tolerations }}
+  tolerations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  ttlStrategy:
+    secondsAfterCompletion: {{ .Values.workflow.ttlStrategy.secondsAfterCompletion }}
+  podGC:
+    strategy: {{ .Values.workflow.podGC.strategy }}
+  templates:
+  - name: fan-out
+    container:
+      image: {{ .Values.tooling.kubectlImage | default "alpine/k8s:1.36.4" }}
+      {{- with .Values.tooling.resources }}
+      resources:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      command: [sh, -c]
+      args:
+      - |
+        set -eu
+        for t in kubectl jq; do
+          command -v "$t" >/dev/null || { echo "FATAL: $t missing from this image" >&2; exit 1; }
+        done
+        NS="{{`{{workflow.namespace}}`}}"
+        # A failed read fails the Workflow loudly: the hourly poll is the backstop.
+        CRONS=$(kubectl get cronworkflows -n "$NS" -o json)
+        # Only ML apps: k8sapp's reconciler CronWorkflows carry the same label but run
+        # another template.
+        APPS=$(echo "$CRONS" | jq -r '.items[]
+          | select(.spec.workflowSpec.workflowTemplateRef.name == "ml-ci-reconcile" and (.spec.suspend | not))
+          | .metadata.labels["platform.kubecore.io/app"] // empty')
+        if [ -z "$APPS" ]; then
+          echo "dataset-release: no ML app in ${NS} — nothing to re-render"
+          exit 0
+        fi
+        FAILED=0
+        for APP in $APPS; do
+          if echo "$CRONS" | jq -c --arg app "$APP" '
+              .items[]
+              | select(.metadata.labels["platform.kubecore.io/app"] == $app
+                       and .spec.workflowSpec.workflowTemplateRef.name == "ml-ci-reconcile")
+              | {apiVersion: "argoproj.io/v1alpha1", kind: "Workflow",
+                 metadata: {generateName: "ml-ci-dataset-rerender-",
+                            labels: {"platform.kubecore.io/app": $app,
+                                     "platform.kubecore.io/submitted-by": "dataset-release"}},
+                 spec: (.spec.workflowSpec
+                        | .arguments.parameters = ((.arguments.parameters // []) | map(select(.name != "dataset_event"))
+                                                   + [{name: "dataset_event", value: "true"}])
+                        | .synchronization = {mutexes: [{name: ($app + "-dataset-rerender")}]}
+                        | .ttlStrategy = {secondsAfterCompletion: 3600})}' \
+             | kubectl create -n "$NS" -f - ; then
+            echo "dataset-release: ${APP}: dataset check submitted"
+          else
+            echo "dataset-release: ${APP}: could not submit the dataset check" >&2
+            FAILED=1
+          fi
+        done
+        exit $FAILED

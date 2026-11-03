@@ -2957,31 +2957,33 @@ spec:
         # never data); the untrusted render above never sees a credential. A
         # catalog that cannot be read leaves the parameter free text, never a red
         # build.
-        python3 - /workspace/out/workflow-template.yaml /tmp/context.yaml /var/run/secrets/kaos-lake/token <<'DSEOF'
-        import json, sys, urllib.request
+{{ include "kubecore-ci-workflows.datasetChoicesScript" . | indent 8 }}
+        # dataset-sha: what ml-ci-reconcile's DATASET DRIFT compares with the catalog later. "none" =
+        # this pipeline offers no dataset; absent = the catalog could not be read, so the record of
+        # the last good render stays.
+        rm -f /tmp/dataset-sha
+        python3 - /workspace/out/workflow-template.yaml /tmp/context.yaml /var/run/secrets/kaos-lake/token /tmp/dataset-sha <<'DSEOF'
+        import importlib.util, sys
         import yaml
-        wft_path, ctx_path, token_path = sys.argv[1:4]
+        spec = importlib.util.spec_from_file_location("dataset_choices", "/tmp/dataset-choices.py")
+        dc = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(dc)
+        wft_path, ctx_path, token_path, sha_path = sys.argv[1:5]
         wft = yaml.safe_load(open(wft_path))
         params = (wft["spec"].get("arguments") or {}).get("parameters") or []
         param = next((p for p in params if p.get("name") == "dataset"), None)
         if param is None:
+            open(sha_path, "w").write("none")
             print("datasets: the pipeline declares no dataset parameter")
             sys.exit(0)
         endpoint = (((yaml.safe_load(open(ctx_path)) or {}).get("lakefs") or {}).get("endpoint") or "").rstrip("/")
         try:
-            req = urllib.request.Request(endpoint + "/kaos/v1/catalog",
-                                         headers={"Authorization": "Bearer " + open(token_path).read().strip()})
-            datasets = json.load(urllib.request.urlopen(req, timeout=20)).get("datasets") or []
+            datasets = dc.read_catalog(endpoint, token_path)
         except Exception as exc:  # noqa: BLE001
             print(f"datasets: catalog not read ({type(exc).__name__}: {exc}); the dataset parameter stays free text")
             sys.exit(0)
-        datasets.sort(key=lambda d: (not d.get("default"), d.get("name", "")))
-        choices, default = [], ""
-        for d in datasets:
-            versions = [f"{d['name']}@{v['tag']}" for v in d.get("versions") or []]
-            choices += versions + [f"{d['name']}@latest"]
-            if d.get("default") and not default:
-                default = versions[0] if versions else f"{d['name']}@latest"
+        choices, default = dc.choices(datasets)
+        open(sha_path, "w").write(dc.digest(choices))
         if not choices:
             print("datasets: the project has no dataset yet; the dataset parameter stays free text")
             sys.exit(0)
@@ -3026,7 +3028,7 @@ spec:
         IMAGES_FILE="${GITOPS_DIR}/pipeline-images.yaml"
         if [ -f "$IMAGES_FILE" ]; then
           CONTEXT_SHA=$(sha256sum "$CONTEXT_PATH" | cut -c1-64)
-          python3 - "$WFT_FILE" "$IMAGES_FILE" "$APP_NAME" "$CONTEXT_SHA" "{{ include "kubecore-ci-workflows.enhancerRef" . }}" <<'IMGEOF'
+          python3 - "$WFT_FILE" "$IMAGES_FILE" "$APP_NAME" "$CONTEXT_SHA" "{{ include "kubecore-ci-workflows.enhancerRef" . }}" /tmp/dataset-sha <<'IMGEOF'
         import sys, yaml, re
         wft = yaml.safe_load(open(sys.argv[1]))
         images_doc = yaml.safe_load(open(sys.argv[2]))
@@ -3040,6 +3042,11 @@ spec:
         # ran — the pin overlaid above. ml-ci-reconcile compares it with the
         # chart's pin and re-renders when the pin moved without a push.
         enhancer_ref = sys.argv[5]
+        # dataset-sha: digest of the `dataset` choices this render offered ("none": no such
+        # parameter; missing file: the catalog was unreadable, keep the record). ml-ci-reconcile
+        # compares it with the catalog and re-renders on DATASET DRIFT.
+        import os
+        dataset_sha = open(sys.argv[6]).read().strip() if len(sys.argv) > 6 and os.path.exists(sys.argv[6]) else ""
         # collect image-<step> configMapKeyRef keys the WFT expects
         wanted = set()
         for p in wft["spec"].get("arguments", {}).get("parameters", []):
@@ -3056,7 +3063,7 @@ spec:
         # renamed step): otherwise the ConfigMap — and the image parameters the
         # submit form derives from it — keep stale entries forever
         # (kubecore-operator#1126, ml-dev-loop e2e "delete"/"rename").
-        removed = [k for k in list(data) if k not in ("last-built-sha", "context-sha", "enhancer-ref", "kaos-lib-package", "kaos-lib-compat") and k not in wanted]
+        removed = [k for k in list(data) if k not in ("last-built-sha", "context-sha", "enhancer-ref", "dataset-sha", "kaos-lib-package", "kaos-lib-compat") and k not in wanted]
         for k in removed:
             del data[k]
         context_moved = bool(context_sha) and data.get("context-sha") != context_sha
@@ -3081,9 +3088,12 @@ spec:
         if moved:
             print(f"pipeline-images namespace {meta.get('namespace')!r} -> {wft_ns!r} (following the rendered WFT)")
             meta["namespace"] = wft_ns
-        if added or removed or moved or context_moved or enhancer_moved:
+        dataset_moved = bool(dataset_sha) and data.get("dataset-sha") != dataset_sha
+        if dataset_moved:
+            data["dataset-sha"] = dataset_sha
+        if added or removed or moved or context_moved or enhancer_moved or dataset_moved:
             yaml.safe_dump(images_doc, open(sys.argv[2], "w"), sort_keys=False)
-            print(f"pipeline-images keys — added: {added} removed: {removed} moved: {moved} context-sha: {context_sha[:12] if context_moved else 'unchanged'} enhancer-ref: {enhancer_ref[:12] if enhancer_moved else 'unchanged'}")
+            print(f"pipeline-images keys — added: {added} removed: {removed} moved: {moved} context-sha: {context_sha[:12] if context_moved else 'unchanged'} enhancer-ref: {enhancer_ref[:12] if enhancer_moved else 'unchanged'} dataset-sha: {dataset_sha[:12] if dataset_moved else 'unchanged'}")
         else:
             print("pipeline-images already has exactly the image-<step> keys the WFT references")
         IMGEOF
@@ -3334,6 +3344,7 @@ spec:
           for KEY in $(yq e '.data | keys | .[]' "${IMAGES_PATH}"); do
             [ "${KEY}" = "last-built-sha" ] && continue
             [ "${KEY}" = "enhancer-ref" ] && continue
+            [ "${KEY}" = "dataset-sha" ] && continue
             [ "${KEY}" = "kaos-lib-package" ] && continue
             [ "${KEY}" = "kaos-lib-compat" ] && continue
             CUR_VALUE=$(yq e ".data.\"${KEY}\"" "${IMAGES_PATH}")
