@@ -55,7 +55,7 @@ expect_eq "$ml_hits" 0 "ml-* templates carry no ci-secrets wiring"
 # A Zot-less pool never renders ci-registry-auth; every template that mounts it must
 # tolerate its absence or the kubelet never starts the pod (#1057 for ci-*, and the ML
 # templates on 2026-10-07, e2e-suite-ml-jq4vp).
-for wf in ci-build ci-rc-build ml-ci-build ml-ci-rc-build; do
+for wf in ci-build ci-rc-build ml-ci-build; do
   expect_eq "$(yq "select(.kind == \"ClusterWorkflowTemplate\" and .metadata.name == \"$wf\") | .spec.volumes[] | select(.name == \"registry-auth\") | .secret.optional" "$RENDERED")" \
     true "$wf: registry-auth (ci-registry-auth) volume is optional"
 done

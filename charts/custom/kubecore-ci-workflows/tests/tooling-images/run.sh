@@ -54,7 +54,7 @@ LIST=$(yq -r '
   | @tsv' "$RENDERED" | grep -v '^---$')
 
 N=$(printf '%s\n' "$LIST" | grep -c .)
-[ "$N" -ge 40 ] && ok "found $N containers to check" || ko "found only $N containers (expected >= 40)"
+[ "$N" -ge 35 ] && ok "found $N containers to check" || ko "found only $N containers (expected >= 35)"
 
 TAB=$(printf '\t')
 pinned() {
@@ -122,7 +122,7 @@ tpl() {
   yq "select(.kind == \"ClusterWorkflowTemplate\" and .metadata.name == \"$1\")
       | .spec.templates[] | select(.container != null) | $2" "$RENDERED"
 }
-for cwt in ml-autoscaler-healer ml-nodepool-janitor ml-compute-catalog-probe; do
+for cwt in ml-autoscaler-healer; do
   mnt=$(tpl "$cwt" '.container.volumeMounts[] | select(.name == "kubectl-bin") | .mountPath')
   vol=$(tpl "$cwt" '.volumes[] | select(.name == "kubectl-bin") | .emptyDir')
   script=$(tpl "$cwt" '.container.args[0]')

@@ -212,6 +212,52 @@ OVERLAYEOF
     --raw /workspace/out/raw-workflow-template.yaml \
     --context /tmp/context.yaml \
     --output /workspace/out/workflow-template.yaml )
+python3 - /workspace/out/workflow-template.yaml /tmp/context.yaml <<'STEPTOKEOF'
+import sys
+import yaml
+{{ include "kubecore-ci-workflows.stepToken" . }}
+wft_path, ctx_path = sys.argv[1:3]
+wft, ctx = yaml.safe_load(open(wft_path)), yaml.safe_load(open(ctx_path)) or {}
+if add_step_token(wft, ctx):
+    yaml.dump(wft, open(wft_path, "w"), default_flow_style=False, allow_unicode=True, sort_keys=False)
+STEPTOKEOF
+{{- end }}
+
+{{/*
+The step's service-account token for kaos-lake (PRD novelcore/kaos#1217 F-05).
+Python source of add_step_token(wft, ctx): when the pipeline context carries
+workloadIdentity.audience, every container template that runs as the app's own
+account (ctx.serviceAccountName, else the WFT's) gets a projected, audience-bound
+token mounted read-only at /var/run/secrets/kaos-lake and KAOS_LAKE_TOKEN_FILE
+pointing at it. Returns how many templates it changed; with no audience it changes
+nothing, so existing renders stay byte-identical. The volume name and mount path
+are the ones the enhance step itself uses for the dataset catalog. Shared by
+render-wft and the Hera path (platformEnhance), neither of which can import it.
+*/}}
+{{- define "kubecore-ci-workflows.stepToken" -}}
+def add_step_token(wft, ctx):
+    audience = ((ctx or {}).get("workloadIdentity") or {}).get("audience")
+    if not audience:
+        return 0
+    spec = wft["spec"]
+    account = (ctx or {}).get("serviceAccountName") or "argo-workflow"
+    changed = 0
+    for t in spec.get("templates") or []:
+        c = t.get("container")
+        if not c or (t.get("serviceAccountName") or spec.get("serviceAccountName")) != account:
+            continue
+        vols = t.setdefault("volumes", [])
+        if not any(v.get("name") == "kaos-lake-token" for v in vols):
+            vols.append({"name": "kaos-lake-token", "projected": {"sources": [
+                {"serviceAccountToken": {"audience": audience, "expirationSeconds": 3600, "path": "token"}}]}})
+        mounts = c.setdefault("volumeMounts", [])
+        if not any(m.get("name") == "kaos-lake-token" for m in mounts):
+            mounts.append({"name": "kaos-lake-token", "mountPath": "/var/run/secrets/kaos-lake", "readOnly": True})
+        env = c.setdefault("env", [])
+        if not any(e.get("name") == "KAOS_LAKE_TOKEN_FILE" for e in env):
+            env.append({"name": "KAOS_LAKE_TOKEN_FILE", "value": "/var/run/secrets/kaos-lake/token"})
+        changed += 1
+    return changed
 {{- end }}
 
 {{/*
@@ -552,8 +598,7 @@ gh_api() {
 
 {{/*
 The GitHub reporting of a build (#1126), shared by the status templates of
-ci-build, ci-rc-build and ml-ci-build (ml-ci-rc-build borrows ml-ci-build's
-by templateRef): ONE commit status with target_url into the Argo UI run, plus
+ci-build, ci-rc-build and ml-ci-build: ONE commit status with target_url into the Argo UI run, plus
 a Deployment rollup whose log/environment URL is the same run. pending creates
 the Deployment; success/failure resolve the Deployment created for this SHA +
 environment, and create it themselves when none is listed after 5 lookups (the
