@@ -43,7 +43,7 @@ helm install my-release novelcore/CHART_NAME -f values.yaml
 │   ├── custom/         # Custom Novelcore charts
 │   └── external/       # Synced external charts
 ├── scripts/           # Utility scripts
-├── sync-config.yaml   # External chart sync configuration
+├── scripts/synch-config.yaml   # External chart sync configuration
 └── ct.yaml           # Chart testing configuration
 ```
 
@@ -85,7 +85,7 @@ ct lint --charts charts/custom/my-chart
 
 ## Syncing External Charts
 
-External charts are automatically synced daily based on `sync-config.yaml`. 
+External charts are synced by hand; there is no scheduled job.
 
 ### Manual Sync
 
@@ -101,25 +101,27 @@ To manually sync a specific chart:
 
 ### Adding New External Charts
 
-1. Edit `sync-config.yaml`
+1. Edit `scripts/synch-config.yaml`
 2. Add the repository (if not already present) and chart details
-3. Commit and push - the sync workflow will handle the rest
+3. Run `scripts/sync-chart.sh` and open a PR
 
-## CI/CD Workflows
+## CI/CD
 
-### Release Charts (`release-charts.yml`)
-- Triggers on push to main branch
-- Packages all charts and updates the Helm repository index
-- Publishes to GitHub Pages
+CI runs in Argo Workflows (the repository has no GitHub Actions). It is defined in `novelcore/kaos`
+under `kubetools/system/argo-workflows/ci/overlays/dev/charts-ci/` and reports as commit statuses.
 
-### Sync External Charts (`sync-external-charts.yml`)
-- Runs daily at 2 AM UTC
-- Can be triggered manually via GitHub Actions
-- Creates PRs with synced charts
+### `charts/validate` (every open PR)
+- Runs the chart test suites, `ct lint` and renders every changed chart
+- The status link opens the run in the Argo Workflows UI
 
-### Validate Charts (`validate-charts.yml`)
-- Runs on all PRs affecting charts
-- Performs linting, security scanning, and installation testing
+### `charts/release` (every commit on `main`)
+- Packages all charts, updates the Helm repository index and publishes to GitHub Pages
+- Pushes `kubecore-observability-rules` to GHCR when a package token is configured
+
+### External charts
+- Synced by hand with `scripts/sync-chart.sh`; there is no scheduled job
+
+A poller submits the runs every 2 minutes, so a status can take up to two minutes to appear.
 
 ## Private Repository Access
 
