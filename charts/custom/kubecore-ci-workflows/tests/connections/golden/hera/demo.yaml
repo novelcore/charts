@@ -20,7 +20,7 @@ spec:
       - platform.lakefs.repository=PLACEHOLDER-repo
       - platform.lakefs.endpoint=http://lakefs.internal.invalid
       - platform.mlflow.tracking_uri=http://mlflow.internal.invalid
-      - platform.checkpoints.bucket=PLACEHOLDER-bucket
+      - platform.checkpoints.bucket=outputs-demo
       - platform.checkpoints.prefix=main/checkpoints
       - experiment.name={{workflow.parameters.experiment-name}}
       - experiment.description={{workflow.parameters.experiment-description}}
@@ -59,10 +59,12 @@ spec:
             name: PLACEHOLDER-lakefs-admin
             key: secretAccessKey
       - name: CHECKPOINT_BUCKET
-        value: PLACEHOLDER-bucket
+        value: outputs-demo
       - name: CHECKPOINT_PREFIX
         value: main/checkpoints
       - name: KUBECORE_RUN_ID
+        value: '{{workflow.name}}'
+      - name: KUBECORE_WORKFLOW_NAME
         value: '{{workflow.name}}'
       resources:
         requests:
@@ -148,10 +150,12 @@ spec:
             name: PLACEHOLDER-lakefs-admin
             key: secretAccessKey
       - name: CHECKPOINT_BUCKET
-        value: PLACEHOLDER-bucket
+        value: outputs-demo
       - name: CHECKPOINT_PREFIX
         value: main/checkpoints
       - name: KUBECORE_RUN_ID
+        value: '{{workflow.name}}'
+      - name: KUBECORE_WORKFLOW_NAME
         value: '{{workflow.name}}'
       resources:
         requests:
@@ -220,7 +224,7 @@ spec:
           - name: step-command
             value: '["python", "-m", "kubecore.compose", "platform.lakefs.repository=PLACEHOLDER-repo",
               "platform.lakefs.endpoint=http://lakefs.internal.invalid", "platform.mlflow.tracking_uri=http://mlflow.internal.invalid",
-              "platform.checkpoints.bucket=PLACEHOLDER-bucket", "platform.checkpoints.prefix=main/checkpoints",
+              "platform.checkpoints.bucket=outputs-demo", "platform.checkpoints.prefix=main/checkpoints",
               {{=toJson(''experiment.name='' + workflow.parameters[''experiment-name''])}},
               {{=toJson(''experiment.description='' + workflow.parameters[''experiment-description''])}},
               "--render-defaults", "{\"experiment.name\":\"my-experiment-v1\",\"experiment.description\":\"\"}",
@@ -310,34 +314,44 @@ spec:
       - -c
       - "\nSTAGEOUT = r\"\"\"\n# F-05 stage-out: the step's declared outputs (/work/output/<name>.json,\n\
         # what Argo would have read as outputs.parameters in-cluster) go to lakeFS\n\
-        # at hpc-outputs/{wf-uid}/{step}/ on the project's outputs branch (the run's\n\
-        # dataset branch on a project without one); the waiter fetches them back\n\
-        # into the twin's outputs so downstream steps see real values.\nimport json,\
-        \ os, pathlib, urllib.parse, urllib.request\nbase = os.environ['LAKEFS_ENDPOINT'].rstrip('/')\
+        # at hpc-outputs/{wf-uid}/{step}/ on a hand-off branch of the app's outputs\n\
+        # repository (outputs-<app>); the waiter fetches them back into the twin's\
+        \ outputs so\n# downstream steps see real values, then deletes the branch.\
+        \ They never touch `main`:\n# lakeFS refuses a merge into a branch with uncommitted\
+        \ objects, and the step's real\n# results (checkpoints) are written by the\
+        \ step itself, inside the image, with the\n# kubecore package's run writer\
+        \ (branch run-<run>-<kind>, merged into main).\nimport json, os, pathlib,\
+        \ urllib.error, urllib.parse, urllib.request\nbase = os.environ['LAKEFS_ENDPOINT'].rstrip('/')\
         \ + '/api/v1'\nH = {'Authorization': 'Bearer ' + os.environ['LAKEFS_BEARER_TOKEN']}\n\
-        repo = os.environ['DATASET_REPO']\nbranch = os.environ.get('OUTPUTS_BRANCH')\
-        \ or os.environ.get('DATASET_REF') or 'main'\nprefix = 'hpc-outputs/%s/%s/'\
-        \ % (os.environ['WF_UID'], os.environ['STEP_NAME'])\nout = pathlib.Path(os.environ['KAOS_WORK'])\
-        \ / 'output'\nfor name in [n for n in os.environ.get('STEP_OUTPUTS', '').split(',')\
-        \ if n]:\n    f = out / (name + '.json')\n    if not f.exists():\n       \
-        \ print('stage-out: no', f, flush=True); continue\n    data = f.read_bytes()\n\
-        \    body = (b'--B\\r\\nContent-Disposition: form-data; name=\"content\";\
-        \ filename=\"f\"\\r\\n'\n            b'Content-Type: application/octet-stream\\\
-        r\\n\\r\\n' + data + b'\\r\\n--B--\\r\\n')\n    q = urllib.parse.urlencode({'path':\
-        \ prefix + name + '.json'})\n    req = urllib.request.Request(base + '/repositories/%s/branches/%s/objects?%s'\
+        repo = os.environ['OUTPUTS_REPO']\nbranch = 'hpc-%s-%s' % (os.environ['WF_UID'],\
+        \ os.environ['STEP_NAME'])\ntry:\n    urllib.request.urlopen(urllib.request.Request(\n\
+        \        base + '/repositories/%s/branches' % repo, method='POST',\n     \
+        \   data=json.dumps({'name': branch, 'source': os.environ.get('OUTPUTS_REF')\
+        \ or 'main'}).encode(),\n        headers=dict(H, **{'Content-Type': 'application/json'})),\
+        \ timeout=60).read()\nexcept urllib.error.HTTPError as e:\n    if e.code !=\
+        \ 409:   # 409: a retry of this stage-out created it already\n        raise\n\
+        prefix = 'hpc-outputs/%s/%s/' % (os.environ['WF_UID'], os.environ['STEP_NAME'])\n\
+        out = pathlib.Path(os.environ['KAOS_WORK']) / 'output'\nfor name in [n for\
+        \ n in os.environ.get('STEP_OUTPUTS', '').split(',') if n]:\n    f = out /\
+        \ (name + '.json')\n    if not f.exists():\n        print('stage-out: no',\
+        \ f, flush=True); continue\n    data = f.read_bytes()\n    body = (b'--B\\\
+        r\\nContent-Disposition: form-data; name=\"content\"; filename=\"f\"\\r\\\
+        n'\n            b'Content-Type: application/octet-stream\\r\\n\\r\\n' + data\
+        \ + b'\\r\\n--B--\\r\\n')\n    q = urllib.parse.urlencode({'path': prefix\
+        \ + name + '.json'})\n    req = urllib.request.Request(base + '/repositories/%s/branches/%s/objects?%s'\
         \ % (repo, branch, q),\n                                 data=body, method='POST',\n\
         \                                 headers=dict(H, **{'Content-Type': 'multipart/form-data;\
         \ boundary=B'}))\n    urllib.request.urlopen(req, timeout=120).read()\n  \
         \  print('stage-out:', name, len(data), 'bytes ->', prefix, flush=True)\n\"\
-        \"\"\nimport base64, json, os, shlex, signal, subprocess, sys, threading,\
+        \"\"\nimport base64, json, os, re, shlex, signal, subprocess, sys, threading,\
         \ time, urllib.parse, urllib.request\n\n# F-04 stage-in, run ON the compute\
         \ node (system python3, stdlib only):\n# take the commit dataset-loading pinned\
-        \ (DATASET_COMMIT) or resolve\n# ref -> commit, download the dataset/ folder\
-        \ of that version (the whole ref\n# only for data uploaded before the dataset/\
-        \ layout) from the lakeFS PUBLIC\n# endpoint (bearer through oauth2-proxy\
-        \ \u2014 the in-cluster S3-gateway/manifest\n# streaming path is blocked by\
-        \ the SSO front off-cluster) into a Lustre cache\n# keyed by commit, parallel\
-        \ + resumable (size-matched files are skipped,\n# .part rename is atomic).\
+        \ (DATASET_COMMIT) or resolve\n# ref -> commit, download the dataset (data.yaml,\
+        \ images/, labels/ at the root of\n# the dataset repository) of that version\
+        \ from the lakeFS PUBLIC\n# endpoint (bearer through oauth2-proxy \u2014 the\
+        \ in-cluster S3-gateway/manifest\n# streaming path is blocked by the SSO front\
+        \ off-cluster) into a Lustre cache\n# keyed by commit, parallel + resumable\
+        \ (size-matched files are skipped,\n# per-writer part-file renamed atomically).\
         \ Rides to the node base64-encoded in the job\n# environment.\nSTAGEIN = \"\
         \"\"\nimport concurrent.futures, json, os, pathlib, sys, urllib.parse, urllib.request\n\
         EP = os.environ['LAKEFS_ENDPOINT'].rstrip('/')\nH = {'Authorization': 'Bearer\
@@ -353,46 +367,53 @@ spec:
         \ + urllib.parse.quote(REF, safe='')\n        + '/commits?amount=1'))['results'][0]['id']\n\
         dest = pathlib.Path(os.environ['DATASET_CACHE']) / REPO / commit\nopen(os.environ['DATASET_DIRFILE'],\
         \ 'w').write(str(dest))\nif (dest / '.complete').exists():\n    (dest / '.complete').touch()\
-        \            # last use, for the job's cache cleanup\n    print('stage-in:\
-        \ cache hit', dest, flush=True)\n    sys.exit(0)\ndef ls(prefix):\n    objs,\
-        \ after = [], ''\n    while True:\n        page = json.load(get(base + '/refs/'\
-        \ + commit + '/objects/ls?'\n                             + urllib.parse.urlencode(\n\
+        \            # last use, for the job's cache cleanup\n    (dest / '.kaos-commit').write_text(commit)\
+        \  # the kubecore consumer checks it\n    print('stage-in: cache hit', dest,\
+        \ flush=True)\n    sys.exit(0)\ndef ls(prefix):\n    objs, after = [], ''\n\
+        \    while True:\n        page = json.load(get(base + '/refs/' + commit +\
+        \ '/objects/ls?'\n                             + urllib.parse.urlencode(\n\
         \                                 {'amount': 1000, 'after': after,\n     \
         \                             'prefix': prefix})))\n        objs += [r for\
         \ r in page.get('results') or []\n                 if r.get('path_type') ==\
         \ 'object']\n        pg = page.get('pagination') or {}\n        if not pg.get('has_more'):\n\
         \            return objs\n        after = pg.get('next_offset') or ''\n# Only\
-        \ the dataset: the branch may also hold other files (checkpoints of\n# older\
-        \ runs). Data uploaded before the dataset/ layout sits at the root.\nobjs\
-        \ = ls('dataset/') or ls('')\nprint('stage-in:', len(objs), 'objects @', commit[:12],\
-        \ flush=True)\ndef fetch(o):\n    p = dest / o['path']\n    if p.exists()\
-        \ and p.stat().st_size == o.get('size_bytes'):\n        return 0\n    p.parent.mkdir(parents=True,\
-        \ exist_ok=True)\n    tmp = str(p) + '.part'\n    with get(base + '/refs/'\
-        \ + commit + '/objects?'\n             + urllib.parse.urlencode({'path': o['path']}))\
-        \ as r:\n        with open(tmp, 'wb') as f:\n            while True:\n   \
-        \             b = r.read(1 << 20)\n                if not b:\n           \
-        \         break\n                f.write(b)\n    os.replace(tmp, p)\n    return\
-        \ 1\nwith concurrent.futures.ThreadPoolExecutor(8) as ex:\n    n = sum(ex.map(fetch,\
-        \ objs))\n(dest / '.complete').touch()\nprint('stage-in: downloaded', n, 'of',\
-        \ len(objs), '->', dest, flush=True)\n\"\"\"\n\n# F-08 wallet: mint a short-lived\
-        \ Zitadel bearer from the mounted machine\n# key \u2014 the same JWT-profile\
-        \ recipe as the seeded mlflow_zitadel_auth\n# module (assertion aud = https://{domain};\
-        \ the project-audience scope is\n# what makes the token acceptable to mlflow-oidc-auth\
-        \ AND carries the\n# groups claim). PyJWT+cryptography are pip-installed at\
-        \ run time: the\n# submit image is bare-stdlib alpine and RS256 needs real\
-        \ crypto. Any\n# failure degrades loudly to no-wallet (job still runs, data-plane\
-        \ env\n# omitted) \u2014 never the machine key itself into the Slurm environment\n\
-        # (T-03: HPC-side env must only ever see short-lived tokens).\nWALLET = None\n\
-        WALLET_EXP = 0.0\n# Resubmit a still-PENDING job before its wallet (MLflow/lakeFS\
-        \ bearer, 12 h\n# lifetime) expires: a job that starts after a queue wait\
-        \ longer than the\n# wallet would train blind (no MLflow, no checkpoint upload,\
-        \ no stage-out).\n# The Slurm JWT is read fresh per request (tok()); the wallet\
-        \ cannot be\n# refreshed inside a queued job, so the job itself is replaced.\n\
-        WALLET_MARGIN_S = 30 * 60\n\n\ndef wallet_exp(w):\n    \"\"\"exp claim of\
-        \ a JWT as epoch seconds (0 when unknown).\"\"\"\n    try:\n        seg =\
-        \ w.split('.')[1]\n        return float(json.loads(base64.urlsafe_b64decode(\n\
-        \            seg + '=' * (-len(seg) % 4)))['exp'])\n    except Exception:\n\
-        \        return 0.0\n\n\ndef mint_wallet():\n    keyfile = os.environ.get('ZITADEL_MACHINE_KEY_FILE')\
+        \ the dataset: the repository root may also hold other files (README,\n# notes)\
+        \ the steps never read.\nobjs = [o for o in ls('') if o['path'] == 'data.yaml'\n\
+        \        or o['path'].split('/', 1)[0] in ('images', 'labels')]\nprint('stage-in:',\
+        \ len(objs), 'objects @', commit[:12], flush=True)\ndef fetch(o):\n    p =\
+        \ dest / o['path']\n    if p.exists() and p.stat().st_size == o.get('size_bytes'):\n\
+        \        return 0\n    p.parent.mkdir(parents=True, exist_ok=True)\n    #\
+        \ PRD-1609 F-02: one part-file per writer \u2014 another job may stage the\
+        \ same file.\n    tmp = '%s.part-%s-%d' % (p, os.environ.get('SLURM_JOB_ID',\
+        \ ''), os.getpid())\n    try:\n        with get(base + '/refs/' + commit +\
+        \ '/objects?'\n                 + urllib.parse.urlencode({'path': o['path']}))\
+        \ as r:\n            with open(tmp, 'wb') as f:\n                while True:\n\
+        \                    b = r.read(1 << 20)\n                    if not b:\n\
+        \                        break\n                    f.write(b)\n        os.replace(tmp,\
+        \ p)\n    except BaseException:\n        if os.path.exists(tmp):\n       \
+        \     os.remove(tmp)\n        raise\n    return 1\nwith concurrent.futures.ThreadPoolExecutor(8)\
+        \ as ex:\n    n = sum(ex.map(fetch, objs))\n(dest / '.complete').touch()\n\
+        (dest / '.kaos-commit').write_text(commit)   # the kubecore consumer checks\
+        \ it\nprint('stage-in: downloaded', n, 'of', len(objs), '->', dest, flush=True)\n\
+        \"\"\"\n\n# F-08 wallet: mint a short-lived Zitadel bearer from the mounted\
+        \ machine\n# key \u2014 the same JWT-profile recipe as the seeded mlflow_zitadel_auth\n\
+        # module (assertion aud = https://{domain}; the project-audience scope is\n\
+        # what makes the token acceptable to mlflow-oidc-auth AND carries the\n# groups\
+        \ claim). PyJWT+cryptography are pip-installed at run time: the\n# submit\
+        \ image is bare-stdlib alpine and RS256 needs real crypto. Any\n# failure\
+        \ degrades loudly to no-wallet (job still runs, data-plane env\n# omitted)\
+        \ \u2014 never the machine key itself into the Slurm environment\n# (T-03:\
+        \ HPC-side env must only ever see short-lived tokens).\nWALLET = None\nWALLET_EXP\
+        \ = 0.0\n# Resubmit a still-PENDING job before its wallet (MLflow/lakeFS bearer,\
+        \ 12 h\n# lifetime) expires: a job that starts after a queue wait longer than\
+        \ the\n# wallet would train blind (no MLflow, no checkpoint upload, no stage-out).\n\
+        # The Slurm JWT is read fresh per request (tok()); the wallet cannot be\n\
+        # refreshed inside a queued job, so the job itself is replaced.\nWALLET_MARGIN_S\
+        \ = 30 * 60\n\n\ndef wallet_exp(w):\n    \"\"\"exp claim of a JWT as epoch\
+        \ seconds (0 when unknown).\"\"\"\n    try:\n        seg = w.split('.')[1]\n\
+        \        return float(json.loads(base64.urlsafe_b64decode(\n            seg\
+        \ + '=' * (-len(seg) % 4)))['exp'])\n    except Exception:\n        return\
+        \ 0.0\n\n\ndef mint_wallet():\n    keyfile = os.environ.get('ZITADEL_MACHINE_KEY_FILE')\
         \ or ''\n    domain = os.environ.get('ZITADEL_DOMAIN') or ''\n    if not keyfile\
         \ or not os.path.exists(keyfile) or not domain:\n        print('wallet: machine\
         \ key / domain absent, data-plane env omitted',\n              flush=True)\n\
@@ -443,113 +464,324 @@ spec:
         \        wd = (cfg.get('config') or {}).get('WorkingDir') or ''\n        print('workdir:',\
         \ wd or '(none)', flush=True)\n        return wd\n    except Exception as\
         \ e:\n        print('workdir: lookup failed (running from host cwd):', e,\
-        \ flush=True)\n        return ''\n\nAPI = 'https://slurm-api.lxp.lu/slurm/v0.0.44'\n\
-        SDB = 'https://slurm-api.lxp.lu/slurmdb/v0.0.44'\nTOKEN_FILE = '/etc/meluxina-jwt/token'\n\
-        \n\ndef tok():\n    \"\"\"The MeluXina JWT, read FRESH on every request. The\
-        \ platform mints it\n    with a 60-minute lifetime and rotates the Secret\
-        \ every 25 minutes; the\n    mounted file follows the rotation, an env var\
-        \ does not (live run\n    app-meluxina-toy-abcde: the pod's env token expired\
-        \ 13:30:02 while\n    the job still queued \u2014 every poll 502/511 for hours,\
-        \ and cancel/resubmit\n    would have failed the same way).\"\"\"\n    try:\n\
-        \        with open(TOKEN_FILE) as f:\n            t = f.read().strip()\n \
-        \           if t:\n                return t\n    except OSError:\n       \
-        \ pass\n    return os.environ['SLURM_TOKEN'].strip()\n\n\ndef hpc_identity():\n\
-        \    \"\"\"The project's HPC identity from the pipeline context (PRD-HPC-1231\n\
-        \    CON-05): user, account, scratch root and home. Never literals \u2014\
-        \ one\n    project's twin must never submit as another project's user. Missing\n\
-        \    identity = the platform did not publish the tenancy; fail loudly.\"\"\
-        \"\n    ident = {k: (os.environ.get(v) or '') for k, v in (\n        ('user',\
-        \ 'HPC_USER'), ('account', 'HPC_ACCOUNT'),\n        ('scratch', 'HPC_SCRATCH'),\
-        \ ('home', 'HPC_HOME'))}\n    missing = [k for k, val in ident.items() if\
-        \ not val]\n    if missing:\n        print('HPC identity missing from the\
-        \ pipeline context:', missing,\n              '- the KubeProject is not bound\
-        \ to an HPC tenancy (PRD-HPC-1231)',\n              flush=True)\n        sys.exit(2)\n\
-        \    return ident\n\n\ndef hdrs():\n    return {'X-SLURM-USER-NAME': hpc_identity()['user'],\n\
-        \            'X-SLURM-USER-TOKEN': tok(),\n            'Content-Type': 'application/json'}\n\
-        \n\ndef hpc_class():\n    \"\"\"The HPC class this twin runs on (its {step}-class\
-        \ value), resolved\n    against the catalog the enhancer embedded. Unknown\
-        \ class = render/\n    submit mismatch, never a silent default partition.\"\
-        \"\"\n    name = os.environ.get('HPC_CLASS') or ''\n    for c in json.loads(os.environ.get('HPC_CLASSES_JSON')\
+        \ flush=True)\n        return ''\n\n\n# PRD-1609 node sharing. Off unless\
+        \ the operator turned it on for this project\n# (pipeline context hpc.sharing)\
+        \ and gave its scope: a host on a shared node takes\n# only jobs whose name\
+        \ and script header carry its own scope.\nSCOPE = os.environ.get('HPC_SCOPE')\
+        \ or ''\nSHARING = os.environ.get('HPC_SHARING') == 'on' and re.fullmatch('[a-z0-9]{8,16}',\
+        \ SCOPE) is not None\nif os.environ.get('HPC_SHARING') == 'on' and not SHARING:\n\
+        \    print('node sharing: scope %r is not 8-16 lowercase letters or digits\
+        \ - running alone' % SCOPE,\n          flush=True)\n# What stays in the Slurm\
+        \ environment when the inputs move into the script: the\n# login shell builds\
+        \ PATH from it, so it is never re-exported over the profile.\nSLURM_ENV_KEEP\
+        \ = ('PATH', 'HOME', 'USER')\n\n\ndef inputs_in_script(batch, env):\n    \"\
+        \"\"D-02: a host can read a waiting job's script, never its environment (probe\n\
+        \    2026-11-03), so with sharing on the step's inputs ride in the script\
+        \ as export\n    lines after its header, and the Slurm environment keeps only\
+        \ SLURM_ENV_KEEP.\"\"\"\n    keep, exports = [], []\n    for e in env:\n \
+        \       k, v = e.split('=', 1)\n        if k in SLURM_ENV_KEEP:\n        \
+        \    keep.append(e)\n        else:\n            exports.append('export %s=%s'\
+        \ % (k, shlex.quote(v)))\n    lines = batch.split('\\n')\n    return '\\n'.join(lines[:3]\
+        \ + exports + lines[3:]), keep\n\n\ndef comment_of(job):\n    \"\"\"The job\
+        \ comment: a string from slurmctld, {'job': ...} from slurmdbd.\"\"\"\n  \
+        \  c = job.get('comment') or ''\n    return (c.get('job') or '') if isinstance(c,\
+        \ dict) else c\n\n\ndef share_state(comment):\n    \"\"\"D-04: what a host\
+        \ wrote into this job's comment, as a dict ({} when no host\n    took it):\
+        \ kaos-state (taken|done|requeued), host, slot, attempt, rc, reason.\"\"\"\
+        \n    return dict(re.findall(r'(?:^|\\s)(kaos-state|host|slot|attempt|rc|reason)=(\\\
+        S+)', comment))\n\n\n# PRD-1609 F-03: the slot manager. With sharing on, a\
+        \ job's batch step runs this\n# instead of its own step (MeluXina compute\
+        \ nodes: Python 3.6, standard library only).\n# It runs its own step and waiting\
+        \ jobs of the same scope as Slurm job steps, one GPU\n# each, and reports\
+        \ each in that job's comment. Rides to the node base64-encoded.\nSLOTS = r\"\
+        \"\"\nimport os, re, signal, subprocess, sys, time\n\n# A step's environment:\
+        \ Slurm's own variables, the GPU it was given and the login\n# basics. Nothing\
+        \ of the host's inputs reaches a guest; each script exports its own.\nSTEP_ENV\
+        \ = re.compile(r'^(SLURM_|CUDA_VISIBLE_DEVICES$|GPU_DEVICE_ORDINAL$|ROCR_VISIBLE_DEVICES$'\n\
+        \                      r'|PATH$|HOME$|USER$|LANG$|LC_)')\n\nif sys.argv[1:2]\
+        \ == ['--step']:\n    import pwd\n    script, job = sys.argv[2], sys.argv[3]\n\
+        \    env = dict((k, v) for k, v in os.environ.items() if STEP_ENV.match(k))\n\
+        \    # The login basics, also when Slurm passed none (SLURM_EXPORT_ENV=NONE).\n\
+        \    me = pwd.getpwuid(os.getuid())\n    env.setdefault('HOME', me.pw_dir)\n\
+        \    env.setdefault('USER', me.pw_name)\n    env.setdefault('PATH', '/usr/bin:/bin:/usr/local/bin')\n\
+        \    env.update(KAOS_IN_STEP='1', KAOS_JOB_ID=job)\n    os.chdir(env.get('HOME')\
+        \ or '/')\n    if len(sys.argv) > 4:\n        # The step writes its own log:\
+        \ srun forwards output late, and fail() reads\n        # this file for the\
+        \ job's comment (live 2026-11-03: the hosted tail was empty).\n        fd\
+        \ = os.open(sys.argv[4], os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o640)\n\
+        \        os.dup2(fd, 1)\n        os.dup2(fd, 2)\n    os.execve('/bin/bash',\
+        \ ['bash', '-l', script], env)\n\nME = os.environ['SLURM_JOB_ID']\nOWN_SCRIPT\
+        \ = sys.argv[1]\nSCOPE = os.environ['KAOS_SCOPE']\nPREFIX = 'kaos-' + SCOPE\
+        \ + '-'\nHEADER = '# kaos-job v2 scope=' + SCOPE\nCLAIMS = os.path.join(os.environ['KAOS_SCR'],\
+        \ 'kaos-claims')\nHOME = os.environ.get('HOME') or '/'\nGPUS = max(1, int(os.environ.get('HPC_GPUS')\
+        \ or 1))\nCPUS = max(1, int(os.environ.get('SLURM_CPUS_ON_NODE') or GPUS)\
+        \ // GPUS)\nIDLE_S = int(os.environ.get('KAOS_IDLE_S') or 120)\nMARGIN_S =\
+        \ 300          # a guest must end this long before the host's own limit\n\
+        TOKEN_MARGIN_S = 1800   # ... and this long before its own token expires (D-07)\n\
+        HELD = ('JobHeld', 'Dependency', 'BeginTime')\nPOLL_S = float(os.environ.get('KAOS_POLL_S')\
+        \ or 2)   # watchdog cadence; queue every 5 polls\n\n\ndef log(*a):\n    print(time.strftime('%H:%M:%S'),\
+        \ 'slots:', *a, flush=True)\n\n\ndef run(*cmd):\n    p = subprocess.run(list(cmd),\
+        \ stdout=subprocess.PIPE, stderr=subprocess.STDOUT,\n                    \
+        \   universal_newlines=True)\n    return p.returncode, p.stdout.strip()\n\n\
+        \ndef q(job, fmt):\n    rc, out = run('squeue', '-h', '-j', job, '-o', fmt)\n\
+        \    return out if rc == 0 else ''\n\n\ndef comment(job):\n    c = q(job,\
+        \ '%k')\n    return '' if c == '(null)' else c\n\n\ndef set_comment(job, text):\n\
+        \    run('scontrol', 'update', 'JobId=' + job, 'Comment=' + text)\n\n\ndef\
+        \ lease(c):\n    m = re.search(r'kaos-commit=\\S+', c)\n    return m.group(0)\
+        \ + ' ' if m else ''\n\n\ndef err_part(c):\n    m = re.search(r'(?:^|\\s)(err\\\
+        d+:.*)$', c)\n    return ' ' + m.group(1) if m else ''\n\n\ndef attempt(c):\n\
+        \    m = re.search(r'(?:^|\\s)attempt=(\\d+)', c)\n    return int(m.group(1))\
+        \ if m else 1\n\n\ndef mem_share_bytes():\n    mb = int(os.environ.get('SLURM_MEM_PER_NODE')\
+        \ or 0)\n    if not mb:\n        with open('/proc/meminfo') as f:\n      \
+        \      mb = int(f.readline().split()[1]) // 1024\n    return mb * 1024 * 1024\
+        \ // GPUS\n\n\ndef limit_s(text):\n    # squeue %l: UNLIMITED, D-HH:MM:SS,\
+        \ HH:MM:SS, MM:SS or MM\n    if not text or text in ('UNLIMITED', 'INVALID',\
+        \ 'NOT_SET'):\n        return None\n    days, _, rest = text.rpartition('-')\n\
+        \    try:\n        parts = [int(x) for x in rest.split(':')]\n    except ValueError:\n\
+        \        return None\n    if len(parts) == 1:\n        h, m, s = 0, parts[0],\
+        \ 0\n    elif len(parts) == 2:\n        h, m, s = 0, parts[0], parts[1]\n\
+        \    else:\n        h, m, s = parts[-3:]\n    return int(days or 0) * 86400\
+        \ + h * 3600 + m * 60 + s\n\n\ndef end_epoch():\n    e = q(ME, '%e')\n   \
+        \ try:\n        return time.mktime(time.strptime(e, '%Y-%m-%dT%H:%M:%S'))\n\
+        \    except ValueError:\n        return time.time() + 3600\n\n\nPART = q(ME,\
+        \ '%P')\nHOST_END = end_epoch()\nSHARE = mem_share_bytes()\nPAGE = os.sysconf('SC_PAGE_SIZE')\n\
+        slots = {}      # slot -> {'job', 'proc', 'claim', 'name', 'memkill'}\nown_rc\
+        \ = None\nskip = set()    # jobs looked at and not ours to take\n\n\ndef launch(slot,\
+        \ job, script, log_to, limit=None):\n    # --export=ALL: a job with an explicit\
+        \ environment (REST) has SLURM_EXPORT_ENV=NONE,\n    # and a plain srun would\
+        \ start the step without HOME or PATH (live 2026-11-03,\n    # job 5417729).\
+        \ The launcher then keeps only Slurm's variables and the basics.\n    cmd\
+        \ = ['srun', '--export=ALL', '--exact', '-N1', '-n1', '--gpus=1', '-c', str(CPUS),\n\
+        \           '--job-name', 'kaos-' + job]\n    if limit:\n        cmd.append('--time=%d'\
+        \ % max(1, (limit + 59) // 60))\n    cmd += ['python3', sys.argv[0], '--step',\
+        \ script, job] + ([log_to] if log_to else [])\n    out = open(log_to, 'a')\
+        \ if log_to else None\n    proc = subprocess.Popen(cmd, stdin=subprocess.DEVNULL,\
+        \ stdout=out, stderr=subprocess.STDOUT if out else None)\n    return proc\n\
+        \n\ndef step_id(job):\n    rc, out = run('squeue', '-s', '-j', ME, '-h', '-o',\
+        \ '%i %j')\n    for line in out.splitlines():\n        sid, _, name = line.partition('\
+        \ ')\n        if name == 'kaos-' + job:\n            return sid\n    return\
+        \ None\n\n\ndef step_rss():\n    # Memory per step, from /proc (psslurm has\
+        \ no slurmd tooling: scontrol listpids fails).\n    rss = {}\n    for pid\
+        \ in os.listdir('/proc'):\n        if not pid.isdigit():\n            continue\n\
+        \        try:\n            with open('/proc/%s/environ' % pid, 'rb') as f:\n\
+        \                env = dict(kv.split(b'=', 1) for kv in f.read().split(b'\\\
+        0') if b'=' in kv)\n            if env.get(b'SLURM_JOB_ID') != ME.encode()\
+        \ or b'SLURM_STEP_ID' not in env:\n                continue\n            with\
+        \ open('/proc/%s/statm' % pid) as f:\n                pages = int(f.read().split()[1])\n\
+        \        except (OSError, ValueError, IndexError):\n            continue\n\
+        \        sid = env[b'SLURM_STEP_ID'].decode()\n        rss[sid] = rss.get(sid,\
+        \ 0) + pages * PAGE\n    return rss\n\n\ndef take(slot, job, name, limit):\n\
+        \    # The claim folder is a lock: only its owner holds or releases the job,\
+        \ so two\n    # hosts never undo each other. A taken job stays held, so it\
+        \ never also starts alone.\n    now = time.time()\n    if limit is None or\
+        \ now + limit + MARGIN_S > HOST_END:\n        return False\n    if not os.path.isdir(CLAIMS):\n\
+        \        os.makedirs(CLAIMS, exist_ok=True)\n    c = comment(job)\n    k =\
+        \ attempt(c)\n    claim = os.path.join(CLAIMS, '%s-a%d' % (job, k))\n    try:\n\
+        \        os.mkdir(claim)\n    except OSError:\n        return False      \
+        \                 # another host is deciding or runs it\n    keep = False\n\
+        \    try:\n        run('scontrol', 'hold', job)\n        if not q(job, '%T|%r').startswith('PENDING|JobHeld'):\n\
+        \            return False                   # it started on its own node meanwhile\n\
+        \        script = os.path.join(claim, 'job.sh')\n        rc, _ = run('scontrol',\
+        \ 'write', 'batch_script', job, script)\n        text = open(script).read()\
+        \ if rc == 0 and os.path.exists(script) else ''\n        if HEADER not in\
+        \ text.split('\\n')[:3]:\n            skip.add(job)\n            log('not\
+        \ taking', job, '(no', HEADER + ')')\n            return False\n        m\
+        \ = re.search(r'^export KAOS_TOKEN_EXP=(\\d+)$', text, re.M)\n        if m\
+        \ and now + limit + MARGIN_S > int(m.group(1)) - TOKEN_MARGIN_S:\n       \
+        \     return False\n        set_comment(job, '%skaos-state=taken host=%s slot=%d\
+        \ attempt=%d' % (lease(c), ME, slot, k))\n        slots[slot] = {'job': job,\
+        \ 'claim': claim, 'name': name, 'memkill': False, 'attempt': k,\n        \
+        \               'proc': launch(slot, job, script, os.path.join(HOME, 'slurm-%s.out'\
+        \ % job), limit)}\n        keep = True\n        log('took', job, name, 'on\
+        \ slot', slot)\n        return True\n    finally:\n        if not keep:\n\
+        \            run('scontrol', 'release', job)\n            try:\n         \
+        \       for f in os.listdir(claim):\n                    os.remove(os.path.join(claim,\
+        \ f))\n                os.rmdir(claim)\n            except OSError:\n    \
+        \            pass\n\n\ndef requeue(s):\n    # Back to the queue with the next\
+        \ attempt number, still leasing its dataset.\n    if q(s['job'], '%T') ==\
+        \ 'PENDING':\n        c = comment(s['job'])\n        set_comment(s['job'],\
+        \ '%skaos-state=requeued attempt=%d' % (lease(c), s['attempt'] + 1))\n   \
+        \     run('scontrol', 'release', s['job'])\n        log('requeued', s['job'],\
+        \ 'as attempt', s['attempt'] + 1)\n\n\ndef finish(slot, rc):\n    global own_rc\n\
+        \    s = slots.pop(slot)\n    job = s['job']\n    reason = ' reason=memkill'\
+        \ if s['memkill'] else ''\n    if job == ME:\n        own_rc = rc\n      \
+        \  c = comment(ME)\n        set_comment(ME, '%skaos-state=done rc=%d%s%s'\
+        \ % (lease(c), rc, reason, err_part(c)))\n        log('own step ended rc=%d%s'\
+        \ % (rc, reason))\n        return\n    if q(job, '%T') != 'PENDING':\n   \
+        \     log('guest', job, 'was stopped; its step ended rc=%d' % rc)\n      \
+        \  return\n    if q(ME, '%T') != 'RUNNING':\n        # The host itself is\
+        \ going away (cancelled, out of time): Slurm may end the\n        # steps\
+        \ before this program's TERM handler runs (live 2026-11-03, host\n       \
+        \ # 5417697). The guest's run did not fail; it goes back to the queue.\n \
+        \       requeue(s)\n        return\n    c = comment(job)\n    set_comment(job,\
+        \ '%skaos-state=done rc=%d host=%s%s%s' % (lease(c), rc, ME, reason, err_part(c)))\n\
+        \    run('scancel', job)\n    log('guest', job, 'done rc=%d%s' % (rc, reason))\n\
+        \n\ndef requeue_all(signum, frame):\n    # Host cancelled or out of time (Slurm\
+        \ sends TERM, KILL 30 s later): every guest\n    # goes back to the queue\
+        \ with the next attempt number, still leasing its dataset.\n    for s in list(slots.values()):\n\
+        \        if s['job'] != ME:\n            requeue(s)\n    sys.exit(own_rc if\
+        \ own_rc is not None else 143)\n\n\nsignal.signal(signal.SIGTERM, requeue_all)\n\
+        slots[0] = {'job': ME, 'claim': None, 'name': 'own', 'memkill': False, 'attempt':\
+        \ 1,\n            'proc': launch(0, ME, OWN_SCRIPT, None)}\nlog('host', ME,\
+        \ 'partition', PART, 'slots', GPUS, 'cpus/slot', CPUS, 'mem/slot %d MiB' %\
+        \ (SHARE >> 20))\nidle_since, tick = None, 0\nwhile True:\n    time.sleep(POLL_S)\n\
+        \    tick += 1\n    for slot, s in list(slots.items()):\n        rc = s['proc'].poll()\n\
+        \        if rc is not None:\n            finish(slot, rc)\n    rss = step_rss()\n\
+        \    for s in slots.values():\n        sid = s.get('sid') or step_id(s['job'])\n\
+        \        s['sid'] = sid\n        if sid and rss.get(sid.split('.')[-1], 0)\
+        \ > SHARE and not s['memkill']:\n            log('memory: step', sid, 'of',\
+        \ s['job'], 'uses %d MiB > %d MiB share' % (rss[sid.split('.')[-1]] >> 20,\
+        \ SHARE >> 20))\n            s['memkill'] = True\n            run('scancel',\
+        \ sid)\n    if tick % 5:\n        continue\n    for slot, s in list(slots.items()):\n\
+        \        if s['job'] != ME and q(s['job'], '%T') != 'PENDING' and s.get('sid'):\n\
+        \            log('guest', s['job'], 'stopped by its run: cancelling step',\
+        \ s['sid'])\n            run('scancel', s['sid'])\n    if q(ME, '%T') != 'RUNNING':\n\
+        \        # Cancelled or out of time: take nothing new; leave once the last\
+        \ step is gone.\n        if not slots:\n            sys.exit(own_rc if own_rc\
+        \ is not None else 143)\n        continue\n    free = [i for i in range(GPUS)\
+        \ if i not in slots]\n    if free:\n        rc, out = run('squeue', '-u',\
+        \ os.environ.get('USER', ''), '-h', '-t', 'PENDING',\n                   \
+        \   '--sort=-p,i', '-o', '%i|%j|%r|%l|%P')\n        for line in out.splitlines():\n\
+        \            if not free:\n                break\n            job, name, reason,\
+        \ lim, part = (line.split('|') + [''] * 5)[:5]\n            if (job == ME\
+        \ or job in skip or not name.startswith(PREFIX) or part != PART\n        \
+        \            or reason.startswith(HELD)):\n                continue\n    \
+        \        if take(free[0], job, name, limit_s(lim)):\n                free.pop(0)\n\
+        \    busy = bool(slots)\n    if busy:\n        idle_since = None\n    elif\
+        \ idle_since is None:\n        idle_since = time.time()\n    elif time.time()\
+        \ - idle_since >= IDLE_S or HOST_END - time.time() < MARGIN_S + 60:\n    \
+        \    log('idle: releasing the node')\n        sys.exit(own_rc or 0)\n\"\"\"\
+        \n\n\nAPI = 'https://slurm-api.lxp.lu/slurm/v0.0.44'\nSDB = 'https://slurm-api.lxp.lu/slurmdb/v0.0.44'\n\
+        TOKEN_FILE = '/etc/meluxina-jwt/token'\n\n\ndef tok():\n    \"\"\"The MeluXina\
+        \ JWT, read FRESH on every request. The platform mints it\n    with a 60-minute\
+        \ lifetime and rotates the Secret every 25 minutes; the\n    mounted file\
+        \ follows the rotation, an env var does not (live run\n    app-meluxina-toy-abcde:\
+        \ the pod's env token expired 13:30:02 while\n    the job still queued \u2014\
+        \ every poll 502/511 for hours, and cancel/resubmit\n    would have failed\
+        \ the same way).\"\"\"\n    try:\n        with open(TOKEN_FILE) as f:\n  \
+        \          t = f.read().strip()\n            if t:\n                return\
+        \ t\n    except OSError:\n        pass\n    return os.environ['SLURM_TOKEN'].strip()\n\
+        \n\ndef hpc_identity():\n    \"\"\"The project's HPC identity from the pipeline\
+        \ context (PRD-HPC-1231\n    CON-05): user, account, scratch root and home.\
+        \ Never literals \u2014 one\n    project's twin must never submit as another\
+        \ project's user. Missing\n    identity = the platform did not publish the\
+        \ tenancy; fail loudly.\"\"\"\n    ident = {k: (os.environ.get(v) or '') for\
+        \ k, v in (\n        ('user', 'HPC_USER'), ('account', 'HPC_ACCOUNT'),\n \
+        \       ('scratch', 'HPC_SCRATCH'), ('home', 'HPC_HOME'))}\n    missing =\
+        \ [k for k, val in ident.items() if not val]\n    if missing:\n        print('HPC\
+        \ identity missing from the pipeline context:', missing,\n              '-\
+        \ the KubeProject is not bound to an HPC tenancy (PRD-HPC-1231)',\n      \
+        \        flush=True)\n        sys.exit(2)\n    return ident\n\n\ndef hdrs():\n\
+        \    return {'X-SLURM-USER-NAME': hpc_identity()['user'],\n            'X-SLURM-USER-TOKEN':\
+        \ tok(),\n            'Content-Type': 'application/json'}\n\n\ndef hpc_class():\n\
+        \    \"\"\"The HPC class this twin runs on (its {step}-class value), resolved\n\
+        \    against the catalog the enhancer embedded. Unknown class = render/\n\
+        \    submit mismatch, never a silent default partition.\"\"\"\n    name =\
+        \ os.environ.get('HPC_CLASS') or ''\n    for c in json.loads(os.environ.get('HPC_CLASSES_JSON')\
         \ or '[]'):\n        if c.get('name') == name:\n            return c\n   \
         \ print('unknown HPC class', repr(name), '- catalog:',\n          [c.get('name')\
         \ for c in json.loads(os.environ.get('HPC_CLASSES_JSON') or '[]')],\n    \
         \      flush=True)\n    sys.exit(2)\n\n\n\ndef get(url):\n    return json.load(urllib.request.urlopen(\n\
         \        urllib.request.Request(url, headers=hdrs()), timeout=30))\n\njobname\
-        \ = 'kaos-' + os.environ['WF_UID'] + '-' + os.environ['STEP_NAME']\nimg =\
-        \ os.environ['IMAGE_REF']\n# Apptainer rejects tag@digest refs ('Docker references\
-        \ with both a tag and\n# digest are currently not supported', live job 5140397).\
-        \ The platform pins\n# images as name:tag@sha256:... (Zot-retention lesson)\
-        \ \u2014 normalize to the\n# digest-only form, which Apptainer accepts and\
-        \ which is the stronger pin.\nif '@' in img:\n    name, digest = img.split('@',\
-        \ 1)\n    if ':' in name.rsplit('/', 1)[-1]:\n        name = name.rsplit(':',\
-        \ 1)[0]\n    img = name + '@' + digest\n# shlex-quote each argv token: the\
-        \ joined string rides through Slurm env ->\n# sh -c, and a naive join destroys\
-        \ embedded quoting (live job 5140493:\n# python -c 'import torch; ...' arrived\
-        \ as bare words and exited 2).\n# strict=False tolerates control characters\
-        \ inside strings \u2014 belt-and-braces\n# for any substitution path the render-side\
-        \ toJson escaping didn't cover.\ncmd = ' '.join(shlex.quote(t) for t in json.loads(\n\
-        \    os.environ.get('STEP_COMMAND') or '[]', strict=False))\n\n\ndef pinned_commit():\n\
-        \    \"\"\"The lakeFS commit dataset-loading resolved. It rides in this step's\
-        \ own\n    command, already pair-aware: dataset-loading's --manifest-summary\n\
-        \    ({commit}), or model-training's --training-result ({dataset_commit})\
-        \ for\n    the steps after training. So the HPC copy stages exactly what the\n\
-        \    in-cluster steps read. \"\" when neither carries one (older step code).\"\
-        \"\"\n    toks = json.loads(os.environ.get('STEP_COMMAND') or '[]', strict=False)\n\
-        \    for flag, value in zip(toks, toks[1:]):\n        key = {'--manifest-summary':\
-        \ 'commit',\n               '--training-result': 'dataset_commit'}.get(flag)\n\
-        \        if key:\n            try:\n                commit = str(json.loads(value).get(key)\
-        \ or '')\n            except (ValueError, AttributeError):\n             \
-        \   commit = ''\n            if commit:\n                return commit\n \
-        \   return ''\n\n# PRD-HPC-1541 F-03: stage the pinned dataset commit into\
-        \ the project's Lustre\n# cache from a MeluXina LOGIN node before the GPU\
-        \ job is submitted, so the job\n# reads a resident copy instead of downloading\
-        \ on GPU time. The pod talks to\n# the stager the platform installed (~/.kaos/stager.py)\
-        \ through a\n# forced-command key that can run nothing else (Secret meluxina-staging:\
-        \ key +\n# verified host pin). The stager names a base (its newest ready commit\
-        \ of the\n# repo); the pod lists only the lakeFS diff base..commit, or the\
-        \ whole\n# dataset/ for a first copy, and streams one JSON line per file.\
-        \ Unchanged\n# files are hard links of the base. Bytes come from the lakeFS\
-        \ API with the\n# wallet bearer (sent once on stdin, held in memory only)\
-        \ until presigned URLs\n# are enabled (F-05). Any failure returns '' and the\
-        \ job stages in-job as\n# before, saying so (F-06).\nSTAGING_DIR = '/etc/meluxina-staging'\n\
-        LOGIN_HOST, LOGIN_PORT = 'login.lxp.lu', '8822'\nSTAGE_BUDGET_S = 4 * 3600\n\
-        EX_RETRY, EX_NOSPACE = 75, 76\n\n\ndef lakefs_pages(url, wallet, params):\n\
-        \    # Every object of a paginated lakeFS listing (objects/ls or diff).\n\
-        \    after = ''\n    while True:\n        q = urllib.parse.urlencode(dict(params,\
-        \ amount=1000, after=after))\n        page = json.load(urllib.request.urlopen(urllib.request.Request(\n\
+        \ = 'kaos-' + (SCOPE + '-' if SHARING else '') + os.environ['WF_UID'] + '-'\
+        \ + os.environ['STEP_NAME']\nimg = os.environ['IMAGE_REF']\n# Apptainer rejects\
+        \ tag@digest refs ('Docker references with both a tag and\n# digest are currently\
+        \ not supported', live job 5140397). The platform pins\n# images as name:tag@sha256:...\
+        \ (Zot-retention lesson) \u2014 normalize to the\n# digest-only form, which\
+        \ Apptainer accepts and which is the stronger pin.\nif '@' in img:\n    name,\
+        \ digest = img.split('@', 1)\n    if ':' in name.rsplit('/', 1)[-1]:\n   \
+        \     name = name.rsplit(':', 1)[0]\n    img = name + '@' + digest\n# shlex-quote\
+        \ each argv token: the joined string rides through Slurm env ->\n# sh -c,\
+        \ and a naive join destroys embedded quoting (live job 5140493:\n# python\
+        \ -c 'import torch; ...' arrived as bare words and exited 2).\n# strict=False\
+        \ tolerates control characters inside strings \u2014 belt-and-braces\n# for\
+        \ any substitution path the render-side toJson escaping didn't cover.\ncmd\
+        \ = ' '.join(shlex.quote(t) for t in json.loads(\n    os.environ.get('STEP_COMMAND')\
+        \ or '[]', strict=False))\n\n\ndef pinned_commit():\n    \"\"\"The lakeFS\
+        \ commit an upstream step recorded as `dataset_commit` in a JSON\n    output\
+        \ that rides in this step's own command (e.g. --training-result,\n    --dataset-info).\
+        \ The HPC copy then stages exactly what the in-cluster steps\n    read. \"\
+        \" when no argument carries one (the first step: see resolve_commit).\"\"\"\
+        \n    toks = json.loads(os.environ.get('STEP_COMMAND') or '[]', strict=False)\n\
+        \    for tok in toks:\n        if not (isinstance(tok, str) and tok.lstrip().startswith('{')):\n\
+        \            continue\n        try:\n            commit = str(json.loads(tok).get('dataset_commit')\
+        \ or '')\n        except (ValueError, AttributeError):\n            continue\n\
+        \        if commit:\n            return commit\n    return ''\n\n\ndef dataset_coords():\n\
+        \    \"\"\"(repo, ref) of the run's `dataset` parameter (`<dataset-repo>@<version>`):\n\
+        \    the dataset repository and the lakeFS ref to resolve when no commit was\n\
+        \    pinned (`latest` is the head of `main`). ('', '') when the pipeline has\
+        \ no\n    `dataset` parameter (the batch then runs the step data-less).\"\"\
+        \"\n    value = (os.environ.get('DATASET') or '').strip()\n    if not value:\n\
+        \        return '', ''\n    repo, sep, version = value.partition('@')\n  \
+        \  if not (sep and re.match(r'^dataset-[a-z0-9][a-z0-9-]*$', repo)\n     \
+        \       and re.match(r'^(latest|v[0-9]+)$', version)):\n        print('dataset\
+        \ must be <dataset-repo>@<version> (e.g. '\n              'dataset-default@latest),\
+        \ got %r' % value, flush=True)\n        sys.exit(1)\n    return repo, ('main'\
+        \ if version == 'latest' else version)\n\n\ndef resolve_commit(repo, ref,\
+        \ lakefs, wallet):\n    \"\"\"ref -> commit for a first step that has no upstream\
+        \ pin. The commit log\n    (amount=1) is the proven endpoint: GET /refs/{ref}\
+        \ does not exist on our\n    lakeFS version. Tags and branches both work as\
+        \ {ref}.\"\"\"\n    url = (lakefs + '/api/v1/repositories/' + urllib.parse.quote(repo,\
+        \ safe='')\n           + '/refs/' + urllib.parse.quote(ref, safe='') + '/commits?amount=1')\n\
+        \    page = json.load(urllib.request.urlopen(urllib.request.Request(\n   \
+        \     url, headers={'Authorization': 'Bearer ' + wallet}), timeout=60))\n\
+        \    return page['results'][0]['id']\n\n\nPINNED = ''   # the commit staged\
+        \ for this run (upstream pin, else resolved here)\n\n\n# PRD-HPC-1541 F-03:\
+        \ stage the pinned dataset commit into the project's Lustre\n# cache from\
+        \ a MeluXina LOGIN node before the GPU job is submitted, so the job\n# reads\
+        \ a resident copy instead of downloading on GPU time. The pod talks to\n#\
+        \ the stager the platform installed (~/.kaos/stager.py) through a\n# forced-command\
+        \ key that can run nothing else (Secret meluxina-staging: key +\n# verified\
+        \ host pin). The stager names a base (its newest ready commit of the\n# repo);\
+        \ the pod lists only the lakeFS diff base..commit, or the whole\n# dataset\
+        \ for a first copy, and streams one JSON line per file. Unchanged\n# files\
+        \ are hard links of the base. Bytes come from the lakeFS API with the\n# wallet\
+        \ bearer (sent once on stdin, held in memory only) until presigned URLs\n\
+        # are enabled (F-05). Any failure returns '' and the job stages in-job as\n\
+        # before, saying so (F-06).\nSTAGING_DIR = '/etc/meluxina-staging'\nLOGIN_HOST,\
+        \ LOGIN_PORT = 'login.lxp.lu', '8822'\nSTAGE_BUDGET_S = 4 * 3600\nEX_RETRY,\
+        \ EX_NOSPACE = 75, 76\n\n\ndef lakefs_pages(url, wallet, params):\n    # Every\
+        \ object of a paginated lakeFS listing (objects/ls or diff).\n    after =\
+        \ ''\n    while True:\n        q = urllib.parse.urlencode(dict(params, amount=1000,\
+        \ after=after))\n        page = json.load(urllib.request.urlopen(urllib.request.Request(\n\
         \            url + '?' + q, headers={'Authorization': 'Bearer ' + wallet}),\
         \ timeout=120))\n        for r in page.get('results') or []:\n           \
         \ if r.get('path_type') == 'object':\n                yield r\n        pg\
         \ = page.get('pagination') or {}\n        if not pg.get('has_more'):\n   \
-        \         return\n        after = pg.get('next_offset') or ''\n\n\ndef stage_plan(api,\
-        \ commit, base, prefix, wallet):\n    # (kind, path, size) per file the stager\
-        \ applies: the two-dot diff against\n    # the base (three-dot would be wrong\
-        \ when the base is not an ancestor), or\n    # every object of the commit\
-        \ for a first copy.\n    if base:\n        for d in lakefs_pages(api + '/refs/%s/diff/%s'\
-        \ % (base, commit), wallet,\n                              {'prefix': prefix,\
-        \ 'type': 'two_dot'}):\n            if d['type'] not in ('added', 'changed',\
-        \ 'removed'):\n                raise ValueError('unexpected diff entry %s\
-        \ for %s' % (d['type'], d['path']))\n            yield d['type'], d['path'],\
-        \ int(d.get('size_bytes') or 0)\n    else:\n        for o in lakefs_pages(api\
-        \ + '/refs/%s/objects/ls' % commit, wallet, {'prefix': prefix}):\n       \
-        \     yield 'added', o['path'], int(o.get('size_bytes') or 0)\n\n\ndef stager(words,\
-        \ feed=None):\n    # One stager subcommand on a login node: (exit code, JSON\
-        \ events). The\n    # feed's records are written while the stager downloads;\
-        \ a feed that\n    # fails mid-way closes stdin without the end record, which\
-        \ the stager\n    # keeps as resumable partial state (exit 75).\n    cmd =\
-        \ ['ssh', '-i', STAGING_DIR + '/id_ed25519', '-p', LOGIN_PORT,\n         \
-        \  '-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=yes',\n           '-o',\
-        \ 'UserKnownHostsFile=' + STAGING_DIR + '/known_hosts',\n           '-o',\
-        \ 'ConnectTimeout=20', '-o', 'ServerAliveInterval=30',\n           '-o', 'ServerAliveCountMax=4',\n\
-        \           hpc_identity()['user'] + '@' + LOGIN_HOST,\n           ' '.join(shlex.quote(str(w))\
-        \ for w in words)]\n    p = subprocess.Popen(cmd, stdin=subprocess.PIPE if\
-        \ feed is not None else subprocess.DEVNULL,\n                         stdout=subprocess.PIPE,\
-        \ stderr=subprocess.PIPE,\n                         universal_newlines=True)\n\
-        \    events = []\n\n    def read():\n        for line in p.stdout:\n     \
-        \       try:\n                ev = json.loads(line)\n            except ValueError:\n\
-        \                print('stager:', line.rstrip(), flush=True)\n           \
-        \     continue\n            events.append(ev)\n            print('stager:',\
-        \ json.dumps(ev, sort_keys=True), flush=True)\n    reader = threading.Thread(target=read,\
+        \         return\n        after = pg.get('next_offset') or ''\n\n\ndef is_dataset_path(path):\n\
+        \    # The YOLO layout the steps read: data.yaml, images/, labels/ at the\n\
+        \    # root of the dataset repository. README and notes are not staged.\n\
+        \    return path == 'data.yaml' or path.split('/', 1)[0] in ('images', 'labels')\n\
+        \n\ndef stage_plan(api, commit, base, prefix, wallet):\n    # (kind, path,\
+        \ size) per file the stager applies: the two-dot diff against\n    # the base\
+        \ (three-dot would be wrong when the base is not an ancestor), or\n    # every\
+        \ object of the commit for a first copy.\n    if base:\n        for d in lakefs_pages(api\
+        \ + '/refs/%s/diff/%s' % (base, commit), wallet,\n                       \
+        \       {'prefix': prefix, 'type': 'two_dot'}):\n            if d['type']\
+        \ not in ('added', 'changed', 'removed'):\n                raise ValueError('unexpected\
+        \ diff entry %s for %s' % (d['type'], d['path']))\n            if is_dataset_path(d['path']):\n\
+        \                yield d['type'], d['path'], int(d.get('size_bytes') or 0)\n\
+        \    else:\n        for o in lakefs_pages(api + '/refs/%s/objects/ls' % commit,\
+        \ wallet, {'prefix': prefix}):\n            if is_dataset_path(o['path']):\n\
+        \                yield 'added', o['path'], int(o.get('size_bytes') or 0)\n\
+        \n\ndef stager(words, feed=None):\n    # One stager subcommand on a login\
+        \ node: (exit code, JSON events). The\n    # feed's records are written while\
+        \ the stager downloads; a feed that\n    # fails mid-way closes stdin without\
+        \ the end record, which the stager\n    # keeps as resumable partial state\
+        \ (exit 75).\n    cmd = ['ssh', '-i', STAGING_DIR + '/id_ed25519', '-p', LOGIN_PORT,\n\
+        \           '-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=yes',\n  \
+        \         '-o', 'UserKnownHostsFile=' + STAGING_DIR + '/known_hosts',\n  \
+        \         '-o', 'ConnectTimeout=20', '-o', 'ServerAliveInterval=30',\n   \
+        \        '-o', 'ServerAliveCountMax=4',\n           hpc_identity()['user']\
+        \ + '@' + LOGIN_HOST,\n           ' '.join(shlex.quote(str(w)) for w in words)]\n\
+        \    p = subprocess.Popen(cmd, stdin=subprocess.PIPE if feed is not None else\
+        \ subprocess.DEVNULL,\n                         stdout=subprocess.PIPE, stderr=subprocess.PIPE,\n\
+        \                         universal_newlines=True)\n    events = []\n\n  \
+        \  def read():\n        for line in p.stdout:\n            try:\n        \
+        \        ev = json.loads(line)\n            except ValueError:\n         \
+        \       print('stager:', line.rstrip(), flush=True)\n                continue\n\
+        \            events.append(ev)\n            print('stager:', json.dumps(ev,\
+        \ sort_keys=True), flush=True)\n    reader = threading.Thread(target=read,\
         \ daemon=True)\n    reader.start()\n    failed = None\n    if feed is not\
         \ None:\n        try:\n            for rec in feed:\n                p.stdin.write(json.dumps(rec)\
         \ + '\\n')\n        except BrokenPipeError:\n            pass\n        except\
@@ -565,49 +797,51 @@ spec:
         \ None)\n    if rc != 0 or st is None:\n        return '', rc in (EX_RETRY,\
         \ 255)\n    if st.get('ready'):\n        print('stage: cache hit', st['path'],\
         \ flush=True)\n        return st['path'], False\n    api = lakefs + '/api/v1/repositories/'\
-        \ + urllib.parse.quote(repo, safe='')\n    # Only the dataset: the branch\
-        \ may also hold other files. Data uploaded\n    # before the dataset/ layout\
-        \ sits at the root (same rule as the stage-in).\n    prefix = 'dataset/' if\
-        \ next(lakefs_pages(api + '/refs/%s/objects/ls' % commit, wallet,\n      \
-        \                                       {'prefix': 'dataset/'}), None) else\
-        \ ''\n    base = st.get('base') if st.get('base') and st.get('base_prefix')\
-        \ == prefix else None\n    need_bytes = need_files = added = removed = 0\n\
-        \    for kind, _, size in stage_plan(api, commit, base, prefix, wallet):\n\
-        \        if kind == 'removed':\n            removed += 1\n            continue\n\
-        \        need_bytes += size\n        need_files += 1\n        added += kind\
-        \ == 'added'\n    files = (int(st.get('base_files') or 0) if base else 0)\
-        \ + added - removed\n    print('stage: %s@%s %s: %d files to fetch (%.1f MB),\
-        \ %d to delete, %d in the version'\n          % (repo, commit[:12], 'delta\
-        \ on ' + base[:12] if base else 'first copy',\n             need_files, need_bytes\
-        \ / 1e6, removed, files), flush=True)\n\n    def feed():\n        yield {'op':\
-        \ 'auth', 'authorization': 'Bearer ' + wallet}\n        for kind, path, size\
-        \ in stage_plan(api, commit, base, prefix, wallet):\n            if kind ==\
-        \ 'removed':\n                yield {'op': 'delete', 'path': path}\n     \
-        \       else:\n                yield {'op': 'fetch', 'path': path, 'size':\
-        \ size,\n                       'url': api + '/refs/' + commit + '/objects?'\n\
-        \                       + urllib.parse.urlencode({'path': path})}\n      \
-        \  yield {'op': 'end', 'files': files, 'bytes': need_bytes, 'ref': ref, 'prefix':\
-        \ prefix}\n    words = ['stage', '--repo', repo, '--commit', commit, '--ref',\
-        \ ref,\n             '--need-bytes', need_bytes, '--need-files', need_files]\n\
-        \    if base:\n        words += ['--base', base]\n    rc, ev = stager(words,\
-        \ feed())\n    done = next((e for e in reversed(ev) if e.get('event') == 'done'),\
-        \ None)\n    if rc == 0 and done:\n        return done['path'], False\n  \
-        \  if rc == EX_NOSPACE:\n        print('stage: NOT ENOUGH SPACE on MeluXina\
-        \ scratch for this version even after'\n              ' evicting unused versions\
-        \ - free space or raise the quota', flush=True)\n    return '', rc in (EX_RETRY,\
+        \ + urllib.parse.quote(repo, safe='')\n    # The dataset sits at the repository\
+        \ root; is_dataset_path() keeps the rest out.\n    prefix = ''\n    base =\
+        \ st.get('base') if st.get('base') and st.get('base_prefix') == prefix else\
+        \ None\n    need_bytes = need_files = added = removed = 0\n    for kind, _,\
+        \ size in stage_plan(api, commit, base, prefix, wallet):\n        if kind\
+        \ == 'removed':\n            removed += 1\n            continue\n        need_bytes\
+        \ += size\n        need_files += 1\n        added += kind == 'added'\n   \
+        \ files = (int(st.get('base_files') or 0) if base else 0) + added - removed\n\
+        \    print('stage: %s@%s %s: %d files to fetch (%.1f MB), %d to delete, %d\
+        \ in the version'\n          % (repo, commit[:12], 'delta on ' + base[:12]\
+        \ if base else 'first copy',\n             need_files, need_bytes / 1e6, removed,\
+        \ files), flush=True)\n\n    def feed():\n        yield {'op': 'auth', 'authorization':\
+        \ 'Bearer ' + wallet}\n        for kind, path, size in stage_plan(api, commit,\
+        \ base, prefix, wallet):\n            if kind == 'removed':\n            \
+        \    yield {'op': 'delete', 'path': path}\n            else:\n           \
+        \     yield {'op': 'fetch', 'path': path, 'size': size,\n                \
+        \       'url': api + '/refs/' + commit + '/objects?'\n                   \
+        \    + urllib.parse.urlencode({'path': path})}\n        yield {'op': 'end',\
+        \ 'files': files, 'bytes': need_bytes, 'ref': ref, 'prefix': prefix}\n   \
+        \ words = ['stage', '--repo', repo, '--commit', commit, '--ref', ref,\n  \
+        \           '--need-bytes', need_bytes, '--need-files', need_files]\n    if\
+        \ base:\n        words += ['--base', base]\n    rc, ev = stager(words, feed())\n\
+        \    done = next((e for e in reversed(ev) if e.get('event') == 'done'), None)\n\
+        \    if rc == 0 and done:\n        return done['path'], False\n    if rc ==\
+        \ EX_NOSPACE:\n        print('stage: NOT ENOUGH SPACE on MeluXina scratch\
+        \ for this version even after'\n              ' evicting unused versions -\
+        \ free space or raise the quota', flush=True)\n    return '', rc in (EX_RETRY,\
         \ 255)\n\n\ndef stage_dataset():\n    # The resident path of the pinned commit,\
-        \ or '' (job stages in-job).\n    repo, commit = os.environ.get('DATASET_REPO')\
-        \ or '', pinned_commit()\n    ref = os.environ.get('DATASET_REF') or ''\n\
-        \    lakefs = (os.environ.get('LAKEFS_EXTERNAL_URL') or '').rstrip('/')\n\
-        \    if not (repo and commit and lakefs and os.path.exists(STAGING_DIR + '/id_ed25519')):\n\
-        \        print('stage: skipped (needs the dataset repo, a pinned commit, the\
-        \ lakeFS'\n              ' endpoint and the staging key) - the job stages\
+        \ or '' (job stages in-job).\n    global PINNED\n    repo, ref = dataset_coords()\n\
+        \    commit = PINNED = pinned_commit()\n    lakefs = (os.environ.get('LAKEFS_EXTERNAL_URL')\
+        \ or '').rstrip('/')\n    if not (repo and lakefs and os.path.exists(STAGING_DIR\
+        \ + '/id_ed25519')):\n        print('stage: skipped (needs the dataset parameter,\
+        \ the lakeFS'\n              ' endpoint and the staging key) - the job stages\
         \ in-job', flush=True)\n        return ''\n    wallet = mint_wallet()\n  \
-        \  if not wallet:\n        return ''\n    try:\n        if subprocess.call(['sh',\
-        \ '-c', 'command -v ssh >/dev/null || apk add --no-cache -q openssh-client'])\
-        \ != 0:\n            print('stage: no ssh client - the job stages in-job',\
-        \ flush=True)\n            return ''\n    except OSError as e:\n        print('stage:\
-        \ no ssh client (%s) - the job stages in-job' % e, flush=True)\n        return\
+        \  if not wallet:\n        return ''\n    if not commit:\n        # The first\
+        \ step of the run: nothing upstream pinned a commit, so pin it\n        #\
+        \ here (the step then resolves the same ref; a vN tag cannot move).\n    \
+        \    try:\n            commit = PINNED = resolve_commit(repo, ref, lakefs,\
+        \ wallet)\n        except Exception as e:\n            print('stage: cannot\
+        \ resolve %s@%s (%s) - the job stages in-job' % (repo, ref, e), flush=True)\n\
+        \            return ''\n    try:\n        if subprocess.call(['sh', '-c',\
+        \ 'command -v ssh >/dev/null || apk add --no-cache -q openssh-client']) !=\
+        \ 0:\n            print('stage: no ssh client - the job stages in-job', flush=True)\n\
+        \            return ''\n    except OSError as e:\n        print('stage: no\
+        \ ssh client (%s) - the job stages in-job' % e, flush=True)\n        return\
         \ ''\n    deadline, attempt = time.time() + STAGE_BUDGET_S, 0\n    while True:\n\
         \        attempt += 1\n        try:\n            path, retry = stage_once(repo,\
         \ ref, commit, lakefs, wallet)\n        except Exception as e:\n         \
@@ -631,18 +865,32 @@ spec:
         \            'access_token', '')\n    except Exception as e:\n        print('no\
         \ registry token from metadata server (anonymous pull):', e,\n           \
         \   flush=True)\n    ident = hpc_identity()\n    batch = '\\n'.join([\n  \
-        \      '#!/bin/bash -l',\n        'set +e',\n        # Diagnostics without\
-        \ SSH (live job 5143859: exit 231 with no way to\n        # see WHY): on any\
-        \ failure, tail this job's own output file into its\n        # job COMMENT\
-        \ \u2014 readable over REST from the waiter and by operators.\n        'fail(){\
-        \ scontrol update JobId=$SLURM_JOB_ID Comment=\"err$1:$(tail -c 700 slurm-$SLURM_JOB_ID.out\
-        \ 2>/dev/null | tr \"\\\\n\" \"|\")\" 2>/dev/null; exit $1; }',\n        'for\
-        \ f in /usr/share/lmod/lmod/init/bash /etc/profile.d/lmod.sh; do'\n      \
-        \  ' [ -r \"$f\" ] && source \"$f\" && break; done',\n        'module load\
-        \ Apptainer 2>/dev/null || module load apptainer 2>/dev/null',\n        'command\
-        \ -v apptainer >/dev/null || fail 210',\n        'SCR=' + ident['scratch'],\n\
-        \        'export APPTAINER_CACHEDIR=$SCR/kaos-apptainer-cache'\n        '\
-        \ APPTAINER_TMPDIR=$SCR/kaos-tmp',\n        'mkdir -p $APPTAINER_CACHEDIR\
+        \      '#!/bin/bash -l',\n        # PRD-1609 F-01: the script's format and\
+        \ sharing scope ('-': sharing off).\n        # A host takes only jobs whose\
+        \ header carries its own scope.\n        '# kaos-job v2 scope=' + (SCOPE if\
+        \ SHARING else '-'),\n        'set +e',\n        # The job this step belongs\
+        \ to: its own on its own node; on a shared node\n        # the host sets it\
+        \ to this step's job. Every per-job path keys on it.\n        'KAOS_JOB_ID=${KAOS_JOB_ID:-$SLURM_JOB_ID}',\n\
+        \        # Diagnostics without SSH (live job 5143859: exit 231 with no way\
+        \ to\n        # see WHY): on any failure, tail this job's own output file\
+        \ into its\n        # job COMMENT \u2014 readable over REST from the waiter\
+        \ and by operators.\n        # The dataset lease (kaos-commit=, PRD-1541 D-06)\
+        \ stays first.\n        'fail(){ scontrol update JobId=$KAOS_JOB_ID Comment=\"\
+        ${KAOS_COMMIT:+kaos-commit=$KAOS_COMMIT }err$1:$(tail -c 700 slurm-$KAOS_JOB_ID.out\
+        \ 2>/dev/null | tr \"\\\\n\" \"|\")\" 2>/dev/null; exit $1; }',\n        #\
+        \ PRD-1609 F-03: with sharing on, the job's batch step is the host. It runs\n\
+        \        # this same script as one Slurm job step per slot (its own step and\
+        \ taken\n        # guests' scripts), each with KAOS_IN_STEP=1 and that step's\
+        \ KAOS_JOB_ID.\n        'if [ -z \"$KAOS_IN_STEP\" ] && [ -n \"$KAOS_SLOTS_B64\"\
+        \ ]; then',\n        '  printf %s \"$KAOS_SLOTS_B64\" | base64 -d > /tmp/kaos-slots-$SLURM_JOB_ID.py',\n\
+        \        '  scontrol write batch_script $SLURM_JOB_ID /tmp/kaos-job-$SLURM_JOB_ID.sh\
+        \ >/dev/null || fail 233',\n        '  exec python3 /tmp/kaos-slots-$SLURM_JOB_ID.py\
+        \ /tmp/kaos-job-$SLURM_JOB_ID.sh',\n        'fi',\n        'for f in /usr/share/lmod/lmod/init/bash\
+        \ /etc/profile.d/lmod.sh; do'\n        ' [ -r \"$f\" ] && source \"$f\" &&\
+        \ break; done',\n        'module load Apptainer 2>/dev/null || module load\
+        \ apptainer 2>/dev/null',\n        'command -v apptainer >/dev/null || fail\
+        \ 210',\n        'SCR=' + ident['scratch'],\n        'export APPTAINER_CACHEDIR=$SCR/kaos-apptainer-cache'\n\
+        \        ' APPTAINER_TMPDIR=$SCR/kaos-tmp',\n        'mkdir -p $APPTAINER_CACHEDIR\
         \ $APPTAINER_TMPDIR $SCR/sif-cache',\n        'KEY=$(printf %s \"$IMAGE_REF\"\
         \ | sha256sum | cut -c1-16)',\n        'SIF=$SCR/sif-cache/$KEY.sif',\n  \
         \      # F-04 stage-in: only when the wallet minted AND the run pins a\n \
@@ -658,59 +906,66 @@ spec:
         \        ' [ -n \"$STAGEIN_B64\" ] && command -v python3 >/dev/null; then',\n\
         \        '  [ -n \"$DATASET_STAGED\" ] && echo \"dataset: WARNING staged copy\
         \ $DATASET_STAGED'\n        ' not ready - downloading in-job on GPU time\"\
-        ',\n        '  export DATASET_CACHE=$SCR/data-cache'\n        ' DATASET_DIRFILE=$SCR/kaos-tmp/ds-$SLURM_JOB_ID.dir',\n\
+        ',\n        '  export DATASET_CACHE=$SCR/data-cache'\n        ' DATASET_DIRFILE=$SCR/kaos-tmp/ds-$KAOS_JOB_ID.dir',\n\
         \        '  printf %s \"$STAGEIN_B64\" | base64 -d | python3 - || fail 232',\n\
         \        '  DATASET_DIR=$(cat \"$DATASET_DIRFILE\" 2>/dev/null)',\n      \
         \  'fi',\n        # Apptainer passes the host env through, so the wallet/endpoint\
         \ vars\n        # reach the step; the bind gives it the staged version read-only.\n\
         \        'BIND=\"\"',\n        'if [ -n \"$DATASET_DIR\" ]; then'\n      \
-        \  ' BIND=\"-B $DATASET_DIR:/kubecore/dataset:ro\";'\n        ' export APPTAINERENV_KUBECORE_DATASET_DIR=/kubecore/dataset;\
-        \ fi',\n        # Writable /work: the SIF is read-only, but steps write /work/output\n\
+        \  ' BIND=\"-B $DATASET_DIR:/kubecore/dataset:ro\";'\n        ' export APPTAINERENV_KUBECORE_DATASET_DIR=/kubecore/dataset'\n\
+        \        ' APPTAINERENV_KUBECORE_STAGED_DIR=/kubecore/dataset; fi',\n    \
+        \    # Writable /work: the SIF is read-only, but steps write /work/output\n\
         \        # (declared outputs), /work/runs, /work/dataset caches. Per-job scratch\n\
         \        # on Lustre, removed after a successful stage-out.\n        'export\
-        \ KAOS_WORK=$SCR/kaos-work/$SLURM_JOB_ID; mkdir -p $KAOS_WORK/output',\n \
-        \       'BIND=\"$BIND -B $KAOS_WORK:/work\"',\n        # Last use of a cached\
+        \ KAOS_WORK=$SCR/kaos-work/$KAOS_JOB_ID; mkdir -p $KAOS_WORK/output',\n  \
+        \      'BIND=\"$BIND -B $KAOS_WORK:/work\"',\n        # Last use of a cached\
         \ SIF, before the cleanup below can see it.\n        'touch -c \"$SIF\"',\n\
         \        'if [ ! -f \"$SIF\" ]; then',\n        # GCP token ONLY for GAR hosts:\
         \ presenting it to Zot turns an\n        # anonymous-OK pull into 401 authentication\
         \ required (live job\n        # 5140432 vs the anonymous F-01 pull that worked\
         \ on the same repo).\n        '  case \"$IMAGE_REF\" in *-docker.pkg.dev/*)'\n\
         \        ' [ -n \"$REG_TOKEN\" ] && export'\n        ' APPTAINER_DOCKER_USERNAME=oauth2accesstoken'\n\
-        \        ' APPTAINER_DOCKER_PASSWORD=$REG_TOKEN;; esac',\n        '  apptainer\
-        \ pull \"$SIF\" docker://$IMAGE_REF || fail 231',\n        'fi',\n       \
-        \ # PRD-1541: the image and download caches share the allocation's scratch\n\
-        \        # quota with the dataset cache and only ever grew. This user's entries\n\
-        \        # unused for 14 days go: SIFs, Apptainer's layer cache, in-job\n\
-        \        # downloads. What this job uses was touched just above.\n       \
-        \ 'find $SCR/sif-cache -maxdepth 1 -name \"*.sif\" -user \"$USER\" -mtime\
-        \ +14 -delete 2>/dev/null',\n        'find $SCR/data-cache -mindepth 3 -maxdepth\
-        \ 3 -name .complete -user \"$USER\" -mtime +14'\n        ' -printf \"%h\\\\\
-        n\" 2>/dev/null | xargs -r rm -rf',\n        'apptainer cache clean --force\
-        \ --days 14 >/dev/null 2>&1',\n        # Start in the image's WORKDIR (Apptainer\
-        \ ignores it; Docker does not).\n        'PWD_OPT=\"\"; [ -n \"$STEP_WORKDIR\"\
-        \ ] && PWD_OPT=\"--pwd $STEP_WORKDIR\"',\n        # --nv only on GPU classes:\
-        \ on the cpu/largemem partitions there is\n        # no driver to bind and\
-        \ the flag makes Apptainer warn or fail.\n        'NV=\"\"; [ \"${HPC_GPUS:-0}\"\
-        \ -gt 0 ] && NV=\"--nv\"',\n        'if [ -n \"$STEP_CMD\" ]; then apptainer\
-        \ exec $NV $PWD_OPT $BIND \"$SIF\"'\n        ' /bin/sh -c \"$STEP_CMD\"; else\
-        \ apptainer exec $NV $PWD_OPT $BIND \"$SIF\"'\n        ' /bin/sh -c \"nvidia-smi\
-        \ -L || nproc\"; fi',\n        'rc=$?',\n        'if [ -n \"$STEP_OUTPUTS\"\
-        \ ] && [ -n \"$STAGEOUT_B64\" ] && [ -n \"$LAKEFS_BEARER_TOKEN\" ]; then'\n\
-        \        ' printf %s \"$STAGEOUT_B64\" | base64 -d | python3 - || echo \"\
-        stage-out failed (rc=$rc)\"; fi',\n        '[ $rc -eq 0 ] && rm -rf \"$KAOS_WORK\"\
-        ',\n        '[ $rc -ne 0 ] && fail $rc',\n        'exit 0',\n    ])\n    env\
-        \ = ['PATH=/usr/bin:/bin:/usr/local/bin', 'HOME=' + ident['home'],\n     \
-        \      'USER=' + ident['user'], 'IMAGE_REF=' + img, 'REG_TOKEN=' + reg,\n\
-        \           'HPC_GPUS=' + str(HPC.get('gpus') or 0),\n           'STEP_CMD='\
-        \ + cmd, 'STEP_WORKDIR=' + fetch_workdir(img, reg),\n           'WF_UID='\
-        \ + (os.environ.get('WF_UID') or ''),\n           'STEP_NAME=' + (os.environ.get('STEP_NAME')\
-        \ or ''),\n           'STEP_OUTPUTS=' + (os.environ.get('STEP_OUTPUTS') or\
-        \ ''),\n           'DATASET_STAGED=' + STAGED]\n    # Same checkpoint location\
-        \ + run id as the in-cluster copy; without them\n    # training fell back\
-        \ to {ref}/checkpoints/ on the dataset branch. Only when\n    # set: step\
-        \ code reads os.environ.get(..., default), so an empty value\n    # would\
-        \ override its own default.\n    env += [k + '=' + os.environ[k] for k in\n\
-        \            ('CHECKPOINT_BUCKET', 'CHECKPOINT_PREFIX', 'KUBECORE_RUN_ID')\n\
+        \        ' APPTAINER_DOCKER_PASSWORD=$REG_TOKEN;; esac',\n        # PRD-1609\
+        \ F-02: pull to a name only this job writes, then rename it into\n       \
+        \ # the shared cache (atomic on Lustre). Jobs, and steps sharing a node,\n\
+        \        # never run a half-written SIF; an image another job finished first\
+        \ is kept.\n        '  SIF_TMP=$SIF.part-$SLURM_JOB_ID-$$',\n        '  apptainer\
+        \ pull \"$SIF_TMP\" docker://$IMAGE_REF || { rm -f \"$SIF_TMP\"; fail 231;\
+        \ }',\n        '  mv -n \"$SIF_TMP\" \"$SIF\"; rm -f \"$SIF_TMP\"',\n    \
+        \    'fi',\n        # PRD-1541: the image and download caches share the allocation's\
+        \ scratch\n        # quota with the dataset cache and only ever grew. This\
+        \ user's entries\n        # unused for 14 days go: SIFs, Apptainer's layer\
+        \ cache, in-job\n        # downloads. What this job uses was touched just\
+        \ above.\n        'find $SCR/sif-cache -maxdepth 1 -name \"*.sif\" -user \"\
+        $USER\" -mtime +14 -delete 2>/dev/null',\n        'find $SCR/sif-cache -maxdepth\
+        \ 1 -name \"*.sif.part-*\" -user \"$USER\" -mmin +720 -delete 2>/dev/null',\n\
+        \        'find $SCR/data-cache -mindepth 3 -maxdepth 3 -name .complete -user\
+        \ \"$USER\" -mtime +14'\n        ' -printf \"%h\\\\n\" 2>/dev/null | xargs\
+        \ -r rm -rf',\n        'apptainer cache clean --force --days 14 >/dev/null\
+        \ 2>&1',\n        # Start in the image's WORKDIR (Apptainer ignores it; Docker\
+        \ does not).\n        'PWD_OPT=\"\"; [ -n \"$STEP_WORKDIR\" ] && PWD_OPT=\"\
+        --pwd $STEP_WORKDIR\"',\n        # --nv only on GPU classes: on the cpu/largemem\
+        \ partitions there is\n        # no driver to bind and the flag makes Apptainer\
+        \ warn or fail.\n        'NV=\"\"; [ \"${HPC_GPUS:-0}\" -gt 0 ] && NV=\"--nv\"\
+        ',\n        'if [ -n \"$STEP_CMD\" ]; then apptainer exec $NV $PWD_OPT $BIND\
+        \ \"$SIF\"'\n        ' /bin/sh -c \"$STEP_CMD\"; else apptainer exec $NV $PWD_OPT\
+        \ $BIND \"$SIF\"'\n        ' /bin/sh -c \"nvidia-smi -L || nproc\"; fi',\n\
+        \        'rc=$?',\n        'if [ -n \"$STEP_OUTPUTS\" ] && [ -n \"$STAGEOUT_B64\"\
+        \ ] && [ -n \"$LAKEFS_BEARER_TOKEN\" ]; then'\n        ' printf %s \"$STAGEOUT_B64\"\
+        \ | base64 -d | python3 - || echo \"stage-out failed (rc=$rc)\"; fi',\n  \
+        \      '[ $rc -eq 0 ] && rm -rf \"$KAOS_WORK\"',\n        '[ $rc -ne 0 ] &&\
+        \ fail $rc',\n        'exit 0',\n    ])\n    env = ['PATH=/usr/bin:/bin:/usr/local/bin',\
+        \ 'HOME=' + ident['home'],\n           'USER=' + ident['user'], 'IMAGE_REF='\
+        \ + img, 'REG_TOKEN=' + reg,\n           'HPC_GPUS=' + str(HPC.get('gpus')\
+        \ or 0),\n           'STEP_CMD=' + cmd, 'STEP_WORKDIR=' + fetch_workdir(img,\
+        \ reg),\n           'WF_UID=' + (os.environ.get('WF_UID') or ''),\n      \
+        \     'STEP_NAME=' + (os.environ.get('STEP_NAME') or ''),\n           'STEP_OUTPUTS='\
+        \ + (os.environ.get('STEP_OUTPUTS') or ''),\n           'DATASET_STAGED='\
+        \ + STAGED]\n    # Same outputs location + run id as the in-cluster copy (outputs-<app>).\n\
+        \    # Only when set: step code reads os.environ.get(..., default), so an\
+        \ empty\n    # value would override its own default.\n    env += [k + '='\
+        \ + os.environ[k] for k in\n            ('CHECKPOINT_BUCKET', 'CHECKPOINT_PREFIX',\
+        \ 'KUBECORE_RUN_ID', 'KUBECORE_WORKFLOW_NAME',\n             'KAOS_LIB_SUPPORT')\n\
         \            if os.environ.get(k)]\n    global WALLET, WALLET_EXP\n    wallet\
         \ = WALLET = mint_wallet()\n    WALLET_EXP = wallet_exp(wallet)\n    if wallet:\n\
         \        # Public endpoints only, short-lived bearer only (T-03). MLflow's\n\
@@ -721,39 +976,47 @@ spec:
         \            env += ['MLFLOW_TRACKING_URI=' + mlflow_url,\n              \
         \      'MLFLOW_TRACKING_TOKEN=' + wallet]\n        if lakefs_url:\n      \
         \      env += ['LAKEFS_ENDPOINT=' + lakefs_url,\n                    'LAKEFS_BEARER_TOKEN='\
-        \ + wallet,\n                    'DATASET_REPO=' + (os.environ.get('DATASET_REPO')\
-        \ or ''),\n                    'DATASET_REF=' + (os.environ.get('DATASET_REF')\
-        \ or ''),\n                    'DATASET_COMMIT=' + pinned_commit(),\n    \
-        \                'OUTPUTS_BRANCH=' + (os.environ.get('OUTPUTS_BRANCH') or\
-        \ ''),\n                    'STAGEIN_B64='\n                    + base64.b64encode(STAGEIN.encode()).decode(),\n\
+        \ + wallet,\n                    'DATASET_REPO=' + dataset_coords()[0],\n\
+        \                    'DATASET_REF=' + dataset_coords()[1],\n             \
+        \       'DATASET_COMMIT=' + (PINNED or pinned_commit()),\n               \
+        \     'OUTPUTS_REPO=' + (os.environ.get('OUTPUTS_REPO') or ''),\n        \
+        \            'OUTPUTS_REF=' + (os.environ.get('OUTPUTS_REF') or ''),\n   \
+        \                 'STAGEIN_B64='\n                    + base64.b64encode(STAGEIN.encode()).decode(),\n\
         \                    'STAGEOUT_B64='\n                    + base64.b64encode(STAGEOUT.encode()).decode()]\n\
-        \    commit = pinned_commit()\n    body = {'job': {'name': jobname, 'partition':\
-        \ HPC['partition'],\n                    'account': ident['account'],\n  \
-        \                  'qos': HPC.get('qos') or 'default',\n                 \
-        \   'time_limit': int(os.environ.get('SLURM_TIME_LIMIT') or 240),\n      \
-        \              'current_working_directory': ident['home'],\n             \
-        \       'environment': env, 'tasks': 1, 'nodes': '1'},\n            'script':\
-        \ batch}\n    if commit:\n        # PRD-1541 D-06: the stager never evicts\
-        \ a commit a queued or running\n        # job names here (squeue %k).\n  \
-        \      body['job']['comment'] = 'kaos-commit=' + commit\n    req = urllib.request.Request(API\
-        \ + '/job/submit',\n                                 data=json.dumps(body).encode(),\n\
-        \                                 headers=hdrs(), method='POST')\n    try:\n\
-        \        resp = json.load(urllib.request.urlopen(req, timeout=30))\n    except\
-        \ urllib.error.HTTPError as e:\n        print('job submit refused:', submit_refusal(e),\
-        \ flush=True)\n        sys.exit(1)\n    j = resp.get('job_id')\n    print('submitted\
-        \ job', j, 'errors:', resp.get('errors'), flush=True)\n    if not j:\n   \
-        \     sys.exit(1)\n    return j\n\n\ndef submit_refusal(e):\n    \"\"\"slurmrestd\
-        \ refuses a job with an HTTP error whose body names why\n    (errors/warnings:\
-        \ an account, partition or QOS it rejects, a time limit\n    above the QOS);\
-        \ without it the step dies on a bare 'HTTP Error 500'.\"\"\"\n    try:\n \
-        \       why = json.loads(e.read().decode(errors='replace') or '{}')\n    except\
-        \ Exception:\n        why = {}\n    if not isinstance(why, dict):\n      \
-        \  why = {}\n    return 'HTTP %s %s' % (e.code, {k: why.get(k) for k in ('errors',\
-        \ 'warnings')\n                                     if why.get(k)} or '(no\
-        \ reason in the body)')\n\n\ndef cancel(j):\n    try:\n        urllib.request.urlopen(urllib.request.Request(\n\
-        \            API + '/job/' + str(j), headers=hdrs(), method='DELETE'), timeout=30)\n\
-        \        print('cancelled job', j, flush=True)\n    except Exception as e:\n\
-        \        print('cancel failed:', e, flush=True)\n\n\ndef on_term(signum, frame):\n\
+        \    commit = pinned_commit()\n    if commit:\n        env.append('KAOS_COMMIT='\
+        \ + commit)   # fail() keeps the dataset lease\n    if SHARING and int(HPC.get('gpus')\
+        \ or 0) > 0:\n        # F-03: the batch step becomes the host (slot manager);\
+        \ one slot per GPU.\n        env += ['KAOS_SLOTS_B64=' + base64.b64encode(SLOTS.encode()).decode(),\n\
+        \                'KAOS_SCOPE=' + SCOPE, 'KAOS_SCR=' + ident['scratch']]\n\
+        \        if WALLET_EXP:\n            env.append('KAOS_TOKEN_EXP=%d' % WALLET_EXP)\
+        \   # the host's fit rule (D-07)\n    if SHARING:\n        batch, env = inputs_in_script(batch,\
+        \ env)\n    body = {'job': {'name': jobname, 'partition': HPC['partition'],\n\
+        \                    'account': ident['account'],\n                    'qos':\
+        \ HPC.get('qos') or 'default',\n                    'time_limit': int(os.environ.get('SLURM_TIME_LIMIT')\
+        \ or 240),\n                    'current_working_directory': ident['home'],\n\
+        \                    'environment': env, 'tasks': 1, 'nodes': '1'},\n    \
+        \        'script': batch}\n    if commit:\n        # PRD-1541 D-06: the stager\
+        \ never evicts a commit a queued or running\n        # job names here (squeue\
+        \ %k).\n        body['job']['comment'] = 'kaos-commit=' + commit\n    req\
+        \ = urllib.request.Request(API + '/job/submit',\n                        \
+        \         data=json.dumps(body).encode(),\n                              \
+        \   headers=hdrs(), method='POST')\n    try:\n        resp = json.load(urllib.request.urlopen(req,\
+        \ timeout=30))\n    except urllib.error.HTTPError as e:\n        print('job\
+        \ submit refused:', submit_refusal(e), flush=True)\n        sys.exit(1)\n\
+        \    j = resp.get('job_id')\n    print('submitted job', j, 'errors:', resp.get('errors'),\
+        \ flush=True)\n    if not j:\n        sys.exit(1)\n    return j\n\n\ndef submit_refusal(e):\n\
+        \    \"\"\"slurmrestd refuses a job with an HTTP error whose body names why\n\
+        \    (errors/warnings: an account, partition or QOS it rejects, a time limit\n\
+        \    above the QOS); without it the step dies on a bare 'HTTP Error 500'.\"\
+        \"\"\n    try:\n        why = json.loads(e.read().decode(errors='replace')\
+        \ or '{}')\n    except Exception:\n        why = {}\n    if not isinstance(why,\
+        \ dict):\n        why = {}\n    return 'HTTP %s %s' % (e.code, {k: why.get(k)\
+        \ for k in ('errors', 'warnings')\n                                     if\
+        \ why.get(k)} or '(no reason in the body)')\n\n\ndef cancel(j):\n    try:\n\
+        \        urllib.request.urlopen(urllib.request.Request(\n            API +\
+        \ '/job/' + str(j), headers=hdrs(), method='DELETE'), timeout=30)\n      \
+        \  print('cancelled job', j, flush=True)\n    except Exception as e:\n   \
+        \     print('cancel failed:', e, flush=True)\n\n\ndef on_term(signum, frame):\n\
         \    # Argo sends TERM on deadline/stop. A PENDING job never started \u2014\
         \ cancel\n    # it so it does not run unobserved hours later (live job 5143859\
         \ did\n    # exactly that: waiter killed at the deadline mid-queue, job ran\
@@ -769,18 +1032,23 @@ spec:
         \    open('/tmp/outputs/%s.json' % n, 'w').write('{}')\n\n\ndef fetch_outputs():\n\
         \    \"\"\"F-05: pull the step's staged-out outputs back into the twin.\"\"\
         \"\n    base = (os.environ.get('LAKEFS_EXTERNAL_URL') or '').rstrip('/')\n\
-        \    repo = os.environ.get('DATASET_REPO') or ''\n    if not (OUTPUT_NAMES\
-        \ and base and repo and WALLET):\n        return\n    branch = os.environ.get('OUTPUTS_BRANCH')\
-        \ or os.environ.get('DATASET_REF') or 'main'\n    for n in OUTPUT_NAMES:\n\
-        \        q = urllib.parse.urlencode({'path': 'hpc-outputs/%s/%s/%s.json' %\
-        \ (\n            os.environ.get('WF_UID', ''), os.environ.get('STEP_NAME',\
+        \    repo = os.environ.get('OUTPUTS_REPO') or ''\n    if not (OUTPUT_NAMES\
+        \ and base and repo and WALLET):\n        return\n    branch = 'hpc-%s-%s'\
+        \ % (os.environ.get('WF_UID', ''), os.environ.get('STEP_NAME', ''))\n    for\
+        \ n in OUTPUT_NAMES:\n        q = urllib.parse.urlencode({'path': 'hpc-outputs/%s/%s/%s.json'\
+        \ % (\n            os.environ.get('WF_UID', ''), os.environ.get('STEP_NAME',\
         \ ''), n)})\n        try:\n            data = urllib.request.urlopen(urllib.request.Request(\n\
         \                base + '/api/v1/repositories/%s/refs/%s/objects?%s' % (repo,\
         \ branch, q),\n                headers={'Authorization': 'Bearer ' + WALLET}),\
         \ timeout=60).read()\n            open('/tmp/outputs/%s.json' % n, 'wb').write(data)\n\
         \            print('output', n, ':', len(data), 'bytes', flush=True)\n   \
         \     except Exception as e:\n            print('output', n, 'not staged out\
-        \ (default {}):', e, flush=True)\n\n\nTERMINAL = ('COMPLETED', 'FAILED', 'CANCELLED',\
+        \ (default {}):', e, flush=True)\n    try:   # the hand-off branch has done\
+        \ its job\n        urllib.request.urlopen(urllib.request.Request(\n      \
+        \      base + '/api/v1/repositories/%s/branches/%s' % (repo, branch), method='DELETE',\n\
+        \            headers={'Authorization': 'Bearer ' + WALLET}), timeout=60).read()\n\
+        \    except Exception as e:\n        print('hand-off branch', branch, 'not\
+        \ deleted:', e, flush=True)\n\n\nTERMINAL = ('COMPLETED', 'FAILED', 'CANCELLED',\
         \ 'TIMEOUT', 'NODE_FAIL',\n            'PREEMPTED', 'OUT_OF_MEMORY')\n# The\
         \ registry pull token (GCE metadata, 1 h) is minted at submit time and\n#\
         \ cannot be refreshed inside a queued job, so every queue wait longer than\
@@ -791,31 +1059,53 @@ spec:
         \ minutes are spent, ...): only slurmctld knows it, the\n# accounting record\
         \ polled below does not. Printed when it changes, so a run\n# that never left\
         \ the queue says why (kaos e2e 2026-10-26: two jobs PENDING\n# for the whole\
-        \ 2.5 h budget, reason unknown).\npending_reason = None\nwhile True:\n   \
-        \ time.sleep(30)\n    try:\n        job = (get(SDB + '/job/' + str(jid)).get('jobs')\
+        \ 2.5 h budget, reason unknown).\npending_reason = None\nhosted = None   #\
+        \ PRD-1609: the host that took this job, as last printed\nwhile True:\n  \
+        \  time.sleep(30)\n    try:\n        job = (get(SDB + '/job/' + str(jid)).get('jobs')\
         \ or [{}])[0]\n        st = (job.get('state') or {}).get('current') or []\n\
-        \        print('state:', st, flush=True)\n        if 'PENDING' in st:\n  \
-        \          try:\n                reason = (get(API + '/job/' + str(jid)).get('jobs')\n\
-        \                          or [{}])[0].get('state_reason') or ''\n       \
-        \     except Exception:\n                reason = pending_reason or ''\n \
-        \           if reason != pending_reason:\n                print('pending reason:',\
-        \ reason, flush=True)\n                pending_reason = reason\n        if\
-        \ ('PENDING' in st and WALLET_EXP\n                and time.time() > WALLET_EXP\
-        \ - WALLET_MARGIN_S):\n            print('wallet expires within', WALLET_MARGIN_S\
-        \ // 60,\n                  'min and the job is still queued - resubmitting\
-        \ with a'\n                  ' fresh wallet (queue position is lost, credentials\
-        \ are'\n                  ' not)', flush=True)\n            cancel(jid)\n\
-        \            jid = submit()\n            open('/tmp/slurm-job-id', 'w').write(str(jid))\n\
-        \            continue\n        if any(x in TERMINAL for x in st):\n      \
-        \      rc = ((job.get('exit_code') or {}).get('return_code')\n           \
-        \       or {}).get('number')\n            print('terminal:', st, 'exit:',\
+        \        print('state:', st, flush=True)\n        share = share_state(comment_of(job))\n\
+        \        if 'PENDING' in st:\n            try:\n                live = (get(API\
+        \ + '/job/' + str(jid)).get('jobs') or [{}])[0]\n                reason =\
+        \ live.get('state_reason') or ''\n                # The live comment: accounting\
+        \ may lag a host's update.\n                share = share_state(comment_of(live))\
+        \ or share\n            except Exception:\n                reason = pending_reason\
+        \ or ''\n            if reason != pending_reason:\n                print('pending\
+        \ reason:', reason, flush=True)\n                pending_reason = reason\n\
+        \            if share.get('kaos-state') == 'taken' and share != hosted:\n\
+        \                print('running on a shared node: host job', share.get('host'),\n\
+        \                      'slot', share.get('slot'), flush=True)\n          \
+        \      hosted = share\n        elif 'RUNNING' in st and SHARING:\n       \
+        \     # PRD-1609 F-03: a host keeps its node while its guests run; its own\n\
+        \            # step's result is in its comment as soon as that step ends.\n\
+        \            try:\n                live = (get(API + '/job/' + str(jid)).get('jobs')\
+        \ or [{}])[0]\n                share = share_state(comment_of(live)) or share\n\
+        \            except Exception:\n                pass\n        # A job a host\
+        \ took stays queued (held) while its step runs: never\n        # resubmit\
+        \ it. The host checked its token outlives the step (D-07).\n        if ('PENDING'\
+        \ in st and share.get('kaos-state') != 'taken' and WALLET_EXP\n          \
+        \      and time.time() > WALLET_EXP - WALLET_MARGIN_S):\n            print('wallet\
+        \ expires within', WALLET_MARGIN_S // 60,\n                  'min and the\
+        \ job is still queued - resubmitting with a'\n                  ' fresh wallet\
+        \ (queue position is lost, credentials are'\n                  ' not)', flush=True)\n\
+        \            cancel(jid)\n            jid = submit()\n            open('/tmp/slurm-job-id',\
+        \ 'w').write(str(jid))\n            continue\n        if any(x in TERMINAL\
+        \ for x in st) or ('RUNNING' in st and share.get('kaos-state') == 'done'):\n\
+        \            rc = ((job.get('exit_code') or {}).get('return_code')\n     \
+        \             or {}).get('number')\n            print('terminal:', st, 'exit:',\
         \ rc, flush=True)\n            print('job comment:', job.get('comment'), flush=True)\n\
-        \            if 'FAILED' in st and rc == 231 and resubmits < PULL_RESUBMITS:\n\
-        \                # A cache-missing pull after a LONG queue wait runs with\
-        \ the\n                # registry token minted at submit time \u2014 GCP tokens\
-        \ live 1h,\n                # so it can be stale (live job 5143859: 3.5h queue\
-        \ -> 231;\n                # 5150371: 65 min queue -> 231). Resubmitting mints\n\
-        \                # everything fresh; queue age is lost only after an actual\n\
+        \            if share.get('kaos-state') == 'done':\n                # PRD-1609\
+        \ D-04: a host ran this step on a shared node and then\n                #\
+        \ cancelled this job; the step's result is in the comment.\n             \
+        \   rc = int(share['rc']) if share.get('rc', '').isdigit() else 1\n      \
+        \          print('ran on a shared node: host job', share.get('host'),\n  \
+        \                    'exit:', share.get('rc'), flush=True)\n             \
+        \   st = ['COMPLETED'] if rc == 0 else ['FAILED']\n            if 'FAILED'\
+        \ in st and rc == 231 and resubmits < PULL_RESUBMITS:\n                # A\
+        \ cache-missing pull after a LONG queue wait runs with the\n             \
+        \   # registry token minted at submit time \u2014 GCP tokens live 1h,\n  \
+        \              # so it can be stale (live job 5143859: 3.5h queue -> 231;\n\
+        \                # 5150371: 65 min queue -> 231). Resubmitting mints\n   \
+        \             # everything fresh; queue age is lost only after an actual\n\
         \                # failure.\n                resubmits += 1\n            \
         \    print('pull failed - resubmitting with fresh credentials'\n         \
         \             ' (%d/%d)' % (resubmits, PULL_RESUBMITS), flush=True)\n    \
@@ -877,17 +1167,19 @@ spec:
         value: https://mlflow.internal.invalid
       - name: LAKEFS_EXTERNAL_URL
         value: https://lakefs.internal.invalid
-      - name: DATASET_REPO
-        value: '{{workflow.parameters.lakefs-repo}}'
-      - name: DATASET_REF
+      - name: DATASET
         value: ''
-      - name: OUTPUTS_BRANCH
-        value: ''
+      - name: OUTPUTS_REPO
+        value: outputs-demo
+      - name: OUTPUTS_REF
+        value: main
       - name: CHECKPOINT_BUCKET
-        value: PLACEHOLDER-bucket
+        value: outputs-demo
       - name: CHECKPOINT_PREFIX
         value: main/checkpoints
       - name: KUBECORE_RUN_ID
+        value: '{{workflow.name}}'
+      - name: KUBECORE_WORKFLOW_NAME
         value: '{{workflow.name}}'
     outputs:
       parameters:

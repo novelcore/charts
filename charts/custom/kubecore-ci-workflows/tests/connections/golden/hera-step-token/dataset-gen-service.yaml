@@ -20,7 +20,7 @@ spec:
       - platform.lakefs.repository=PLACEHOLDER-repo
       - platform.lakefs.endpoint=http://lakefs.internal.invalid
       - platform.mlflow.tracking_uri=http://mlflow.internal.invalid
-      - platform.checkpoints.bucket=PLACEHOLDER-bucket
+      - platform.checkpoints.bucket=outputs-dataset-gen-service
       - platform.checkpoints.prefix=main/checkpoints
       - experiment.name={{workflow.parameters.experiment-name}}
       - experiment.description={{workflow.parameters.experiment-description}}
@@ -59,10 +59,12 @@ spec:
             name: PLACEHOLDER-lakefs-admin
             key: secretAccessKey
       - name: CHECKPOINT_BUCKET
-        value: PLACEHOLDER-bucket
+        value: outputs-dataset-gen-service
       - name: CHECKPOINT_PREFIX
         value: main/checkpoints
       - name: KUBECORE_RUN_ID
+        value: '{{workflow.name}}'
+      - name: KUBECORE_WORKFLOW_NAME
         value: '{{workflow.name}}'
       - name: KAOS_LAKE_TOKEN_FILE
         value: /var/run/secrets/kaos-lake/token
@@ -160,10 +162,12 @@ spec:
             name: PLACEHOLDER-lakefs-admin
             key: secretAccessKey
       - name: CHECKPOINT_BUCKET
-        value: PLACEHOLDER-bucket
+        value: outputs-dataset-gen-service
       - name: CHECKPOINT_PREFIX
         value: main/checkpoints
       - name: KUBECORE_RUN_ID
+        value: '{{workflow.name}}'
+      - name: KUBECORE_WORKFLOW_NAME
         value: '{{workflow.name}}'
       - name: KAOS_LAKE_TOKEN_FILE
         value: /var/run/secrets/kaos-lake/token
