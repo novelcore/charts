@@ -775,3 +775,15 @@ cat > /tmp/kaos-lib.py <<'KAOSLIBEOF'
 {{ .Files.Get "files/kaos-lib.py" }}
 KAOSLIBEOF
 {{- end }}
+
+{{/*
+The dataset dropdown's choices and their digest (PRD novelcore/kaos#1283 D-05), shared by the
+render (hera-enhance-commit) and the drift check (ml-ci-reconcile): one definition, so the digest
+a render records is the digest the check compares. Tested in tests/dataset-choices.
+Caller: python3 (tooling.toolboxImage / tooling.kubectlImage).
+*/}}
+{{- define "kubecore-ci-workflows.datasetChoicesScript" -}}
+cat > /tmp/dataset-choices.py <<'DATASETCHOICESEOF'
+{{ .Files.Get "files/dataset-choices.py" }}
+DATASETCHOICESEOF
+{{- end }}
