@@ -598,8 +598,7 @@ gh_api() {
 
 {{/*
 The GitHub reporting of a build (#1126), shared by the status templates of
-ci-build, ci-rc-build and ml-ci-build (ml-ci-rc-build borrows ml-ci-build's
-by templateRef): ONE commit status with target_url into the Argo UI run, plus
+ci-build, ci-rc-build and ml-ci-build: ONE commit status with target_url into the Argo UI run, plus
 a Deployment rollup whose log/environment URL is the same run. pending creates
 the Deployment; success/failure resolve the Deployment created for this SHA +
 environment, and create it themselves when none is listed after 5 lookups (the
