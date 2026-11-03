@@ -529,9 +529,9 @@ spec:
         \ Slurm's own variables, the GPU it was given and the login\n# basics. Nothing\
         \ of the host's inputs reaches a guest; each script exports its own.\nSTEP_ENV\
         \ = re.compile(r'^(SLURM_|CUDA_VISIBLE_DEVICES$|GPU_DEVICE_ORDINAL$|ROCR_VISIBLE_DEVICES$'\n\
-        \                      r'|PATH$|HOME$|USER$|LANG$|LC_)')\n\nif sys.argv[1:2]\
-        \ == ['--step']:\n    import pwd\n    script, job = sys.argv[2], sys.argv[3]\n\
-        \    env = dict((k, v) for k, v in os.environ.items() if STEP_ENV.match(k))\n\
+        \                      r'|KUBECORE_SLOT_|PATH$|HOME$|USER$|LANG$|LC_)')\n\n\
+        if sys.argv[1:2] == ['--step']:\n    import pwd\n    script, job = sys.argv[2],\
+        \ sys.argv[3]\n    env = dict((k, v) for k, v in os.environ.items() if STEP_ENV.match(k))\n\
         \    # The login basics, also when Slurm passed none (SLURM_EXPORT_ENV=NONE).\n\
         \    me = pwd.getpwuid(os.getuid())\n    env.setdefault('HOME', me.pw_dir)\n\
         \    env.setdefault('USER', me.pw_name)\n    env.setdefault('PATH', '/usr/bin:/bin:/usr/local/bin')\n\
@@ -586,8 +586,13 @@ spec:
         \           '--job-name', 'kaos-' + job]\n    if limit:\n        cmd.append('--time=%d'\
         \ % max(1, (limit + 59) // 60))\n    cmd += ['python3', sys.argv[0], '--step',\
         \ script, job] + ([log_to] if log_to else [])\n    out = open(log_to, 'a')\
-        \ if log_to else None\n    proc = subprocess.Popen(cmd, stdin=subprocess.DEVNULL,\
-        \ stdout=out, stderr=subprocess.STDOUT if out else None)\n    return proc\n\
+        \ if log_to else None\n    # PRD-1609 F-05: the step's share of the node,\
+        \ for kaos_lib.runtime (context().slot,\n    # usable_cpus()): the GPU is\
+        \ already the only one it sees; cores and memory are not hidden.\n    env\
+        \ = dict(os.environ, KUBECORE_SLOT_GPUS='1', KUBECORE_SLOT_CPUS=str(CPUS),\n\
+        \               KUBECORE_SLOT_MEM_GIB=str(SHARE >> 30), KUBECORE_SLOT_SHARED='1')\n\
+        \    proc = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=out, stderr=subprocess.STDOUT\
+        \ if out else None,\n                            env=env)\n    return proc\n\
         \n\ndef step_id(job):\n    rc, out = run('squeue', '-s', '-j', ME, '-h', '-o',\
         \ '%i %j')\n    for line in out.splitlines():\n        sid, _, name = line.partition('\
         \ ')\n        if name == 'kaos-' + job:\n            return sid\n    return\
