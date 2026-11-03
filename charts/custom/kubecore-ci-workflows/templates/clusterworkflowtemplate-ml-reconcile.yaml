@@ -187,7 +187,7 @@ spec:
       # on `gcloud components install kubectl` on a busy system node, which
       # delayed a new app's first build by 17.5 minutes (2026-10-11).
       image: {{ .Values.tooling.kubectlImage | default "alpine/k8s:1.36.4" }}
-      {{- with .Values.tooling.resources }}
+      {{- with .Values.tooling.clusterResources }}
       resources:
         {{- toYaml . | nindent 8 }}
       {{- end }}

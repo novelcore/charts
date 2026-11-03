@@ -173,7 +173,7 @@ spec:
       # (clusterworkflowtemplate-ml-reconcile.yaml, live 2026-07-16).
       # kubectl + jq + curl are baked in; nothing is installed at start-up.
       image: {{ .Values.tooling.kubectlImage | default "alpine/k8s:1.36.4" }}
-      {{- with .Values.tooling.resources }}
+      {{- with .Values.tooling.clusterResources }}
       resources:
         {{- toYaml . | nindent 8 }}
       {{- end }}

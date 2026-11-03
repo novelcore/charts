@@ -60,21 +60,34 @@ kaniko:
   # headroom. memory limit == request so kaniko can't be OOMKilled
   # mid-snapshot of a multi-GB ML image; the pool is min=0 → one build per
   # node, so the cpu limit is the whole node.
+  #
+  # Right-sized from 14 days of Cloud Monitoring history for the dev/e2e pools
+  # (308 ML build-push pods, kaos-dev-511509): per-pod CPU p95 1.99 / peak
+  # 2.16 cores, working-set p95 10.1 GiB / max 10.6 GiB. CPU request 2 (was 3)
+  # and NO cpu limit (platform decision 2026-11-03: size requests, never cap
+  # CPU). Memory request stays 11Gi: p95+20% would be 12.1Gi, which can never
+  # schedule on an e2-standard-4 (12.2 GiB left after GKE daemonsets). The
+  # 12Gi limit is the most the smallest CI node can give while other CI pods
+  # (render, reconciler) share it; max x1.5 (16Gi) exceeds the node.
   resources:
     requests:
-      cpu: "3"
+      cpu: "2"
       memory: "11Gi"
     limits:
-      cpu: "4"
-      memory: "11Gi"
+      memory: "12Gi"
   # Requests for ci-build / ci-rc-build build-push (service apps). These had
   # none (BestEffort). Kept well below the ML request above: a service image
   # is small, and the build shares the project's CI node with the other steps
   # of the run. No limit, so a large build is never OOMKilled by this value.
   serviceResources:
     requests:
-      cpu: 500m
-      memory: 1Gi
+      cpu: 250m
+      memory: 1536Mi
+    limits:
+      # Measured (98 service build-push pods, 14 days, e2e apps only): CPU p95
+      # 0.23 / peak 0.32 cores, working set p95 1.24 GiB / max 1.34 GiB. The
+      # limit is 2x the largest observed because the sample is small e2e apps.
+      memory: 3Gi
 
 # ci-secrets-prep init container of ci-build / ci-rc-build build-push (kaos
 # PRD 695): lays out the user's CI secrets under /kaniko/secrets and writes
@@ -135,23 +148,62 @@ tooling:
   heraRenderImage: "python:3.12.13-slim"
   # Requests keep these pods out of the BestEffort class, so the scheduler
   # spreads them by CPU instead of piling them onto one saturated node.
-  # There is no limit: a janitor's `kubectl get workflows -A -o json` grows
-  # with the cluster, and an OOMKill there would only hide the result.
+  # CPU is never limited (requests only). Measured over 14 days of Cloud
+  # Monitoring history (dev/e2e pools): the small git/curl/jq/kubectl steps
+  # (clone, version, tag, status, report, gitops-notify, detect-*, patch-images)
+  # peak at 62 MiB working set and 9m CPU.
   resources:
     requests:
       cpu: 50m
       memory: 64Mi
-  # gcloud is Python and needs more memory than kubectl.
+    limits:
+      memory: 128Mi
+  # The reconciler's check-drift and the pending-reaper list/read the cluster's
+  # workflows and pods: working set p95 135-161 MiB, max 222 MiB, CPU peak 58m.
+  clusterResources:
+    requests:
+      cpu: 50m
+      memory: 208Mi
+    limits:
+      memory: 384Mi
+  # gcloud is Python and needs more memory than kubectl (autoscaler healer:
+  # p95 130 MiB, max 199 MiB, CPU peak 57m).
   gcloudResources:
     requests:
       cpu: 50m
+      memory: 160Mi
+    limits:
+      memory: 320Mi
+  # The create/destroy-nodegroups steps render-wft writes into an ML app's
+  # pipeline (they run in the app's own WorkflowTemplate, not in the CI
+  # templates). NOT measured; unchanged.
+  nodegroupStepResources:
+    requests:
+      cpu: 50m
       memory: 128Mi
-  # The python steps (render-wft, the Hera render/enhance steps, the dataset
-  # probe): the interpreter plus a parsed WorkflowTemplate.
+  # render-wft: the interpreter plus a parsed WorkflowTemplate. NOT measured
+  # (no pods in the metrics history), so it keeps its previous request and
+  # has no limit.
   pythonResources:
     requests:
       cpu: 100m
       memory: 256Mi
+  # hera-render: `pip install -e .` plus pipeline.py. 246 pods: working set
+  # p95 143 MiB, max 164 MiB; CPU p95 0.09, peak 0.135 cores.
+  heraRenderResources:
+    requests:
+      cpu: 100m
+      memory: 192Mi
+    limits:
+      memory: 256Mi
+  # hera-enhance-commit / hera-enhance-gate: kubecore.enhance over one
+  # WorkflowTemplate. Working set max 45 MiB, CPU peak 9m.
+  enhanceResources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      memory: 128Mi
 
 # Build paths for the service-app (non-ML) CWTs.
 #
@@ -184,7 +236,6 @@ buildkit:
       cpu: "1500m"
       memory: "4Gi"
     limits:
-      cpu: "3"
       memory: "8Gi"
 
 # Workflow configuration
