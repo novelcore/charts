@@ -10,8 +10,13 @@
 # only the backstop. In force mode "not yet" must retry (exit 3), never skip:
 # there is no next poll to catch it. The scripts under test are EXECUTED, not
 # grepped: check-drift is extracted from the rendered ml-ci-reconcile and run
-# against stub kubectl/curl. Needs helm, yq v4, jq.
+# against stub kubectl/curl. Needs helm, yq v4, jq, python3.
 # Exit status is the number of failed assertions.
+#
+# PRD novelcore/kaos#1283 D-05: DATASET DRIFT (the hourly backstop re-renders when the catalog's
+# datasets differ from the ones the live pipeline was rendered with) and the dataset_event run
+# (kaos-lake's release event: a build in flight is waited out, an unrecorded pipeline re-renders)
+# are exercised against a local fake catalog; so is the fan-out that starts those runs.
 set -u
 HERE=$(cd "$(dirname "$0")" && pwd)
 CHART="${HERE}/../.."
@@ -35,7 +40,7 @@ expect_has() {
 }
 
 BASE_TMP=$(mktemp -d)
-trap 'rm -rf "$BASE_TMP"' EXIT
+trap 'rm -rf "$BASE_TMP"; kill ${CATALOG_PID:-0} ${BROKEN_PID:-0} 2>/dev/null' EXIT
 RENDERED="${BASE_TMP}/rendered.yaml"
 helm template t "$CHART" --set github.org=acme > "$RENDERED" || { echo "FAIL: helm template"; exit 1; }
 
@@ -72,8 +77,9 @@ run_case() {
   T=$(mktemp -d "${BASE_TMP}/case-XXXX")
   mkdir -p "$T/bin"
   printf 'token' > "$T/token"
+  printf 'pod-token' > "$T/lake-token"
   case "$4" in
-    built)   CMJ="{\"data\":{\"last-built-sha\":\"${HEAD_SHA}\"}}" ;;
+    built)   CMJ="{\"data\":{\"last-built-sha\":\"${HEAD_SHA}\",\"dataset-sha\":\"${DS_CM:-}\"}}" ;;
     unbuilt) CMJ='{"data":{}}' ;;
     *)       CMJ="" ;;
   esac
@@ -81,7 +87,9 @@ run_case() {
 #!/usr/bin/env bash
 case "\$*" in
   *"get workflows"*) printf '%s' '$2' ;;
-  *"get configmap"*"pipeline-context"*) echo 'Error from server (NotFound)'; exit 1 ;;
+  *"get configmap"*"pipeline-context"*)
+    if [ -n '${CTX_YAML:-}' ]; then printf '%s' '${CTX_YAML:-}'; exit 0; fi
+    echo 'Error from server (NotFound)'; exit 1 ;;
   *"get configmap"*)
     if [ -z '$CMJ' ]; then echo 'Error from server (NotFound): configmaps "app1-pipeline-images" not found'; exit 1; fi
     printf '%s' '$CMJ' ;;
@@ -93,7 +101,7 @@ EOF
 echo "\$*" >> "$T/curl.log"
 case "\$*" in
   *"/commits/"*) [ -n '$3' ] || exit 22; printf '{"sha":"%s"}' '$3' ;;
-  *"pipeline-images.yaml"*) printf 'metadata:\n  namespace: ml-proj\n' ;;
+  *"pipeline-images.yaml"*) printf 'metadata:\n  namespace: ml-proj\ndata:\n  dataset-sha: %s\n' '${GITOPS_DS:-}' ;;
   *"pipeline-context.yaml"*) printf '%s' '$GITOPS_CTX' ;;
   *) exit 22 ;;
 esac
@@ -111,8 +119,10 @@ EOF
       -e "s#{{workflow.parameters.gitops_branch}}#main#g" \
       -e "s#{{workflow.parameters.workflow_template_path}}#kubeapps/app1/main/workflow-template.yaml#g" \
       -e "s#{{workflow.parameters.repo_url}}##g" \
+      -e "s#{{workflow.parameters.dataset_event}}#${DATASET_EVENT:-false}#g" \
       -e "s#/tmp/#${T}/#g" \
-      -e "s#/etc/github-token/token#${T}/token#g" "$DRIFT_SRC" > "$T/check-drift.sh"
+      -e "s#/etc/github-token/token#${T}/token#g" \
+      -e "s#/var/run/secrets/kaos-lake/token#${T}/lake-token#g" "$DRIFT_SRC" > "$T/check-drift.sh"
   OUT=$(PATH="$T/bin:$PATH" bash "$T/check-drift.sh" 2>&1); RC=$?
   NEEDS=$(cat "$T/needs_build" 2>/dev/null || echo "<unset>")
   SHA=$(cat "$T/head_sha" 2>/dev/null || echo "<unset>")
@@ -164,6 +174,149 @@ expect_eq "$RETRY" "asInt(lastRetry.exitCode) == 3" "check-drift retries exactly
 FORCE_DEFAULT=$(yq 'select(.kind == "ClusterWorkflowTemplate" and .metadata.name == "ml-ci-reconcile")
     | .spec.arguments.parameters[] | select(.name == "force") | .value' "$RENDERED")
 expect_eq "$FORCE_DEFAULT" "false" "force defaults to false (CronWorkflows rendered before it keep the backstop)"
+
+# ── DATASET DRIFT (PRD novelcore/kaos#1283 D-05) ─────────────────────────────
+# The render records a digest of the dataset choices it offered (dataset-sha);
+# the backstop compares it with the catalog now.
+WORK="${BASE_TMP}/catalog"; mkdir -p "$WORK"
+cat > "$WORK/catalog.py" <<'PY'
+import http.server, json, sys
+BODY = {"datasets": [
+    {"name": "dataset-cars", "versions": [{"tag": "v2", "commit": "c2"}, {"tag": "v1", "commit": "c1"}]},
+    {"name": "dataset-default", "default": True, "versions": [{"tag": "v3", "commit": "c3"}]},
+]}
+BROKEN = sys.argv[2] == "broken"
+class H(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        ok = (not BROKEN) and self.path == "/kaos/v1/catalog" and self.headers.get("Authorization") == "Bearer pod-token"
+        self.send_response(200 if ok else (503 if BROKEN else 401))
+        self.end_headers()
+        self.wfile.write(json.dumps(BODY if ok else {"message": "no"}).encode())
+    def log_message(self, *a): pass
+http.server.HTTPServer(("127.0.0.1", int(sys.argv[1])), H).serve_forever()
+PY
+python3 "$WORK/catalog.py" 18921 ok & CATALOG_PID=$!
+python3 "$WORK/catalog.py" 18922 broken & BROKEN_PID=$!
+sleep 1
+# What a render of that catalog records: sha256 of the sorted choices, one per line.
+DS_NOW=$(python3 -c "import hashlib; print(hashlib.sha256('\n'.join(sorted(['dataset-default@v3','dataset-default@latest','dataset-cars@v2','dataset-cars@v1','dataset-cars@latest'])).encode()).hexdigest())")
+ctx_for() { printf 'lakefs:\n  endpoint: http://127.0.0.1:%s/\ncomputeClasses:\n' "$1"; }
+OLD_DS=1111111111111111111111111111111111111111111111111111111111111111
+
+CTX_YAML=$(ctx_for 18921)
+DS_CM="$OLD_DS" GITOPS_DS="$OLD_DS" run_case false "$IDLE" "$HEAD_SHA" built
+expect_eq "$RC/$NEEDS" "0/true" "backstop, datasets differ from the render's: builds (re-renders)"
+expect_has "$OUT" "reconcile: DATASET DRIFT" "and says DATASET DRIFT"
+
+DS_CM="$DS_NOW" run_case false "$IDLE" "$HEAD_SHA" built
+expect_eq "$RC/$NEEDS" "0/false" "backstop, datasets as rendered: no build"
+expect_has "$OUT" "datasets in sync" "and says so"
+
+DS_CM="$OLD_DS" GITOPS_DS="$DS_NOW" run_case false "$IDLE" "$HEAD_SHA" built
+expect_eq "$RC/$NEEDS" "0/false" "backstop, gitops already carries a render for the catalog (ArgoCD pending): no second build"
+expect_has "$OUT" "waiting for ArgoCD" "and says why"
+
+DS_CM=none run_case false "$IDLE" "$HEAD_SHA" built
+expect_eq "$RC/$NEEDS" "0/false" "backstop, a pipeline without a dataset parameter: not applicable"
+
+DS_CM="" run_case false "$IDLE" "$HEAD_SHA" built
+expect_eq "$RC/$NEEDS" "0/false" "backstop, a pipeline rendered before dataset-sha existed: unknown is no drift"
+
+CTX_YAML=$(ctx_for 18922)
+DS_CM="$OLD_DS" run_case false "$IDLE" "$HEAD_SHA" built
+expect_eq "$RC/$NEEDS" "0/false" "backstop, catalog answers 503: no drift, never an error"
+expect_has "$OUT" "dataset drift unknown" "and says it is unknown"
+
+CTX_YAML=$(ctx_for 1)
+DS_CM="$OLD_DS" run_case false "$IDLE" "$HEAD_SHA" built
+expect_eq "$RC/$NEEDS" "0/false" "backstop, catalog unreachable: no drift, never an error"
+
+CTX_YAML="computeClasses:"
+DS_CM="$OLD_DS" run_case false "$IDLE" "$HEAD_SHA" built
+expect_eq "$RC/$NEEDS" "0/false" "backstop, no lakeFS endpoint in the context: no drift"
+
+# A drifted commit still builds; the dataset check only adds a reason.
+CTX_YAML=$(ctx_for 18921)
+DS_CM="$DS_NOW" run_case false "$IDLE" "$HEAD_SHA" unbuilt
+expect_eq "$RC/$NEEDS" "0/true" "backstop, HEAD never built and datasets in sync: still builds"
+
+# ── dataset_event: kaos-lake's release event ─────────────────────────────────
+DATASET_EVENT=true
+DS_CM="$OLD_DS" GITOPS_DS="$OLD_DS" run_case false "$IDLE" "$HEAD_SHA" built
+expect_eq "$RC/$NEEDS" "0/true" "event, datasets differ: re-renders"
+expect_has "$OUT" "reconcile: DATASET DRIFT" "event: says DATASET DRIFT"
+DS_CM="$DS_NOW" run_case false "$IDLE" "$HEAD_SHA" built
+expect_eq "$RC/$NEEDS" "0/false" "event, datasets unchanged (another project's release): no build"
+DS_CM="" GITOPS_DS="" run_case false "$IDLE" "$HEAD_SHA" built
+expect_eq "$RC/$NEEDS" "0/true" "event, a pipeline that never recorded its datasets: re-renders once (records them)"
+DS_CM=none run_case false "$IDLE" "$HEAD_SHA" built
+expect_eq "$RC/$NEEDS" "0/false" "event, a pipeline without a dataset parameter: nothing"
+DS_CM="$OLD_DS" run_case false "$BUSY" "$HEAD_SHA" built
+expect_eq "$RC" "3" "event, a build in flight (its render may predate the release): waits (exit 3), never drops it"
+run_case false "$IDLE" "" built
+expect_eq "$RC/$NEEDS" "0/false" "event, app repo unreadable: skips like the poll (the hourly poll catches up)"
+CTX_YAML=$(ctx_for 18922)
+DS_CM="$OLD_DS" run_case false "$IDLE" "$HEAD_SHA" built
+expect_eq "$RC/$NEEDS" "0/false" "event, catalog answers 503: no drift, never an error"
+unset DATASET_EVENT CTX_YAML DS_CM GITOPS_DS
+
+DE_DEFAULT=$(yq 'select(.kind == "ClusterWorkflowTemplate" and .metadata.name == "ml-ci-reconcile")
+    | .spec.arguments.parameters[] | select(.name == "dataset_event") | .value' "$RENDERED")
+expect_eq "$DE_DEFAULT" "false" "dataset_event defaults to false (the CronWorkflow is the plain backstop)"
+LAKE_AUD=$(yq 'select(.kind == "ClusterWorkflowTemplate" and .metadata.name == "ml-ci-reconcile")
+    | .spec.templates[] | select(.name == "check-drift") | .volumes[] | select(.name == "kaos-lake-token") | .projected.sources[0].serviceAccountToken.audience' "$RENDERED")
+expect_eq "$LAKE_AUD" "kaos-lake" "check-drift mounts a kaos-lake audience token for the catalog"
+
+# ── ml-ci-dataset-release: the fan-out kaos-lake's event starts ──────────────
+FANOUT_SRC="${BASE_TMP}/fanout.src"
+yq 'select(.kind == "ClusterWorkflowTemplate" and .metadata.name == "ml-ci-dataset-release")
+    | .spec.templates[] | select(.name == "fan-out") | .container.args[0]' "$RENDERED" > "$FANOUT_SRC"
+expect_eq "$(test -s "$FANOUT_SRC" && echo yes)" "yes" "ml-ci-dataset-release has a fan-out step"
+expect_eq "$(yq 'select(.kind == "ClusterWorkflowTemplate" and .metadata.name == "ml-ci-dataset-release") | .spec.serviceAccountName' "$RENDERED")" \
+  "dataset-release-sa" "the template pins its own account (an absent serviceAccountName in a submitted Workflow cannot fall back to default)"
+expect_eq "$(yq 'select(.kind == "ClusterWorkflowTemplate" and .metadata.name == "ml-ci-dataset-release") | .spec.synchronization.mutexes[0].name' "$RENDERED")" \
+  "dataset-release" "at most one fan-out at a time"
+
+# fanout_case CRONS_JSON: a sandbox with stub kubectl; jq is real. $T/created holds every
+# Workflow the fan-out created.
+fanout_case() {
+  T=$(mktemp -d "${BASE_TMP}/fan-XXXX"); mkdir -p "$T/bin"
+  printf '%s' "$1" > "$T/crons.json"
+  cat > "$T/bin/kubectl" <<EOF
+#!/usr/bin/env bash
+case "\$*" in
+  *"get cronworkflows"*) [ -z "\${CRONS_FAIL:-}" ] || { echo forbidden >&2; exit 1; }; cat "$T/crons.json" ;;
+  *"create -n ci -f -"*) cat >> "$T/created" ; echo >> "$T/created" ;;
+  *) echo "stub kubectl: unexpected \$*" >&2; exit 1 ;;
+esac
+EOF
+  chmod +x "$T/bin/kubectl"
+  sed -e "s#{{workflow.namespace}}#ci#g" "$FANOUT_SRC" > "$T/fanout.sh"
+  OUT=$(PATH="$T/bin:$PATH" bash "$T/fanout.sh" 2>&1); RC=$?
+}
+cron() { # NAME TEMPLATE [SUSPEND]
+  printf '{"metadata":{"name":"%s-ci-reconciler","labels":{"platform.kubecore.io/app":"%s"}},"spec":{"suspend":%s,"workflowSpec":{"serviceAccountName":"operate-workflow-sa","workflowTemplateRef":{"name":"%s","clusterScope":true},"arguments":{"parameters":[{"name":"app_name","value":"%s"},{"name":"dataset_event","value":"false"}]}}}}' "$1" "$1" "${3:-false}" "$2" "$1"
+}
+fanout_case "{\"items\":[$(cron mlapp ml-ci-reconcile),$(cron svcapp ci-reconcile),$(cron paused ml-ci-reconcile true),$(cron other ml-ci-reconcile)]}"
+expect_eq "$RC" "0" "fan-out succeeds"
+expect_eq "$(jq -r '.metadata.labels["platform.kubecore.io/app"]' "$T/created" | grep -v '^$' | sort | tr '\n' ' ')" "mlapp other " \
+  "only the project's running ML apps get a dataset check (not a service app's reconciler, not a paused one)"
+expect_eq "$(jq -r '.spec.arguments.parameters[] | select(.name=="dataset_event") | .value' "$T/created" | sort -u)" "true" \
+  "each check runs ml-ci-reconcile with dataset_event=true"
+expect_eq "$(jq -r '.spec.workflowTemplateRef.name' "$T/created" | sort -u)" "ml-ci-reconcile" "from the app's own reconciler spec"
+expect_eq "$(jq -r '.spec.serviceAccountName' "$T/created" | sort -u)" "operate-workflow-sa" "as the app's own CI account"
+expect_eq "$(jq -r '.spec.synchronization.mutexes[0].name' "$T/created" | sort | tr '\n' ' ')" "mlapp-dataset-rerender other-dataset-rerender " \
+  "a mutex per app: two events never race to submit two builds"
+expect_eq "$(jq -r '.spec.arguments.parameters[] | select(.name=="app_name") | .value' "$T/created" | sort | tr '\n' ' ')" "mlapp other " \
+  "the reconciler's own parameters are kept"
+
+fanout_case '{"items":[]}'
+expect_eq "$RC" "0" "a project with no ML app: no error"
+expect_eq "$(test -e "$T/created" && echo created || echo none)" "none" "and nothing is created"
+fanout_case "{\"items\":[$(cron svcapp ci-reconcile)]}"
+expect_eq "$RC/$(test -e "$T/created" && echo created || echo none)" "0/none" "only service apps: nothing, no error"
+CRONS_FAIL=1 fanout_case '{"items":[]}'
+expect_eq "$RC" "1" "an unreadable cluster fails the Workflow loudly (the hourly poll catches up)"
 
 echo "reconcile-trigger: ${PASSED} passed, ${FAILED} failed"
 exit "$FAILED"

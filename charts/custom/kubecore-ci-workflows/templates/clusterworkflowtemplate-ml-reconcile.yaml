@@ -25,6 +25,15 @@ human: a dropped/failed webhook delivery, and a build that never ran because the
 event was lost. It is deliberately NOT a re-render trigger for platform-context
 changes — those flow operator -> XR -> composition -> ConfigMap, and the WFT
 picks them up on the next build this reconciler submits.
+
+Dataset changes (PRD novelcore/kaos#1283 D-05) are the second input of a render
+besides the commit that the poll can see: the pipeline's `dataset` dropdown is
+read from kaos-lake's catalog at render time only. The render records a digest of
+the choices it offered (dataset-sha, in {app}-pipeline-images); DATASET DRIFT
+compares it with the catalog now and re-renders when they differ. kaos-lake
+creates a `ml-ci-dataset-release` Workflow when a version is released, which
+submits this template for each ML app with dataset_event=true: the same check,
+run at once instead of at the next poll, and retried while a build is in flight.
 */}}
 apiVersion: argoproj.io/v1alpha1
 kind: ClusterWorkflowTemplate
@@ -111,6 +120,12 @@ spec:
     # re-trigger it. Empty = do not wait.
     - name: context_sha
       value: ""
+    # dataset_event: set by ml-ci-dataset-release (kaos-lake saw a dataset change).
+    # The poll's checks, plus: a build already in flight is waited out (exit 3,
+    # retried) instead of skipping, because the in-flight render may predate the
+    # change, and a pipeline that records no dataset-sha yet counts as drifted.
+    - name: dataset_event
+      value: "false"
     - name: node_class
       value: {{ .Values.ci.defaultNodeClass | default (dig "platform.kubecore.io/nodegroup-type" "kubecorecpu" .Values.nodeSelector) | quote }}
 
@@ -192,10 +207,15 @@ spec:
         # documents). A read failure also skips: unknown state must never mean
         # "submit more work".
         FORCE="{{`{{workflow.parameters.force}}`}}"
-        # not_yet MSG: in force mode, retry later (exit 3); otherwise skip this
+        DATASET_EVENT="{{`{{workflow.parameters.dataset_event}}`}}"
+        # RETRY: the runs that must not drop their event when the state is "not
+        # yet" — force, and (for a build in flight only) a dataset event.
+        RETRY=false
+        [ "$FORCE" = "true" ] || [ "$DATASET_EVENT" = "true" ] && RETRY=true
+        # not_yet MSG: retry later (exit 3) in a RETRY run; otherwise skip this
         # poll as before.
         not_yet() {
-          if [ "$FORCE" = "true" ]; then
+          if [ "$RETRY" = "true" ]; then
             echo "reconcile: force: $1 — retrying"
             exit 3
           fi
@@ -218,8 +238,9 @@ spec:
         APP="{{`{{workflow.parameters.app_name}}`}}"
         ACTIVE=$(echo "$INFLIGHT" | jq -r --arg app "$APP" '[.items[] | select((.metadata.name|startswith("ml-ci-build")) and (.status.phase=="Running" or .status.phase=="Pending" or .status.phase==null) and ([.spec.arguments.parameters[]? | select(.name=="app_name") | .value] | index($app)))] | length')
         if [ "${ACTIVE:-0}" != "0" ]; then
-          # force: the running build may predate the change this run is for.
-          [ "$FORCE" = "true" ] && not_yet "build already in flight (${ACTIVE} active ml-ci-build workflow(s) for ${APP})"
+          # force / dataset event: the running build may predate the change this
+          # run is for.
+          [ "$RETRY" = "true" ] && not_yet "build already in flight (${ACTIVE} active ml-ci-build workflow(s) for ${APP})"
           echo "reconcile: build already in flight (${ACTIVE} active ml-ci-build workflow(s) for ${APP}) - skipping submit this poll"
           printf 'false' > /tmp/needs_build
           printf '' > /tmp/head_sha
@@ -549,12 +570,65 @@ spec:
           echo "reconcile: WARN no ${ML_NS}/${APP}-pipeline-context — context-drift check SKIPPED"
         fi
 
+        # DATASET DRIFT (PRD novelcore/kaos#1283 D-05): the `dataset` dropdown is
+        # read from kaos-lake's catalog at render time, so a version released (or a
+        # dataset deleted) after the last render is missing from (or still in) the
+        # live WFT with no commit and no context change. Compare the digest the
+        # last render recorded (dataset-sha) with the catalog now. Unknown never
+        # means "submit work": an unreadable catalog, a context without a lakeFS
+        # endpoint, or (outside a dataset event) a pipeline rendered before the
+        # record existed is no drift. "none" = the pipeline offers no dataset.
+{{ include "kubecore-ci-workflows.datasetChoicesScript" . | indent 8 }}
+        DS_LAST=$(echo "$CM" | jq -r '.data["dataset-sha"] // empty')
+        DS_ENDPOINT=$(echo "${CTX:-}" | sed -n '/^lakefs:/,/^[a-z]/p' | sed -n 's/^  endpoint: *"\{0,1\}\([^"]*\)"\{0,1\}$/\1/p' | head -1)
+        if [ "$DS_LAST" = "none" ]; then
+          echo "reconcile: the pipeline offers no dataset — dataset drift does not apply"
+        elif [ -z "$DS_LAST" ] && [ "$DATASET_EVENT" != "true" ]; then
+          echo "reconcile: no dataset-sha recorded yet (rendered before it existed) — dataset drift unknown this poll"
+        elif [ -z "$DS_ENDPOINT" ]; then
+          echo "reconcile: WARN no lakeFS endpoint in ${ML_NS}/${APP}-pipeline-context — dataset drift unknown this poll"
+        elif ! DS_NOW=$(python3 -I /tmp/dataset-choices.py digest "$DS_ENDPOINT" /var/run/secrets/kaos-lake/token 2>/tmp/dataset-err); then
+          echo "reconcile: WARN dataset catalog not read ($(head -c 300 /tmp/dataset-err)) — dataset drift unknown this poll"
+        elif [ "$DS_NOW" = "$DS_LAST" ]; then
+          echo "reconcile: datasets in sync (${DS_NOW:0:12})"
+        else
+          # A render that already offers the catalog's datasets may be pushed to
+          # gitops and not synced to the pool yet: the live record is behind, the
+          # work is done. Only a gitops copy that is behind too is drift.
+          DS_IMAGES_REL="$(dirname "{{`{{workflow.parameters.workflow_template_path}}`}}")/pipeline-images.yaml"
+          DS_GITOPS=$(curl -sf -H "Authorization: Bearer ${TOKEN}" -H "Accept: application/vnd.github.raw" \
+            "https://api.github.com/repos/${GORG}/${GREPO}/contents/${DS_IMAGES_REL}?ref=${GBRANCH}" \
+            | sed -n 's/^  dataset-sha: *"\{0,1\}\([^"]*\)"\{0,1\}$/\1/p' | head -1 || true)
+          if [ "$DS_GITOPS" = "$DS_NOW" ]; then
+            echo "reconcile: datasets changed (${DS_LAST:-<unrecorded>} -> ${DS_NOW:0:12}) but gitops already carries a render for them — waiting for ArgoCD"
+          else
+            printf 'true' > /tmp/needs_build
+            DS_SHOWN="${DS_LAST:-<unrecorded>}"
+            echo "reconcile: DATASET DRIFT — the live WFT was rendered with datasets ${DS_SHOWN:0:12} but the catalog is now ${DS_NOW:0:12}; submitting ml-ci-build to re-render"
+            exit 0
+          fi
+        fi
+
         printf 'false' > /tmp/needs_build
         echo "reconcile: up to date — commit built and the WFT matches the platform context"
       volumeMounts:
       - name: github-token
         mountPath: /etc/github-token
         readOnly: true
+      - name: kaos-lake-token
+        mountPath: /var/run/secrets/kaos-lake
+        readOnly: true
+    # This pod's own service-account token for kaos-lake's dataset catalog
+    # (DATASET DRIFT): audience-bound, short-lived, read-only use — the same
+    # projection as ml-ci-build's hera-enhance-commit.
+    volumes:
+    - name: kaos-lake-token
+      projected:
+        sources:
+        - serviceAccountToken:
+            audience: {{ .Values.kaosLake.workloadAudience | quote }}
+            expirationSeconds: 600
+            path: token
 
   - name: submit-build
     inputs:
