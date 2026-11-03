@@ -628,7 +628,7 @@ spec:
   # no userns gymnastics — works identically on COS, Ubuntu, EKS, kind.
   # Switched from rootless BuildKit because BuildKit's overlayfs snapshot
   # copy-up performs poorly on GKE Container-Optimized OS for multi-GB
-  # images (e.g. PyTorch + ultralytics), getting stuck in "exporting
+  # images (e.g. PyTorch plus a training library), getting stuck in "exporting
   # layers" indefinitely. Kaniko's flat tar-based layer model handles
   # large images consistently.
   - name: build-push

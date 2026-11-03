@@ -103,7 +103,7 @@ pipeline:
 
     - name: batch-size
       default: "16"
-      description: "Training batch size. Use -1 for Ultralytics auto-batch."
+      description: "Training batch size. Use -1 for the training library auto-batch."
 
     - name: image-size
       default: "640"
@@ -112,7 +112,7 @@ pipeline:
     # ── Learning rate ─────────────────────────────────────────────────────────
     - name: learning-rate
       default: "0.01"
-      description: "Initial learning rate (Ultralytics lr0)."
+      description: "Initial learning rate (lr0)."
 
     - name: cos-lr
       default: "true"
@@ -127,7 +127,7 @@ pipeline:
     - name: optimizer
       default: "SGD"
       enum: ["SGD", "Adam", "AdamW"]
-      description: "Gradient optimizer. SGD is the Ultralytics default for YOLO."
+      description: "Gradient optimizer. SGD is the training library default for YOLO."
 
     - name: momentum
       default: "0.937"
@@ -158,7 +158,7 @@ pipeline:
     # ── Gradient accumulation ─────────────────────────────────────────────────
     - name: nbs
       default: "64"
-      description: "Nominal batch size. Ultralytics scales gradients so effective LR matches this batch size."
+      description: "Nominal batch size. The training library scales gradients so effective LR matches this batch size."
 
     # ── Fine-tuning control ───────────────────────────────────────────────────
     - name: freeze
@@ -303,7 +303,7 @@ pipeline:
     - name: quantization-mode
       default: "none"
       enum: ["none", "ptq", "qat"]
-      description: "Quantization mode: 'none' skips both qat-finetune and model-quantization; 'ptq' runs Ultralytics INT8 export; 'qat' runs PT2E QAT fine-tune then model-quantization."
+      description: "Quantization mode: 'none' skips both qat-finetune and model-quantization; 'ptq' runs the training library INT8 export; 'qat' runs PT2E QAT fine-tune then model-quantization."
 
     - name: quantization-image-size
       default: "640"
@@ -1175,7 +1175,7 @@ steps:
   # Step 5 — model-quantization  [CONDITIONAL — skipped when mode=none]
   #
   # Shared export tail for both PTQ and QAT paths:
-  #   PTQ: runs Ultralytics export(int8=True) on the FP32 checkpoint
+  #   PTQ: runs the training library export(int8=True) on the FP32 checkpoint
   #   QAT: receives INT8 TFLite URI from qat-finetune; runs parity test
   #
   # Dependency: uses Argo `depends` expression (not `dependencies` list) so

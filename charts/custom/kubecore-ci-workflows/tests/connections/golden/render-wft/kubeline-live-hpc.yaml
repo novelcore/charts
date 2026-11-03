@@ -76,13 +76,13 @@ spec:
       description: Total training epochs.
     - name: batch-size
       value: '16'
-      description: Training batch size. Use -1 for Ultralytics auto-batch.
+      description: Training batch size. Use -1 for the training library auto-batch.
     - name: image-size
       value: '640'
       description: Input image resolution in pixels (must be a multiple of 32).
     - name: learning-rate
       value: '0.01'
-      description: Initial learning rate (Ultralytics lr0).
+      description: Initial learning rate (lr0).
     - name: cos-lr
       value: 'true'
       description: Use cosine learning rate schedule.
@@ -92,7 +92,7 @@ spec:
         1].'
     - name: optimizer
       value: SGD
-      description: Gradient optimizer. SGD is the Ultralytics default for YOLO.
+      description: Gradient optimizer. SGD is the training library default for YOLO.
     - name: momentum
       value: '0.937'
       description: SGD momentum or Adam beta1.
@@ -113,8 +113,8 @@ spec:
       description: Label smoothing epsilon [0.0, 1.0). Reduces overconfidence.
     - name: nbs
       value: '64'
-      description: Nominal batch size. Ultralytics scales gradients so effective LR
-        matches this batch size.
+      description: Nominal batch size. The training library scales gradients so effective
+        LR matches this batch size.
     - name: freeze
       value: ''
       description: Freeze the first N backbone layers. Empty = train all layers.
@@ -225,8 +225,8 @@ spec:
     - name: quantization-mode
       value: none
       description: 'Quantization mode: ''none'' skips both qat-finetune and model-quantization;
-        ''ptq'' runs Ultralytics INT8 export; ''qat'' runs PT2E QAT fine-tune then
-        model-quantization.'
+        ''ptq'' runs the training library INT8 export; ''qat'' runs PT2E QAT fine-tune
+        then model-quantization.'
     - name: quantization-image-size
       value: '640'
       description: Input image size for quantization. Must match training image-size.
