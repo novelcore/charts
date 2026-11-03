@@ -132,6 +132,8 @@ spec:
           parameters:
           - name: commit_sha
             value: "{{`{{steps.check-drift.outputs.parameters.head_sha}}`}}"
+          - name: kaos_lib_ref
+            value: "{{`{{steps.check-drift.outputs.parameters.kaos_lib_ref}}`}}"
 
   - name: check-drift
     # Only force mode exits 3 ("not yet, retry"); every other outcome exits 0
@@ -155,6 +157,12 @@ spec:
       - name: head_sha
         valueFrom:
           path: /tmp/head_sha
+      # KAOS-LIB DRIFT's attempt guard: sha256[:12] of the spec a build is
+      # submitted for ("" = not a kaos-lib re-build).
+      - name: kaos_lib_ref
+        valueFrom:
+          path: /tmp/kaos_lib_ref
+          default: ""
     container:
       # kubectl + jq + curl baked in (tooling.kubectlImage, pinned). alpine/git
       # has NO kubectl: the baseline read silently produced "" on every poll, so
@@ -427,6 +435,56 @@ spec:
           fi
         fi
 
+        # KAOS-LIB DRIFT (PRD novelcore/kaos#1147): the kaos-lib version the
+        # step images install is chosen by the platform, not the app repo. The
+        # operator writes it into the gitops pipeline-context (kaosLib.spec),
+        # with no push, and holds an app whose desired version is outside its
+        # compat range at the spec it was built with, so a spec here that the
+        # images do not have (kaos-lib-package, recorded by patch-images) is a
+        # rebuild to do: the build submitted here rebuilds every step that
+        # declares ARG KAOS_LIB_PACKAGE (detect-steps) and re-renders. Nothing
+        # delivered, or an app whose Dockerfiles declare no ARG ("none"), is
+        # not drift. The same one-attempt-per-hour guard as ENHANCER DRIFT, per
+        # spec: a spec that cannot install fails once an hour, not every poll.
+{{ include "kubecore-ci-workflows.kaosLibScript" . | indent 8 }}
+        KL_WANT=""
+        if curl -sf -H "Authorization: Bearer ${TOKEN}" -H "Accept: application/vnd.github.raw" \
+             "https://api.github.com/repos/${GORG}/${GREPO}/contents/${CTX_REL}?ref=${GBRANCH}" > /tmp/kl-context.yaml; then
+          KL_WANT=$(python3 -I /tmp/kaos-lib.py context --context /tmp/kl-context.yaml 2>/dev/null || true)
+        else
+          echo "reconcile: gitops ${CTX_REL} unreadable — kaos-lib drift unknown this poll"
+        fi
+        KL_HAVE=$(echo "$CM" | jq -r '.data["kaos-lib-package"] // empty')
+        if [ -z "$KL_WANT" ]; then
+          :
+        elif [ "$KL_HAVE" = "none" ]; then
+          echo "reconcile: kaos-lib ${KL_WANT} delivered, but no step Dockerfile declares ARG KAOS_LIB_PACKAGE — nothing the platform can rebuild"
+        elif [ "$KL_HAVE" = "$KL_WANT" ]; then
+          echo "reconcile: kaos-lib in sync (${KL_WANT})"
+        else
+          KL_REF=$(printf '%s' "$KL_WANT" | sha256sum | cut -c1-12)
+          LAST_TRY=$(echo "$INFLIGHT" | jq -r --arg app "$APP" --arg ref "$KL_REF" '
+            [.items[]
+             | select((.metadata.labels // {})["platform.kubecore.io/app"] == $app
+                      and (.metadata.labels // {})["platform.kubecore.io/submitted-by"] == "ml-ci-reconcile"
+                      and (.metadata.labels // {})["platform.kubecore.io/kaos-lib"] == $ref
+                      and (.status.phase == "Succeeded" or .status.phase == "Failed" or .status.phase == "Error"))
+             | {name: .metadata.name, phase: .status.phase,
+                age: (now - ((.status.finishedAt // .metadata.creationTimestamp // "")
+                             | try fromdateiso8601 catch now))}
+             | select(.age < 3600)]
+            | sort_by(.age) | first
+            | if . == null then "" else "\(.name) (\(.phase), \(.age | floor)s ago)" end' 2>&1) || LAST_TRY="unreadable: ${LAST_TRY}"
+          if [ -n "$LAST_TRY" ]; then
+            echo "reconcile: KAOS-LIB DRIFT (${KL_HAVE:-<unrecorded>} -> ${KL_WANT}) — not rebuilding this poll: an attempt at this spec ended within the hour: ${LAST_TRY}"
+          else
+            printf '%s' "$KL_REF" > /tmp/kaos_lib_ref
+            printf 'true' > /tmp/needs_build
+            echo "reconcile: KAOS-LIB DRIFT — the images have kaos-lib ${KL_HAVE:-<unrecorded>} but the platform delivers ${KL_WANT}; submitting ml-ci-build to rebuild and re-render"
+            exit 0
+          fi
+        fi
+
         # The commit is built — but the WFT has a SECOND input the commit says
         # nothing about: pipeline-context (compute classes, endpoints), written
         # by Crossplane from the operator into the ML namespace. When the
@@ -502,6 +560,8 @@ spec:
     inputs:
       parameters:
       - name: commit_sha
+      - name: kaos_lib_ref
+        value: ""
     resource:
       action: create
       manifest: |
@@ -515,6 +575,8 @@ spec:
             platform.kubecore.io/submitted-by: ml-ci-reconcile
             # The enhancer this build renders with: ENHANCER DRIFT's attempt guard.
             platform.kubecore.io/enhancer-ref: "{{ include "kubecore-ci-workflows.enhancerRef" . }}"
+            # The kaos-lib spec (sha256[:12]) this build is for: KAOS-LIB DRIFT's attempt guard.
+            platform.kubecore.io/kaos-lib: "{{`{{inputs.parameters.kaos_lib_ref}}`}}"
         spec:
           workflowTemplateRef:
             name: ml-ci-build

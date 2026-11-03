@@ -184,6 +184,12 @@ spec:
         template: detect-steps
     - - name: version
         template: version
+      # kaos-lib/support commit status (PRD novelcore/kaos#1147): reporting
+      # only, never a red build.
+      - name: kaos-lib-support
+        template: kaos-lib-support
+        continueOn:
+          failed: true
     # build-push and render-wft run in the SAME step-group (both single-dash =
     # parallel), because render-wft does NOT depend on build output — it only
     # consumes version.image_tag + detect-steps.changed_steps (both produced
@@ -243,6 +249,8 @@ spec:
             value: "{{`{{steps.version.outputs.parameters.image_tag}}`}}"
           - name: new_version
             value: "{{`{{steps.version.outputs.parameters.new_version}}`}}"
+          - name: kaos_lib_package
+            value: "{{`{{steps.detect-steps.outputs.parameters.kaos_lib_package}}`}}"
         withParam: "{{`{{steps.detect-steps.outputs.parameters.changed_steps}}`}}"
     - - name: patch-images
         template: patch-images
@@ -262,6 +270,10 @@ spec:
             value: "{{`{{steps.version.outputs.parameters.image_tag}}`}}"
           - name: changed_steps
             value: "{{`{{steps.detect-steps.outputs.parameters.changed_steps}}`}}"
+          - name: kaos_lib_record
+            value: "{{`{{steps.detect-steps.outputs.parameters.kaos_lib_record}}`}}"
+          - name: kaos_lib_compat
+            value: "{{`{{steps.detect-steps.outputs.parameters.kaos_lib_compat}}`}}"
     - - name: tag
         template: tag
         when: "{{`{{steps.detect-steps.outputs.parameters.has_changes}}`}} == true && {{`{{workflow.parameters.branch_type}}`}} != chore && {{`{{workflow.parameters.branch_type}}`}} != rc"
@@ -361,6 +373,21 @@ spec:
       - name: frontend
         valueFrom:
           path: /workspace/frontend
+      # kaos-lib delivery (PRD novelcore/kaos#1147), see the KAOS-LIB block
+      # below: the --build-arg KAOS_LIB_PACKAGE value ("" = none), and the
+      # pipeline-images kaos-lib-package / kaos-lib-compat report ("" = leave).
+      - name: kaos_lib_package
+        valueFrom:
+          path: /tmp/kaos_lib_package
+          default: ""
+      - name: kaos_lib_record
+        valueFrom:
+          path: /tmp/kaos_lib_record
+          default: ""
+      - name: kaos_lib_compat
+        valueFrom:
+          path: /tmp/kaos_lib_compat
+          default: ""
     container:
       image: {{ .Values.tooling.toolboxImage | default "alpine/k8s:1.36.4" }}
       {{- include "kubecore-ci-workflows.resources" .Values.tooling.resources | nindent 6 }}
@@ -504,6 +531,41 @@ spec:
         # Write pairs to a file and loop with redirection (NOT a pipe) so the
         # CHANGED_JSON accumulator survives the loop (no subshell).
         printf '%s\n' "$STEP_PAIRS" > /tmp/step_pairs
+
+        # KAOS-LIB (PRD novelcore/kaos#1147): the platform picks the kaos-lib
+        # version the step images install. The operator writes it into the
+        # gitops pipeline-context (kaosLib.spec; it already holds an app whose
+        # desired version is outside its .kaos/compat.yaml range at the spec it
+        # was built with), and this build installs exactly that: every step
+        # whose Dockerfile declares ARG KAOS_LIB_PACKAGE gets
+        # --build-arg KAOS_LIB_PACKAGE=<spec> (build-push). When the spec differs
+        # from the one the images were built with (pipeline-images
+        # kaos-lib-package), every such step is rebuilt, commit or not: kaniko
+        # keys the layers after the ARG on its value, so the cache misses
+        # exactly there. patch-images then reports the built spec and the app's
+        # compat range back (kaos-lib-package, kaos-lib-compat), which the
+        # operator reads as status.ml.kaosLib.built. "none" = no step declares
+        # the ARG (an app from before delivery): the platform cannot move it.
+        # The script reads the workspace as data only (python3 -I).
+{{ include "kubecore-ci-workflows.kaosLibScript" . | indent 8 }}
+        cut -d'|' -f2 /tmp/step_pairs > /tmp/step_paths
+        KL_CTX=$(find /tmp/gitops -path "*/${APP_NAME}/${GITOPS_BRANCH}/pipeline-context.yaml" 2>/dev/null | head -1)
+        KL_REC=""
+        if [ -n "${IMAGES_PATH:-}" ]; then KL_REC=$(yq e '.data."kaos-lib-package" // ""' "$IMAGES_PATH"); fi
+        KL_NONE='{"spec":"","record":"","compat":"","rebuild":false,"managed":[],"reason":"no pipeline-context in the gitops repo: kaos-lib left as it is"}'
+        if [ -n "$KL_CTX" ]; then
+          python3 -I /tmp/kaos-lib.py decide --context "$KL_CTX" --recorded "$KL_REC" \
+            --repo /workspace/repo --steps /tmp/step_paths > /tmp/kaos_lib.json \
+            || { echo "kaos-lib: WARN the decision failed: kaos-lib left as it is"; printf '%s' "$KL_NONE" > /tmp/kaos_lib.json; }
+        else
+          printf '%s' "$KL_NONE" > /tmp/kaos_lib.json
+        fi
+        jq -j '.spec' /tmp/kaos_lib.json > /tmp/kaos_lib_package
+        jq -j '.record' /tmp/kaos_lib.json > /tmp/kaos_lib_record
+        jq -j '.compat' /tmp/kaos_lib.json > /tmp/kaos_lib_compat
+        jq -r 'if .rebuild then .managed[] else empty end' /tmp/kaos_lib.json > /tmp/kaos_lib_rebuild
+        echo "kaos-lib: $(jq -r '.reason' /tmp/kaos_lib.json)"
+
         CHANGED_JSON="[]"
         while IFS='|' read -r STEP_NAME STEP_PATH; do
           [ -n "$STEP_NAME" ] || continue
@@ -524,6 +586,8 @@ spec:
             REASON="config/ or kubecore/ changed (baked into this image)"
           elif [ "$UNBUILT_STEPS" = "__ALL__" ]; then
             REASON="no pipeline-images (first build)"
+          elif grep -qxF "$STEP_PATH" /tmp/kaos_lib_rebuild; then
+            REASON="kaos-lib package moved to $(cat /tmp/kaos_lib_package)"
           elif [ -n "${IMAGES_PATH:-}" ]; then
             # ConfigMap key value for this step; absent → null. A value still
             # ending in "-latest" is the seeded placeholder = never built.
@@ -641,6 +705,10 @@ spec:
       - name: step_path
       - name: image_tag
       - name: new_version
+      # kaos-lib spec for --build-arg KAOS_LIB_PACKAGE (detect-steps); "" = the
+      # Dockerfile's default. Passed as an env var, never spliced into the script.
+      - name: kaos_lib_package
+        value: ""
     metadata:
       labels:
         app.kubernetes.io/name: "{{`{{workflow.parameters.app_name}}`}}"
@@ -772,6 +840,9 @@ spec:
     container:
       image: {{ .Values.kaniko.image | default "gcr.io/kaniko-project/executor:v1.23.2-debug" }}
       command: ["/busybox/sh", "-c"]
+      env:
+      - name: KAOS_LIB_PACKAGE
+        value: "{{`{{inputs.parameters.kaos_lib_package}}`}}"
       args:
       - |
         set -e
@@ -849,6 +920,15 @@ spec:
         if [ "$STEP_NAME" = "compose-and-validate" ]; then
           BUILD_CONTEXT="/workspace/repo"
         fi
+        # kaos-lib (PRD novelcore/kaos#1147): the spec the platform chose, for a
+        # step whose Dockerfile declares ARG KAOS_LIB_PACKAGE, plus the image
+        # label io.kaos.lib naming it. Any other step builds as before.
+        set --
+        if [ -n "${KAOS_LIB_PACKAGE:-}" ] \
+           && grep -qE '^[[:space:]]*ARG[[:space:]]+KAOS_LIB_PACKAGE([[:space:]=]|$)' "/workspace/repo/${STEP_PATH}/Dockerfile"; then
+          set -- --build-arg="KAOS_LIB_PACKAGE=${KAOS_LIB_PACKAGE}" --label="io.kaos.lib=${KAOS_LIB_PACKAGE}"
+          echo "kaos-lib: ${STEP_NAME} installs kaos-lib ${KAOS_LIB_PACKAGE}"
+        fi
         /kaniko/executor \
           --context="${BUILD_CONTEXT}" \
           --dockerfile="/workspace/repo/${STEP_PATH}/Dockerfile" \
@@ -865,7 +945,8 @@ spec:
           --snapshot-mode=time \
           --cleanup \
           --use-new-run \
-          --compressed-caching=false
+          --compressed-caching=false \
+          "$@"
 
         echo "Pushed ${STEP_NAME}: ${VERSIONED_IMAGE} + ${LATEST_IMAGE}"
       {{- with .Values.kaniko.resources }}
@@ -2975,7 +3056,7 @@ spec:
         # renamed step): otherwise the ConfigMap — and the image parameters the
         # submit form derives from it — keep stale entries forever
         # (kubecore-operator#1126, ml-dev-loop e2e "delete"/"rename").
-        removed = [k for k in list(data) if k not in ("last-built-sha", "context-sha", "enhancer-ref") and k not in wanted]
+        removed = [k for k in list(data) if k not in ("last-built-sha", "context-sha", "enhancer-ref", "kaos-lib-package", "kaos-lib-compat") and k not in wanted]
         for k in removed:
             del data[k]
         context_moved = bool(context_sha) and data.get("context-sha") != context_sha
@@ -3049,12 +3130,95 @@ spec:
             expirationSeconds: 600
             path: token
 
+  # kaos-lib-support (PRD novelcore/kaos#1147, contract "Support window as
+  # release metadata"): the commit status kaos-lib/support on the built commit,
+  # from the same check every pipeline step runs at start, against the version
+  # this build resolved (the gitops pipeline-context's kaosLib.version, checked
+  # against kaosLib.support, the newest release's metadata the operator
+  # publishes). Red (failure) when unsupported; success with a "warning:"
+  # description when behind or deprecated; target_url is the Argo run. No
+  # support data in the context = no status. Borrowed by ml-ci-pr-render (the
+  # PR head) and ml-ci-rc-build, which passes refuse_unsupported=true: an
+  # unsupported version then fails the step, so the release is refused. A
+  # GitHub write that still fails exits non-zero (callers that only report run
+  # it with continueOn failed) but never refuses a release on its own.
+  - name: kaos-lib-support
+{{ include "kubecore-ci-workflows.githubReportRetry" . | indent 4 }}
+    inputs:
+      parameters:
+      - name: refuse_unsupported
+        value: "false"
+    container:
+      image: {{ .Values.tooling.toolboxImage | default "alpine/k8s:1.36.4" }}
+      {{- include "kubecore-ci-workflows.resources" .Values.tooling.resources | nindent 6 }}
+      command: [sh, -c]
+      args:
+      - |
+        set -e
+        TOKEN=$(cat /etc/github-token/token)
+{{ include "kubecore-ci-workflows.gitAuth" . | indent 8 }}
+        ORG="{{ .Values.github.org }}"
+        APP_NAME="{{`{{workflow.parameters.app_name}}`}}"
+        GITOPS_BRANCH="{{`{{workflow.parameters.gitops_branch}}`}}"
+        REFUSE="{{`{{inputs.parameters.refuse_unsupported}}`}}"
+        rm -rf /tmp/gitops
+        git clone --quiet --depth=1 --branch "${GITOPS_BRANCH}" \
+          "https://github.com/${ORG}/{{`{{workflow.parameters.gitops_repository}}`}}.git" /tmp/gitops
+        git_assert_no_token /tmp/gitops
+        KL_CTX=$(find /tmp/gitops -path "*/${APP_NAME}/${GITOPS_BRANCH}/pipeline-context.yaml" | head -1)
+        if [ -z "$KL_CTX" ]; then
+          echo "kaos-lib-support: no pipeline-context for ${APP_NAME} in the gitops repo — nothing to check"
+          exit 0
+        fi
+{{ include "kubecore-ci-workflows.kaosLibScript" . | indent 8 }}
+        python3 -I /tmp/kaos-lib.py support --context "$KL_CTX" > /tmp/support.json
+        VERDICT=$(jq -r '.verdict' /tmp/support.json)
+        STATE=$(jq -r '.state' /tmp/support.json)
+        DESC=$(jq -r '.description' /tmp/support.json)
+        if [ -z "$STATE" ]; then
+          echo "kaos-lib-support: the platform context carries no kaos-lib support data — no status"
+          exit 0
+        fi
+        echo "kaos-lib-support: ${VERDICT} — ${DESC}"
+        SHA="{{`{{workflow.parameters.commit_sha}}`}}"
+        OWNER_REPO=$(echo "{{`{{workflow.parameters.repo_url}}`}}" | sed 's|https://github.com/||; s|\.git$||')
+        CONTEXT="kaos-lib/support"
+        ENVIRONMENT=""
+        API="https://api.github.com/repos/${OWNER_REPO}"
+        AUTH="Authorization: token ${TOKEN}"
+        ACCEPT="Accept: application/vnd.github+json"
+        ARGO_BASE="{{ .Values.argo.uiBaseUrl }}"
+        RUN_URL=""
+        if [ -n "${ARGO_BASE}" ]; then
+          RUN_URL="${ARGO_BASE}/workflows/{{`{{workflow.namespace}}`}}/{{`{{workflow.name}}`}}?uid={{`{{workflow.uid}}`}}"
+        fi
+        set +e
+        (
+{{ include "kubecore-ci-workflows.githubStatusReport" . | indent 10 }}
+        )
+        RC=$?
+        if [ "$REFUSE" = "true" ] && [ "$VERDICT" = "unsupported" ]; then
+          echo "kaos-lib-support: REFUSED — ${DESC}. Move the app to a supported kaos-lib version (merge its bump pull request) and release again." >&2
+          exit 1
+        fi
+        [ "$REFUSE" = "true" ] && exit 0
+        exit "$RC"
+      volumeMounts:
+      - name: github-token
+        mountPath: /etc/github-token
+        readOnly: true
+
   - name: patch-images
 {{ include "kubecore-ci-workflows.preemptionRetry" . | indent 4 }}
     inputs:
       parameters:
       - name: image_tag
       - name: changed_steps
+      # kaos-lib report (PRD novelcore/kaos#1147, detect-steps): "" = leave.
+      - name: kaos_lib_record
+        value: ""
+      - name: kaos_lib_compat
+        value: ""
     securityContext:
       runAsUser: 0
       runAsGroup: 0
@@ -3065,6 +3229,11 @@ spec:
       securityContext:
         runAsUser: 0
         runAsGroup: 0
+      env:
+      - name: KL_RECORD
+        value: "{{`{{inputs.parameters.kaos_lib_record}}`}}"
+      - name: KL_COMPAT
+        value: "{{`{{inputs.parameters.kaos_lib_compat}}`}}"
       args:
       - |
         set -e
@@ -3165,6 +3334,8 @@ spec:
           for KEY in $(yq e '.data | keys | .[]' "${IMAGES_PATH}"); do
             [ "${KEY}" = "last-built-sha" ] && continue
             [ "${KEY}" = "enhancer-ref" ] && continue
+            [ "${KEY}" = "kaos-lib-package" ] && continue
+            [ "${KEY}" = "kaos-lib-compat" ] && continue
             CUR_VALUE=$(yq e ".data.\"${KEY}\"" "${IMAGES_PATH}")
             BASE="${CUR_VALUE%%@*}"
             TAG="${BASE##*:}"
@@ -3202,6 +3373,17 @@ spec:
         if [ -n "${COMMIT_SHA}" ]; then
           echo "Recording last-built-sha = ${COMMIT_SHA}"
           yq e -i ".data.\"last-built-sha\" = \"${COMMIT_SHA}\"" "${IMAGES_PATH}"
+        fi
+
+        # kaos-lib report (PRD novelcore/kaos#1147): the spec every step image
+        # that declares ARG KAOS_LIB_PACKAGE now has ("none" = no step does) and
+        # the app's .kaos/compat.yaml range ("" = none declared). The operator
+        # reads both from this file (status.ml.kaosLib.built) and ml-ci-reconcile
+        # compares kaos-lib-package with the context. Only reached when every
+        # build-push succeeded, so the record never runs ahead of the images.
+        if [ -n "${KL_RECORD}" ]; then
+          echo "Recording kaos-lib-package = ${KL_RECORD}, kaos-lib-compat = ${KL_COMPAT:-<none declared>}"
+          yq e -i '.data."kaos-lib-package" = strenv(KL_RECORD) | .data."kaos-lib-compat" = strenv(KL_COMPAT)' "${IMAGES_PATH}"
         fi
 
         git config user.name "KubeCore CI"

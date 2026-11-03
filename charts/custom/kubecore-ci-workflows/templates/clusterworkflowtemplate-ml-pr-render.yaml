@@ -121,6 +121,15 @@ spec:
           clusterScope: true
     - - name: detect-frontend
         template: detect-frontend
+      # kaos-lib/support commit status on the PR head (PRD novelcore/kaos#1147):
+      # reporting only, never a red render.
+      - name: kaos-lib-support
+        templateRef:
+          name: ml-ci-build
+          template: kaos-lib-support
+          clusterScope: true
+        continueOn:
+          failed: true
     - - name: hera-render
         templateRef:
           name: ml-ci-build
