@@ -974,6 +974,8 @@ spec:
         OB = chr(123) + chr(123)
         CB = chr(125) + chr(125)
 
+{{ include "kubecore-ci-workflows.stepToken" . | indent 8 }}
+
         kubeline_path = os.environ['KUBELINE_PATH']
         context_path = os.environ['CONTEXT_PATH']
         wft_out = os.environ['WFT_OUT']
@@ -2068,6 +2070,8 @@ spec:
                 }
             }
 
+            add_step_token(wft, ctx)
+
             os.makedirs(os.path.dirname(wft_out), exist_ok=True)
             with open(wft_out, 'w') as f:
                 yaml.dump(wft, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
@@ -2676,6 +2680,8 @@ spec:
                 'templates': templates,
             }
         }
+
+        add_step_token(wft, ctx)
 
         os.makedirs(os.path.dirname(wft_out), exist_ok=True)
         with open(wft_out, 'w') as f:
