@@ -336,8 +336,25 @@ expect_has "$TARGET" 'RUN_URL="${ARGO_BASE}/workflows/' "support: the status lin
 
 # ── wiring ───────────────────────────────────────────────────────────────────
 
+# Parsed with PyYAML, not yq: the same yq expression answered differently in the charts-validate pod (yq 4.44.3).
 for wf in ml-ci-build ml-ci-pr-render; do
-  S=$(yq "select(.metadata.name == \"$wf\") | .spec.templates[] | select(.name == \"$wf\") | .steps[][] | select(.name == \"kaos-lib-support\") | (.continueOn.failed // false)" "$RENDERED")
+  S=$(python3 -I - "$RENDERED" "$wf" <<'PY'
+import sys, yaml
+rendered, wf = sys.argv[1], sys.argv[2]
+out = []
+for doc in yaml.safe_load_all(open(rendered)):
+    if not doc or doc.get("kind") != "ClusterWorkflowTemplate" or doc["metadata"]["name"] != wf:
+        continue
+    for t in doc["spec"]["templates"]:
+        if t["name"] != wf:
+            continue
+        for group in t.get("steps", []):
+            for step in group:
+                if step["name"] == "kaos-lib-support":
+                    out.append(str(bool((step.get("continueOn") or {}).get("failed", False))).lower())
+print(",".join(out))
+PY
+)
   expect_eq "$S" "true" "$wf: posts kaos-lib/support, reporting only"
 done
 PARAMS=$(yq 'select(.metadata.name == "kaos-lib-bump-pr") | [.spec.arguments.parameters[].name] | join(" ")' "$RENDERED" | grep -v '^---$' | grep .)
