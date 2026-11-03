@@ -560,74 +560,96 @@ spec:
         \n\ndef step_id(job):\n    rc, out = run('squeue', '-s', '-j', ME, '-h', '-o',\
         \ '%i %j')\n    for line in out.splitlines():\n        sid, _, name = line.partition('\
         \ ')\n        if name == 'kaos-' + job:\n            return sid\n    return\
-        \ None\n\n\ndef step_rss():\n    # Memory per step, from /proc (psslurm has\
-        \ no slurmd tooling: scontrol listpids fails).\n    rss = {}\n    for pid\
-        \ in os.listdir('/proc'):\n        if not pid.isdigit():\n            continue\n\
-        \        try:\n            with open('/proc/%s/environ' % pid, 'rb') as f:\n\
-        \                env = dict(kv.split(b'=', 1) for kv in f.read().split(b'\\\
-        0') if b'=' in kv)\n            if env.get(b'SLURM_JOB_ID') != ME.encode()\
-        \ or b'SLURM_STEP_ID' not in env:\n                continue\n            with\
-        \ open('/proc/%s/statm' % pid) as f:\n                pages = int(f.read().split()[1])\n\
+        \ None\n\n\ndef pss_bytes(pid):\n    # PSS shares a page between the processes\
+        \ that map it, so the forked data-loader\n    # workers of one training are\
+        \ not counted many times over (RSS would be).\n    try:\n        with open('/proc/%s/smaps_rollup'\
+        \ % pid) as f:\n            for line in f:\n                if line.startswith('Pss:'):\n\
+        \                    return int(line.split()[1]) * 1024\n    except OSError:\n\
+        \        pass\n    with open('/proc/%s/statm' % pid) as f:      # kernels\
+        \ without smaps_rollup\n        return int(f.read().split()[1]) * PAGE\n\n\
+        \ndef step_rss():\n    # Memory per step, from /proc (psslurm has no slurmd\
+        \ tooling: scontrol listpids fails).\n    rss = {}\n    for pid in os.listdir('/proc'):\n\
+        \        if not pid.isdigit():\n            continue\n        try:\n     \
+        \       with open('/proc/%s/environ' % pid, 'rb') as f:\n                env\
+        \ = dict(kv.split(b'=', 1) for kv in f.read().split(b'\\0') if b'=' in kv)\n\
+        \            if env.get(b'SLURM_JOB_ID') != ME.encode() or b'SLURM_STEP_ID'\
+        \ not in env:\n                continue\n            used = pss_bytes(pid)\n\
         \        except (OSError, ValueError, IndexError):\n            continue\n\
         \        sid = env[b'SLURM_STEP_ID'].decode()\n        rss[sid] = rss.get(sid,\
-        \ 0) + pages * PAGE\n    return rss\n\n\ndef take(slot, job, name, limit):\n\
-        \    # The claim folder is a lock: only its owner holds or releases the job,\
-        \ so two\n    # hosts never undo each other. A taken job stays held, so it\
-        \ never also starts alone.\n    now = time.time()\n    if limit is None or\
-        \ now + limit + MARGIN_S > HOST_END:\n        return False\n    if not os.path.isdir(CLAIMS):\n\
-        \        os.makedirs(CLAIMS, exist_ok=True)\n    c = comment(job)\n    k =\
-        \ attempt(c)\n    claim = os.path.join(CLAIMS, '%s-a%d' % (job, k))\n    try:\n\
-        \        os.mkdir(claim)\n    except OSError:\n        return False      \
-        \                 # another host is deciding or runs it\n    keep = False\n\
+        \ 0) + used\n    return rss\n\n\ndef step_limit_of(text):\n    # The step's\
+        \ own time limit in seconds, from its script (KAOS_STEP_LIMIT_MIN). Its job\n\
+        \    # asks Slurm for more (padded, so a host has room for guests); the step\
+        \ needs only this.\n    m = re.search(r'^export KAOS_STEP_LIMIT_MIN=(\\d+)$',\
+        \ text, re.M)\n    return int(m.group(1)) * 60 if m else None\n\n\ndef take(slot,\
+        \ job, name, job_limit):\n    # Take one waiting job onto slot. Its script\
+        \ is read first (no side effect); only a\n    # job of this scope whose STEP\
+        \ fits the host's remaining time and its own token is\n    # locked, held\
+        \ and run. A job that does not fit now never will on this host (its\n    #\
+        \ remaining time only shrinks), so it is skipped for good.\n    now = time.time()\n\
+        \    if not os.path.isdir(CLAIMS):\n        os.makedirs(CLAIMS, exist_ok=True)\n\
+        \    peek = os.path.join(CLAIMS, '.peek-%s-%s.sh' % (ME, job))\n    rc, _\
+        \ = run('scontrol', 'write', 'batch_script', job, peek)\n    text = open(peek).read()\
+        \ if rc == 0 and os.path.exists(peek) else ''\n    try:\n        os.remove(peek)\n\
+        \    except OSError:\n        pass\n    if HEADER not in text.split('\\n')[:3]:\n\
+        \        skip.add(job)\n        log('not taking', job, '(no', HEADER + ')')\n\
+        \        return False\n    limit = step_limit_of(text) or job_limit\n    m\
+        \ = re.search(r'^export KAOS_TOKEN_EXP=(\\d+)$', text, re.M)\n    if (limit\
+        \ is None or now + limit + MARGIN_S > HOST_END\n            or (m and now\
+        \ + limit + MARGIN_S > int(m.group(1)) - TOKEN_MARGIN_S)):\n        skip.add(job)\n\
+        \        return False\n    c = comment(job)\n    k = attempt(c)\n    claim\
+        \ = os.path.join(CLAIMS, '%s-a%d' % (job, k))\n    try:\n        os.mkdir(claim)\n\
+        \    except OSError:\n        return False                       # another\
+        \ host is deciding or runs it\n    # The claim folder is a lock: only its\
+        \ owner holds or releases the job, so two\n    # hosts never undo each other.\
+        \ A taken job stays held, so it never also starts alone.\n    keep = False\n\
         \    try:\n        run('scontrol', 'hold', job)\n        if not q(job, '%T|%r').startswith('PENDING|JobHeld'):\n\
         \            return False                   # it started on its own node meanwhile\n\
         \        script = os.path.join(claim, 'job.sh')\n        rc, _ = run('scontrol',\
-        \ 'write', 'batch_script', job, script)\n        text = open(script).read()\
-        \ if rc == 0 and os.path.exists(script) else ''\n        if HEADER not in\
-        \ text.split('\\n')[:3]:\n            skip.add(job)\n            log('not\
-        \ taking', job, '(no', HEADER + ')')\n            return False\n        m\
-        \ = re.search(r'^export KAOS_TOKEN_EXP=(\\d+)$', text, re.M)\n        if m\
-        \ and now + limit + MARGIN_S > int(m.group(1)) - TOKEN_MARGIN_S:\n       \
-        \     return False\n        set_comment(job, '%skaos-state=taken host=%s slot=%d\
-        \ attempt=%d' % (lease(c), ME, slot, k))\n        slots[slot] = {'job': job,\
-        \ 'claim': claim, 'name': name, 'memkill': False, 'attempt': k,\n        \
-        \               'proc': launch(slot, job, script, os.path.join(HOME, 'slurm-%s.out'\
-        \ % job), limit)}\n        keep = True\n        log('took', job, name, 'on\
-        \ slot', slot)\n        return True\n    finally:\n        if not keep:\n\
-        \            run('scontrol', 'release', job)\n            try:\n         \
-        \       for f in os.listdir(claim):\n                    os.remove(os.path.join(claim,\
-        \ f))\n                os.rmdir(claim)\n            except OSError:\n    \
-        \            pass\n\n\ndef requeue(s):\n    # Back to the queue with the next\
-        \ attempt number, still leasing its dataset.\n    if q(s['job'], '%T') ==\
-        \ 'PENDING':\n        c = comment(s['job'])\n        set_comment(s['job'],\
+        \ 'write', 'batch_script', job, script)\n        if rc != 0 or HEADER not\
+        \ in open(script).read().split('\\n')[:3]:\n            return False\n   \
+        \     set_comment(job, '%skaos-state=taken host=%s slot=%d attempt=%d' % (lease(c),\
+        \ ME, slot, k))\n        slots[slot] = {'job': job, 'claim': claim, 'name':\
+        \ name, 'memkill': False, 'attempt': k,\n                       'proc': launch(slot,\
+        \ job, script, os.path.join(HOME, 'slurm-%s.out' % job), limit)}\n       \
+        \ keep = True\n        log('took', job, name, 'on slot', slot)\n        return\
+        \ True\n    finally:\n        if not keep:\n            run('scontrol', 'release',\
+        \ job)\n            unlock(claim)\n\n\ndef unlock(claim):\n    # Remove a\
+        \ claim folder (the lock and the script copy in it).\n    if not claim:\n\
+        \        return\n    try:\n        for f in os.listdir(claim):\n         \
+        \   os.remove(os.path.join(claim, f))\n        os.rmdir(claim)\n    except\
+        \ OSError:\n        pass\n\n\ndef requeue(s):\n    # Back to the queue with\
+        \ the next attempt number, still leasing its dataset.\n    if q(s['job'],\
+        \ '%T') == 'PENDING':\n        c = comment(s['job'])\n        set_comment(s['job'],\
         \ '%skaos-state=requeued attempt=%d' % (lease(c), s['attempt'] + 1))\n   \
         \     run('scontrol', 'release', s['job'])\n        log('requeued', s['job'],\
-        \ 'as attempt', s['attempt'] + 1)\n\n\ndef finish(slot, rc):\n    global own_rc\n\
-        \    s = slots.pop(slot)\n    job = s['job']\n    reason = ' reason=memkill'\
-        \ if s['memkill'] else ''\n    if job == ME:\n        own_rc = rc\n      \
-        \  c = comment(ME)\n        set_comment(ME, '%skaos-state=done rc=%d%s%s'\
-        \ % (lease(c), rc, reason, err_part(c)))\n        log('own step ended rc=%d%s'\
-        \ % (rc, reason))\n        return\n    if q(job, '%T') != 'PENDING':\n   \
-        \     log('guest', job, 'was stopped; its step ended rc=%d' % rc)\n      \
-        \  return\n    if q(ME, '%T') != 'RUNNING':\n        # The host itself is\
-        \ going away (cancelled, out of time): Slurm may end the\n        # steps\
-        \ before this program's TERM handler runs (live 2026-11-03, host\n       \
-        \ # 5417697). The guest's run did not fail; it goes back to the queue.\n \
-        \       requeue(s)\n        return\n    c = comment(job)\n    set_comment(job,\
-        \ '%skaos-state=done rc=%d host=%s%s%s' % (lease(c), rc, ME, reason, err_part(c)))\n\
-        \    run('scancel', job)\n    log('guest', job, 'done rc=%d%s' % (rc, reason))\n\
-        \n\ndef requeue_all(signum, frame):\n    # Host cancelled or out of time (Slurm\
-        \ sends TERM, KILL 30 s later): every guest\n    # goes back to the queue\
-        \ with the next attempt number, still leasing its dataset.\n    for s in list(slots.values()):\n\
+        \ 'as attempt', s['attempt'] + 1)\n    unlock(s.get('claim'))\n\n\ndef finish(slot,\
+        \ rc):\n    global own_rc\n    s = slots.pop(slot)\n    job = s['job']\n \
+        \   reason = ' reason=memkill' if s['memkill'] else ''\n    if job == ME:\n\
+        \        own_rc = rc\n        c = comment(ME)\n        set_comment(ME, '%skaos-state=done\
+        \ rc=%d%s%s' % (lease(c), rc, reason, err_part(c)))\n        log('own step\
+        \ ended rc=%d%s' % (rc, reason))\n        return\n    if q(job, '%T') != 'PENDING':\n\
+        \        log('guest', job, 'was stopped; its step ended rc=%d' % rc)\n   \
+        \     unlock(s.get('claim'))\n        return\n    if q(ME, '%T') != 'RUNNING':\n\
+        \        # The host itself is going away (cancelled, out of time): Slurm may\
+        \ end the\n        # steps before this program's TERM handler runs (live 2026-11-03,\
+        \ host\n        # 5417697). The guest's run did not fail; it goes back to\
+        \ the queue.\n        requeue(s)\n        return\n    c = comment(job)\n \
+        \   set_comment(job, '%skaos-state=done rc=%d host=%s%s%s' % (lease(c), rc,\
+        \ ME, reason, err_part(c)))\n    run('scancel', job)\n    unlock(s.get('claim'))\n\
+        \    log('guest', job, 'done rc=%d%s' % (rc, reason))\n\n\ndef requeue_all(signum,\
+        \ frame):\n    # Host cancelled or out of time (Slurm sends TERM, KILL 30\
+        \ s later): every guest\n    # goes back to the queue with the next attempt\
+        \ number, still leasing its dataset.\n    for s in list(slots.values()):\n\
         \        if s['job'] != ME:\n            requeue(s)\n    sys.exit(own_rc if\
         \ own_rc is not None else 143)\n\n\nsignal.signal(signal.SIGTERM, requeue_all)\n\
         slots[0] = {'job': ME, 'claim': None, 'name': 'own', 'memkill': False, 'attempt':\
-        \ 1,\n            'proc': launch(0, ME, OWN_SCRIPT, None)}\nlog('host', ME,\
-        \ 'partition', PART, 'slots', GPUS, 'cpus/slot', CPUS, 'mem/slot %d MiB' %\
-        \ (SHARE >> 20))\nidle_since, tick = None, 0\nwhile True:\n    time.sleep(POLL_S)\n\
-        \    tick += 1\n    for slot, s in list(slots.items()):\n        rc = s['proc'].poll()\n\
-        \        if rc is not None:\n            finish(slot, rc)\n    rss = step_rss()\n\
-        \    for s in slots.values():\n        sid = s.get('sid') or step_id(s['job'])\n\
+        \ 1,\n            'proc': launch(0, ME, OWN_SCRIPT, None, int(os.environ.get('KAOS_STEP_LIMIT_MIN')\
+        \ or 0) * 60 or None)}\nlog('host', ME, 'partition', PART, 'slots', GPUS,\
+        \ 'cpus/slot', CPUS, 'mem/slot %d MiB' % (SHARE >> 20))\nidle_since, tick\
+        \ = None, 0\nwhile True:\n    time.sleep(POLL_S)\n    tick += 1\n    for slot,\
+        \ s in list(slots.items()):\n        rc = s['proc'].poll()\n        if rc\
+        \ is not None:\n            finish(slot, rc)\n    rss = step_rss()\n    for\
+        \ s in slots.values():\n        sid = s.get('sid') or step_id(s['job'])\n\
         \        s['sid'] = sid\n        if sid and rss.get(sid.split('.')[-1], 0)\
         \ > SHARE and not s['memkill']:\n            log('memory: step', sid, 'of',\
         \ s['job'], 'uses %d MiB > %d MiB share' % (rss[sid.split('.')[-1]] >> 20,\
@@ -984,39 +1006,48 @@ spec:
         \                 'STAGEIN_B64='\n                    + base64.b64encode(STAGEIN.encode()).decode(),\n\
         \                    'STAGEOUT_B64='\n                    + base64.b64encode(STAGEOUT.encode()).decode()]\n\
         \    commit = pinned_commit()\n    if commit:\n        env.append('KAOS_COMMIT='\
-        \ + commit)   # fail() keeps the dataset lease\n    if SHARING and int(HPC.get('gpus')\
+        \ + commit)   # fail() keeps the dataset lease\n    step_limit = int(os.environ.get('SLURM_TIME_LIMIT')\
+        \ or 240)\n    job_limit = step_limit\n    if SHARING and int(HPC.get('gpus')\
         \ or 0) > 0:\n        # F-03: the batch step becomes the host (slot manager);\
         \ one slot per GPU.\n        env += ['KAOS_SLOTS_B64=' + base64.b64encode(SLOTS.encode()).decode(),\n\
-        \                'KAOS_SCOPE=' + SCOPE, 'KAOS_SCR=' + ident['scratch']]\n\
-        \        if WALLET_EXP:\n            env.append('KAOS_TOKEN_EXP=%d' % WALLET_EXP)\
-        \   # the host's fit rule (D-07)\n    if SHARING:\n        batch, env = inputs_in_script(batch,\
-        \ env)\n    body = {'job': {'name': jobname, 'partition': HPC['partition'],\n\
-        \                    'account': ident['account'],\n                    'qos':\
-        \ HPC.get('qos') or 'default',\n                    'time_limit': int(os.environ.get('SLURM_TIME_LIMIT')\
-        \ or 240),\n                    'current_working_directory': ident['home'],\n\
-        \                    'environment': env, 'tasks': 1, 'nodes': '1'},\n    \
-        \        'script': batch}\n    if commit:\n        # PRD-1541 D-06: the stager\
-        \ never evicts a commit a queued or running\n        # job names here (squeue\
-        \ %k).\n        body['job']['comment'] = 'kaos-commit=' + commit\n    req\
-        \ = urllib.request.Request(API + '/job/submit',\n                        \
-        \         data=json.dumps(body).encode(),\n                              \
-        \   headers=hdrs(), method='POST')\n    try:\n        resp = json.load(urllib.request.urlopen(req,\
-        \ timeout=30))\n    except urllib.error.HTTPError as e:\n        print('job\
-        \ submit refused:', submit_refusal(e), flush=True)\n        sys.exit(1)\n\
-        \    j = resp.get('job_id')\n    print('submitted job', j, 'errors:', resp.get('errors'),\
-        \ flush=True)\n    if not j:\n        sys.exit(1)\n    return j\n\n\ndef submit_refusal(e):\n\
-        \    \"\"\"slurmrestd refuses a job with an HTTP error whose body names why\n\
-        \    (errors/warnings: an account, partition or QOS it rejects, a time limit\n\
-        \    above the QOS); without it the step dies on a bare 'HTTP Error 500'.\"\
-        \"\"\n    try:\n        why = json.loads(e.read().decode(errors='replace')\
-        \ or '{}')\n    except Exception:\n        why = {}\n    if not isinstance(why,\
-        \ dict):\n        why = {}\n    return 'HTTP %s %s' % (e.code, {k: why.get(k)\
-        \ for k in ('errors', 'warnings')\n                                     if\
-        \ why.get(k)} or '(no reason in the body)')\n\n\ndef cancel(j):\n    try:\n\
-        \        urllib.request.urlopen(urllib.request.Request(\n            API +\
-        \ '/job/' + str(j), headers=hdrs(), method='DELETE'), timeout=30)\n      \
-        \  print('cancelled job', j, flush=True)\n    except Exception as e:\n   \
-        \     print('cancel failed:', e, flush=True)\n\n\ndef on_term(signum, frame):\n\
+        \                'KAOS_SCOPE=' + SCOPE, 'KAOS_SCR=' + ident['scratch'],\n\
+        \                'KAOS_STEP_LIMIT_MIN=%d' % step_limit]\n        # A host\
+        \ can only take steps that end before its own time limit, so with equal\n\
+        \        # limits nothing would ever fit: the job asks Slurm for twice its\
+        \ step's time,\n        # capped by the class's maximum (partition/QOS). Every\
+        \ step still runs with its\n        # own limit, and the host releases the\
+        \ node 2 minutes after its last step.\n        # No known maximum: no padding\
+        \ (a request above the QOS cap would pend forever).\n        cap = int(HPC.get('maxTimeLimitMinutes')\
+        \ or 0)\n        if cap:\n            job_limit = max(step_limit, min(2 *\
+        \ step_limit, cap))\n        if WALLET_EXP:\n            env.append('KAOS_TOKEN_EXP=%d'\
+        \ % WALLET_EXP)   # the host's fit rule (D-07)\n    if SHARING:\n        batch,\
+        \ env = inputs_in_script(batch, env)\n    body = {'job': {'name': jobname,\
+        \ 'partition': HPC['partition'],\n                    'account': ident['account'],\n\
+        \                    'qos': HPC.get('qos') or 'default',\n               \
+        \     'time_limit': job_limit,\n                    'current_working_directory':\
+        \ ident['home'],\n                    'environment': env, 'tasks': 1, 'nodes':\
+        \ '1'},\n            'script': batch}\n    if commit:\n        # PRD-1541\
+        \ D-06: the stager never evicts a commit a queued or running\n        # job\
+        \ names here (squeue %k).\n        body['job']['comment'] = 'kaos-commit='\
+        \ + commit\n    req = urllib.request.Request(API + '/job/submit',\n      \
+        \                           data=json.dumps(body).encode(),\n            \
+        \                     headers=hdrs(), method='POST')\n    try:\n        resp\
+        \ = json.load(urllib.request.urlopen(req, timeout=30))\n    except urllib.error.HTTPError\
+        \ as e:\n        print('job submit refused:', submit_refusal(e), flush=True)\n\
+        \        sys.exit(1)\n    j = resp.get('job_id')\n    print('submitted job',\
+        \ j, 'errors:', resp.get('errors'), flush=True)\n    if not j:\n        sys.exit(1)\n\
+        \    return j\n\n\ndef submit_refusal(e):\n    \"\"\"slurmrestd refuses a\
+        \ job with an HTTP error whose body names why\n    (errors/warnings: an account,\
+        \ partition or QOS it rejects, a time limit\n    above the QOS); without it\
+        \ the step dies on a bare 'HTTP Error 500'.\"\"\"\n    try:\n        why =\
+        \ json.loads(e.read().decode(errors='replace') or '{}')\n    except Exception:\n\
+        \        why = {}\n    if not isinstance(why, dict):\n        why = {}\n \
+        \   return 'HTTP %s %s' % (e.code, {k: why.get(k) for k in ('errors', 'warnings')\n\
+        \                                     if why.get(k)} or '(no reason in the\
+        \ body)')\n\n\ndef cancel(j):\n    try:\n        urllib.request.urlopen(urllib.request.Request(\n\
+        \            API + '/job/' + str(j), headers=hdrs(), method='DELETE'), timeout=30)\n\
+        \        print('cancelled job', j, flush=True)\n    except Exception as e:\n\
+        \        print('cancel failed:', e, flush=True)\n\n\ndef on_term(signum, frame):\n\
         \    # Argo sends TERM on deadline/stop. A PENDING job never started \u2014\
         \ cancel\n    # it so it does not run unobserved hours later (live job 5143859\
         \ did\n    # exactly that: waiter killed at the deadline mid-queue, job ran\
