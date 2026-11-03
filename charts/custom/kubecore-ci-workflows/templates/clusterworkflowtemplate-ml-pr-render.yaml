@@ -187,7 +187,7 @@ spec:
       runAsGroup: 0
     container:
       image: {{ .Values.tooling.toolboxImage | default "alpine/k8s:1.36.4" }}
-      {{- include "kubecore-ci-workflows.resources" .Values.tooling.pythonResources | nindent 6 }}
+      {{- include "kubecore-ci-workflows.resources" .Values.tooling.enhanceResources | nindent 6 }}
       command: [sh, -c]
       securityContext:
         runAsUser: 0

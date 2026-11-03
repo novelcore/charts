@@ -95,7 +95,7 @@ spec:
       - name: reap
         container:
           image: {{ .Values.tooling.kubectlImage | default "alpine/k8s:1.36.4" }}
-          {{- include "kubecore-ci-workflows.resources" .Values.tooling.resources | nindent 10 }}
+          {{- include "kubecore-ci-workflows.resources" .Values.tooling.clusterResources | nindent 10 }}
           command: [sh, -c]
           args:
             - |
