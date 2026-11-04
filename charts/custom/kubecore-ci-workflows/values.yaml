@@ -159,13 +159,16 @@ tooling:
     limits:
       memory: 128Mi
   # The reconciler's check-drift and the pending-reaper list/read the cluster's
-  # workflows and pods: working set p95 135-161 MiB, max 222 MiB, CPU peak 58m.
+  # workflows and pods: working set p95 135-161 MiB, max 222 MiB, CPU peak 58m
+  # on quiet pools. NO memory limit, on purpose: `kubectl get workflows -o json`
+  # grows with the namespace (a busy e2e `{project}-ci` holds ~100 Workflows,
+  # ~39 MB of JSON), and an OOMKill drops the event: a forced re-render after a
+  # connection change never ran (0.12.128's 384Mi limit, e2e-suite-rtwn5
+  # pipeline_connection, 2026-11-04). Keep the request; never add a limit here.
   clusterResources:
     requests:
       cpu: 50m
       memory: 208Mi
-    limits:
-      memory: 384Mi
   # gcloud is Python and needs more memory than kubectl (autoscaler healer:
   # p95 130 MiB, max 199 MiB, CPU peak 57m).
   gcloudResources:

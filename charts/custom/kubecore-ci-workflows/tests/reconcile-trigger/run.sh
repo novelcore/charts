@@ -170,7 +170,7 @@ expect_eq "$RC/$NEEDS" "0/true" "force, gitops context matches: builds"
 
 RETRY=$(yq 'select(.kind == "ClusterWorkflowTemplate" and .metadata.name == "ml-ci-reconcile")
     | .spec.templates[] | select(.name == "check-drift") | .retryStrategy.expression' "$RENDERED")
-expect_eq "$RETRY" "asInt(lastRetry.exitCode) == 3" "check-drift retries exactly the force-mode 'not yet' (exit 3)"
+expect_eq "$RETRY" "asInt(lastRetry.exitCode) == 3 || asInt(lastRetry.exitCode) == 137" "check-drift retries the force-mode not-yet (3) and a killed pod (137)"
 FORCE_DEFAULT=$(yq 'select(.kind == "ClusterWorkflowTemplate" and .metadata.name == "ml-ci-reconcile")
     | .spec.arguments.parameters[] | select(.name == "force") | .value' "$RENDERED")
 expect_eq "$FORCE_DEFAULT" "false" "force defaults to false (CronWorkflows rendered before it keep the backstop)"

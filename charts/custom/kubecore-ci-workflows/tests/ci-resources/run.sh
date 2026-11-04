@@ -55,6 +55,9 @@ for line in sys.stdin:
     if cl: print("FAIL: %s has a cpu limit (%s)"%(n,cl)); continue
     # The ML kaniko build-push is the one exception: 1.25x its 11Gi request would
     # exceed what an e2-standard-4 can give (see values.yaml kaniko.resources).
+    # Steps that list the cluster (`kubectl get workflows/pods -o json`) grow with it and
+    # must have NO memory limit: an OOMKill drops a forced re-render (0.12.128, 2026-11-04).
+    if ml and any(k in n for k in ("/check-drift/", "pending-reaper")): print("FAIL: %s lists the cluster and must have no memory limit (has %s)"%(n,ml)); continue
     if ml and n != "ml-ci-build/build-push/main" and mem(ml) < 1.25*mem(mr): print("FAIL: %s memory limit %s is below 1.25x its request %s"%(n,ml,mr)); continue
     print("PASS: %s requests cpu %s memory %s, no cpu limit%s"%(n,cr,mr,", memory limit "+ml if ml else ""))
 ')
