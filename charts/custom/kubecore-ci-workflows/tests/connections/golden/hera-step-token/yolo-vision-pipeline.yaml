@@ -1108,7 +1108,7 @@ spec:
           - name: time-limit
             value: '240'
           - name: deadline-seconds
-            value: '43200'
+            value: '259200'
           - name: step-outputs
             value: params
           - name: hpc-class
@@ -1139,7 +1139,7 @@ spec:
           - name: time-limit
             value: '240'
           - name: deadline-seconds
-            value: '43200'
+            value: '259200'
           - name: step-outputs
             value: ''
           - name: hpc-class
@@ -1174,7 +1174,7 @@ spec:
           - name: time-limit
             value: '240'
           - name: deadline-seconds
-            value: '43200'
+            value: '259200'
           - name: step-outputs
             value: data-yaml,manifest-summary
           - name: hpc-class
@@ -1222,7 +1222,7 @@ spec:
           - name: time-limit
             value: '240'
           - name: deadline-seconds
-            value: '43200'
+            value: '259200'
           - name: step-outputs
             value: ''
           - name: hpc-class
@@ -1273,7 +1273,7 @@ spec:
           - name: time-limit
             value: '720'
           - name: deadline-seconds
-            value: '72000'
+            value: '432000'
           - name: step-outputs
             value: training-result
           - name: hpc-class
@@ -1321,7 +1321,7 @@ spec:
           - name: time-limit
             value: '240'
           - name: deadline-seconds
-            value: '43200'
+            value: '259200'
           - name: step-outputs
             value: qat-result
           - name: hpc-class
@@ -1374,7 +1374,7 @@ spec:
           - name: time-limit
             value: '240'
           - name: deadline-seconds
-            value: '43200'
+            value: '259200'
           - name: step-outputs
             value: quantization-result
           - name: hpc-class
@@ -1427,7 +1427,7 @@ spec:
           - name: time-limit
             value: '240'
           - name: deadline-seconds
-            value: '43200'
+            value: '259200'
           - name: step-outputs
             value: registration-result
           - name: hpc-class
@@ -1583,11 +1583,12 @@ spec:
         \ the\n# wallet would train blind (no MLflow, no checkpoint upload, no stage-out).\n\
         # The Slurm JWT is read fresh per request (tok()); the wallet cannot be\n\
         # refreshed inside a queued job, so the job itself is replaced.\nWALLET_MARGIN_S\
-        \ = 30 * 60\n\n\ndef wallet_exp(w):\n    \"\"\"exp claim of a JWT as epoch\
-        \ seconds (0 when unknown).\"\"\"\n    try:\n        seg = w.split('.')[1]\n\
-        \        return float(json.loads(base64.urlsafe_b64decode(\n            seg\
-        \ + '=' * (-len(seg) % 4)))['exp'])\n    except Exception:\n        return\
-        \ 0.0\n\n\ndef mint_wallet():\n    keyfile = os.environ.get('ZITADEL_MACHINE_KEY_FILE')\
+        \ = 30 * 60\nCHECKPOINT_WARNING_S = 10 * 60   # PRD-HPC-1461 D-38: USR1 this\
+        \ long before the time limit\n\n\ndef wallet_exp(w):\n    \"\"\"exp claim\
+        \ of a JWT as epoch seconds (0 when unknown).\"\"\"\n    try:\n        seg\
+        \ = w.split('.')[1]\n        return float(json.loads(base64.urlsafe_b64decode(\n\
+        \            seg + '=' * (-len(seg) % 4)))['exp'])\n    except Exception:\n\
+        \        return 0.0\n\n\ndef mint_wallet():\n    keyfile = os.environ.get('ZITADEL_MACHINE_KEY_FILE')\
         \ or ''\n    domain = os.environ.get('ZITADEL_DOMAIN') or ''\n    if not keyfile\
         \ or not os.path.exists(keyfile) or not domain:\n        print('wallet: machine\
         \ key / domain absent, data-plane env omitted',\n              flush=True)\n\
@@ -2147,10 +2148,30 @@ spec:
         --pwd $STEP_WORKDIR\"',\n        # --nv only on GPU classes: on the cpu/largemem\
         \ partitions there is\n        # no driver to bind and the flag makes Apptainer\
         \ warn or fail.\n        'NV=\"\"; [ \"${HPC_GPUS:-0}\" -gt 0 ] && NV=\"--nv\"\
-        ',\n        'if [ -n \"$STEP_CMD\" ]; then apptainer exec $NV $PWD_OPT $BIND\
-        \ \"$SIF\"'\n        ' /bin/sh -c \"$STEP_CMD\"; else apptainer exec $NV $PWD_OPT\
-        \ $BIND \"$SIF\"'\n        ' /bin/sh -c \"nvidia-smi -L || nproc\"; fi',\n\
-        \        'rc=$?',\n        'if [ -n \"$STEP_OUTPUTS\" ] && [ -n \"$STAGEOUT_B64\"\
+        ',\n        '[ -n \"$STEP_CMD\" ] || STEP_CMD=\"nvidia-smi -L || nproc\"',\n\
+        \        # PRD-HPC-1461 D-38/D-44: Slurm sends USR1 to this shell about 10\
+        \ minutes\n        # before the time limit. The step runs in its own process\
+        \ group (set -m), and\n        # the shell passes USR1 ONLY to the processes\
+        \ of that group that handle it\n        # (SigCgt bit 9): kaos-lib's handler\
+        \ (an open run writer) saves progress and\n        # exits 85. Never the whole\
+        \ group: Apptainer's squashfuse dies on USR1 and the\n        # image vanishes\
+        \ under the step (live job 5421507: Bus error, rc 135). Inside,\n        #\
+        \ sh ignores USR1 and so does every process that keeps that setting, so a\
+        \ step\n        # without kaos-lib runs to the limit as before. `wait` returns\
+        \ early on the\n        # trap, so wait again until the step is really gone.\n\
+        \        'set -m',\n        'apptainer exec $NV $PWD_OPT $BIND \"$SIF\" /bin/sh\
+        \ -c \"trap \\'\\' USR1; $STEP_CMD\" &',\n        'STEP_PID=$!',\n       \
+        \ 'set +m',\n        'kaos_stop(){ echo \"stop signal: asking the step to\
+        \ save its progress\";'\n        ' for p in $(pgrep -g $STEP_PID); do'\n \
+        \       ' m=$(awk \\'/^SigCgt:/{print $2}\\' /proc/$p/status 2>/dev/null);'\n\
+        \        ' [ -n \"$m\" ] && [ $(( 0x$m >> 9 & 1 )) -eq 1 ] && kill -USR1 $p\
+        \ 2>/dev/null; done; }',\n        'trap kaos_stop USR1',\n        'wait $STEP_PID;\
+        \ rc=$?',\n        'while kill -0 $STEP_PID 2>/dev/null; do wait $STEP_PID;\
+        \ rc=$?; done',\n        'trap - USR1',\n        # 85: the step saved its\
+        \ progress; the waiter continues the run in a new job.\n        # Its outputs\
+        \ are not final yet, so nothing is staged out.\n        '[ $rc -eq 85 ] &&\
+        \ echo \"step saved its progress before the time limit (exit 85)\"',\n   \
+        \     'if [ $rc -ne 85 ] && [ -n \"$STEP_OUTPUTS\" ] && [ -n \"$STAGEOUT_B64\"\
         \ ] && [ -n \"$LAKEFS_BEARER_TOKEN\" ]; then'\n        ' printf %s \"$STAGEOUT_B64\"\
         \ | base64 -d | python3 - || echo \"stage-out failed (rc=$rc)\"; fi',\n  \
         \      '[ $rc -eq 0 ] && rm -rf \"$KAOS_WORK\"',\n        '[ $rc -ne 0 ] &&\
@@ -2185,9 +2206,9 @@ spec:
         \                    'STAGEOUT_B64='\n                    + base64.b64encode(STAGEOUT.encode()).decode()]\n\
         \    commit = pinned_commit()\n    if commit:\n        env.append('KAOS_COMMIT='\
         \ + commit)   # fail() keeps the dataset lease\n    step_limit = int(os.environ.get('SLURM_TIME_LIMIT')\
-        \ or 240)\n    job_limit = step_limit\n    if SHARING and int(HPC.get('gpus')\
-        \ or 0) > 0:\n        # F-03: the batch step becomes the host (slot manager);\
-        \ one slot per GPU.\n        env += ['KAOS_SLOTS_B64=' + base64.b64encode(SLOTS.encode()).decode(),\n\
+        \ or 240)\n    job_limit = step_limit\n    hosting = SHARING and int(HPC.get('gpus')\
+        \ or 0) > 0\n    if hosting:\n        # F-03: the batch step becomes the host\
+        \ (slot manager); one slot per GPU.\n        env += ['KAOS_SLOTS_B64=' + base64.b64encode(SLOTS.encode()).decode(),\n\
         \                'KAOS_SCOPE=' + SCOPE, 'KAOS_SCR=' + ident['scratch'],\n\
         \                'KAOS_STEP_LIMIT_MIN=%d' % step_limit]\n        # A host\
         \ can only take steps that end before its own time limit, so with equal\n\
@@ -2207,9 +2228,19 @@ spec:
         \ '1'},\n            'script': batch}\n    if commit:\n        # PRD-1541\
         \ D-06: the stager never evicts a commit a queued or running\n        # job\
         \ names here (squeue %k).\n        body['job']['comment'] = 'kaos-commit='\
-        \ + commit\n    req = urllib.request.Request(API + '/job/submit',\n      \
-        \                           data=json.dumps(body).encode(),\n            \
-        \                     headers=hdrs(), method='POST')\n    try:\n        resp\
+        \ + commit\n    if not hosting:\n        # PRD-HPC-1461 D-37/D-38: requeue\
+        \ lets the site put a pre-empted job back in\n        # the queue with its\
+        \ ID and place (users cannot requeue their own jobs on\n        # MeluXina).\
+        \ USR1 goes to the batch shell CHECKPOINT_WARNING_S before the\n        #\
+        \ limit (half the limit for short jobs), which passes it to the step (D-44).\n\
+        \        # Not for a host yet: its slot manager does not pass the signal on\
+        \ (#1609).\n        body['job'].update({'requeue': True, 'kill_warning_signal':\
+        \ 'USR1',\n                            'kill_warning_flags': ['BATCH_JOB'],\n\
+        \                            'kill_warning_delay': {'set': True, 'number':\
+        \ min(\n                                CHECKPOINT_WARNING_S, step_limit *\
+        \ 30)}})\n    req = urllib.request.Request(API + '/job/submit',\n        \
+        \                         data=json.dumps(body).encode(),\n              \
+        \                   headers=hdrs(), method='POST')\n    try:\n        resp\
         \ = json.load(urllib.request.urlopen(req, timeout=30))\n    except urllib.error.HTTPError\
         \ as e:\n        print('job submit refused:', submit_refusal(e), flush=True)\n\
         \        sys.exit(1)\n    j = resp.get('job_id')\n    print('submitted job',\
@@ -2263,17 +2294,21 @@ spec:
         \ cannot be refreshed inside a queued job, so every queue wait longer than\
         \ an\n# hour costs one failed pull (exit 231) and a resubmission. Bounded,\
         \ not\n# once: a second long wait after the first resubmit must not strand\
-        \ the run.\nPULL_RESUBMITS = 3\nresubmits = 0\n# Why Slurm holds a queued\
-        \ job (Priority, Resources, AssocGrpGRESMinutes = the\n# allocation's GPU\
-        \ minutes are spent, ...): only slurmctld knows it, the\n# accounting record\
-        \ polled below does not. Printed when it changes, so a run\n# that never left\
-        \ the queue says why (kaos e2e 2026-10-26: two jobs PENDING\n# for the whole\
-        \ 2.5 h budget, reason unknown).\npending_reason = None\nhosted = None   #\
-        \ PRD-1609: the host that took this job, as last printed\n# PRD-1609: how\
-        \ often this run started over because its host died with it.\nLOST_HOST_RESUBMITS\
-        \ = 3\nlost_hosts = 0\nHOST_ALIVE = ('PENDING', 'RUNNING', 'SUSPENDED', 'COMPLETING')\n\
-        \n\ndef host_gone(host):\n    \"\"\"True only when accounting says the host\
-        \ job ended: an unreadable record\n    is not a death (the host keeps running;\
+        \ the run.\nPULL_RESUBMITS = 3\nresubmits = 0\n# PRD-HPC-1461 D-44: exit 85\
+        \ = the step saved its progress on the stop signal\n# (kaos-lib). The run\
+        \ continues in a new job, which resumes from the run's\n# branch; bounded\
+        \ so a step that never finishes cannot run forever.\nCHECKPOINT_EXIT = 85\n\
+        MAX_CONTINUATIONS = 5\ncontinuations = 0\n# Why Slurm holds a queued job (Priority,\
+        \ Resources, AssocGrpGRESMinutes = the\n# allocation's GPU minutes are spent,\
+        \ ...): only slurmctld knows it, the\n# accounting record polled below does\
+        \ not. Printed when it changes, so a run\n# that never left the queue says\
+        \ why (kaos e2e 2026-10-26: two jobs PENDING\n# for the whole 2.5 h budget,\
+        \ reason unknown).\npending_reason = None\nhosted = None   # PRD-1609: the\
+        \ host that took this job, as last printed\n# PRD-1609: how often this run\
+        \ started over because its host died with it.\nLOST_HOST_RESUBMITS = 3\nlost_hosts\
+        \ = 0\nHOST_ALIVE = ('PENDING', 'RUNNING', 'SUSPENDED', 'COMPLETING')\n\n\n\
+        def host_gone(host):\n    \"\"\"True only when accounting says the host job\
+        \ ended: an unreadable record\n    is not a death (the host keeps running;\
         \ the next poll asks again).\"\"\"\n    try:\n        h = (get(SDB + '/job/'\
         \ + str(host)).get('jobs') or [{}])[0]\n    except Exception:\n        return\
         \ False\n    hst = (h.get('state') or {}).get('current') or []\n    return\
@@ -2337,10 +2372,17 @@ spec:
         \    print('pull failed - resubmitting with fresh credentials'\n         \
         \             ' (%d/%d)' % (resubmits, PULL_RESUBMITS), flush=True)\n    \
         \            jid = submit()\n                open('/tmp/slurm-job-id', 'w').write(str(jid))\n\
-        \                continue\n            if 'COMPLETED' in st:\n           \
-        \     fetch_outputs()\n            sys.exit(0 if ('COMPLETED' in st and rc\
-        \ in (0, None)) else 1)\n    except SystemExit:\n        raise\n    except\
-        \ Exception as e:\n        print('poll error (transient):', e, flush=True)\n"
+        \                continue\n            if (rc == CHECKPOINT_EXIT and not any(x\
+        \ in st for x in ('COMPLETED', 'CANCELLED'))\n                    and continuations\
+        \ < MAX_CONTINUATIONS):\n                continuations += 1\n            \
+        \    print('the step saved its progress before the time limit - continuing'\n\
+        \                      ' the run in a new job (%d/%d)' % (continuations, MAX_CONTINUATIONS),\n\
+        \                      flush=True)\n                jid = submit()\n     \
+        \           open('/tmp/slurm-job-id', 'w').write(str(jid))\n             \
+        \   continue\n            if 'COMPLETED' in st:\n                fetch_outputs()\n\
+        \            sys.exit(0 if ('COMPLETED' in st and rc in (0, None)) else 1)\n\
+        \    except SystemExit:\n        raise\n    except Exception as e:\n     \
+        \   print('poll error (transient):', e, flush=True)\n"
       volumeMounts:
       - name: mlflow-svc
         mountPath: /etc/mlflow-svc
