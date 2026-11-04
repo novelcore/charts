@@ -151,8 +151,8 @@ spec:
             value: "{{`{{steps.check-drift.outputs.parameters.kaos_lib_ref}}`}}"
 
   - name: check-drift
-    # Only force mode exits 3 ("not yet, retry"); every other outcome exits 0
-    # or fails for real, so the backstop poll is unchanged. A new app's repo,
+    # Only force mode exits 3 ("not yet, retry"); a killed pod (137) is retried
+    # in every mode; every other outcome exits 0 or fails for real. A new app's repo,
     # first commit and pipeline-images arrive within minutes, and a build in
     # flight finishes within its own runtime: retry every minute for up to ~45
     # minutes. No maxDuration (Argo counts it from the first attempt; see
@@ -160,7 +160,9 @@ spec:
     retryStrategy:
       limit: 45
       retryPolicy: OnFailure
-      expression: "asInt(lastRetry.exitCode) == 3"
+      # 3 = force mode's "not yet"; 137 = the pod was killed (OOM or a lost
+      # node) before it decided anything, which must never drop a forced event.
+      expression: "asInt(lastRetry.exitCode) == 3 || asInt(lastRetry.exitCode) == 137"
       backoff:
         duration: "60s"
         factor: 1
