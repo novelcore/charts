@@ -497,6 +497,18 @@ spec:
                   printf "false" > /tmp/wft_changed
                 fi
                 echo "wft_changed=$(cat /tmp/wft_changed) (re-evaluated against last-built-sha)"
+              elif [ -n "$LAST_BUILT" ] && [ "$LAST_BUILT" = "$(git rev-parse HEAD)" ] \
+                   && [ "{{`{{workflow.parameters.event_type}}`}}" = "reconcile" ]; then
+                # A reconcile of a commit that is ALREADY built has nothing to
+                # rebuild: the backstop only (re)renders. It reads last-built-sha
+                # from the POOL's ConfigMap, which trails gitops until ArgoCD syncs
+                # the build's own commit, so it can submit this build for the very
+                # SHA that just finished; the HEAD~1 diff above would then rebuild
+                # the steps that commit touched and re-stamp their images (live,
+                # kaos e2e 10480ba0, 2026-11-04: e2e-probe rebuilt 2 min after its
+                # own build, moving the images under a test that expected none).
+                CHANGED_FILES=""
+                echo "HEAD ${LAST_BUILT} is already built: a reconcile rebuilds no step for its diff"
               else
                 echo "diff base stays HEAD~1 (last-built-sha ${LAST_BUILT:-unset} unusable in this clone)"
               fi

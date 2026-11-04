@@ -132,6 +132,22 @@ expect_eq "$KL_PKG" "$SPEC" "detect-steps: a step that rebuilds for its own reas
 detect_case "-"; context_cm "$T/fixture/kubeapps/${APP}/main/pipeline-context.yaml" "-"; run_detect
 expect_eq "$KL_PKG/$KL_REC/$CHANGED" "//[]" "detect-steps: a context without kaosLib changes nothing"
 
+# A commit that touched step b is built (last-built-sha = HEAD). A reconcile of it rebuilds nothing
+# (the pool's ConfigMap trails gitops, so the backstop can run for the SHA that just finished: live,
+# kaos e2e 10480ba0 rebuilt e2e-probe 2 min after its own build); the same SHA on a push still does.
+built_head_touching_b() {
+  detect_case "$SPEC"; context_cm "$T/fixture/kubeapps/${APP}/main/pipeline-context.yaml" "$SPEC"
+  ( cd "$T/workspace/repo" && printf 'y\n' > steps/b/code.py && git add -A \
+      && git -c user.email=t@t -c user.name=t commit -qm three )
+  sed -i "s#^  last-built-sha: .*#  last-built-sha: $(git -C "$T/workspace/repo" rev-parse HEAD)#" \
+    "$T/fixture/kubeapps/${APP}/main/pipeline-images.yaml"
+}
+built_head_touching_b; EVENT=reconcile run_detect
+expect_eq "$RC/$CHANGED" "0/[]" "detect-steps: a reconcile of an already built HEAD rebuilds no step"
+expect_has "$OUT" "is already built" "detect-steps: says why nothing rebuilds"
+built_head_touching_b; EVENT=push run_detect
+expect_eq "$CHANGED" '[{"name":"b","path":"steps/b"}]' "detect-steps: the same HEAD on a push still rebuilds the step it touched"
+
 detect_case "-"; context_cm "$T/fixture/kubeapps/${APP}/main/pipeline-context.yaml" 'kaos-lib==0.3.0"; touch /tmp/pwned; "'; run_detect
 expect_eq "$KL_PKG/$KL_REC" "/" "detect-steps: a spec outside the operator pattern is refused"
 expect_has "$OUT" "REFUSED" "detect-steps: the refusal is loud"
