@@ -3,7 +3,7 @@
 Runs the two pipeline renderers against fixture contexts:
   * render-wft: the python embedded in the rendered ClusterWorkflowTemplate
     `ml-ci-build` (template `render-wft`), extracted from `helm template` output.
-  * Hera enhancer: `kubecore.enhance` from the pinned `platformEnhancer.ref`,
+  * Hera enhancer: `kaos_pipeline.enhance` (`kubecore.enhance` before the rename) from the pinned `platformEnhancer.ref`,
     fetched and unpacked the same way `kubecore-ci-workflows.platformEnhance` does.
 
 Fixtures hold PLACEHOLDER values only; nothing captured from a real tenant.
@@ -169,7 +169,7 @@ _SHA_RE = re.compile(r"[0-9a-f]{40}")
 
 
 def fetch_enhancer(ref: str, repo: str = "novelcore/hera-mlops-template") -> str:
-    """A directory containing kubecore/ for `repo`@`ref` (or $ENHANCER_DIR unchanged)."""
+    """A directory containing kaos_pipeline/ (or kubecore/ before the rename) for `repo`@`ref` (or $ENHANCER_DIR unchanged)."""
     if os.environ.get("ENHANCER_DIR"):
         return os.environ["ENHANCER_DIR"]
     if not _SHA_RE.fullmatch(ref):
@@ -197,14 +197,16 @@ def _fetch_enhancer(repo: str, ref: str) -> str:
     with urllib.request.urlopen(req, timeout=60) as r:
         tb = tarfile.open(fileobj=io.BytesIO(r.read()), mode="r:gz")
     root = tempfile.mkdtemp(prefix=f"enhancer-{ref[:12]}-")
-    dst = os.path.join(root, "kubecore")
+    members = tb.getmembers()
+    pkg = "kaos_pipeline" if any(m.name.split("/", 1)[-1].startswith("kaos_pipeline/") for m in members) else "kubecore"
+    dst = os.path.join(root, pkg)
     os.makedirs(dst)
     n = 0
-    for m in tb.getmembers():
+    for m in members:
         parts = m.name.split("/", 1)
-        if len(parts) < 2 or not parts[1].startswith("kubecore/") or "/local-dev/" in parts[1] + "/":
+        if len(parts) < 2 or not parts[1].startswith(pkg + "/") or "/local-dev/" in parts[1] + "/":
             continue
-        rel = parts[1][len("kubecore/"):]
+        rel = parts[1][len(pkg) + 1:]
         if not rel or "__pycache__" in rel:
             continue
         if ".." in rel.split("/") or os.path.isabs(rel):
@@ -218,7 +220,7 @@ def _fetch_enhancer(repo: str, ref: str) -> str:
                 f.write(src.read())
             n += 1
     if n == 0:
-        raise RuntimeError(f"no kubecore/ files in {repo}@{ref}")
+        raise RuntimeError(f"no kaos_pipeline/ or kubecore/ files in {repo}@{ref}")
     return root
 
 
@@ -228,13 +230,14 @@ def enhance_hera(enhancer_dir: str, raw_path: str, ctx: dict, catalog_path: Opti
         with open(ctx_path, "w") as f:
             yaml.safe_dump(ctx, f, sort_keys=False)
         out_path = os.path.join(td, "workflow-template.yaml")
-        cmd = [sys.executable, "-m", "kubecore.enhance", "--raw", os.path.abspath(raw_path), "--context", ctx_path]
+        pkg = "kaos_pipeline" if os.path.isdir(os.path.join(enhancer_dir, "kaos_pipeline")) else "kubecore"
+        cmd = [sys.executable, "-m", f"{pkg}.enhance", "--raw", os.path.abspath(raw_path), "--context", ctx_path]
         if catalog_path:
             cmd += ["--catalog", os.path.abspath(catalog_path)]
         cmd += ["--output", out_path]
         p = subprocess.run(cmd, cwd=enhancer_dir, capture_output=True, text=True)
         if p.returncode != 0:
-            raise RuntimeError(f"kubecore.enhance exited {p.returncode}\nstderr:\n{p.stderr}")
+            raise RuntimeError(f"{pkg}.enhance exited {p.returncode}\nstderr:\n{p.stderr}")
         with open(out_path) as f:
             return f.read()
 

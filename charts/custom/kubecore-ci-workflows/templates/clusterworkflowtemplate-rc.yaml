@@ -582,7 +582,7 @@ spec:
         mountPath: /etc/github-token
         readOnly: true
 
-  # status posts a commit status to GitHub. Context is kubecore-ci/rc to
+  # status posts a commit status to GitHub. Context is kaos-ci/rc to
   # distinguish RC build results from dev build results on the same commit.
   - name: status
     # A hung or infra-killed step used to wedge the whole run forever: these
@@ -620,7 +620,7 @@ spec:
         # real build (kubecore-operator#1377). limit bounds the retries.
     activeDeadlineSeconds: 600
     # GitHub reporting for the RC build (#1126): ONE commit status (context
-    # kubecore-ci/rc) with target_url into the Argo UI run, plus a Deployment
+    # kaos-ci/rc) with target_url into the Argo UI run, plus a Deployment
     # rollup (environment argo-workflows-rc) whose log/environment URL is the same run. The
     # GitHub Release + tracking issue below are the RC's own artefacts; this
     # is the check + rollup the rc/* commit carries.
@@ -636,7 +636,7 @@ spec:
       # Deployment, statuses only). Defaults are this pipeline's own; RC
       # variants override both via templateRef.
       - name: context
-        value: "kubecore-ci/rc"
+        value: "kaos-ci/rc"
       - name: environment
         value: "argo-workflows-rc"
     container:
@@ -1010,6 +1010,6 @@ spec:
           - name: pipeline
             value: "RC build"
           - name: context
-            value: "kubecore-ci/rc"
+            value: "kaos-ci/rc"
           - name: environment
             value: "argo-workflows-rc"

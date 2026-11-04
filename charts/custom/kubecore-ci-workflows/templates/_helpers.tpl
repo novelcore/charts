@@ -186,14 +186,19 @@ if tok:
     req.add_header("Authorization", f"Bearer {tok}")
 with urllib.request.urlopen(req, timeout=60) as r:
     tb = tarfile.open(fileobj=io.BytesIO(r.read()), mode="r:gz")
-dst = "/tmp/kubecore-enhancer/kubecore"
-shutil.rmtree(dst, ignore_errors=True); os.makedirs(dst)
+# The engine package is kaos_pipeline/ in an enhancer ref from the kaos rename on,
+# kubecore/ before it: use the new one when the ref has it, else the old one.
+members = tb.getmembers()
+pkg = "kaos_pipeline" if any(m.name.split("/", 1)[-1].startswith("kaos_pipeline/") for m in members) else "kubecore"
+root = "/tmp/kubecore-enhancer"
+dst = f"{root}/{pkg}"
+shutil.rmtree(root, ignore_errors=True); os.makedirs(dst)
 n = 0
-for m in tb.getmembers():
+for m in members:
     parts = m.name.split("/", 1)
-    if len(parts) < 2 or not parts[1].startswith("kubecore/") or "/local-dev/" in parts[1] + "/":
+    if len(parts) < 2 or not parts[1].startswith(pkg + "/") or "/local-dev/" in parts[1] + "/":
         continue
-    rel = parts[1][len("kubecore/"):]
+    rel = parts[1][len(pkg) + 1:]
     if not rel or "__pycache__" in rel:
         continue
     out = os.path.join(dst, rel)
@@ -205,10 +210,11 @@ for m in tb.getmembers():
             f.write(src.read())
         n += 1
 if n == 0:
-    raise SystemExit(f"platform enhancer: no kubecore/ files in {repo}@{ref}")
-print(f"platform enhancer: {repo}@{ref[:12]} ({n} files) unpacked to /tmp/kubecore-enhancer")
+    raise SystemExit(f"platform enhancer: no kaos_pipeline/ or kubecore/ files in {repo}@{ref}")
+print(f"platform enhancer: {repo}@{ref[:12]} ({n} files, package {pkg}) unpacked to {root}")
 OVERLAYEOF
-( cd /tmp/kubecore-enhancer && python3 -m kubecore.enhance \
+ENHANCER_PKG=$(ls /tmp/kubecore-enhancer | head -1)
+( cd /tmp/kubecore-enhancer && python3 -m "${ENHANCER_PKG}.enhance" \
     --raw /workspace/out/raw-workflow-template.yaml \
     --context /tmp/context.yaml \
     --output /workspace/out/workflow-template.yaml )
@@ -625,16 +631,23 @@ report_failed() {
 }
 
 # 1) commit status — the check on the commit / PR, linking to the run.
-if [ -n "${RUN_URL}" ]; then
-  PAYLOAD="{\"state\":\"${STATE}\",\"description\":\"${DESC}\",\"context\":\"${CONTEXT}\",\"target_url\":\"${RUN_URL}\"}"
-else
-  PAYLOAD="{\"state\":\"${STATE}\",\"description\":\"${DESC}\",\"context\":\"${CONTEXT}\"}"
-fi
-if gh_api POST "${API}/statuses/${SHA}" "${PAYLOAD}"; then
-  echo "Posted commit status ${CONTEXT}=${STATE} on ${OWNER_REPO}@${SHA}"
-else
-  report_failed $? "commit status ${CONTEXT}=${STATE} not posted on ${OWNER_REPO}@${SHA}"
-fi
+# The app CI check is named kaos-ci. Its old name, kubecore-ci, is still what
+# the CI-gate ruleset requires until the operator flips it, so kaos-ci is
+# posted under BOTH names (deprecated alias, removal tracked with that flip).
+post_status() {
+  if [ -n "${RUN_URL}" ]; then
+    PAYLOAD="{\"state\":\"${STATE}\",\"description\":\"${DESC}\",\"context\":\"$1\",\"target_url\":\"${RUN_URL}\"}"
+  else
+    PAYLOAD="{\"state\":\"${STATE}\",\"description\":\"${DESC}\",\"context\":\"$1\"}"
+  fi
+  if gh_api POST "${API}/statuses/${SHA}" "${PAYLOAD}"; then
+    echo "Posted commit status $1=${STATE} on ${OWNER_REPO}@${SHA}"
+  else
+    report_failed $? "commit status $1=${STATE} not posted on ${OWNER_REPO}@${SHA}"
+  fi
+}
+post_status "${CONTEXT}"
+if [ "${CONTEXT}" = "kaos-ci" ]; then post_status "kubecore-ci"; fi
 
 # 2) Deployment rollup (environment = this pipeline). Created on pending
 # with required_contexts:[] — THIS run is what the commit statuses
