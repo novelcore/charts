@@ -15,7 +15,7 @@ ml-ci-reconcile uses:
      Running/Pending in ci_namespace — never stack a build on an unfinished
      one (mirrors kubecore-operator#872).
   2. COMMIT-DRIFT CHECK: read the app repo's current HEAD SHA on its dev
-     branch (GitHub API) and check whether ANY "kubecore-ci" commit status
+     branch (GitHub API) and check whether ANY "kaos-ci" (or its old name "kubecore-ci") commit status
      exists yet on that exact commit. If none exists, submit ci-build.
 
 Deliberately DROPPED from the ML version — both are ML-only and have no
@@ -31,18 +31,18 @@ service-app equivalent to inspect:
 Also DIFFERENT from ml-ci-reconcile's "last built" mechanism: ML records
 last-built-sha into a ConfigMap that only ML builds write. ci-build (the
 service-app build template) has no such ConfigMap — but it already posts a
-"kubecore-ci" GitHub commit status on the exact commit it built, via BOTH its
+"kaos-ci" (or its old name "kubecore-ci") GitHub commit status on the exact commit it built, via BOTH its
 own `status` step (state=success, after a successful build-push) AND its
 `onExit: exit-handler` (state=failure, when workflow.status==Failed — see
 ci-build's `exit-handler` template). So EVERY build attempt against a commit,
-success or failure, leaves a "kubecore-ci" status on that commit.
+success or failure, leaves a "kaos-ci" (or its old name "kubecore-ci") status on that commit.
 
 This is the reconciler's ONLY job (D-07): recover a DROPPED WEBHOOK — i.e. a
 push that never triggered a build at all. It is explicitly NOT a retry
 mechanism for a build that ran and failed; a failed build has already
 reported itself (red check on the commit, visible to the developer, who can
 push a fix or re-run it). So the check below submits ci-build only when
-HEAD has NO "kubecore-ci" status whatsoever — pending, success, failure, or
+HEAD has NO "kaos-ci" (or its old name "kubecore-ci") status whatsoever — pending, success, failure, or
 error all mean a build was attempted and the reconciler must stay out of the
 way. Getting this wrong (treating "failure" as drift) would resubmit a
 genuinely broken commit every 3 minutes forever — the exact runaway-retry
@@ -255,7 +255,7 @@ spec:
         fi
         printf '%s' "$HEAD_SHA" > /tmp/head_sha
 
-        # COMMIT-DRIFT CHECK: ci-build posts a "kubecore-ci" commit status on
+        # COMMIT-DRIFT CHECK: ci-build posts a "kaos-ci" (old name: kubecore-ci) commit status on
         # every attempt against a SHA — success via its `status` step,
         # failure via its `onExit: exit-handler` (state=failure). So the
         # PRESENCE of any status (regardless of state) is proof the trigger
@@ -272,16 +272,18 @@ spec:
           printf 'false' > /tmp/needs_build
           exit 0
         fi
-        STATUS_COUNT=$(echo "$STATUS_JSON" | jq -r '[.statuses[]? | select(.context=="kubecore-ci")] | length')
-        STATE=$(echo "$STATUS_JSON" | jq -r '[.statuses[]? | select(.context=="kubecore-ci")] | .[0].state // empty')
-        echo "reconcile: ${SLUG}@${HEAD_SHA} kubecore-ci status=${STATE:-<none>} (count=${STATUS_COUNT:-0})"
+        # kaos-ci is the check's name; kubecore-ci is its old name, still posted
+        # (and still what a build from before the rename left): either one is a build.
+        STATUS_COUNT=$(echo "$STATUS_JSON" | jq -r '[.statuses[]? | select(.context=="kaos-ci" or .context=="kubecore-ci")] | length')
+        STATE=$(echo "$STATUS_JSON" | jq -r '[.statuses[]? | select(.context=="kaos-ci" or .context=="kubecore-ci")] | .[0].state // empty')
+        echo "reconcile: ${SLUG}@${HEAD_SHA} kaos-ci status=${STATE:-<none>} (count=${STATUS_COUNT:-0})"
 
         if [ "${STATUS_COUNT:-0}" = "0" ]; then
           printf 'true' > /tmp/needs_build
-          echo "reconcile: NO BUILD ATTEMPT — ${HEAD_SHA} has no kubecore-ci status at all (dropped webhook?); submitting ci-build"
+          echo "reconcile: NO BUILD ATTEMPT — ${HEAD_SHA} has no kaos-ci/kubecore-ci status at all (dropped webhook?); submitting ci-build"
         else
           printf 'false' > /tmp/needs_build
-          echo "reconcile: a build was already attempted for ${HEAD_SHA} (kubecore-ci=${STATE}) — staying out of the way"
+          echo "reconcile: a build was already attempted for ${HEAD_SHA} (kaos-ci=${STATE}) — staying out of the way"
         fi
       volumeMounts:
       - name: github-token

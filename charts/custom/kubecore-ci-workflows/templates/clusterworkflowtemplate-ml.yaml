@@ -418,10 +418,11 @@ spec:
         # up the change — a silent drift. Emit wft_changed=true whenever a
         # DAG-source file is in the diff (or this is a full build with no parent),
         # and gate render/patch-images on (has_changes OR wft_changed).
-        # Hera sources: pipeline.py, config/**, kubecore/** (vendored helpers).
+        # Hera sources: pipeline.py, config/**, kaos_pipeline/** or kubecore/**
+        # (the vendored engine; kubecore/ is the name before the kaos rename).
         # kubeline source: kubeline.yaml.
         if [ "$FRONTEND" = "hera" ]; then
-          WFT_SRC_RE="^(pipeline\.py|config/|kubecore/)"
+          WFT_SRC_RE="^(pipeline\.py|config/|kaos_pipeline/|kubecore/)"
         else
           WFT_SRC_RE="^kubeline\.ya?ml$"
         fi
@@ -586,16 +587,17 @@ spec:
           if echo "$CHANGED_FILES" | grep -qE "^${STEP_PATH}/"; then
             REASON="source changed"
           elif [ "$FRONTEND" = "hera" ] && [ "$STEP_NAME" = "compose-and-validate" ] \
-               && echo "$CHANGED_FILES" | grep -qE "^(config/|kubecore/)"; then
+               && echo "$CHANGED_FILES" | grep -qE "^(config/|kaos_pipeline/|kubecore/)"; then
             # compose-and-validate is built with the repo ROOT as context and
-            # BAKES `config/` + `kubecore/` into its image (see its Dockerfile),
+            # BAKES `config/` + the engine (`kaos_pipeline/`, or `kubecore/` in
+            # repos not yet moved) into its image (see its Dockerfile),
             # so its build inputs live OUTSIDE steps/compose_and_validate/.
             # Without this, adding a config section left the compose image stale
             # and every run died on the reads= gate ("a step declares
             # reads=['evaluation'] but the composed config has no 'evaluation'
             # section") — the tree in the image predated the section. Live
             # 2026-07-15.
-            REASON="config/ or kubecore/ changed (baked into this image)"
+            REASON="config/ or the pipeline engine changed (baked into this image)"
           elif [ "$UNBUILT_STEPS" = "__ALL__" ]; then
             REASON="no pipeline-images (first build)"
           elif grep -qxF "$STEP_PATH" /tmp/kaos_lib_rebuild; then
@@ -2787,7 +2789,7 @@ spec:
           SRC_COMMIT_TIME="$SRC_COMMIT_TIME" NODE_CLASS="$NODE_CLASS" \
           python3 /tmp/render_wft.py
 
-        # .kubecore/dataset-config.yaml is no longer written here: the k8smlapp
+        # .kaos/dataset-config.yaml (and its .kubecore/ twin) is no longer written here: the k8smlapp
         # composition owns it in the app repo from creation on (one writer, no
         # chore(dataset) commit re-triggering builds — charts#158).
 
@@ -2884,14 +2886,14 @@ spec:
         set -e
         cd /workspace/repo
         # Install the app's OWN pinned deps. `pip install -e .` uses the repo's
-        # pyproject.toml (PEP 621). The vendored kubecore/ package + hera + hydra
+        # pyproject.toml (PEP 621). The vendored engine package (kaos_pipeline/ or kubecore/) + hera + hydra
         # resolve from there. This runs UNTRUSTED developer code + deps with NO
         # credentials of any kind — the step has no token and no network egress
         # to anything but PyPI (lock down with a NetworkPolicy in the chart values).
         pip install --quiet -e . || pip install --quiet hera hydra-core omegaconf pyyaml
         mkdir -p /workspace/out
         # Render pipeline.py -> raw WFT. pipeline.py writes to out/ relative to
-        # itself; run from repo root so `from kubecore.authoring import ...` works.
+        # itself; run from repo root so `from kaos_pipeline.authoring import ...` (or `kubecore.authoring`) works.
         PYTHONPATH="/workspace/repo" python pipeline.py
         # pipeline.py writes out/raw-workflow-template.yaml under the repo; move it
         # to the shared workspace location the enhance step reads.
@@ -3474,7 +3476,7 @@ spec:
   - name: status
 {{ include "kubecore-ci-workflows.githubReportRetry" . | indent 4 }}
     # GitHub reporting for the AUTHORITATIVE in-cluster build (#1126): ONE
-    # commit status (context kubecore-ml-ci by default) with target_url into
+    # commit status (context kaos-ml-ci by default) with target_url into
     # the Argo UI run, plus a Deployment rollup (environment auto = argo-workflows-<branch|pr> by default)
     # whose log/environment URL is the same run. pending creates the
     # Deployment; success/failure resolve the Deployment created for this SHA.
@@ -3490,7 +3492,7 @@ spec:
       # Deployment, statuses only). Defaults are this pipeline's own; RC
       # variants override both via templateRef.
       - name: context
-        value: "kubecore-ml-ci"
+        value: "kaos-ml-ci"
       - name: environment
         value: "auto"
     container:
@@ -3593,6 +3595,9 @@ spec:
         ARGO_BASE="{{ .Values.argo.uiBaseUrl }}"
         RUN_URL=""; [ -n "${ARGO_BASE}" ] && RUN_URL="${ARGO_BASE}/workflows/${NS}/${WF}?uid={{`{{workflow.uid}}`}}"
         MARKER="<!-- kubecore-ci-report:${CONTEXT} -->"
+        # A report comment written under the check's old name (kubecore-*) is
+        # the same report: update it in place instead of posting a second one.
+        OLD_MARKER="<!-- kubecore-ci-report:$(printf '%s' "${CONTEXT}" | sed 's|^kaos-|kubecore-|') -->"
 
         # Argo hands the exit handler the failed nodes as JSON.
         cat > /tmp/failures.json <<'FAILEOF'
@@ -3681,7 +3686,7 @@ spec:
           echo "report: listing comments on ${TARGET} answered ${LIST_CODE}: $(jq -r '.message // .' /tmp/list.json 2>/dev/null | head -c 300)"
           echo '[]' > /tmp/list.json
         fi
-        CID=$(jq -r --arg m "${MARKER}" '[.[]? | objects | select((.body // "") | startswith($m))] | .[0].id // empty' /tmp/list.json)
+        CID=$(jq -r --arg m "${MARKER}" --arg o "${OLD_MARKER}" '[.[]? | objects | select((.body // "") | (startswith($m) or startswith($o)))] | .[0].id // empty' /tmp/list.json)
         if [ -n "${CID}" ]; then
           CODE=$(curl -s -o /tmp/post.json -w '%{http_code}' -X PATCH -H "${AUTH}" -H "${ACCEPT}" "${EDIT}/${CID}" -d @/tmp/payload.json)
           VERB="Updated report comment ${CID} on"
@@ -3727,7 +3732,7 @@ spec:
           - name: pipeline
             value: "ML build"
           - name: context
-            value: "kubecore-ml-ci"
+            value: "kaos-ml-ci"
           - name: environment
             value: "auto"
           - name: pr_number

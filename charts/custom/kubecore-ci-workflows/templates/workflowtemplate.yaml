@@ -594,7 +594,7 @@ spec:
         # real build (kubecore-operator#1377). limit bounds the retries.
     activeDeadlineSeconds: 600
     # GitHub reporting for the service build (#1126): ONE commit status
-    # (context kubecore-ci) with target_url into the Argo UI run, plus a
+    # (context kaos-ci, and kubecore-ci as its deprecated alias) with target_url into the Argo UI run, plus a
     # Deployment rollup (environment auto = argo-workflows-<branch|pr>) whose log/environment URL is the
     # same run — on PR builds the check + Deployment land on the PR head SHA.
     # Every GitHub call retries transient answers; a write that still fails
@@ -609,7 +609,7 @@ spec:
       # Deployment, statuses only). Defaults are this pipeline's own; RC
       # variants override both via templateRef.
       - name: context
-        value: "kubecore-ci"
+        value: "kaos-ci"
       - name: environment
         value: "auto"
     container:
@@ -917,7 +917,7 @@ spec:
           - name: pipeline
             value: "Build"
           - name: context
-            value: "kubecore-ci"
+            value: "kaos-ci"
           - name: environment
             value: "auto"
           - name: pr_number
