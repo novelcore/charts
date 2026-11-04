@@ -410,9 +410,10 @@ spec:
         # The Slurm JWT is read fresh per request (tok()); the wallet cannot be\n\
         # refreshed inside a queued job, so the job itself is replaced.\nWALLET_MARGIN_S\
         \ = 30 * 60\nCHECKPOINT_WARNING_S = 10 * 60   # PRD-HPC-1461 D-38: USR1 this\
-        \ long before the time limit\n\n\ndef wallet_exp(w):\n    \"\"\"exp claim\
-        \ of a JWT as epoch seconds (0 when unknown).\"\"\"\n    try:\n        seg\
-        \ = w.split('.')[1]\n        return float(json.loads(base64.urlsafe_b64decode(\n\
+        \ long before the time limit\nOFFER_S = 60   # PRD-1609: a sharing job waits\
+        \ this long for a host of its scope to take it\n\n\ndef wallet_exp(w):\n \
+        \   \"\"\"exp claim of a JWT as epoch seconds (0 when unknown).\"\"\"\n  \
+        \  try:\n        seg = w.split('.')[1]\n        return float(json.loads(base64.urlsafe_b64decode(\n\
         \            seg + '=' * (-len(seg) % 4)))['exp'])\n    except Exception:\n\
         \        return 0.0\n\n\ndef mint_wallet():\n    keyfile = os.environ.get('ZITADEL_MACHINE_KEY_FILE')\
         \ or ''\n    domain = os.environ.get('ZITADEL_DOMAIN') or ''\n    if not keyfile\
@@ -519,8 +520,11 @@ spec:
         \ // GPUS)\nIDLE_S = int(os.environ.get('KAOS_IDLE_S') or 120)\nMARGIN_S =\
         \ 300          # a guest must end this long before the host's own limit\n\
         TOKEN_MARGIN_S = 1800   # ... and this long before its own token expires (D-07)\n\
-        HELD = ('JobHeld', 'Dependency', 'BeginTime')\nPOLL_S = float(os.environ.get('KAOS_POLL_S')\
-        \ or 2)   # watchdog cadence; queue every 5 polls\n\n\ndef log(*a):\n    print(time.strftime('%H:%M:%S'),\
+        # Not takeable: held (another host took it) or waiting for another job. A\
+        \ job of this\n# scope waiting for its BeginTime is in its offer window (OFFER_S):\
+        \ exactly the job a\n# host should take, so it is NOT skipped.\nHELD = ('JobHeld',\
+        \ 'Dependency')\nPOLL_S = float(os.environ.get('KAOS_POLL_S') or 2)   # watchdog\
+        \ cadence; queue every 5 polls\n\n\ndef log(*a):\n    print(time.strftime('%H:%M:%S'),\
         \ 'slots:', *a, flush=True)\n\n\ndef run(*cmd):\n    p = subprocess.run(list(cmd),\
         \ stdout=subprocess.PIPE, stderr=subprocess.STDOUT,\n                    \
         \   universal_newlines=True)\n    return p.returncode, p.stdout.strip()\n\n\
@@ -1055,32 +1059,40 @@ spec:
         \ '1'},\n            'script': batch}\n    if commit:\n        # PRD-1541\
         \ D-06: the stager never evicts a commit a queued or running\n        # job\
         \ names here (squeue %k).\n        body['job']['comment'] = 'kaos-commit='\
-        \ + commit\n    if not hosting:\n        # PRD-HPC-1461 D-37/D-38: requeue\
-        \ lets the site put a pre-empted job back in\n        # the queue with its\
-        \ ID and place (users cannot requeue their own jobs on\n        # MeluXina).\
-        \ USR1 goes to the batch shell CHECKPOINT_WARNING_S before the\n        #\
-        \ limit (half the limit for short jobs), which passes it to the step (D-44).\n\
-        \        # Not for a host yet: its slot manager does not pass the signal on\
-        \ (#1609).\n        body['job'].update({'requeue': True, 'kill_warning_signal':\
-        \ 'USR1',\n                            'kill_warning_flags': ['BATCH_JOB'],\n\
-        \                            'kill_warning_delay': {'set': True, 'number':\
-        \ min(\n                                CHECKPOINT_WARNING_S, step_limit *\
-        \ 30)}})\n    req = urllib.request.Request(API + '/job/submit',\n        \
-        \                         data=json.dumps(body).encode(),\n              \
-        \                   headers=hdrs(), method='POST')\n    try:\n        resp\
-        \ = json.load(urllib.request.urlopen(req, timeout=30))\n    except urllib.error.HTTPError\
-        \ as e:\n        print('job submit refused:', submit_refusal(e), flush=True)\n\
-        \        sys.exit(1)\n    j = resp.get('job_id')\n    print('submitted job',\
-        \ j, 'errors:', resp.get('errors'), flush=True)\n    if not j:\n        sys.exit(1)\n\
-        \    return j\n\n\ndef submit_refusal(e):\n    \"\"\"slurmrestd refuses a\
-        \ job with an HTTP error whose body names why\n    (errors/warnings: an account,\
-        \ partition or QOS it rejects, a time limit\n    above the QOS); without it\
-        \ the step dies on a bare 'HTTP Error 500'.\"\"\"\n    try:\n        why =\
-        \ json.loads(e.read().decode(errors='replace') or '{}')\n    except Exception:\n\
-        \        why = {}\n    if not isinstance(why, dict):\n        why = {}\n \
-        \   return 'HTTP %s %s' % (e.code, {k: why.get(k) for k in ('errors', 'warnings')\n\
-        \                                     if why.get(k)} or '(no reason in the\
-        \ body)')\n\n\ndef cancel(j):\n    try:\n        urllib.request.urlopen(urllib.request.Request(\n\
+        \ + commit\n    if SHARING and int(HPC.get('gpus') or 0) > 0:\n        # PRD-1609\
+        \ offer window (PRD-HPC-1461 N-12): a sharing job starts OFFER_S late,\n \
+        \       # so a running host of the same scope can take it even when free nodes\
+        \ would\n        # start it at once (a quiet site packed nothing: e2e 56c7480b).\
+        \ Slurm makes it\n        # eligible by itself afterwards: nothing has to\
+        \ release it, so there is no race\n        # beyond the one take() already\
+        \ handles (hold, then check it is still pending).\n        # Live 2026-11-05\
+        \ (job 5422046): BeginTime for 45 s, then it started alone.\n        body['job']['begin_time']\
+        \ = {'set': True, 'number': int(time.time()) + OFFER_S}\n    if not hosting:\n\
+        \        # PRD-HPC-1461 D-37/D-38: requeue lets the site put a pre-empted\
+        \ job back in\n        # the queue with its ID and place (users cannot requeue\
+        \ their own jobs on\n        # MeluXina). USR1 goes to the batch shell CHECKPOINT_WARNING_S\
+        \ before the\n        # limit (half the limit for short jobs), which passes\
+        \ it to the step (D-44).\n        # Not for a host yet: its slot manager does\
+        \ not pass the signal on (#1609).\n        body['job'].update({'requeue':\
+        \ True, 'kill_warning_signal': 'USR1',\n                            'kill_warning_flags':\
+        \ ['BATCH_JOB'],\n                            'kill_warning_delay': {'set':\
+        \ True, 'number': min(\n                                CHECKPOINT_WARNING_S,\
+        \ step_limit * 30)}})\n    req = urllib.request.Request(API + '/job/submit',\n\
+        \                                 data=json.dumps(body).encode(),\n      \
+        \                           headers=hdrs(), method='POST')\n    try:\n   \
+        \     resp = json.load(urllib.request.urlopen(req, timeout=30))\n    except\
+        \ urllib.error.HTTPError as e:\n        print('job submit refused:', submit_refusal(e),\
+        \ flush=True)\n        sys.exit(1)\n    j = resp.get('job_id')\n    print('submitted\
+        \ job', j, 'errors:', resp.get('errors'), flush=True)\n    if not j:\n   \
+        \     sys.exit(1)\n    return j\n\n\ndef submit_refusal(e):\n    \"\"\"slurmrestd\
+        \ refuses a job with an HTTP error whose body names why\n    (errors/warnings:\
+        \ an account, partition or QOS it rejects, a time limit\n    above the QOS);\
+        \ without it the step dies on a bare 'HTTP Error 500'.\"\"\"\n    try:\n \
+        \       why = json.loads(e.read().decode(errors='replace') or '{}')\n    except\
+        \ Exception:\n        why = {}\n    if not isinstance(why, dict):\n      \
+        \  why = {}\n    return 'HTTP %s %s' % (e.code, {k: why.get(k) for k in ('errors',\
+        \ 'warnings')\n                                     if why.get(k)} or '(no\
+        \ reason in the body)')\n\n\ndef cancel(j):\n    try:\n        urllib.request.urlopen(urllib.request.Request(\n\
         \            API + '/job/' + str(j), headers=hdrs(), method='DELETE'), timeout=30)\n\
         \        print('cancelled job', j, flush=True)\n    except Exception as e:\n\
         \        print('cancel failed:', e, flush=True)\n\n\ndef on_term(signum, frame):\n\
