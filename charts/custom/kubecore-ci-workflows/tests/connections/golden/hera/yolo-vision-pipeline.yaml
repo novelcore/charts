@@ -1012,7 +1012,9 @@ spec:
           - name: time-limit
             value: '240'
           - name: deadline-seconds
-            value: '259200'
+            value: '43200'
+          - name: resumable-lead
+            value: '0'
           - name: step-outputs
             value: params
           - name: hpc-class
@@ -1043,7 +1045,9 @@ spec:
           - name: time-limit
             value: '240'
           - name: deadline-seconds
-            value: '259200'
+            value: '43200'
+          - name: resumable-lead
+            value: '0'
           - name: step-outputs
             value: ''
           - name: hpc-class
@@ -1078,7 +1082,9 @@ spec:
           - name: time-limit
             value: '240'
           - name: deadline-seconds
-            value: '259200'
+            value: '43200'
+          - name: resumable-lead
+            value: '0'
           - name: step-outputs
             value: data-yaml,manifest-summary
           - name: hpc-class
@@ -1126,7 +1132,9 @@ spec:
           - name: time-limit
             value: '240'
           - name: deadline-seconds
-            value: '259200'
+            value: '43200'
+          - name: resumable-lead
+            value: '0'
           - name: step-outputs
             value: ''
           - name: hpc-class
@@ -1177,7 +1185,9 @@ spec:
           - name: time-limit
             value: '720'
           - name: deadline-seconds
-            value: '432000'
+            value: '72000'
+          - name: resumable-lead
+            value: '0'
           - name: step-outputs
             value: training-result
           - name: hpc-class
@@ -1225,7 +1235,9 @@ spec:
           - name: time-limit
             value: '240'
           - name: deadline-seconds
-            value: '259200'
+            value: '43200'
+          - name: resumable-lead
+            value: '0'
           - name: step-outputs
             value: qat-result
           - name: hpc-class
@@ -1278,7 +1290,9 @@ spec:
           - name: time-limit
             value: '240'
           - name: deadline-seconds
-            value: '259200'
+            value: '43200'
+          - name: resumable-lead
+            value: '0'
           - name: step-outputs
             value: quantization-result
           - name: hpc-class
@@ -1331,7 +1345,9 @@ spec:
           - name: time-limit
             value: '240'
           - name: deadline-seconds
-            value: '259200'
+            value: '43200'
+          - name: resumable-lead
+            value: '0'
           - name: step-outputs
             value: registration-result
           - name: hpc-class
@@ -1353,6 +1369,8 @@ spec:
       - name: step-outputs
         value: ''
       - name: hpc-class
+      - name: resumable-lead
+        value: '0'
     activeDeadlineSeconds: '{{inputs.parameters.deadline-seconds}}'
     retryStrategy:
       limit: '2'
@@ -1414,28 +1432,110 @@ spec:
         \                                 headers=dict(H, **{'Content-Type': 'multipart/form-data;\
         \ boundary=B'}))\n    urllib.request.urlopen(req, timeout=120).read()\n  \
         \  print('stage-out:', name, len(data), 'bytes ->', prefix, flush=True)\n\"\
-        \"\"\nimport base64, json, os, re, shlex, signal, subprocess, sys, threading,\
-        \ time, urllib.parse, urllib.request\n\n# F-04 stage-in, run ON the compute\
-        \ node (system python3, stdlib only):\n# take the commit dataset-loading pinned\
-        \ (DATASET_COMMIT) or resolve\n# ref -> commit, download the dataset (data.yaml,\
-        \ images/, labels/ at the root of\n# the dataset repository) of that version\
-        \ from the lakeFS PUBLIC\n# endpoint (bearer through oauth2-proxy \u2014 the\
-        \ in-cluster S3-gateway/manifest\n# streaming path is blocked by the SSO front\
-        \ off-cluster) into a Lustre cache\n# keyed by commit, parallel + resumable\
-        \ (size-matched files are skipped,\n# per-writer part-file renamed atomically).\
-        \ Rides to the node base64-encoded in the job\n# environment.\nSTAGEIN = \"\
-        \"\"\nimport concurrent.futures, json, os, pathlib, sys, urllib.parse, urllib.request\n\
-        EP = os.environ['LAKEFS_ENDPOINT'].rstrip('/')\nH = {'Authorization': 'Bearer\
-        \ ' + os.environ['LAKEFS_BEARER_TOKEN']}\nREPO, REF = os.environ['DATASET_REPO'],\
-        \ os.environ['DATASET_REF']\ndef get(url):\n    return urllib.request.urlopen(\n\
-        \        urllib.request.Request(url, headers=H), timeout=120)\nbase = EP +\
-        \ '/api/v1/repositories/' + urllib.parse.quote(REPO, safe='')\n# The commit\
-        \ dataset-loading pinned, so this step reads exactly what the\n# in-cluster\
-        \ steps read. Without one (older step code): ref -> tip commit via\n# the\
-        \ commit LOG (amount=1). GET /refs/{ref} does not exist on our lakeFS\n# version\
-        \ (404, live job 5143633) \u2014 /refs/{ref}/commits is the proven one.\n\
-        commit = os.environ.get('DATASET_COMMIT') or json.load(\n    get(base + '/refs/'\
-        \ + urllib.parse.quote(REF, safe='')\n        + '/commits?amount=1'))['results'][0]['id']\n\
+        \"\"\nCKPTOUT = r\"\"\"\n# Checkpoint stage-out (PRD-HPC-1461 D-44 as amended\
+        \ 2026-11-05, T-19): a resumable step saved\n# <work>/output/checkpoint/ with\
+        \ kaos_lib.checkpoint and exited 85. Before the job ends, upload\n# it to\
+        \ the app's outputs repository on the branch hpc-ckpt-<wf-uid>-<step> (kept,\
+        \ so the\n# checkpoint stays in lineage) at hpc-checkpoints/<wf-uid>/<step>/attempt-<n>/,\
+        \ check every\n# file's size, commit, and write the commit id to $KAOS_CKPT_FILE.\
+        \ Files are streamed, never\n# held in memory. Any failure exits non-zero:\
+        \ no commit id, no continuation.\nimport http.client, json, os, pathlib, sys,\
+        \ time, urllib.error, urllib.parse, urllib.request\nep = urllib.parse.urlsplit(os.environ['LAKEFS_ENDPOINT'].rstrip('/'))\n\
+        base = os.environ['LAKEFS_ENDPOINT'].rstrip('/') + '/api/v1'\nH = {'Authorization':\
+        \ 'Bearer ' + os.environ['LAKEFS_BEARER_TOKEN']}\nrepo = os.environ['OUTPUTS_REPO']\n\
+        wf, step, attempt = os.environ['WF_UID'], os.environ['STEP_NAME'], os.environ.get('KAOS_ATTEMPT')\
+        \ or '1'\nbranch = 'hpc-ckpt-%s-%s' % (wf, step)\nprefix = 'hpc-checkpoints/%s/%s/attempt-%s/'\
+        \ % (wf, step, attempt)\nsrc = pathlib.Path(os.environ['KAOS_WORK']) / 'output'\
+        \ / 'checkpoint'\nfiles = sorted(f for f in src.rglob('*') if f.is_file())\
+        \ if src.is_dir() else []\nif not files:\n    print('checkpoint stage-out:\
+        \ nothing in', src, flush=True); sys.exit(1)\ndef call(method, path, body=None,\
+        \ ok=(200, 201)):\n    req = urllib.request.Request(base + path, method=method,\
+        \ headers=dict(H, **{'Content-Type': 'application/json'}),\n             \
+        \                    data=json.dumps(body).encode() if body is not None else\
+        \ None)\n    try:\n        with urllib.request.urlopen(req, timeout=120) as\
+        \ r:\n            return r.status, json.loads(r.read() or b'{}')\n    except\
+        \ urllib.error.HTTPError as e:\n        return e.code, {}\ncode, _ = call('POST',\
+        \ '/repositories/%s/branches' % repo, {'name': branch, 'source': os.environ.get('OUTPUTS_REF')\
+        \ or 'main'})\nif code not in (200, 201, 409):   # 409: an earlier attempt\
+        \ created it\n    print('checkpoint stage-out: cannot create', branch, code,\
+        \ flush=True); sys.exit(1)\ndef upload(f, path):\n    size = f.stat().st_size\n\
+        \    pre = ('--B\\r\\nContent-Disposition: form-data; name=\"content\"; filename=\"\
+        f\"\\r\\n'\n           'Content-Type: application/octet-stream\\r\\n\\r\\\
+        n').encode()\n    post = b'\\r\\n--B--\\r\\n'\n    q = urllib.parse.urlencode({'path':\
+        \ path})\n    conn = (http.client.HTTPSConnection if ep.scheme == 'https'\
+        \ else http.client.HTTPConnection)(ep.netloc, timeout=600)\n    conn.putrequest('POST',\
+        \ ep.path + '/api/v1/repositories/%s/branches/%s/objects?%s' % (repo, branch,\
+        \ q))\n    for k, v in dict(H, **{'Content-Type': 'multipart/form-data; boundary=B',\n\
+        \                          'Content-Length': str(len(pre) + size + len(post))}).items():\n\
+        \        conn.putheader(k, v)\n    conn.endheaders()\n    conn.send(pre)\n\
+        \    with open(f, 'rb') as fh:\n        while True:\n            chunk = fh.read(1\
+        \ << 20)\n            if not chunk:\n                break\n            conn.send(chunk)\n\
+        \    conn.send(post)\n    status = conn.getresponse().status\n    conn.close()\n\
+        \    if status not in (200, 201):\n        raise IOError('upload %s: HTTP\
+        \ %d' % (path, status))\n    code, st = call('GET', '/repositories/%s/refs/%s/objects/stat?%s'\
+        \ % (repo, branch, q))\n    if code != 200 or st.get('size_bytes') != size:\n\
+        \        raise IOError('upload %s: stored size %s, local %d' % (path, st.get('size_bytes'),\
+        \ size))\ntotal = 0\nfor f in files:\n    path = prefix + f.relative_to(src).as_posix()\n\
+        \    for n in range(4):\n        try:\n            upload(f, path)\n     \
+        \       break\n        except Exception as e:\n            if n == 3:\n  \
+        \              print('checkpoint stage-out:', e, flush=True); sys.exit(1)\n\
+        \            time.sleep(5 * (n + 1))\n    total += f.stat().st_size\ncode,\
+        \ c = call('POST', '/repositories/%s/branches/%s/commits' % (repo, branch),\n\
+        \               {'message': 'checkpoint: %s attempt %s' % (step, attempt),\n\
+        \                'metadata': {'kaos.kind': 'checkpoint', 'workflow_uid': wf,\
+        \ 'step': step, 'attempt': str(attempt)}})\nif code not in (200, 201) or not\
+        \ c.get('id'):\n    print('checkpoint stage-out: commit failed', code, flush=True);\
+        \ sys.exit(1)\nopen(os.environ['KAOS_CKPT_FILE'], 'w').write(c['id'] + ' '\
+        \ + prefix)\nprint('checkpoint stage-out: %d files, %d bytes -> %s@%s %s'\
+        \ % (len(files), total, branch, c['id'][:12], prefix), flush=True)\n\"\"\"\
+        \n\nCKPTIN = r\"\"\"\n# Checkpoint stage-in for a continued job: download\
+        \ hpc-checkpoints/.../attempt-<n>/ at the commit the\n# previous attempt staged\
+        \ out ($KAOS_RESUME_REF, $KAOS_RESUME_PREFIX) into <work>/resume, each file\
+        \ to a\n# part-file renamed when complete and checked against its size. Exits\
+        \ non-zero if anything is\n# missing: a continuation never silently starts\
+        \ from scratch.\nimport json, os, pathlib, sys, urllib.parse, urllib.request\n\
+        base = os.environ['LAKEFS_ENDPOINT'].rstrip('/') + '/api/v1'\nH = {'Authorization':\
+        \ 'Bearer ' + os.environ['LAKEFS_BEARER_TOKEN']}\nrepo, ref, prefix = os.environ['OUTPUTS_REPO'],\
+        \ os.environ['KAOS_RESUME_REF'], os.environ['KAOS_RESUME_PREFIX']\ndest =\
+        \ pathlib.Path(os.environ['KAOS_WORK']) / 'resume'\ndef get(path):\n    return\
+        \ urllib.request.urlopen(urllib.request.Request(base + path, headers=H), timeout=600)\n\
+        objs, after = [], ''\nwhile True:\n    q = urllib.parse.urlencode({'prefix':\
+        \ prefix, 'after': after, 'amount': 1000})\n    page = json.load(get('/repositories/%s/refs/%s/objects/ls?%s'\
+        \ % (repo, ref, q)))\n    objs += [o for o in page.get('results', []) if o.get('path_type',\
+        \ 'object') == 'object']\n    if not page.get('pagination', {}).get('has_more'):\n\
+        \        break\n    after = page['pagination']['next_offset']\nif not objs:\n\
+        \    print('checkpoint stage-in: nothing at', ref, prefix, flush=True); sys.exit(1)\n\
+        for o in objs:\n    target = dest / o['path'][len(prefix):]\n    target.parent.mkdir(parents=True,\
+        \ exist_ok=True)\n    part = target.with_name(target.name + '.part')\n   \
+        \ q = urllib.parse.urlencode({'path': o['path']})\n    with get('/repositories/%s/refs/%s/objects?%s'\
+        \ % (repo, ref, q)) as r, open(str(part), 'wb') as fh:\n        while True:\n\
+        \            chunk = r.read(1 << 20)\n            if not chunk:\n        \
+        \        break\n            fh.write(chunk)\n    if part.stat().st_size !=\
+        \ o['size_bytes']:\n        print('checkpoint stage-in: short download of',\
+        \ o['path'], flush=True); sys.exit(1)\n    os.replace(str(part), str(target))\n\
+        print('checkpoint stage-in: %d files from %s@%s %s' % (len(objs), repo, ref[:12],\
+        \ prefix), flush=True)\n\"\"\"\n\nimport base64, json, os, re, shlex, signal,\
+        \ subprocess, sys, threading, time, urllib.parse, urllib.request\n\n# F-04\
+        \ stage-in, run ON the compute node (system python3, stdlib only):\n# take\
+        \ the commit dataset-loading pinned (DATASET_COMMIT) or resolve\n# ref ->\
+        \ commit, download the dataset (data.yaml, images/, labels/ at the root of\n\
+        # the dataset repository) of that version from the lakeFS PUBLIC\n# endpoint\
+        \ (bearer through oauth2-proxy \u2014 the in-cluster S3-gateway/manifest\n\
+        # streaming path is blocked by the SSO front off-cluster) into a Lustre cache\n\
+        # keyed by commit, parallel + resumable (size-matched files are skipped,\n\
+        # per-writer part-file renamed atomically). Rides to the node base64-encoded\
+        \ in the job\n# environment.\nSTAGEIN = \"\"\"\nimport concurrent.futures,\
+        \ json, os, pathlib, sys, urllib.parse, urllib.request\nEP = os.environ['LAKEFS_ENDPOINT'].rstrip('/')\n\
+        H = {'Authorization': 'Bearer ' + os.environ['LAKEFS_BEARER_TOKEN']}\nREPO,\
+        \ REF = os.environ['DATASET_REPO'], os.environ['DATASET_REF']\ndef get(url):\n\
+        \    return urllib.request.urlopen(\n        urllib.request.Request(url, headers=H),\
+        \ timeout=120)\nbase = EP + '/api/v1/repositories/' + urllib.parse.quote(REPO,\
+        \ safe='')\n# The commit dataset-loading pinned, so this step reads exactly\
+        \ what the\n# in-cluster steps read. Without one (older step code): ref ->\
+        \ tip commit via\n# the commit LOG (amount=1). GET /refs/{ref} does not exist\
+        \ on our lakeFS\n# version (404, live job 5143633) \u2014 /refs/{ref}/commits\
+        \ is the proven one.\ncommit = os.environ.get('DATASET_COMMIT') or json.load(\n\
+        \    get(base + '/refs/' + urllib.parse.quote(REF, safe='')\n        + '/commits?amount=1'))['results'][0]['id']\n\
         dest = pathlib.Path(os.environ['DATASET_CACHE']) / REPO / commit\nopen(os.environ['DATASET_DIRFILE'],\
         \ 'w').write(str(dest))\nif (dest / '.complete').exists():\n    (dest / '.complete').touch()\
         \            # last use, for the job's cache cleanup\n    (dest / '.kaos-commit').write_text(commit)\
@@ -1480,11 +1580,15 @@ spec:
         \ the\n# wallet would train blind (no MLflow, no checkpoint upload, no stage-out).\n\
         # The Slurm JWT is read fresh per request (tok()); the wallet cannot be\n\
         # refreshed inside a queued job, so the job itself is replaced.\nWALLET_MARGIN_S\
-        \ = 30 * 60\nCHECKPOINT_WARNING_S = 10 * 60   # PRD-HPC-1461 D-38: USR1 this\
-        \ long before the time limit\nOFFER_S = 60   # PRD-1609: a sharing job waits\
-        \ this long for a host of its scope to take it\n\n\ndef wallet_exp(w):\n \
-        \   \"\"\"exp claim of a JWT as epoch seconds (0 when unknown).\"\"\"\n  \
-        \  try:\n        seg = w.split('.')[1]\n        return float(json.loads(base64.urlsafe_b64decode(\n\
+        \ = 30 * 60\n# PRD-HPC-1461 D-44 (amended 2026-11-05): only a step declared\
+        \ resumable gets the stop signal,\n# this many minutes before its wall time,\
+        \ and continues in a new job; 0 = not resumable.\nRESUMABLE_LEAD_MIN = int(os.environ.get('HPC_RESUMABLE_LEAD')\
+        \ or 0)\nATTEMPT = 1      # this step's job: 1, then one more per continuation\n\
+        RESUME = None    # (commit, path) of the checkpoint the next job continues\
+        \ from\nOFFER_S = 60   # PRD-1609: a sharing job waits this long for a host\
+        \ of its scope to take it\n\n\ndef wallet_exp(w):\n    \"\"\"exp claim of\
+        \ a JWT as epoch seconds (0 when unknown).\"\"\"\n    try:\n        seg =\
+        \ w.split('.')[1]\n        return float(json.loads(base64.urlsafe_b64decode(\n\
         \            seg + '=' * (-len(seg) % 4)))['exp'])\n    except Exception:\n\
         \        return 0.0\n\n\ndef mint_wallet():\n    keyfile = os.environ.get('ZITADEL_MACHINE_KEY_FILE')\
         \ or ''\n    domain = os.environ.get('ZITADEL_DOMAIN') or ''\n    if not keyfile\
@@ -1544,9 +1648,12 @@ spec:
         \ or ''\nSHARING = os.environ.get('HPC_SHARING') == 'on' and re.fullmatch('[a-z0-9]{8,16}',\
         \ SCOPE) is not None\nif os.environ.get('HPC_SHARING') == 'on' and not SHARING:\n\
         \    print('node sharing: scope %r is not 8-16 lowercase letters or digits\
-        \ - running alone' % SCOPE,\n          flush=True)\n# What stays in the Slurm\
-        \ environment when the inputs move into the script: the\n# login shell builds\
-        \ PATH from it, so it is never re-exported over the profile.\nSLURM_ENV_KEEP\
+        \ - running alone' % SCOPE,\n          flush=True)\nif SHARING and RESUMABLE_LEAD_MIN:\n\
+        \    # A step on a shared node is not passed the stop signal (#1609), so a\
+        \ resumable step runs alone.\n    print('node sharing: off for this step -\
+        \ it is resumable', flush=True)\n    SHARING = False\n# What stays in the\
+        \ Slurm environment when the inputs move into the script: the\n# login shell\
+        \ builds PATH from it, so it is never re-exported over the profile.\nSLURM_ENV_KEEP\
         \ = ('PATH', 'HOME', 'USER')\n\n\ndef inputs_in_script(batch, env):\n    \"\
         \"\"D-02: a host can read a waiting job's script, never its environment (probe\n\
         \    2026-11-03), so with sharing on the step's inputs ride in the script\
@@ -2021,93 +2128,117 @@ spec:
         \        # (declared outputs), /work/runs, /work/dataset caches. Per-job scratch\n\
         \        # on Lustre, removed after a successful stage-out.\n        'export\
         \ KAOS_WORK=$SCR/kaos-work/$KAOS_JOB_ID; mkdir -p $KAOS_WORK/output',\n  \
-        \      'BIND=\"$BIND -B $KAOS_WORK:/work\"',\n        # Last use of a cached\
-        \ SIF, before the cleanup below can see it.\n        'touch -c \"$SIF\"',\n\
-        \        'if [ ! -f \"$SIF\" ]; then',\n        # GCP token ONLY for GAR hosts:\
-        \ presenting it to Zot turns an\n        # anonymous-OK pull into 401 authentication\
-        \ required (live job\n        # 5140432 vs the anonymous F-01 pull that worked\
-        \ on the same repo).\n        '  case \"$IMAGE_REF\" in *-docker.pkg.dev/*)'\n\
-        \        ' [ -n \"$REG_TOKEN\" ] && export'\n        ' APPTAINER_DOCKER_USERNAME=oauth2accesstoken'\n\
-        \        ' APPTAINER_DOCKER_PASSWORD=$REG_TOKEN;; esac',\n        # PRD-1609\
-        \ F-02: pull to a name only this job writes, then rename it into\n       \
-        \ # the shared cache (atomic on Lustre). Jobs, and steps sharing a node,\n\
-        \        # never run a half-written SIF; an image another job finished first\
-        \ is kept.\n        '  SIF_TMP=$SIF.part-$SLURM_JOB_ID-$$',\n        '  apptainer\
-        \ pull \"$SIF_TMP\" docker://$IMAGE_REF || { rm -f \"$SIF_TMP\"; fail 231;\
-        \ }',\n        '  mv -n \"$SIF_TMP\" \"$SIF\"; rm -f \"$SIF_TMP\"',\n    \
-        \    'fi',\n        # PRD-1541: the image and download caches share the allocation's\
-        \ scratch\n        # quota with the dataset cache and only ever grew. This\
-        \ user's entries\n        # unused for 14 days go: SIFs, Apptainer's layer\
-        \ cache, in-job\n        # downloads. What this job uses was touched just\
-        \ above.\n        'find $SCR/sif-cache -maxdepth 1 -name \"*.sif\" -user \"\
-        $USER\" -mtime +14 -delete 2>/dev/null',\n        'find $SCR/sif-cache -maxdepth\
-        \ 1 -name \"*.sif.part-*\" -user \"$USER\" -mmin +720 -delete 2>/dev/null',\n\
-        \        'find $SCR/data-cache -mindepth 3 -maxdepth 3 -name .complete -user\
-        \ \"$USER\" -mtime +14'\n        ' -printf \"%h\\\\n\" 2>/dev/null | xargs\
-        \ -r rm -rf',\n        'apptainer cache clean --force --days 14 >/dev/null\
-        \ 2>&1',\n        # Start in the image's WORKDIR (Apptainer ignores it; Docker\
-        \ does not).\n        'PWD_OPT=\"\"; [ -n \"$STEP_WORKDIR\" ] && PWD_OPT=\"\
-        --pwd $STEP_WORKDIR\"',\n        # --nv only on GPU classes: on the cpu/largemem\
-        \ partitions there is\n        # no driver to bind and the flag makes Apptainer\
-        \ warn or fail.\n        'NV=\"\"; [ \"${HPC_GPUS:-0}\" -gt 0 ] && NV=\"--nv\"\
-        ',\n        '[ -n \"$STEP_CMD\" ] || STEP_CMD=\"nvidia-smi -L || nproc\"',\n\
-        \        # PRD-HPC-1461 D-38/D-44: Slurm sends USR1 to this shell about 10\
-        \ minutes\n        # before the time limit. The step runs in its own process\
-        \ group (set -m), and\n        # the shell passes USR1 ONLY to the processes\
-        \ of that group that handle it\n        # (SigCgt bit 9): kaos-lib's handler\
-        \ (an open run writer) saves progress and\n        # exits 85. Never the whole\
-        \ group: Apptainer's squashfuse dies on USR1 and the\n        # image vanishes\
-        \ under the step (live job 5421507: Bus error, rc 135). Inside,\n        #\
-        \ sh ignores USR1 and so does every process that keeps that setting, so a\
-        \ step\n        # without kaos-lib runs to the limit as before. `wait` returns\
-        \ early on the\n        # trap, so wait again until the step is really gone.\n\
-        \        'set -m',\n        'apptainer exec $NV $PWD_OPT $BIND \"$SIF\" /bin/sh\
-        \ -c \"trap \\'\\' USR1; $STEP_CMD\" &',\n        'STEP_PID=$!',\n       \
-        \ 'set +m',\n        'kaos_stop(){ echo \"stop signal: asking the step to\
-        \ save its progress\";'\n        ' for p in $(pgrep -g $STEP_PID); do'\n \
-        \       ' m=$(awk \\'/^SigCgt:/{print $2}\\' /proc/$p/status 2>/dev/null);'\n\
-        \        ' [ -n \"$m\" ] && [ $(( 0x$m >> 9 & 1 )) -eq 1 ] && kill -USR1 $p\
-        \ 2>/dev/null; done; }',\n        'trap kaos_stop USR1',\n        'wait $STEP_PID;\
-        \ rc=$?',\n        'while kill -0 $STEP_PID 2>/dev/null; do wait $STEP_PID;\
-        \ rc=$?; done',\n        'trap - USR1',\n        # 85: the step saved its\
-        \ progress; the waiter continues the run in a new job.\n        # Its outputs\
-        \ are not final yet, so nothing is staged out.\n        '[ $rc -eq 85 ] &&\
-        \ echo \"step saved its progress before the time limit (exit 85)\"',\n   \
-        \     'if [ $rc -ne 85 ] && [ -n \"$STEP_OUTPUTS\" ] && [ -n \"$STAGEOUT_B64\"\
-        \ ] && [ -n \"$LAKEFS_BEARER_TOKEN\" ]; then'\n        ' printf %s \"$STAGEOUT_B64\"\
-        \ | base64 -d | python3 - || echo \"stage-out failed (rc=$rc)\"; fi',\n  \
-        \      '[ $rc -eq 0 ] && rm -rf \"$KAOS_WORK\"',\n        '[ $rc -ne 0 ] &&\
-        \ fail $rc',\n        'exit 0',\n    ])\n    env = ['PATH=/usr/bin:/bin:/usr/local/bin',\
-        \ 'HOME=' + ident['home'],\n           'USER=' + ident['user'], 'IMAGE_REF='\
-        \ + img, 'REG_TOKEN=' + reg,\n           'HPC_GPUS=' + str(HPC.get('gpus')\
-        \ or 0),\n           'STEP_CMD=' + cmd, 'STEP_WORKDIR=' + fetch_workdir(img,\
-        \ reg),\n           'WF_UID=' + (os.environ.get('WF_UID') or ''),\n      \
-        \     'STEP_NAME=' + (os.environ.get('STEP_NAME') or ''),\n           'STEP_OUTPUTS='\
-        \ + (os.environ.get('STEP_OUTPUTS') or ''),\n           'DATASET_STAGED='\
-        \ + STAGED]\n    # Same outputs location + run id as the in-cluster copy (outputs-<app>).\n\
-        \    # Only when set: step code reads os.environ.get(..., default), so an\
-        \ empty\n    # value would override its own default.\n    env += [k + '='\
-        \ + os.environ[k] for k in\n            ('CHECKPOINT_BUCKET', 'CHECKPOINT_PREFIX',\
-        \ 'KUBECORE_RUN_ID', 'KUBECORE_WORKFLOW_NAME',\n             'KAOS_LIB_SUPPORT')\n\
-        \            if os.environ.get(k)]\n    global WALLET, WALLET_EXP\n    wallet\
-        \ = WALLET = mint_wallet()\n    WALLET_EXP = wallet_exp(wallet)\n    if wallet:\n\
-        \        # Public endpoints only, short-lived bearer only (T-03). MLflow's\n\
-        \        # client honors MLFLOW_TRACKING_TOKEN natively; the stage-in and\
-        \ any\n        # in-step lakeFS API calls ride the same bearer through oauth2-proxy.\n\
-        \        mlflow_url = os.environ.get('MLFLOW_EXTERNAL_URL') or ''\n      \
-        \  lakefs_url = os.environ.get('LAKEFS_EXTERNAL_URL') or ''\n        if mlflow_url:\n\
-        \            env += ['MLFLOW_TRACKING_URI=' + mlflow_url,\n              \
-        \      'MLFLOW_TRACKING_TOKEN=' + wallet]\n        if lakefs_url:\n      \
-        \      env += ['LAKEFS_ENDPOINT=' + lakefs_url,\n                    'LAKEFS_BEARER_TOKEN='\
-        \ + wallet,\n                    'DATASET_REPO=' + dataset_coords()[0],\n\
-        \                    'DATASET_REF=' + dataset_coords()[1],\n             \
-        \       'DATASET_COMMIT=' + (PINNED or pinned_commit()),\n               \
-        \     'OUTPUTS_REPO=' + (os.environ.get('OUTPUTS_REPO') or ''),\n        \
-        \            'OUTPUTS_REF=' + (os.environ.get('OUTPUTS_REF') or ''),\n   \
-        \                 'STAGEIN_B64='\n                    + base64.b64encode(STAGEIN.encode()).decode(),\n\
+        \      # D-44: a continued job starts from the checkpoint its previous job\
+        \ staged out, never\n        # silently from scratch: no checkpoint, no run\
+        \ (exit 234).\n        'if [ -n \"$KAOS_RESUME_REF\" ]; then',\n        '\
+        \  { [ -n \"$LAKEFS_BEARER_TOKEN\" ] && [ -n \"$CKPTIN_B64\" ]; } || fail\
+        \ 234',\n        '  rm -rf $KAOS_WORK/resume; printf %s \"$CKPTIN_B64\" |\
+        \ base64 -d | python3 - || fail 234',\n        '  export APPTAINERENV_KAOS_RESUME_PATH=/work/resume',\n\
+        \        'fi',\n        'BIND=\"$BIND -B $KAOS_WORK:/work\"',\n        # Last\
+        \ use of a cached SIF, before the cleanup below can see it.\n        'touch\
+        \ -c \"$SIF\"',\n        'if [ ! -f \"$SIF\" ]; then',\n        # GCP token\
+        \ ONLY for GAR hosts: presenting it to Zot turns an\n        # anonymous-OK\
+        \ pull into 401 authentication required (live job\n        # 5140432 vs the\
+        \ anonymous F-01 pull that worked on the same repo).\n        '  case \"$IMAGE_REF\"\
+        \ in *-docker.pkg.dev/*)'\n        ' [ -n \"$REG_TOKEN\" ] && export'\n  \
+        \      ' APPTAINER_DOCKER_USERNAME=oauth2accesstoken'\n        ' APPTAINER_DOCKER_PASSWORD=$REG_TOKEN;;\
+        \ esac',\n        # PRD-1609 F-02: pull to a name only this job writes, then\
+        \ rename it into\n        # the shared cache (atomic on Lustre). Jobs, and\
+        \ steps sharing a node,\n        # never run a half-written SIF; an image\
+        \ another job finished first is kept.\n        '  SIF_TMP=$SIF.part-$SLURM_JOB_ID-$$',\n\
+        \        '  apptainer pull \"$SIF_TMP\" docker://$IMAGE_REF || { rm -f \"\
+        $SIF_TMP\"; fail 231; }',\n        '  mv -n \"$SIF_TMP\" \"$SIF\"; rm -f \"\
+        $SIF_TMP\"',\n        'fi',\n        # PRD-1541: the image and download caches\
+        \ share the allocation's scratch\n        # quota with the dataset cache and\
+        \ only ever grew. This user's entries\n        # unused for 14 days go: SIFs,\
+        \ Apptainer's layer cache, in-job\n        # downloads. What this job uses\
+        \ was touched just above.\n        'find $SCR/sif-cache -maxdepth 1 -name\
+        \ \"*.sif\" -user \"$USER\" -mtime +14 -delete 2>/dev/null',\n        'find\
+        \ $SCR/sif-cache -maxdepth 1 -name \"*.sif.part-*\" -user \"$USER\" -mmin\
+        \ +720 -delete 2>/dev/null',\n        'find $SCR/data-cache -mindepth 3 -maxdepth\
+        \ 3 -name .complete -user \"$USER\" -mtime +14'\n        ' -printf \"%h\\\\\
+        n\" 2>/dev/null | xargs -r rm -rf',\n        'apptainer cache clean --force\
+        \ --days 14 >/dev/null 2>&1',\n        # Start in the image's WORKDIR (Apptainer\
+        \ ignores it; Docker does not).\n        'PWD_OPT=\"\"; [ -n \"$STEP_WORKDIR\"\
+        \ ] && PWD_OPT=\"--pwd $STEP_WORKDIR\"',\n        # --nv only on GPU classes:\
+        \ on the cpu/largemem partitions there is\n        # no driver to bind and\
+        \ the flag makes Apptainer warn or fail.\n        'NV=\"\"; [ \"${HPC_GPUS:-0}\"\
+        \ -gt 0 ] && NV=\"--nv\"',\n        '[ -n \"$STEP_CMD\" ] || STEP_CMD=\"nvidia-smi\
+        \ -L || nproc\"',\n        # PRD-HPC-1461 D-38/D-44: Slurm sends USR1 to this\
+        \ shell about 10 minutes\n        # before the time limit. The step runs in\
+        \ its own process group (set -m), and\n        # the shell passes USR1 ONLY\
+        \ to the processes of that group that handle it\n        # (SigCgt bit 9):\
+        \ kaos-lib's handler (an open run writer) saves progress and\n        # exits\
+        \ 85. Never the whole group: Apptainer's squashfuse dies on USR1 and the\n\
+        \        # image vanishes under the step (live job 5421507: Bus error, rc\
+        \ 135). Inside,\n        # sh ignores USR1 and so does every process that\
+        \ keeps that setting, so a step\n        # without kaos-lib runs to the limit\
+        \ as before. `wait` returns early on the\n        # trap, so wait again until\
+        \ the step is really gone.\n        'set -m',\n        'apptainer exec $NV\
+        \ $PWD_OPT $BIND \"$SIF\" /bin/sh -c \"trap \\'\\' USR1; $STEP_CMD\" &',\n\
+        \        'STEP_PID=$!',\n        'set +m',\n        'kaos_stop(){ echo \"\
+        stop signal: asking the step to save its progress\";'\n        ' for p in\
+        \ $(pgrep -g $STEP_PID); do'\n        ' m=$(awk \\'/^SigCgt:/{print $2}\\\
+        ' /proc/$p/status 2>/dev/null);'\n        ' [ -n \"$m\" ] && [ $(( 0x$m >>\
+        \ 9 & 1 )) -eq 1 ] && kill -USR1 $p 2>/dev/null; done; }',\n        'trap\
+        \ kaos_stop USR1',\n        'wait $STEP_PID; rc=$?',\n        'while kill\
+        \ -0 $STEP_PID 2>/dev/null; do wait $STEP_PID; rc=$?; done',\n        'trap\
+        \ - USR1',\n        # D-44 (amended 2026-11-05, T-19): 85 = a resumable step\
+        \ saved its checkpoint. Before\n        # the job ends, the checkpoint goes\
+        \ to the outputs repository and its commit into the\n        # job comment;\
+        \ only then may the waiter continue the step. The step's outputs are not\n\
+        \        # final, so nothing else is staged out. 85 from a step that is not\
+        \ resumable fails, and\n        # so does a checkpoint that did not upload\
+        \ (exit 235).\n        'if [ $rc -eq 85 ]; then',\n        '  echo \"step\
+        \ saved its checkpoint before the wall time (exit 85)\"',\n        '  [ \"\
+        $KAOS_RESUMABLE\" = 1 ] || { echo \"exit 85, but the step is not declared\
+        \ resumable\"; fail 85; }',\n        '  { [ -n \"$LAKEFS_BEARER_TOKEN\" ]\
+        \ && [ -n \"$CKPTOUT_B64\" ]; } || fail 235',\n        '  export KAOS_CKPT_FILE=$KAOS_WORK/.kaos-ckpt',\n\
+        \        '  printf %s \"$CKPTOUT_B64\" | base64 -d | python3 - || fail 235',\n\
+        \        '  read -r CKPT CKPT_PATH < $KAOS_CKPT_FILE',\n        '  scontrol\
+        \ update JobId=$KAOS_JOB_ID Comment=\"${KAOS_COMMIT:+kaos-commit=$KAOS_COMMIT\
+        \ }'\n        'kaos-ckpt=$CKPT kaos-ckpt-path=$CKPT_PATH\" || fail 235',\n\
+        \        '  rm -rf \"$KAOS_WORK\"; exit 85',\n        'fi',\n        'if [\
+        \ -n \"$STEP_OUTPUTS\" ] && [ -n \"$STAGEOUT_B64\" ] && [ -n \"$LAKEFS_BEARER_TOKEN\"\
+        \ ]; then'\n        ' printf %s \"$STAGEOUT_B64\" | base64 -d | python3 -\
+        \ || echo \"stage-out failed (rc=$rc)\"; fi',\n        '[ $rc -eq 0 ] && rm\
+        \ -rf \"$KAOS_WORK\"',\n        '[ $rc -ne 0 ] && fail $rc',\n        'exit\
+        \ 0',\n    ])\n    env = ['PATH=/usr/bin:/bin:/usr/local/bin', 'HOME=' + ident['home'],\n\
+        \           'USER=' + ident['user'], 'IMAGE_REF=' + img, 'REG_TOKEN=' + reg,\n\
+        \           'HPC_GPUS=' + str(HPC.get('gpus') or 0),\n           'STEP_CMD='\
+        \ + cmd, 'STEP_WORKDIR=' + fetch_workdir(img, reg),\n           'WF_UID='\
+        \ + (os.environ.get('WF_UID') or ''),\n           'STEP_NAME=' + (os.environ.get('STEP_NAME')\
+        \ or ''),\n           'STEP_OUTPUTS=' + (os.environ.get('STEP_OUTPUTS') or\
+        \ ''),\n           'DATASET_STAGED=' + STAGED, 'KAOS_ATTEMPT=%d' % ATTEMPT]\n\
+        \    if RESUMABLE_LEAD_MIN:\n        env.append('KAOS_RESUMABLE=1')\n    if\
+        \ RESUME:\n        env += ['KAOS_RESUME_REF=' + RESUME[0], 'KAOS_RESUME_PREFIX='\
+        \ + RESUME[1]]\n    # Same outputs location + run id as the in-cluster copy\
+        \ (outputs-<app>).\n    # Only when set: step code reads os.environ.get(...,\
+        \ default), so an empty\n    # value would override its own default.\n   \
+        \ env += [k + '=' + os.environ[k] for k in\n            ('CHECKPOINT_BUCKET',\
+        \ 'CHECKPOINT_PREFIX', 'KUBECORE_RUN_ID', 'KUBECORE_WORKFLOW_NAME',\n    \
+        \         'KAOS_LIB_SUPPORT')\n            if os.environ.get(k)]\n    global\
+        \ WALLET, WALLET_EXP\n    wallet = WALLET = mint_wallet()\n    WALLET_EXP\
+        \ = wallet_exp(wallet)\n    if wallet:\n        # Public endpoints only, short-lived\
+        \ bearer only (T-03). MLflow's\n        # client honors MLFLOW_TRACKING_TOKEN\
+        \ natively; the stage-in and any\n        # in-step lakeFS API calls ride\
+        \ the same bearer through oauth2-proxy.\n        mlflow_url = os.environ.get('MLFLOW_EXTERNAL_URL')\
+        \ or ''\n        lakefs_url = os.environ.get('LAKEFS_EXTERNAL_URL') or ''\n\
+        \        if mlflow_url:\n            env += ['MLFLOW_TRACKING_URI=' + mlflow_url,\n\
+        \                    'MLFLOW_TRACKING_TOKEN=' + wallet]\n        if lakefs_url:\n\
+        \            env += ['LAKEFS_ENDPOINT=' + lakefs_url,\n                  \
+        \  'LAKEFS_BEARER_TOKEN=' + wallet,\n                    'DATASET_REPO=' +\
+        \ dataset_coords()[0],\n                    'DATASET_REF=' + dataset_coords()[1],\n\
+        \                    'DATASET_COMMIT=' + (PINNED or pinned_commit()),\n  \
+        \                  'OUTPUTS_REPO=' + (os.environ.get('OUTPUTS_REPO') or ''),\n\
+        \                    'OUTPUTS_REF=' + (os.environ.get('OUTPUTS_REF') or ''),\n\
+        \                    'STAGEIN_B64='\n                    + base64.b64encode(STAGEIN.encode()).decode(),\n\
         \                    'STAGEOUT_B64='\n                    + base64.b64encode(STAGEOUT.encode()).decode()]\n\
-        \    commit = pinned_commit()\n    if commit:\n        env.append('KAOS_COMMIT='\
-        \ + commit)   # fail() keeps the dataset lease\n    step_limit = int(os.environ.get('SLURM_TIME_LIMIT')\
+        \            if RESUMABLE_LEAD_MIN:\n                env += ['CKPTOUT_B64='\
+        \ + base64.b64encode(CKPTOUT.encode()).decode(),\n                       \
+        \ 'CKPTIN_B64=' + base64.b64encode(CKPTIN.encode()).decode()]\n    commit\
+        \ = pinned_commit()\n    if commit:\n        env.append('KAOS_COMMIT=' + commit)\
+        \   # fail() keeps the dataset lease\n    step_limit = int(os.environ.get('SLURM_TIME_LIMIT')\
         \ or 240)\n    job_limit = step_limit\n    hosting = SHARING and int(HPC.get('gpus')\
         \ or 0) > 0\n    if hosting:\n        # F-03: the batch step becomes the host\
         \ (slot manager); one slot per GPU.\n        env += ['KAOS_SLOTS_B64=' + base64.b64encode(SLOTS.encode()).decode(),\n\
@@ -2139,34 +2270,35 @@ spec:
         \ handles (hold, then check it is still pending).\n        # Live 2026-11-05\
         \ (job 5422046): BeginTime for 45 s, then it started alone.\n        body['job']['begin_time']\
         \ = {'set': True, 'number': int(time.time()) + OFFER_S}\n    if not hosting:\n\
-        \        # PRD-HPC-1461 D-37/D-38: requeue lets the site put a pre-empted\
-        \ job back in\n        # the queue with its ID and place (users cannot requeue\
-        \ their own jobs on\n        # MeluXina). USR1 goes to the batch shell CHECKPOINT_WARNING_S\
-        \ before the\n        # limit (half the limit for short jobs), which passes\
-        \ it to the step (D-44).\n        # Not for a host yet: its slot manager does\
-        \ not pass the signal on (#1609).\n        body['job'].update({'requeue':\
-        \ True, 'kill_warning_signal': 'USR1',\n                            'kill_warning_flags':\
-        \ ['BATCH_JOB'],\n                            'kill_warning_delay': {'set':\
-        \ True, 'number': min(\n                                CHECKPOINT_WARNING_S,\
-        \ step_limit * 30)}})\n    req = urllib.request.Request(API + '/job/submit',\n\
-        \                                 data=json.dumps(body).encode(),\n      \
-        \                           headers=hdrs(), method='POST')\n    try:\n   \
-        \     resp = json.load(urllib.request.urlopen(req, timeout=30))\n    except\
-        \ urllib.error.HTTPError as e:\n        print('job submit refused:', submit_refusal(e),\
-        \ flush=True)\n        sys.exit(1)\n    j = resp.get('job_id')\n    print('submitted\
-        \ job', j, 'errors:', resp.get('errors'), flush=True)\n    if not j:\n   \
-        \     sys.exit(1)\n    return j\n\n\ndef submit_refusal(e):\n    \"\"\"slurmrestd\
-        \ refuses a job with an HTTP error whose body names why\n    (errors/warnings:\
-        \ an account, partition or QOS it rejects, a time limit\n    above the QOS);\
-        \ without it the step dies on a bare 'HTTP Error 500'.\"\"\"\n    try:\n \
-        \       why = json.loads(e.read().decode(errors='replace') or '{}')\n    except\
-        \ Exception:\n        why = {}\n    if not isinstance(why, dict):\n      \
-        \  why = {}\n    return 'HTTP %s %s' % (e.code, {k: why.get(k) for k in ('errors',\
-        \ 'warnings')\n                                     if why.get(k)} or '(no\
-        \ reason in the body)')\n\n\ndef cancel(j):\n    try:\n        urllib.request.urlopen(urllib.request.Request(\n\
-        \            API + '/job/' + str(j), headers=hdrs(), method='DELETE'), timeout=30)\n\
-        \        print('cancelled job', j, flush=True)\n    except Exception as e:\n\
-        \        print('cancel failed:', e, flush=True)\n\n\ndef on_term(signum, frame):\n\
+        \        # PRD-HPC-1461 D-37: requeue lets the site put a pre-empted job back\
+        \ in the\n        # queue with its ID and place (users cannot requeue their\
+        \ own jobs on MeluXina).\n        body['job']['requeue'] = True\n    if RESUMABLE_LEAD_MIN:\n\
+        \        # D-44 (amended 2026-11-05): only a resumable step is told to save.\
+        \ USR1 goes to\n        # the batch shell its lead before the wall time (the\
+        \ render keeps the lead shorter\n        # than the wall time), which passes\
+        \ it to the step. A resumable step never shares\n        # a node, so this\
+        \ job's limit is its step's.\n        body['job'].update({'kill_warning_signal':\
+        \ 'USR1', 'kill_warning_flags': ['BATCH_JOB'],\n                         \
+        \   'kill_warning_delay': {'set': True, 'number': RESUMABLE_LEAD_MIN * 60}})\n\
+        \    req = urllib.request.Request(API + '/job/submit',\n                 \
+        \                data=json.dumps(body).encode(),\n                       \
+        \          headers=hdrs(), method='POST')\n    try:\n        resp = json.load(urllib.request.urlopen(req,\
+        \ timeout=30))\n    except urllib.error.HTTPError as e:\n        print('job\
+        \ submit refused:', submit_refusal(e), flush=True)\n        sys.exit(1)\n\
+        \    j = resp.get('job_id')\n    print('submitted job', j, 'errors:', resp.get('errors'),\
+        \ flush=True)\n    if not j:\n        sys.exit(1)\n    return j\n\n\ndef submit_refusal(e):\n\
+        \    \"\"\"slurmrestd refuses a job with an HTTP error whose body names why\n\
+        \    (errors/warnings: an account, partition or QOS it rejects, a time limit\n\
+        \    above the QOS); without it the step dies on a bare 'HTTP Error 500'.\"\
+        \"\"\n    try:\n        why = json.loads(e.read().decode(errors='replace')\
+        \ or '{}')\n    except Exception:\n        why = {}\n    if not isinstance(why,\
+        \ dict):\n        why = {}\n    return 'HTTP %s %s' % (e.code, {k: why.get(k)\
+        \ for k in ('errors', 'warnings')\n                                     if\
+        \ why.get(k)} or '(no reason in the body)')\n\n\ndef cancel(j):\n    try:\n\
+        \        urllib.request.urlopen(urllib.request.Request(\n            API +\
+        \ '/job/' + str(j), headers=hdrs(), method='DELETE'), timeout=30)\n      \
+        \  print('cancelled job', j, flush=True)\n    except Exception as e:\n   \
+        \     print('cancel failed:', e, flush=True)\n\n\ndef on_term(signum, frame):\n\
         \    # Argo sends TERM on deadline/stop. A PENDING job never started \u2014\
         \ cancel\n    # it so it does not run unobserved hours later (live job 5143859\
         \ did\n    # exactly that: waiter killed at the deadline mid-queue, job ran\
@@ -2208,17 +2340,47 @@ spec:
         \ = the step saved its progress on the stop signal\n# (kaos-lib). The run\
         \ continues in a new job, which resumes from the run's\n# branch; bounded\
         \ so a step that never finishes cannot run forever.\nCHECKPOINT_EXIT = 85\n\
-        MAX_CONTINUATIONS = 5\ncontinuations = 0\n# Why Slurm holds a queued job (Priority,\
-        \ Resources, AssocGrpGRESMinutes = the\n# allocation's GPU minutes are spent,\
-        \ ...): only slurmctld knows it, the\n# accounting record polled below does\
-        \ not. Printed when it changes, so a run\n# that never left the queue says\
-        \ why (kaos e2e 2026-10-26: two jobs PENDING\n# for the whole 2.5 h budget,\
-        \ reason unknown).\npending_reason = None\nhosted = None   # PRD-1609: the\
-        \ host that took this job, as last printed\n# PRD-1609: how often this run\
-        \ started over because its host died with it.\nLOST_HOST_RESUBMITS = 3\nlost_hosts\
-        \ = 0\nHOST_ALIVE = ('PENDING', 'RUNNING', 'SUSPENDED', 'COMPLETING')\n\n\n\
-        def host_gone(host):\n    \"\"\"True only when accounting says the host job\
-        \ ended: an unreadable record\n    is not a death (the host keeps running;\
+        MAX_CONTINUATIONS = 5\ncontinuations = 0\n\n\ndef checkpoint_path(attempt):\n\
+        \    return 'hpc-checkpoints/%s/%s/attempt-%d/' % (os.environ.get('WF_UID',\
+        \ ''),\n                                                  os.environ.get('STEP_NAME',\
+        \ ''), attempt)\n\n\ndef checkpoint_of(job, jid):\n    \"\"\"(commit, path)\
+        \ of the checkpoint this job staged out before it exited 85, or None.\n  \
+        \  The batch script writes them into the job comment after the upload committed;\
+        \ accounting\n    may lag that, so slurmctld is asked too, a few times. Only\
+        \ this attempt's path counts.\"\"\"\n    for n in range(4):\n        texts\
+        \ = [comment_of(job)]\n        try:\n            texts.append(comment_of((get(API\
+        \ + '/job/' + str(jid)).get('jobs') or [{}])[0]))\n        except Exception:\n\
+        \            pass\n        for c in texts:\n            m = dict(re.findall(r'(?:^|\\\
+        s)(kaos-ckpt|kaos-ckpt-path)=(\\S+)', c))\n            if (re.fullmatch('[0-9a-f]{40,64}',\
+        \ m.get('kaos-ckpt', ''))\n                    and m.get('kaos-ckpt-path')\
+        \ == checkpoint_path(ATTEMPT)):\n                return m['kaos-ckpt'], m['kaos-ckpt-path']\n\
+        \        if n < 3:\n            time.sleep(20)\n            try:\n       \
+        \         job = (get(SDB + '/job/' + str(jid)).get('jobs') or [{}])[0]\n \
+        \           except Exception:\n                pass\n    return None\n\n\n\
+        def checkpoint_committed(commit):\n    \"\"\"A4: the checkpoint commit exists\
+        \ in the outputs repository. Asked a few times: an\n    unreachable lakeFS\
+        \ is not a missing checkpoint, but it never lets the step continue either.\"\
+        \"\"\n    base = (os.environ.get('LAKEFS_EXTERNAL_URL') or '').rstrip('/')\n\
+        \    repo = os.environ.get('OUTPUTS_REPO') or ''\n    if not (base and repo\
+        \ and WALLET):\n        return False\n    for n in range(4):\n        try:\n\
+        \            c = json.load(urllib.request.urlopen(urllib.request.Request(\n\
+        \                base + '/api/v1/repositories/%s/commits/%s' % (repo, commit),\n\
+        \                headers={'Authorization': 'Bearer ' + WALLET}), timeout=60))\n\
+        \            return c.get('id') == commit\n        except urllib.error.HTTPError\
+        \ as e:\n            if e.code == 404:\n                return False\n   \
+        \         print('checkpoint commit check:', e, flush=True)\n        except\
+        \ Exception as e:\n            print('checkpoint commit check:', e, flush=True)\n\
+        \        time.sleep(15 * (n + 1))\n    return False\n# Why Slurm holds a queued\
+        \ job (Priority, Resources, AssocGrpGRESMinutes = the\n# allocation's GPU\
+        \ minutes are spent, ...): only slurmctld knows it, the\n# accounting record\
+        \ polled below does not. Printed when it changes, so a run\n# that never left\
+        \ the queue says why (kaos e2e 2026-10-26: two jobs PENDING\n# for the whole\
+        \ 2.5 h budget, reason unknown).\npending_reason = None\nhosted = None   #\
+        \ PRD-1609: the host that took this job, as last printed\n# PRD-1609: how\
+        \ often this run started over because its host died with it.\nLOST_HOST_RESUBMITS\
+        \ = 3\nlost_hosts = 0\nHOST_ALIVE = ('PENDING', 'RUNNING', 'SUSPENDED', 'COMPLETING')\n\
+        \n\ndef host_gone(host):\n    \"\"\"True only when accounting says the host\
+        \ job ended: an unreadable record\n    is not a death (the host keeps running;\
         \ the next poll asks again).\"\"\"\n    try:\n        h = (get(SDB + '/job/'\
         \ + str(host)).get('jobs') or [{}])[0]\n    except Exception:\n        return\
         \ False\n    hst = (h.get('state') or {}).get('current') or []\n    return\
@@ -2282,14 +2444,29 @@ spec:
         \    print('pull failed - resubmitting with fresh credentials'\n         \
         \             ' (%d/%d)' % (resubmits, PULL_RESUBMITS), flush=True)\n    \
         \            jid = submit()\n                open('/tmp/slurm-job-id', 'w').write(str(jid))\n\
-        \                continue\n            if (rc == CHECKPOINT_EXIT and not any(x\
-        \ in st for x in ('COMPLETED', 'CANCELLED'))\n                    and continuations\
-        \ < MAX_CONTINUATIONS):\n                continuations += 1\n            \
-        \    print('the step saved its progress before the time limit - continuing'\n\
-        \                      ' the run in a new job (%d/%d)' % (continuations, MAX_CONTINUATIONS),\n\
-        \                      flush=True)\n                jid = submit()\n     \
-        \           open('/tmp/slurm-job-id', 'w').write(str(jid))\n             \
-        \   continue\n            if 'COMPLETED' in st:\n                fetch_outputs()\n\
+        \                continue\n            if rc == CHECKPOINT_EXIT and not any(x\
+        \ in st for x in ('COMPLETED', 'CANCELLED')):\n                # D-44 (amended\
+        \ 2026-11-05), A2/A4: continue only a resumable step, only from a\n      \
+        \          # checkpoint that reached the outputs repository, and at most MAX_CONTINUATIONS\
+        \ times.\n                ckpt = checkpoint_of(job, jid) if RESUMABLE_LEAD_MIN\
+        \ else None\n                if not RESUMABLE_LEAD_MIN:\n                \
+        \    why = 'the step exited 85, but it is not declared resumable'\n      \
+        \          elif not ckpt:\n                    why = ('its checkpoint did\
+        \ not reach the outputs repository before the job ended'\n               \
+        \            ' (a longer resumable= lead leaves the upload more time)')\n\
+        \                elif not checkpoint_committed(ckpt[0]):\n               \
+        \     why = 'its checkpoint commit %s is not in the outputs repository' %\
+        \ ckpt[0][:12]\n                elif continuations >= MAX_CONTINUATIONS:\n\
+        \                    why = 'the step was continued %d times already' % MAX_CONTINUATIONS\n\
+        \                else:\n                    why = ''\n                if why:\n\
+        \                    print('not continuing the step:', why, flush=True)\n\
+        \                    sys.exit(1)\n                continuations += 1\n   \
+        \             ATTEMPT += 1\n                RESUME = ckpt\n              \
+        \  print('the step saved its checkpoint (%s) before its wall time - continuing\
+        \ it in a'\n                      ' new job (%d/%d)' % (ckpt[0][:12], continuations,\
+        \ MAX_CONTINUATIONS), flush=True)\n                jid = submit()\n      \
+        \          open('/tmp/slurm-job-id', 'w').write(str(jid))\n              \
+        \  continue\n            if 'COMPLETED' in st:\n                fetch_outputs()\n\
         \            sys.exit(0 if ('COMPLETED' in st and rc in (0, None)) else 1)\n\
         \    except SystemExit:\n        raise\n    except Exception as e:\n     \
         \   print('poll error (transient):', e, flush=True)\n"
@@ -2319,6 +2496,8 @@ spec:
         value: '{{inputs.parameters.step-command}}'
       - name: SLURM_TIME_LIMIT
         value: '{{inputs.parameters.time-limit}}'
+      - name: HPC_RESUMABLE_LEAD
+        value: '{{inputs.parameters.resumable-lead}}'
       - name: STEP_OUTPUTS
         value: '{{inputs.parameters.step-outputs}}'
       - name: HPC_CLASS
