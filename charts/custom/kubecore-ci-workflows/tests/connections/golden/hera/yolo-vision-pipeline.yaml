@@ -2539,20 +2539,33 @@ spec:
         \            print('waiting for the HPC controller: %s %s %s' % (\n      \
         \          phase, st.get('reason') or '', st.get('message') or ''), flush=True)\n\
         \            last = (phase, st.get('reason'))\n        time.sleep(5)\n\n\n\
-        def site_time(job, key):\n    t = ((job.get('time') or {}).get(key))\n   \
-        \ t = t.get('number') if isinstance(t, dict) else t\n    return time.strftime('%Y-%m-%dT%H:%M:%SZ',\
-        \ time.gmtime(t)) if t else None\n\n\ndef report(must=False, **run):\n   \
-        \ \"\"\"status.run of this attempt, every field written (a merge patch would\
-        \ keep an earlier attempt's\n    exit code or checkpoint). must: retry until\
-        \ it lands; the controller settles from it.\"\"\"\n    if not CONTROLLER:\n\
-        \        return\n    run['attempt'] = ATTEMPT\n    body = {'status': {'run':\
-        \ {k: run.get(k) for k in RUN_FIELDS}}}\n    for n in range(60 if must else\
-        \ 1):\n        try:\n            k8s('PATCH', record_path('/status'), body,\
-        \ 'application/merge-patch+json')\n            return\n        except Exception\
-        \ as e:\n            print('HPC job record: report failed (%s)%s' % (e, ',\
-        \ retrying' if must else ''), flush=True)\n            if must:\n        \
-        \        time.sleep(10)\n    if must:\n        print('HPC job record: the\
-        \ end of the site job could not be reported', flush=True)\n        sys.exit(1)\n\
+        def site_time(job, key):\n    # A Slurm REST time is unset for a job that\
+        \ never started on its own (a shared-node guest) or\n    # whose end accounting\
+        \ has not landed: {set: false} or {infinite: true}, or NO_VAL/INFINITE\n \
+        \   # (0xFFFFFFFE/0xFFFFFFFF). Turned into a date it settled -41M node-minutes\
+        \ (live 2026-11-06).\n    t = ((job.get('time') or {}).get(key))\n    if isinstance(t,\
+        \ dict):\n        if t.get('set') is False or t.get('infinite'):\n       \
+        \     return None\n        t = t.get('number')\n    if not isinstance(t, int)\
+        \ or t <= 0 or t >= 0xFFFFFFFE:\n        return None\n    return time.strftime('%Y-%m-%dT%H:%M:%SZ',\
+        \ time.gmtime(t))\n\n\ndef ended(job):\n    # A terminal job's end: the site's,\
+        \ else now (the waiter saw it end) - never missing, so the\n    # controller\
+        \ settles a job that ran (a host whose end had not landed settled 0, live\
+        \ 2026-11-06).\n    return site_time(job, 'end') or time.strftime('%Y-%m-%dT%H:%M:%SZ',\
+        \ time.gmtime())\n\n\ndef shared(share):\n    # The host a shared-node guest\
+        \ ran on, and its slot, for every report (terminal ones too).\n    slot =\
+        \ share.get('slot') or ''\n    return {'hostSiteJobID': share.get('host'),\
+        \ 'slot': int(slot) if slot.isdigit() else None}\n\n\ndef report(must=False,\
+        \ **run):\n    \"\"\"status.run of this attempt, every field written (a merge\
+        \ patch would keep an earlier attempt's\n    exit code or checkpoint). must:\
+        \ retry until it lands; the controller settles from it.\"\"\"\n    if not\
+        \ CONTROLLER:\n        return\n    run['attempt'] = ATTEMPT\n    body = {'status':\
+        \ {'run': {k: run.get(k) for k in RUN_FIELDS}}}\n    for n in range(60 if\
+        \ must else 1):\n        try:\n            k8s('PATCH', record_path('/status'),\
+        \ body, 'application/merge-patch+json')\n            return\n        except\
+        \ Exception as e:\n            print('HPC job record: report failed (%s)%s'\
+        \ % (e, ', retrying' if must else ''), flush=True)\n            if must:\n\
+        \                time.sleep(10)\n    if must:\n        print('HPC job record:\
+        \ the end of the site job could not be reported', flush=True)\n        sys.exit(1)\n\
         \n\ndef checkpoint_uri(ckpt):\n    return 'lakefs://%s/%s/%s' % (os.environ.get('OUTPUTS_REPO')\
         \ or '', ckpt[0], ckpt[1])\n\n\ndef resume_of(uri):\n    \"\"\"(commit, path)\
         \ from a checkpoint URI the runner reported, or None.\"\"\"\n    m = re.fullmatch(r'lakefs://[^/]+/([0-9a-f]{40,64})/(\\\
@@ -2655,10 +2668,8 @@ spec:
         \        now = (','.join(st), share.get('host'), share.get('slot'))\n    \
         \    if CONTROLLER and now != reported and not any(x in TERMINAL for x in\
         \ st):\n            report(siteJobID=str(jid), state=now[0], startTime=site_time(job,\
-        \ 'start'),\n                   hostSiteJobID=share.get('host'),\n       \
-        \            slot=int(share['slot']) if (share.get('slot') or '').isdigit()\
-        \ else None)\n            reported = now\n        if 'PENDING' in st:\n  \
-        \          try:\n                live = (get(API + '/job/' + str(jid)).get('jobs')\
+        \ 'start'), **shared(share))\n            reported = now\n        if 'PENDING'\
+        \ in st:\n            try:\n                live = (get(API + '/job/' + str(jid)).get('jobs')\
         \ or [{}])[0]\n                reason = live.get('state_reason') or ''\n \
         \               # The live comment: accounting may lag a host's update.\n\
         \                share = share_state(comment_of(live)) or share\n        \
@@ -2732,12 +2743,12 @@ spec:
         \                    print('not continuing the step:', why, flush=True)\n\
         \                    report(must=True, siteJobID=str(jid), state=','.join(st),\
         \ exitCode=rc,\n                           startTime=site_time(job, 'start'),\
-        \ endTime=site_time(job, 'end'), terminal=True,\n                        \
-        \   checkpointRef=checkpoint_uri(ckpt) if ckpt else None)\n              \
-        \      sys.exit(1)\n                report(must=True, siteJobID=str(jid),\
+        \ endTime=ended(job), terminal=True, **shared(share),\n                  \
+        \         checkpointRef=checkpoint_uri(ckpt) if ckpt else None)\n        \
+        \            sys.exit(1)\n                report(must=True, siteJobID=str(jid),\
         \ state=','.join(st), exitCode=rc,\n                       startTime=site_time(job,\
-        \ 'start'), endTime=site_time(job, 'end'), terminal=True,\n              \
-        \         checkpointRef=checkpoint_uri(ckpt))\n                continuations\
+        \ 'start'), endTime=ended(job), terminal=True, **shared(share),\n        \
+        \               checkpointRef=checkpoint_uri(ckpt))\n                continuations\
         \ += 1\n                ATTEMPT += 1\n                RESUME = ckpt\n    \
         \            print('the step saved its checkpoint (%s) before its wall time\
         \ - continuing it in a'\n                      ' new job (%d/%d)' % (ckpt[0][:12],\
@@ -2747,10 +2758,10 @@ spec:
         \ = submit()\n                open('/tmp/slurm-job-id', 'w').write(str(jid))\n\
         \                continue\n            if 'COMPLETED' in st:\n           \
         \     fetch_outputs()\n            report(must=True, siteJobID=str(jid), state=','.join(st),\
-        \ exitCode=rc,\n                   startTime=site_time(job, 'start'), endTime=site_time(job,\
-        \ 'end'), terminal=True)\n            sys.exit(0 if ('COMPLETED' in st and\
-        \ rc in (0, None)) else 1)\n    except SystemExit:\n        raise\n    except\
-        \ Exception as e:\n        print('poll error (transient):', e, flush=True)\n"
+        \ exitCode=rc,\n                   startTime=site_time(job, 'start'), endTime=ended(job),\
+        \ terminal=True, **shared(share))\n            sys.exit(0 if ('COMPLETED'\
+        \ in st and rc in (0, None)) else 1)\n    except SystemExit:\n        raise\n\
+        \    except Exception as e:\n        print('poll error (transient):', e, flush=True)\n"
       volumeMounts:
       - name: mlflow-svc
         mountPath: /etc/mlflow-svc
