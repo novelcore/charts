@@ -168,7 +168,7 @@ _ENHANCER_FAIL = {}
 _SHA_RE = re.compile(r"[0-9a-f]{40}")
 
 
-def fetch_enhancer(ref: str, repo: str = "novelcore/hera-mlops-template") -> str:
+def fetch_enhancer(ref: str, repo: str = "novelcore/hera-pipeline-template") -> str:
     """A directory containing kubecore/ for `repo`@`ref` (or $ENHANCER_DIR unchanged)."""
     if os.environ.get("ENHANCER_DIR"):
         return os.environ["ENHANCER_DIR"]
