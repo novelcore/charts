@@ -66,6 +66,8 @@ spec:
         value: '{{workflow.name}}'
       - name: KUBECORE_WORKFLOW_NAME
         value: '{{workflow.name}}'
+      - name: KAOS_CHECKPOINT_DIR
+        value: /kaos/checkpoint
       resources:
         requests:
           cpu: '7'
@@ -80,6 +82,8 @@ spec:
         readOnly: true
       - name: dshm
         mountPath: /dev/shm
+      - name: kaos-checkpoint
+        mountPath: /kaos/checkpoint
     outputs:
       parameters:
       - name: params
@@ -116,6 +120,19 @@ spec:
       emptyDir:
         medium: Memory
         sizeLimit: 1Gi
+    - name: kaos-checkpoint
+      emptyDir: {}
+    retryStrategy:
+      limit: '2'
+      retryPolicy: Always
+      expression: (lastRetry.status == 'Error' or lastRetry.message matches '.*(imminent
+        node shutdown|node is shutting down|node is draining|The node was low on resource|The
+        node had condition|Pod was rejected|Evicted|evicted|pod deleted|Pod was deleted).*')
+        and not (lastRetry.message startsWith 'KaosIdle')
+      backoff:
+        duration: 30s
+        factor: '2'
+        maxDuration: 10m
   - name: hello-world
     container:
       image: '{{workflow.parameters.image-hello-world}}'
@@ -157,6 +174,8 @@ spec:
         value: '{{workflow.name}}'
       - name: KUBECORE_WORKFLOW_NAME
         value: '{{workflow.name}}'
+      - name: KAOS_CHECKPOINT_DIR
+        value: /kaos/checkpoint
       resources:
         requests:
           cpu: '7'
@@ -171,6 +190,8 @@ spec:
         readOnly: true
       - name: dshm
         mountPath: /dev/shm
+      - name: kaos-checkpoint
+        mountPath: /kaos/checkpoint
     inputs:
       parameters:
       - name: params
@@ -205,6 +226,19 @@ spec:
       emptyDir:
         medium: Memory
         sizeLimit: 1Gi
+    - name: kaos-checkpoint
+      emptyDir: {}
+    retryStrategy:
+      limit: '2'
+      retryPolicy: Always
+      expression: (lastRetry.status == 'Error' or lastRetry.message matches '.*(imminent
+        node shutdown|node is shutting down|node is draining|The node was low on resource|The
+        node had condition|Pod was rejected|Evicted|evicted|pod deleted|Pod was deleted).*')
+        and not (lastRetry.message startsWith 'KaosIdle')
+      backoff:
+        duration: 30s
+        factor: '2'
+        maxDuration: 10m
   - name: main
     dag:
       tasks:
@@ -233,9 +267,13 @@ spec:
           - name: time-limit
             value: '240'
           - name: deadline-seconds
-            value: '43200'
+            value: '259200'
           - name: resumable-lead
             value: '0'
+          - name: resumable
+            value: auto
+          - name: idle-timeout
+            value: ''
           - name: step-outputs
             value: params
           - name: hpc-class
@@ -266,9 +304,13 @@ spec:
           - name: time-limit
             value: '240'
           - name: deadline-seconds
-            value: '43200'
+            value: '259200'
           - name: resumable-lead
             value: '0'
+          - name: resumable
+            value: auto
+          - name: idle-timeout
+            value: ''
           - name: step-outputs
             value: ''
           - name: hpc-class
@@ -288,6 +330,10 @@ spec:
       - name: hpc-class
       - name: resumable-lead
         value: '0'
+      - name: resumable
+        value: auto
+      - name: idle-timeout
+        value: ''
     metadata:
       labels:
         platform.kubecore.io/compute-type: hpc
