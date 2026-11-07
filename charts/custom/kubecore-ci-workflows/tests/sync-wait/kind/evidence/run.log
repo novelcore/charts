@@ -1,0 +1,25 @@
+== 1. first build in flight: the sync waits Pending (no failed nodes), then decides once ==
+PASS: the sync's decide step sits Pending on the build lock while the build runs
+PASS: no sync pod is running or retrying meanwhile (the input wait already completed)
+PASS: sync Succeeded
+PASS: zero failed nodes in the sync
+PASS: the built HEAD is not rebuilt (ALREADY SATISFIED), still one build
+== 2. a second commit during a build is built after it, nothing lost ==
+PASS: build of the second commit ran after the first
+PASS: last-built-sha is the newest commit
+PASS: zero failed nodes in the sync
+== 3. build pod killed: lock released, sync proceeds ==
+PASS: sync ended Succeeded after the build died
+PASS: the dead build is reported as such (its own red node, not the sync's)
+PASS: zero failed nodes in the sync
+== 4. two syncs at once: one build of HEAD ==
+PASS: exactly one build submitted by two simultaneous syncs
+== 5. hung build: the waiting sync fails with a clear reason at its deadline; lock released at the build's ==
+PASS: waiting sync failed at its deadline
+PASS: the waiting node's reason is the deadline
+PASS: after the hung build is killed, a new sync gets the lock and runs
+== 6. inputs still arriving (repo not there): the sync retries WITHOUT the build lock, a build is not held up ==
+PASS: the build ran while the sync was still waiting for the repo
+PASS: the sync is still waiting for its input
+PASS: the sync completes once the input arrives (already satisfied: built HEAD)
+sync-wait/kind: 18 passed, 0 failed

@@ -1,0 +1,8 @@
+Name:                sync-4a
+Status:              Succeeded
+STEP                       TEMPLATE           PODNAME                          DURATION  MESSAGE
+ ✔ sync-4a                 ml-ci-reconcile                                                 
+ ├───✔ await-inputs(0)     check-drift        sync-4a-check-drift-382213069    5s          
+ └───✔ decide              decide-and-submit                                               
+     ├───✔ check-drift(0)  check-drift        sync-4a-check-drift-1221355828   4s          
+     └───✔ submit-build    submit-build       sync-4a-submit-build-4170326887  3s          

@@ -108,6 +108,7 @@ esac
 EOF
   chmod +x "$T/bin/kubectl" "$T/bin/curl"
   sed -e "s#{{workflow.namespace}}#ci#g" \
+      -e "s#{{inputs.parameters.mode}}#${MODE:-decide}#g" \
       -e "s#{{workflow.parameters.force}}#$1#g" \
       -e "s#{{workflow.parameters.context_sha}}#$WANT_CTX#g" \
       -e "s#{{workflow.parameters.app_name}}#app1#g" \
@@ -128,6 +129,10 @@ EOF
   SHA=$(cat "$T/head_sha" 2>/dev/null || echo "<unset>")
 }
 
+QUEUED_OTHER='{"items": [{"metadata": {"name": "ml-ci-build-q"}, "status": {"phase": "Pending"},
+  "spec": {"arguments": {"parameters": [{"name": "app_name", "value": "app1"}, {"name": "commit_sha", "value": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}]}}}]}'
+QUEUED_HEAD='{"items": [{"metadata": {"name": "ml-ci-build-q"}, "status": {"phase": "Pending"},
+  "spec": {"arguments": {"parameters": [{"name": "app_name", "value": "app1"}, {"name": "commit_sha", "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}]}}}]}'
 IDLE='{"items": []}'
 BUSY='{"items": [{"metadata": {"name": "ml-ci-build-x"}, "status": {"phase": "Running"},
   "spec": {"arguments": {"parameters": [{"name": "app_name", "value": "app1"}]}}}]}'
@@ -156,6 +161,21 @@ run_case true "$IDLE" "" built
 expect_eq "$RC" "3" "force, app repo not created yet: retries (exit 3)"
 run_case true "$BUSY" "$HEAD_SHA" built
 expect_eq "$RC" "3" "force, build in flight: waits for it (exit 3), never drops the trigger"
+# A build QUEUED on the app's lock (phase Pending) is not "in flight": the sync
+# holds that lock, so it runs first and the queued build runs after it.
+run_case true "$QUEUED_OTHER" "$HEAD_SHA" unbuilt
+expect_eq "$RC/$NEEDS/$SHA" "0/true/$HEAD_SHA" "force, a build of another commit is queued behind us: decides now (no exit 3)"
+run_case true "$QUEUED_HEAD" "$HEAD_SHA" unbuilt
+expect_eq "$RC/$NEEDS" "0/false" "force, a build of HEAD is already queued: submits nothing (no duplicate)"
+expect_has "$OUT" "already queues a build of HEAD" "force, queued build of HEAD: says why"
+run_case false "$QUEUED_OTHER" "$HEAD_SHA" unbuilt
+expect_eq "$RC/$NEEDS" "0/false" "backstop, a build is queued: still skips (no stacking, kubecore-operator#872)"
+# await mode (the unlocked wait for non-build inputs) ignores a running build.
+MODE=await run_case true "$BUSY" "$HEAD_SHA" unbuilt
+expect_eq "$RC" "0" "await mode, build running: does not wait on it (decide mode's lock does)"
+# Outputs exist on a failing "not yet" exit too (no "cannot save parameter").
+run_case true "$IDLE" "" built
+expect_eq "$RC/$NEEDS/$SHA" "3/false/" "force, not yet: exit 3 still writes needs_build=false and an empty head_sha"
 run_case true "$IDLE" "$HEAD_SHA" absent
 expect_eq "$RC" "3" "force, pipeline-images still syncing: retries (exit 3)"
 run_case true "$IDLE" "$HEAD_SHA" unbuilt

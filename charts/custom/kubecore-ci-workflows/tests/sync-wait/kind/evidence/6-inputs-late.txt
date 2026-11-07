@@ -1,0 +1,10 @@
+Name:                sync-6
+Status:              Succeeded
+STEP                       TEMPLATE           PODNAME                        DURATION  MESSAGE
+ ✔ sync-6                  ml-ci-reconcile                                                                                   
+ ├───✔ await-inputs        check-drift                                                                                       
+ │   ├─✖ await-inputs(0)   check-drift        sync-6-check-drift-1815512480  3s        main: Error (exit code 3)             
+ │   └─✔ await-inputs(1)   check-drift        sync-6-check-drift-406045389   3s                                              
+ └───✔ decide              decide-and-submit                                                                                 
+     ├───✔ check-drift(0)  check-drift        sync-6-check-drift-840010815   3s                                              
+     └───○ submit-build    submit-build                                                when 'false == true' evaluated false  

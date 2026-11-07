@@ -1,0 +1,8 @@
+Name:                sync-5b
+Status:              Succeeded
+STEP                       TEMPLATE           PODNAME                         DURATION  MESSAGE
+ ✔ sync-5b                 ml-ci-reconcile                                                
+ ├───✔ await-inputs(0)     check-drift        sync-5b-check-drift-1927183869  3s          
+ └───✔ decide              decide-and-submit                                              
+     ├───✔ check-drift(0)  check-drift        sync-5b-check-drift-742770724   3s          
+     └───✔ submit-build    submit-build       sync-5b-submit-build-926127095  2s          

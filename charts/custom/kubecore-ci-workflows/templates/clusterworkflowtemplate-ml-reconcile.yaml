@@ -76,6 +76,12 @@ spec:
     secondsAfterCompletion: {{ .Values.workflow.ttlStrategy.secondsAfterCompletion }}
   podGC:
     strategy: {{ .Values.workflow.podGC.strategy }}
+  # Upper bound for the whole run, INCLUDING the wait for the app's build lock
+  # (check-drift's synchronization below). A build that never releases the lock
+  # fails this run with Argo's "exceeded its deadline" instead of leaving it
+  # Pending forever; the hourly CronWorkflow re-detects any drift this run was
+  # for. Sized above one slow first build (~40m) plus the queue ahead of it.
+  activeDeadlineSeconds: {{ int (.Values.ci.reconcileDeadlineSeconds | default 10800) }}
 
   arguments:
     parameters:
@@ -137,8 +143,46 @@ spec:
   templates:
   - name: ml-ci-reconcile
     steps:
+    # 1. Wait (unlocked) for the INPUTS that are not builds: the app repo,
+    # {app}-pipeline-images (ArgoCD) and the gitops context a trigger is for.
+    # Holding the build lock through those minutes would delay the app's first
+    # build for nothing, so this step takes no lock. Only the triggers that must
+    # not be dropped wait here; the hourly poll just decides in step 2.
+    - - name: await-inputs
+        template: check-drift
+        when: "{{`{{workflow.parameters.force}}`}} == true || {{`{{workflow.parameters.dataset_event}}`}} == true"
+        arguments:
+          parameters:
+          - name: mode
+            value: await
+    # 2. Decide and submit under the app's build lock.
+    - - name: decide
+        template: decide-and-submit
+
+  - name: decide-and-submit
+    # WAITING FOR A BUILD IS NOT A FAILURE. The app's builds hold the Argo mutex
+    # "{app}-build" (ml-ci-build's synchronization); this template takes the SAME
+    # mutex for the duration of check-drift AND submit-build, so Argo keeps it
+    # Pending ("Waiting for lock", no pod, no retry node, nothing red) while a
+    # build runs and starts it the moment the build ends, in queue order. The
+    # check then decides ONCE against the build's result (last-built-sha /
+    # context-sha), and the build it submits already exists (queued behind this
+    # lock) when the lock is released seconds later: a second sync that was
+    # waiting sees it and submits nothing. No deadlock: submit-build only
+    # creates the Workflow, it never waits for it. The wait survives controller
+    # restarts (the queue lives in the Workflow status) and is bounded by the
+    # run's activeDeadlineSeconds. It used to be an exit-3 retry loop: dozens of
+    # red check-drift(n) nodes per first build.
+    synchronization:
+      mutexes:
+      - name: "{{`{{workflow.parameters.app_name}}`}}-build"
+    steps:
     - - name: check-drift
         template: check-drift
+        arguments:
+          parameters:
+          - name: mode
+            value: decide
     - - name: submit-build
         template: submit-build
         # Only when HEAD differs from the last SHA we actually built.
@@ -151,17 +195,24 @@ spec:
             value: "{{`{{steps.check-drift.outputs.parameters.kaos_lib_ref}}`}}"
 
   - name: check-drift
-    # Only force mode exits 3 ("not yet, retry"); a killed pod (137) is retried
-    # in every mode; every other outcome exits 0 or fails for real. A new app's repo,
-    # first commit and pipeline-images arrive within minutes, and a build in
-    # flight finishes within its own runtime: retry every minute for up to ~45
-    # minutes. No maxDuration (Argo counts it from the first attempt; see
+    inputs:
+      parameters:
+      # await: only wait (exit 3) for inputs that are not builds, see
+      # ml-ci-reconcile; the outputs are unused. decide: the authoritative
+      # check, run under the build lock by decide-and-submit.
+      - name: mode
+        value: decide
+    # Exit 3 is now only force/dataset mode's "not yet" for inputs that are NOT
+    # builds (repo, pipeline-images or gitops context still arriving); a killed
+    # pod (137) is retried in every mode; every other outcome exits 0 or fails
+    # for real. Those inputs arrive within minutes: retry every minute for up to
+    # ~45 minutes. No maxDuration (Argo counts it from the first attempt; see
     # tests/retry-window).
     retryStrategy:
       limit: 45
       retryPolicy: OnFailure
-      # 3 = force mode's "not yet"; 137 = the pod was killed (OOM or a lost
-      # node) before it decided anything, which must never drop a forced event.
+      # 3 = "not yet"; 137 = the pod was killed (OOM or a lost node) before it
+      # decided anything, which must never drop a forced event.
       expression: "asInt(lastRetry.exitCode) == 3 || asInt(lastRetry.exitCode) == 137"
       backoff:
         duration: "60s"
@@ -171,9 +222,11 @@ spec:
       - name: needs_build
         valueFrom:
           path: /tmp/needs_build
+          default: "false"
       - name: head_sha
         valueFrom:
           path: /tmp/head_sha
+          default: ""
       # KAOS-LIB DRIFT's attempt guard: sha256[:12] of the spec a build is
       # submitted for ("" = not a kaos-lib re-build).
       - name: kaos_lib_ref
@@ -208,6 +261,10 @@ spec:
         # skip LOUDLY (never silently - the self-disabling class this template
         # documents). A read failure also skips: unknown state must never mean
         # "submit more work".
+        # Outputs exist on EVERY exit path, including a "not yet" exit 3:
+        # without them Argo logs "cannot save parameter" for each retried attempt.
+        printf 'false' > /tmp/needs_build
+        printf '' > /tmp/head_sha
         FORCE="{{`{{workflow.parameters.force}}`}}"
         DATASET_EVENT="{{`{{workflow.parameters.dataset_event}}`}}"
         # RETRY: the runs that must not drop their event when the state is "not
@@ -238,11 +295,25 @@ spec:
         # every other app's reconcile (e2e-suite-ml-jq4vp, 2026-10-07: yolo never
         # built behind mlci's). app_name is on webhook and reconciled builds alike.
         APP="{{`{{workflow.parameters.app_name}}`}}"
-        ACTIVE=$(echo "$INFLIGHT" | jq -r --arg app "$APP" '[.items[] | select((.metadata.name|startswith("ml-ci-build")) and (.status.phase=="Running" or .status.phase=="Pending" or .status.phase==null) and ([.spec.arguments.parameters[]? | select(.name=="app_name") | .value] | index($app)))] | length')
-        if [ "${ACTIVE:-0}" != "0" ]; then
-          # force / dataset event: the running build may predate the change this
-          # run is for.
-          [ "$RETRY" = "true" ] && not_yet "build already in flight (${ACTIVE} active ml-ci-build workflow(s) for ${APP})"
+        # Builds of this app that are not finished. Phase Pending is a build
+        # QUEUED on the app's mutex (it has started nothing); Running holds it.
+        COUNTS=$(echo "$INFLIGHT" | jq -r --arg app "$APP" '
+          [.items[] | select((.metadata.name|startswith("ml-ci-build"))
+                             and ([.spec.arguments.parameters[]? | select(.name=="app_name") | .value] | index($app)))
+                    | .status.phase] as $p
+          | "\([$p[] | select(. == "Running" or . == "Pending" or . == null)] | length) \([$p[] | select(. == "Running")] | length)"')
+        ACTIVE=${COUNTS% *}
+        RUNNING=${COUNTS#* }
+        MODE="{{`{{inputs.parameters.mode}}`}}"
+        if [ "$MODE" = "await" ]; then
+          : # waits for inputs only; a build in flight is decide mode's lock to wait on
+        elif [ "$RETRY" = "true" ]; then
+          # decide mode holds the build mutex, so a Running build here should be
+          # impossible (a build that predates the mutex, or a lock handed over
+          # between the list and now): wait it out the old way. Builds merely
+          # QUEUED behind us are not a reason to wait; they run after this step.
+          [ "${RUNNING:-0}" != "0" ] && not_yet "build running outside the build lock (${RUNNING} running ml-ci-build workflow(s) for ${APP})"
+        elif [ "${ACTIVE:-0}" != "0" ]; then
           echo "reconcile: build already in flight (${ACTIVE} active ml-ci-build workflow(s) for ${APP}) - skipping submit this poll"
           printf 'false' > /tmp/needs_build
           printf '' > /tmp/head_sha
@@ -364,6 +435,22 @@ spec:
           if [ -n "$WANT_CTX" ]; then
             HAVE_CTX=$(gitops_ctx_sha)
             [ "$HAVE_CTX" = "$WANT_CTX" ] || not_yet "gitops ${CTX_REL} is not the context this trigger is for yet (${HAVE_CTX:0:12} != ${WANT_CTX:0:12})"
+          fi
+          # QUEUED: a build of HEAD is already waiting on the app's build lock
+          # (a webhook build created after this run began waiting, or another
+          # trigger's build). It starts after this step and renders the context
+          # and datasets as they are THEN, so submitting a second one would only
+          # queue a duplicate (two syncs fired at once must yield one build).
+          QUEUED=$(echo "$INFLIGHT" | jq -r --arg app "$APP" --arg sha "$HEAD_SHA" '
+            [.items[] | select((.metadata.name|startswith("ml-ci-build"))
+                               and (.status.phase == "Pending" or .status.phase == null)
+                               and ([.spec.arguments.parameters[]? | select(.name=="app_name") | .value] | index($app))
+                               and ([.spec.arguments.parameters[]? | select(.name=="commit_sha") | .value] | index($sha)))
+                      | .metadata.name] | first // empty')
+          if [ -n "$QUEUED" ]; then
+            printf 'false' > /tmp/needs_build
+            echo "reconcile: FORCED but ${QUEUED} already queues a build of HEAD ${HEAD_SHA}; it renders from the current context when it starts — nothing to submit"
+            exit 0
           fi
           # ALREADY SATISFIED: the force exists because the webhook build of
           # HEAD may predate the context or enhancer this trigger is for. When

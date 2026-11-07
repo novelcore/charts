@@ -1,0 +1,6 @@
+Name:                sync-1
+Status:              Running
+STEP                    TEMPLATE           PODNAME                        DURATION  MESSAGE
+ ● sync-1               ml-ci-reconcile                                                                                                       
+ ├───✔ await-inputs(0)  check-drift        sync-1-check-drift-2789716819  4s                                                                  
+ └───◷ decide           decide-and-submit                                           Waiting for argo/Mutex/app1-build lock. Lock status: 0/1  
