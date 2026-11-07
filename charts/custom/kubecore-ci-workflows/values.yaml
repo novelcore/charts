@@ -326,6 +326,10 @@ ci:
   # threshold — see clusterworkflowtemplate-ml.yaml. Raise together with the
   # project's `ci: maxNodes:`.
   mlBuildParallelism: 2
+  # Upper bound (seconds) of one ml-ci-reconcile run, including its wait for the
+  # app's build lock (check-drift takes the same mutex as ml-ci-build). A build
+  # that never releases the lock fails the waiting run at this deadline.
+  reconcileDeadlineSeconds: 10800
 
 # pending-reaper (#897): bounds unschedulable-step hangs and terminate-desync.
 pendingReaper:

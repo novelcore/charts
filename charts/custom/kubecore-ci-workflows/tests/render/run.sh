@@ -69,8 +69,8 @@ expect_eq "$(printf '%s' "$dc" | grep -c '\*-docker.pkg.dev\*)')" 1 \
 # ml-ci-reconcile's in-flight guard counts only THIS app's builds: one app's stuck
 # build must not starve every other app sharing {project}-ci (e2e-suite-ml-jq4vp).
 cd_script=$(yq 'select(.kind == "ClusterWorkflowTemplate" and .metadata.name == "ml-ci-reconcile") | .spec.templates[] | select(.name == "check-drift") | .container.args[0]' "$RENDERED")
-expect_eq "$(printf '%s' "$cd_script" | grep -c 'select(.name=="app_name") | .value\] | index(\$app)')" 1 \
-  "ml-ci-reconcile: in-flight guard is scoped to the app's own builds"
+expect_eq "$(printf '%s' "$cd_script" | grep -c 'select(.name=="app_name") | .value\] | index(\$app)')" 2 \
+  "ml-ci-reconcile: in-flight guard and the queued-build lookup are scoped to the app's own builds"
 
 echo "render: ${PASSED} passed, ${FAILED} failed"
 exit "$FAILED"

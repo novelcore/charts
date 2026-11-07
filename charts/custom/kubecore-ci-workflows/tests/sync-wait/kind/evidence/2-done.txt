@@ -1,0 +1,8 @@
+Name:                sync-2
+Status:              Succeeded
+STEP                       TEMPLATE           PODNAME                        DURATION  MESSAGE
+ ✔ sync-2                  ml-ci-reconcile                                                                                   
+ ├───✔ await-inputs(0)     check-drift        sync-2-check-drift-2176254692  3s                                              
+ └───✔ decide              decide-and-submit                                                                                 
+     ├───✔ check-drift(0)  check-drift        sync-2-check-drift-1800418979  3s                                              
+     └───○ submit-build    submit-build                                                when 'false == true' evaluated false  

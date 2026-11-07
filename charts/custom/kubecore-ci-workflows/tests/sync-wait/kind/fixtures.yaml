@@ -1,0 +1,104 @@
+# Fixtures for tests/sync-wait/kind/run.sh: a throwaway kind cluster only.
+# fakegh serves the three GitHub endpoints check-drift reads; HEAD is whatever
+# /data/head holds (the scenarios change it with kubectl exec).
+apiVersion: v1
+kind: Namespace
+metadata: {name: ml-proj}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata: {name: ci-build-sa, namespace: argo}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata: {name: ci-build-sa-test}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: cluster-admin}
+subjects: [{kind: ServiceAccount, name: ci-build-sa, namespace: argo}]
+---
+apiVersion: v1
+kind: Secret
+metadata: {name: github-token, namespace: argo}
+stringData: {token: fake}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata: {name: fakegh-server, namespace: argo}
+data:
+  server.py: |
+    import http.server
+    class H(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            head = open('/data/head').read().strip()
+            if '/commits/' in self.path:
+                body = '{"sha":"%s"}' % head
+            elif 'pipeline-context.yaml' in self.path:
+                body = 'kind: ConfigMap  # gitops pipeline-context.yaml, raw'
+            elif 'pipeline-images.yaml' in self.path:
+                body = 'metadata:\n  namespace: ml-proj\n'
+            else:
+                self.send_response(404); self.end_headers(); return
+            self.send_response(200); self.end_headers(); self.wfile.write(body.encode())
+        def log_message(self, *a): pass
+    http.server.HTTPServer(('', 8080), H).serve_forever()
+---
+apiVersion: v1
+kind: Pod
+metadata: {name: fakegh, namespace: argo, labels: {app: fakegh}}
+spec:
+  containers:
+  - name: s
+    image: alpine/k8s:1.36.4
+    command: [sh, -c, "echo aaaaaaa1 > /data/head; exec python3 /srv/server.py"]
+    volumeMounts: [{name: srv, mountPath: /srv}, {name: data, mountPath: /data}]
+  volumes:
+  - {name: srv, configMap: {name: fakegh-server}}
+  - {name: data, emptyDir: {}}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: fakegh, namespace: argo}
+spec:
+  selector: {app: fakegh}
+  ports: [{port: 8080}]
+---
+# Stand-in for ml-ci-build: the SAME per-app mutex, a build that takes
+# build_seconds, and the last-built-sha record patch-images makes on success.
+apiVersion: argoproj.io/v1alpha1
+kind: ClusterWorkflowTemplate
+metadata: {name: ml-ci-build}
+spec:
+  serviceAccountName: ci-build-sa
+  entrypoint: build
+  synchronization:
+    mutexes:
+    - name: "{{workflow.parameters.app_name}}-build"
+  arguments:
+    parameters:
+    - {name: app_name}
+    - {name: commit_sha}
+    - {name: build_seconds, value: "20"}
+    - {name: repo_url, value: ""}
+    - {name: branch, value: ""}
+    - {name: target_branch, value: ""}
+    - {name: branch_type, value: ""}
+    - {name: project_name, value: ""}
+    - {name: pr_merged, value: ""}
+    - {name: event_type, value: ""}
+    - {name: image_repository, value: ""}
+    - {name: registry_url, value: ""}
+    - {name: build_registry_url, value: ""}
+    - {name: gitops_repository, value: ""}
+    - {name: gitops_branch, value: ""}
+    - {name: workflow_template_path, value: ""}
+    - {name: node_class, value: ""}
+  templates:
+  - name: build
+    container:
+      image: alpine/k8s:1.36.4
+      command: [sh, -c]
+      args:
+      - |
+        echo "building {{workflow.parameters.commit_sha}} for {{workflow.parameters.build_seconds}}s"
+        sleep {{workflow.parameters.build_seconds}}
+        kubectl -n ml-proj patch cm {{workflow.parameters.app_name}}-pipeline-images --type merge \
+          -p '{"data":{"last-built-sha":"{{workflow.parameters.commit_sha}}"}}'
