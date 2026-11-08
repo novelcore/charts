@@ -1147,7 +1147,7 @@ spec:
         when: '{{=!hasPrefix(workflow.parameters[''compose-and-validate-class''],
           ''meluxina-'')}}'
       - name: compose-and-validate-meluxina
-        template: meluxina-run
+        template: hpc-follower
         when: '{{=hasPrefix(workflow.parameters[''compose-and-validate-class''], ''meluxina-'')}}'
         arguments:
           parameters:
@@ -1266,7 +1266,7 @@ spec:
               : tasks[''compose-and-validate''].outputs.parameters[''params'']}}'
         when: '{{=!hasPrefix(workflow.parameters[''config-validation-class''], ''meluxina-'')}}'
       - name: config-validation-meluxina
-        template: meluxina-run
+        template: hpc-follower
         when: '{{=hasPrefix(workflow.parameters[''config-validation-class''], ''meluxina-'')}}'
         arguments:
           parameters:
@@ -1307,7 +1307,7 @@ spec:
               : tasks[''compose-and-validate''].outputs.parameters[''params'']}}'
         when: '{{=!hasPrefix(workflow.parameters[''dataset-loading-class''], ''meluxina-'')}}'
       - name: dataset-loading-meluxina
-        template: meluxina-run
+        template: hpc-follower
         when: '{{=hasPrefix(workflow.parameters[''dataset-loading-class''], ''meluxina-'')}}'
         arguments:
           parameters:
@@ -1356,7 +1356,7 @@ spec:
               : tasks[''dataset-loading''].outputs.parameters[''manifest-summary'']}}'
         when: '{{=!hasPrefix(workflow.parameters[''data-summary-class''], ''meluxina-'')}}'
       - name: data-summary-meluxina
-        template: meluxina-run
+        template: hpc-follower
         when: '{{=hasPrefix(workflow.parameters[''data-summary-class''], ''meluxina-'')}}'
         arguments:
           parameters:
@@ -1413,7 +1413,7 @@ spec:
               ? ''1'' : ''0''}}'
         when: '{{=!hasPrefix(workflow.parameters[''model-training-class''], ''meluxina-'')}}'
       - name: model-training-meluxina
-        template: meluxina-run
+        template: hpc-follower
         when: '{{=hasPrefix(workflow.parameters[''model-training-class''], ''meluxina-'')}}'
         arguments:
           parameters:
@@ -1468,7 +1468,7 @@ spec:
             value: '{{=workflow.parameters[''qat-finetune-class''] in [''gpu-t4'']
               ? ''1'' : ''0''}}'
       - name: qat-finetune-meluxina
-        template: meluxina-run
+        template: hpc-follower
         when: '{{=(workflow.parameters[''quantization-mode''] == ''qat'') && hasPrefix(workflow.parameters[''qat-finetune-class''],
           ''meluxina-'')}}'
         arguments:
@@ -1524,7 +1524,7 @@ spec:
             value: '{{=tasks[''qat-finetune''].status == ''Skipped'' ? tasks[''qat-finetune-meluxina''].outputs.parameters[''qat-result'']
               : tasks[''qat-finetune''].outputs.parameters[''qat-result'']}}'
       - name: model-quantization-meluxina
-        template: meluxina-run
+        template: hpc-follower
         when: '{{=(workflow.parameters[''quantization-mode''] != ''none'') && hasPrefix(workflow.parameters[''model-quantization-class''],
           ''meluxina-'')}}'
         arguments:
@@ -1584,7 +1584,7 @@ spec:
               : tasks[''model-quantization''].outputs.parameters[''quantization-result'']}}'
         when: '{{=!hasPrefix(workflow.parameters[''model-registration-class''], ''meluxina-'')}}'
       - name: model-registration-meluxina
-        template: meluxina-run
+        template: hpc-follower
         when: '{{=hasPrefix(workflow.parameters[''model-registration-class''], ''meluxina-'')}}'
         arguments:
           parameters:
@@ -1622,7 +1622,7 @@ spec:
           || model-training-meluxina.Skipped)) && ((model-quantization.Succeeded ||
           model-quantization-meluxina.Succeeded) || (model-quantization.Skipped &&
           model-quantization-meluxina.Skipped) || (model-quantization.Omitted && model-quantization-meluxina.Omitted))
-  - name: meluxina-run
+  - name: hpc-follower
     inputs:
       parameters:
       - name: step-name
