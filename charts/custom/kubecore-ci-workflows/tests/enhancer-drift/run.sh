@@ -217,7 +217,10 @@ new_case; FORCE=true WANT_CTX="$CTX_SHA" run_drift
 expect_eq "$RC/$NEEDS" "0/false" "force for the context already rendered (context_sha = recorded = gitops): no build"
 
 new_case; FORCE=true WANT_CTX="$(printf 'next' | sha256sum | cut -c1-64)" run_drift
-expect_eq "$RC/$NEEDS" "3/<unset>" "force for a context not yet in gitops: still waits (exit 3)"
+# Still exit 3 (the await-inputs step retries it). needs_build is now written as
+# "false" BEFORE any decision (ci-sync wait change, charts#198), so the outputs
+# exist on this exit too and Argo logs no "cannot save parameter".
+expect_eq "$RC/$NEEDS" "3/false" "force for a context not yet in gitops: still waits (exit 3), output written as false"
 
 new_case
 jq '.data["last-built-sha"] = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"' "$T/cm.json" > "$T/c.tmp" \
