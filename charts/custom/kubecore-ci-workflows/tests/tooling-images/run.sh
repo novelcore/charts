@@ -103,7 +103,7 @@ printf '%s\n' "$ALLOW" | while IFS='|' read -r key reason; do
 done || FAILED=$((FAILED + 1))
 
 # The step images render-wft writes into the app's pipeline WorkflowTemplate
-# (create/destroy-nodegroups, the stockout guard, meluxina-run, hpc-burst) are
+# (create/destroy-nodegroups, the stockout guard, hpc-follower, hpc-burst) are
 # Python literals inside the render-wft script.
 RW=$(script_of ml-ci-build render-wft main)
 GEN=$(printf '%s\n' "$RW" | sed -n "s/.*'image': '\([^']*\)'.*/\1/p")

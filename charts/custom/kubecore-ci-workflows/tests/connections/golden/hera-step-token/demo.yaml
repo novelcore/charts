@@ -271,7 +271,7 @@ spec:
         when: '{{=!hasPrefix(workflow.parameters[''compose-and-validate-class''],
           ''meluxina-'')}}'
       - name: compose-and-validate-meluxina
-        template: meluxina-run
+        template: hpc-follower
         when: '{{=hasPrefix(workflow.parameters[''compose-and-validate-class''], ''meluxina-'')}}'
         arguments:
           parameters:
@@ -313,7 +313,7 @@ spec:
               : tasks[''compose-and-validate''].outputs.parameters[''params'']}}'
         when: '{{=!hasPrefix(workflow.parameters[''hello-world-class''], ''meluxina-'')}}'
       - name: hello-world-meluxina
-        template: meluxina-run
+        template: hpc-follower
         when: '{{=hasPrefix(workflow.parameters[''hello-world-class''], ''meluxina-'')}}'
         arguments:
           parameters:
@@ -341,7 +341,7 @@ spec:
             value: '{{workflow.parameters.hello-world-class}}'
         depends: ((compose-and-validate.Succeeded || compose-and-validate.Skipped)
           && (compose-and-validate-meluxina.Succeeded || compose-and-validate-meluxina.Skipped))
-  - name: meluxina-run
+  - name: hpc-follower
     inputs:
       parameters:
       - name: step-name

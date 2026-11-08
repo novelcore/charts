@@ -14,15 +14,26 @@ def test_hera_golden(name, conns):
     assert render(name, conns, ref=pinned_ref()) == golden_text("hera", name)
 
 
+# The pinned enhancer names the HPC twin template meluxina-run until the pin moves to the
+# hpc-follower rename (hera-pipeline-template, PRD-HPC-1461 AC-12); accept both so this suite
+# passes before and after that pin bump.
+TWINS = ("hpc-follower", "meluxina-run")
+
+
 def _names(out):
     return {t["name"] for t in yaml.safe_load(out)["spec"]["templates"]}
 
 
+def _twin(names):
+    found = [n for n in TWINS if n in names]
+    return found[0] if found else None
+
+
 def test_fixture_preconditions_hera():
     for n in ("yolo-vision-pipeline", "yolo-meluxina-poc", "demo"):
-        assert "meluxina-run" in _names(golden_text("hera", n)), n
+        assert _twin(_names(golden_text("hera", n))), n
     for n in ("yolo-pipeline", "data-clean", "dataset-gen-service"):
-        assert "meluxina-run" not in _names(golden_text("hera", n)), n
+        assert not _twin(_names(golden_text("hera", n))), n
 
 
 @pytest.mark.parametrize("name", HERA)
@@ -37,8 +48,9 @@ def test_meluxina_twin_untouched(name):
     a = yaml.safe_load(render(name, CONNECTIONS, ref=pinned_ref()))
     b = yaml.safe_load(render(name, None, ref=pinned_ref()))
     pick = lambda w, n: next(t for t in w["spec"]["templates"] if t["name"] == n)
-    assert pick(a, "meluxina-run") == pick(b, "meluxina-run")
-    assert "envFrom" not in pick(a, "meluxina-run")["container"]
+    twin = _twin({t["name"] for t in a["spec"]["templates"]})
+    assert pick(a, twin) == pick(b, twin)
+    assert "envFrom" not in pick(a, twin)["container"]
 
 
 @pytest.mark.parametrize("name", HERA)

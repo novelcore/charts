@@ -238,7 +238,7 @@ spec:
         # have steps/<dir>/Dockerfile (dir = step name with '-' → '_').
         # Steps with a verbatim image are NOT checked: the
         # platform.kubecore.io/image escape hatch, and platform-injected
-        # templates such as meluxina-run (HPC-ready pools; python:3.12.13-alpine)
+        # templates such as hpc-follower (HPC-ready pools; python:3.12.13-alpine)
         # — the first live run of this gate (#1126 e2e) failed on exactly
         # that, because the retired GitHub job rendered with a placeholder
         # context that never produced an HPC step.
