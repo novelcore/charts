@@ -22,11 +22,11 @@ def test_fixture_preconditions_render_wft():
     assert "hpc-burst" in _names(golden_text("render-wft", "kubeline-static-hpc"))
     live = yaml.safe_load(golden_text("render-wft", "kubeline-live-hpc"))["spec"]
     assert live["onExit"] == "destroy-nodegroups"
-    assert {"create-nodegroups", "destroy-nodegroups", "validate-classes", "meluxina-run"} <= {
+    assert {"create-nodegroups", "destroy-nodegroups", "validate-classes", "hpc-follower"} <= {
         t["name"] for t in live["templates"]}
 
 
-PLATFORM_RW = {"create-nodegroups", "destroy-nodegroups", "validate-classes", "meluxina-run", "hpc-burst"}
+PLATFORM_RW = {"create-nodegroups", "destroy-nodegroups", "validate-classes", "hpc-follower", "hpc-burst"}
 
 
 def _tpls(name, conns=CONNECTIONS, ctx_override=None):
@@ -52,13 +52,25 @@ def test_platform_templates_untouched(name):
     with_c = {t["name"]: t for t in _tpls(name)}
     without = {t["name"]: t for t in _tpls(name, None)}
     for n in set(with_c) - _user_names(name):
-        assert with_c[n] == without[n], n  # DAG, nodegroups, validate, hpc-burst, meluxina-run
+        assert with_c[n] == without[n], n  # DAG, nodegroups, validate, hpc-burst, hpc-follower
     assert set(with_c) - _user_names(name) <= PLATFORM_RW | {f"{FIXTURES[name].app}-pipeline"}
 
 
-def test_meluxina_twin_untouched():
-    t = {t["name"]: t for t in _tpls("kubeline-live-hpc")}["meluxina-run"]
-    assert "envFrom" not in t.get("script", {}) and "container" not in t
+def test_hpc_twin_untouched_and_credential_free():
+    t = {t["name"]: t for t in _tpls("kubeline-live-hpc")}["hpc-follower"]
+    assert "envFrom" not in t["container"] and "script" not in t
+
+
+def test_no_inpod_slurm_path_in_render_wft():
+    """PRD-HPC-1461 AC-12/F-35: the kubeline renderer carries no Slurm submitter and mounts no
+    meluxina-jwt Secret; the HPC twin only refuses (this renderer has no HPC controller support)."""
+    text = golden_text("render-wft", "kubeline-live-hpc")
+    assert "meluxina-run" not in text and "meluxina-jwt" not in text and "SLURM_TOKEN" not in text
+    assert "slurm-api" not in text
+    t = {t["name"]: t for t in _tpls("kubeline-live-hpc")}["hpc-follower"]
+    assert t["container"]["args"] == ['echo "$HPC_NOT_SERVED" >&2; exit 1']
+    assert not t["container"].get("volumeMounts") and not t.get("volumes")
+    assert all("valueFrom" not in e for e in t["container"]["env"])
 
 
 def test_env_filtering():

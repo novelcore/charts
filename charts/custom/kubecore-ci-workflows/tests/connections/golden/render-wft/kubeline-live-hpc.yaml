@@ -809,7 +809,7 @@ spec:
             value: '{{tasks.dataset-loading.outputs.parameters.manifest-summary}}'
         when: '{{=workflow.parameters.target != ''meluxina''}}'
       - name: model-training-meluxina
-        template: meluxina-run
+        template: hpc-follower
         depends: create-nodegroups.Succeeded && (dataset-loading.Succeeded || dataset-loading.Skipped)
         when: '{{=workflow.parameters.target == ''meluxina''}}'
         arguments:
@@ -2093,7 +2093,7 @@ spec:
       \ == 'gpu-t4' ? '24Gi' : '26Gi'))}}\"\n      nvidia.com/gpu: \"{{=(workflow.parameters['model-registration-class']\
       \ == 'cpu-standard' ? '0' : (workflow.parameters['model-registration-class']\
       \ == 'gpu-t4' ? '1' : '0'))}}\"\n"
-  - name: meluxina-run
+  - name: hpc-follower
     inputs:
       parameters:
       - name: step-name
@@ -2104,74 +2104,21 @@ spec:
       platform.kubecore.io/nodegroup-type: ci-standard
       platform.kubecore.io/project: data-room
     tolerations: *id001
-    activeDeadlineSeconds: 14400
     metadata:
       labels:
         platform.kubecore.io/project: data-room
         platform.kubecore.io/pipeline: kubeline-live-hpc
         platform.kubecore.io/step: '{{inputs.parameters.step-name}}'
         platform.kubecore.io/compute-type: hpc
-    script:
+    container:
       image: python:3.12.13-alpine
       command:
-      - python3
-      source: "import json, os, sys, time, urllib.request\nAPI='https://slurm-api.lxp.lu/slurm/v0.0.44'\n\
-        SDB='https://slurm-api.lxp.lu/slurmdb/v0.0.44'\nTOK=os.environ['SLURM_TOKEN'].strip()\n\
-        H={'X-SLURM-USER-NAME':'u104378','X-SLURM-USER-TOKEN':TOK,'Content-Type':'application/json'}\n\
-        def get(url):\n    return json.load(urllib.request.urlopen(urllib.request.Request(url,headers=H),timeout=30))\n\
-        jobname='kaos-'+os.environ['WF_UID']+'-'+os.environ['STEP_NAME']\nimg=os.environ['IMAGE_REF'];\
-        \ cmd=' '.join(json.loads(os.environ.get('STEP_COMMAND') or '[]'))\njid=None\n\
-        for j in (get(API+'/jobs').get('jobs') or []):\n    st=j.get('job_state')\
-        \ or []\n    if j.get('name')==jobname and any(x in ('PENDING','RUNNING','SUSPENDED')\
-        \ for x in st):\n        jid=j.get('job_id'); print('adopting existing job',jid,flush=True);\
-        \ break\nif jid is None:\n    reg=''\n    try:\n        r=urllib.request.Request('http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token',headers={'Metadata-Flavor':'Google'})\n\
-        \        reg=json.load(urllib.request.urlopen(r,timeout=5)).get('access_token','')\n\
-        \    except Exception as e:\n        print('no registry token from metadata\
-        \ server (pull will be anonymous):',e,flush=True)\n    batch='\\n'.join([\n\
-        \        '#!/bin/bash -l','set +e',\n        'for f in /usr/share/lmod/lmod/init/bash\
-        \ /etc/profile.d/lmod.sh; do [ -r \"$f\" ] && source \"$f\" && break; done',\n\
-        \        'module load Apptainer 2>/dev/null || module load apptainer 2>/dev/null',\n\
-        \        'command -v apptainer >/dev/null || exit 210',\n        'SCR=/project/scratch/p201342',\n\
-        \        'export APPTAINER_CACHEDIR=$SCR/kaos-apptainer-cache APPTAINER_TMPDIR=$SCR/kaos-tmp',\n\
-        \        'mkdir -p $APPTAINER_CACHEDIR $APPTAINER_TMPDIR $SCR/sif-cache',\n\
-        \        'KEY=$(printf %s \"$IMAGE_REF\" | sha256sum | cut -c1-16)',\n   \
-        \     'SIF=$SCR/sif-cache/$KEY.sif',\n        'if [ ! -f \"$SIF\" ]; then',\n\
-        \        '  [ -n \"$REG_TOKEN\" ] && export APPTAINER_DOCKER_USERNAME=oauth2accesstoken\
-        \ APPTAINER_DOCKER_PASSWORD=$REG_TOKEN',\n        '  apptainer pull \"$SIF\"\
-        \ docker://$IMAGE_REF || exit 231',\n        'fi',\n        'if [ -n \"$STEP_CMD\"\
-        \ ]; then apptainer exec --nv \"$SIF\" /bin/sh -c \"$STEP_CMD\"; else apptainer\
-        \ exec --nv \"$SIF\" nvidia-smi -L; fi',\n    ])\n    env=['PATH=/usr/bin:/bin:/usr/local/bin','HOME=/home/users/u104378','USER=u104378',\n\
-        \         'IMAGE_REF='+img,'REG_TOKEN='+reg,'STEP_CMD='+cmd]\n    body={'job':{'name':jobname,'partition':'gpu','account':'p201342','qos':'default',\n\
-        \        'time_limit':120,'current_working_directory':'/home/users/u104378',\n\
-        \        'environment':env,'tasks':1,'nodes':'1'},'script':batch}\n    req=urllib.request.Request(API+'/job/submit',data=json.dumps(body).encode(),headers=H,method='POST')\n\
-        \    resp=json.load(urllib.request.urlopen(req,timeout=30))\n    jid=resp.get('job_id')\n\
-        \    print('submitted job',jid,'errors:',resp.get('errors'),flush=True)\n\
-        \    if not jid: sys.exit(1)\nopen('/tmp/slurm-job-id','w').write(str(jid))\n\
-        terminal=('COMPLETED','FAILED','CANCELLED','TIMEOUT','NODE_FAIL','PREEMPTED','OUT_OF_MEMORY')\n\
-        while True:\n    time.sleep(30)\n    try:\n        jj=get(SDB+'/job/'+str(jid))\n\
-        \        job=(jj.get('jobs') or [{}])[0]\n        st=(job.get('state') or\
-        \ {}).get('current') or []\n        print('state:',st,flush=True)\n      \
-        \  if any(x in terminal for x in st):\n            rc=((job.get('exit_code')\
-        \ or {}).get('return_code') or {}).get('number')\n            print('terminal:',st,'exit:',rc,flush=True)\n\
-        \            sys.exit(0 if ('COMPLETED' in st and (rc in (0,None))) else 1)\n\
-        \    except SystemExit: raise\n    except Exception as e:\n        print('poll\
-        \ error (transient):',e,flush=True)\n"
+      - sh
+      - -c
+      args:
+      - echo "$HPC_NOT_SERVED" >&2; exit 1
       env:
-      - name: SLURM_TOKEN
-        valueFrom:
-          secretKeyRef:
-            name: meluxina-jwt
-            key: token
-      - name: WF_UID
-        value: '{{workflow.uid}}'
-      - name: STEP_NAME
-        value: '{{inputs.parameters.step-name}}'
-      - name: IMAGE_REF
-        value: '{{inputs.parameters.image}}'
-      - name: STEP_COMMAND
-        value: '{{inputs.parameters.step-command}}'
-    outputs:
-      parameters:
-      - name: slurm-job-id
-        valueFrom:
-          path: /tmp/slurm-job-id
+      - name: HPC_NOT_SERVED
+        value: 'MeluXina steps run through the pool''s HPC controller, which this
+          kubeline pipeline cannot use: move the pipeline to the Hera pipeline template,
+          or pick an in-cluster class. Nothing was submitted.'
