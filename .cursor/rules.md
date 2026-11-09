@@ -22,7 +22,7 @@ charts/
 │   ├── sync-chart.sh   # Manual chart synchronization script
 │   ├── validate-charts.sh # Local validation of all charts
 │   ├── update-gitops-promoter.sh # Custom updater for the gitops-promoter chart
-│   └── synch-config.yaml # Record of tracked external charts (not read by sync-chart.sh)
+│   └── synch-config.yaml # Upstream Helm repositories added by sync-chart.sh
 ├── hack/rules-and-dashboards/ # Generator for kubecore-observability-rules
 ├── (no .github/: CI runs in Argo Workflows, defined in novelcore/kaos)
 ├── init.sh            # Repository initialization script
@@ -72,7 +72,7 @@ All custom charts MUST include:
 
 ### Understanding External Chart Sync
 
-`scripts/synch-config.yaml` records the tracked external charts (the sync script does not read it; run `helm repo add` for the upstream repo first):
+`scripts/synch-config.yaml` records the tracked external charts (the sync script adds the repositories listed in it):
 
 ```yaml
 repositories:
@@ -198,7 +198,7 @@ helm install my-release novelcore/<chart-name>
 ## Best Practices for Cursor Agent
 
 1. **Always validate charts locally** before committing
-2. **Use the sync script** for external chart management rather than manual copying (add the Helm repo first; the script does not read `synch-config.yaml`)
+2. **Use the sync script** for external chart management rather than manual copying (it adds the repositories listed in `synch-config.yaml`)
 3. **Follow the established directory structure** strictly
 4. **Include comprehensive documentation** for any new charts
 5. **Test chart installations** in development environments

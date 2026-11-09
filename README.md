@@ -45,7 +45,7 @@ helm install my-release novelcore/CHART_NAME -f values.yaml
 │   └── kubecore-observability-rules/  # First-party rules/dashboards chart (outside charts/custom)
 ├── hack/              # Rules/dashboards generator
 ├── scripts/           # Utility scripts
-├── scripts/synch-config.yaml   # External chart sync record (not read by sync-chart.sh)
+├── scripts/synch-config.yaml   # Upstream Helm repositories added by sync-chart.sh
 └── ct.yaml           # Chart testing configuration
 ```
 
@@ -101,7 +101,7 @@ To manually sync a specific chart:
 ./scripts/sync-chart.sh <repo-name> <chart-name> <version>
 ```
 
-`scripts/sync-chart.sh` takes the repository, chart and version as arguments; it does not read `scripts/synch-config.yaml`.
+`scripts/sync-chart.sh` takes the repository, chart and version as arguments; it adds the upstream repositories listed in `scripts/synch-config.yaml` (next to the script) before syncing.
 
 ### Adding New External Charts
 
