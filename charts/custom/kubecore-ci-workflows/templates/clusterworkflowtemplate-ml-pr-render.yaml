@@ -323,7 +323,8 @@ spec:
   # ── pipeline-lint (PRD novelcore/kaos#1682 F-02) ───────────────────────────
   # Three pods, split by trust like hera-render / hera-enhance-gate:
   #   prepare (token)    pending status; fetch + verify the pinned kaos-lib wheel; turn the
-  #                      gitops pipeline-context into a catalogue (classes, HPC limits only,
+  #                      gitops pipeline-context into a catalogue (classes, HPC limits and the
+  #                      platform's resumable-step record: step names, verdicts, reasons;
   #                      none of the context's endpoints or secret names)
   #   run (TOKENLESS)    unzip the wheel, lint /workspace/repo as DATA (the linter parses,
   #                      never imports or runs it), write report.json / report.md / status.txt
@@ -386,7 +387,8 @@ spec:
         lint_fetch || { fail "the pinned kaos-lib could not be downloaded and verified"; exit 0; }
         lint_unpack || { fail "the pinned kaos-lib could not be unpacked"; exit 0; }
 
-        # The catalogue: the project's compute classes and HPC limits, from the same gitops
+        # The catalogue: the project's compute classes, HPC limits and the platform's record of which
+        # steps resumed from a checkpoint (hpc.resumableSteps), from the same gitops
         # pipeline-context the render uses. Only those facts are kept, in a file the tokenless
         # step reads. Without a context the linter uses its built-in defaults (and says so).
         GITOPS_REPO="{{`{{workflow.parameters.gitops_repository}}`}}"

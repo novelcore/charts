@@ -84,10 +84,10 @@ if a.from_report:
     out({"markdown": "#### Pipeline lint: %d errors\n" % s["errors"], "status": "%d errors (rule set %s)\n" % (s["errors"], r["ruleset_version"]),
          "text": "stub text\n"}[a.format])
     sys.exit(0)
-if a.expect_ruleset and a.expect_ruleset != "1.0.0":
+if a.expect_ruleset and a.expect_ruleset != "1.1.0":
     sys.exit(1)
 n = int(os.environ.get("STUB_ERRORS", "0"))
-out(json.dumps({"ruleset_version": "1.0.0", "summary": {"errors": n, "warnings": 0, "infos": 0, "skipped": 0},
+out(json.dumps({"ruleset_version": "1.1.0", "summary": {"errors": n, "warnings": 0, "infos": 0, "skipped": 0},
                 "catalogue": {"given": a.catalogue}}))
 sys.exit(2 if n else 0)
 PYEOF
@@ -129,7 +129,11 @@ mkdir -p "$T/gitops/apps/app1/dev"
 cat > "$T/gitops/apps/app1/dev/pipeline-context.yaml" <<'CTX'
 computeClasses:
   all: [{name: gpu-a, tier: gpu}]
-hpc: {enabled: true, limits: {maxTimeLimitMinutes: 600}}
+hpc:
+  enabled: true
+  limits: {maxTimeLimitMinutes: 600}
+  resumableSteps:
+    - {name: model-training, verified: true, since: "2026-11-09T12:00:00Z", reason: "a continuation loaded its checkpoint and got past it", jobName: THE-JOB-NAME}
 lakefs: {adminSecret: THE-SECRET-NAME}
 CTX
 
@@ -193,7 +197,9 @@ expect_not "$(cat "$T/ws/lint/catalogue.json")" "THE-SECRET-NAME" "the catalogue
 expect_has "$(cat "$T/ws/lint/catalogue.json")" "gpu-a" "the catalogue carries the project's classes from the gitops context"
 if [ "$REAL" = 1 ]; then
   expect_eq "$(jq -r '.summary.errors' "$T/ws/lint/report.json")" "1" "real linter: one error found in the bad fixture"
-  expect_eq "$(jq -r '.catalogue.source' "$T/ws/lint/report.json")" "catalogue file" "real linter: the report used the project's catalogue file"
+  expect_eq "$(jq -r '.catalogue.source' "$T/ws/lint/report.json")" "platform context" "real linter: the report names the platform context as its source (the same bytes as kaosctl lint --context)"
+  expect_eq "$(jq -r '.catalogue.resumableSteps[0] | "\(.name) \(.verified)"' "$T/ws/lint/report.json")" "model-training true" "real linter: the platform's resumable-step record reaches the report"
+  expect_not "$(cat "$T/ws/lint/catalogue.json")" "THE-JOB-NAME" "real linter: the catalogue keeps the step record's names, verdicts and reasons only, no job details"
   expect_has "$(grep '"state"' "$T/bodies" | tail -1 | jq -r .description)" "1 error" "real linter: the status text counts the errors"
 fi
 

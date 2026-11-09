@@ -31,7 +31,7 @@ ClusterWorkflowTemplates for the platform CI: `ml-ci-build`, `ml-ci-reconcile`, 
 
 | Step | Trust | What it does |
 |---|---|---|
-| `pipeline-lint-prepare` | holds the GitHub token | posts `pending`; downloads the pinned kaos-lib wheel and checks its sha256; turns the gitops `pipeline-context.yaml` into a **catalogue** (the project's compute classes and HPC (Slurm) limits only: no endpoint, no secret name) |
+| `pipeline-lint-prepare` | holds the GitHub token | posts `pending`; downloads the pinned kaos-lib wheel and checks its sha256; turns the gitops `pipeline-context.yaml` into a **catalogue** (the project's compute classes, HPC (Slurm) limits and the platform's record of which steps resumed from a checkpoint, as step names, verdicts and reasons only: no endpoint, no secret name, no job details) |
 | `pipeline-lint-run` | **tokenless**, reads the checkout | unzips the wheel and lints `/workspace/repo` as data: the linter parses `pipeline.py`, `config/` and `steps/`, it never imports or runs them. Writes `report.json`, `report.md`, `status.txt` |
 | `pipeline-lint-report` | holds the token | posts the final status (`success`, `failure`, or `error` when the check could not run) and the one comment |
 
