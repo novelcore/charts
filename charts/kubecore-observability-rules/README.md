@@ -84,15 +84,18 @@ cd hack/rules-and-dashboards
 go run main.go
 ```
 
-Or using Docker:
+Or via the Makefile:
 
 ```bash
-make hack
+make -C hack/rules-and-dashboards hack        # container build and run
+make -C hack/rules-and-dashboards hack-local  # local Go toolchain
 ```
 
 ## Chart Publishing
 
-The chart is automatically published to `ghcr.io/novelcore/charts` when changes are pushed to the `main` branch via the `release-charts.yml` workflow.
+On every commit to `main` the Argo `charts/release` run (defined in `novelcore/kaos`; this repo has no GitHub Actions) packages the chart and pushes it to `ghcr.io/novelcore/charts` when a package token is configured.
+
+This directory is outside `charts/custom`, so `ct lint` (and its version-increment check) does not cover it.
 
 ## Dependencies
 

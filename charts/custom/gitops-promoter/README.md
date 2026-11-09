@@ -45,8 +45,9 @@ The following table lists the configurable parameters and their default values:
 | `namespace.create` | Create namespace if it doesn't exist | `true` |
 | `namespace.name` | Namespace name (defaults to release namespace) | `""` |
 | `controllerManager.image.repository` | Controller manager image repository | `quay.io/argoprojlabs/gitops-promoter` |
-| `controllerManager.image.tag` | Controller manager image tag | `v0.10.2` |
+| `controllerManager.image.tag` | Controller manager image tag | `v0.22.6` |
 | `controllerManager.replicaCount` | Number of controller manager replicas | `1` |
+| `kubeRbacProxy.image.tag` | kube-rbac-proxy sidecar image tag | `v0.20.2` |
 | `serviceAccount.create` | Create service account | `true` |
 | `rbac.create` | Create RBAC resources | `true` |
 | `services.metrics.enabled` | Enable metrics service | `true` |
@@ -55,42 +56,36 @@ The following table lists the configurable parameters and their default values:
 | `ingress.hostname` | Hostname for webhook ingress | `promoter-webhook.example.com` |
 | `ingress.ingressClassName` | Ingress class name | `traefik-system` |
 | `crds.install` | Install Custom Resource Definitions | `true` |
-| `crds.keep` | Preserve CRDs on chart uninstall | `true` |
+| `crds.keep` | Retained for compatibility; has no effect (CRDs live in `crds/`, which Helm never deletes) | `true` |
 
 ### Advanced Configuration
 
 #### Custom Resource Definitions (CRDs)
 
-The chart includes all 10 Custom Resource Definitions required by GitOps Promoter:
+The chart includes all 12 Custom Resource Definitions required by GitOps Promoter:
 
 - `argocdcommitstatuses.promoter.argoproj.io`
 - `changetransferpolicies.promoter.argoproj.io`
 - `clusterscmproviders.promoter.argoproj.io`
 - `commitstatuses.promoter.argoproj.io`
 - `controllerconfigurations.promoter.argoproj.io`
+- `gitcommitstatuses.promoter.argoproj.io`
 - `gitrepositories.promoter.argoproj.io`
 - `promotionstrategies.promoter.argoproj.io`
 - `pullrequests.promoter.argoproj.io`
 - `revertcommits.promoter.argoproj.io`
 - `scmproviders.promoter.argoproj.io`
+- `timedcommitstatuses.promoter.argoproj.io`
 
-CRDs are installed as pre-install/pre-upgrade hooks with a weight of -5, ensuring they are created before any other resources. By default, CRDs are preserved when the chart is uninstalled to prevent data loss.
+CRDs ship in the chart's `crds/` directory (`crds/promoter-crds.yaml`), so Helm installs them before any other resource. Helm never upgrades or deletes files in `crds/`: they are created on first install only and are preserved on uninstall. (`templates/crds.yaml` is disabled with `{{- if false }}`; the old hook-based installation is gone.) Upgrade CRDs by applying `crds/promoter-crds.yaml` yourself.
 
-```yaml
-crds:
-  # Install CRDs (disable if managing CRDs separately)
-  install: true
-  # Keep CRDs on uninstall (prevents data loss)
-  keep: true
-```
-
-To manually remove CRDs after uninstalling the chart:
+To manually remove CRDs after uninstalling the chart (this deletes every promoter resource), delete them by group:
 
 ```bash
-kubectl delete crd -l controller-gen.kubebuilder.io/version=v0.16.3
-# or delete specific CRDs
-kubectl delete crd argocdcommitstatuses.promoter.argoproj.io changetransferpolicies.promoter.argoproj.io # ... etc
+kubectl get crd -o name | grep '\.promoter\.argoproj\.io$' | xargs kubectl delete
 ```
+
+(`scripts/cleanup-gitops-promoter-crds.sh` carries an older CRD list and does not cover all 12; prefer the command above.)
 
 #### Resource Management
 
@@ -99,10 +94,10 @@ controllerManager:
   resources:
     limits:
       cpu: 500m
-      memory: 128Mi
+      memory: 512Mi
     requests:
       cpu: 10m
-      memory: 64Mi
+      memory: 256Mi
 
 kubeRbacProxy:
   resources:
@@ -175,13 +170,15 @@ monitoring:
 
 #### Controller Configuration
 
+Each controller has a `workQueue` (`maxConcurrentReconciles`, `rateLimiter`, `requeueDuration`); the defaults are in `values.yaml` under `controllerConfiguration.{argocdCommitStatus,changeTransferPolicy,commitStatus,promotionStrategy,pullRequest,gitCommitStatus,timedCommitStatus}`.
+
 ```yaml
 controllerConfiguration:
   enabled: true
-  argocdCommitStatusRequeueDuration: "120s"
-  changeTransferPolicyRequeueDuration: "5m"
-  promotionStrategyRequeueDuration: "5m"
-  pullRequestRequeueDuration: "5m"
+  argocdCommitStatus:
+    watchLocalApplications: true
+    workQueue:
+      requeueDuration: 2m
   pullRequest:
     template:
       title: "Promote {{ trunc 7 .ChangeTransferPolicy.Status.Proposed.Dry.Sha }} to `{{ .ChangeTransferPolicy.Spec.ActiveBranch }}`"
@@ -190,6 +187,10 @@ controllerConfiguration:
         This PR promotes changes from **{{ .ChangeTransferPolicy.Spec.ProposedBranch }}** to **{{ .ChangeTransferPolicy.Spec.ActiveBranch }}**.
         # ... (enhanced template with tables, links, and status checks)
 ```
+
+#### Git fetch daemon (optional sidecar)
+
+`gitFetchDaemon.enabled` (default `false`) adds a sidecar that runs `git fetch --all --prune` every `gitFetchDaemon.fetchIntervalSeconds` (default 300) so branches created by the Argo CD hydrator are discovered. It needs `gitFetchDaemon.secret.name`, a Secret holding a GitHub installation token (for example from an External Secrets `GithubAccessToken` generator).
 
 #### Ingress Configuration
 
@@ -216,19 +217,19 @@ ingress:
    helm install gitops-promoter novelcore/gitops-promoter --namespace gitops-promoter --create-namespace
    ```
 
-2. **Create an SCM Provider:**
+2. **Create an SCM Provider** (GitHub App credentials in a Secret):
    ```yaml
    apiVersion: promoter.argoproj.io/v1alpha1
-   kind: SCMProvider
+   kind: ScmProvider
    metadata:
      name: github-provider
      namespace: gitops-promoter
    spec:
+     secretRef:
+       name: github-app-credentials
      github:
-       domain: github.com
-       tokenRef:
-         secretName: github-token
-         key: token
+       appID: 123456
+       installationID: 7890123
    ```
 
 3. **Create a Git Repository:**
@@ -239,8 +240,11 @@ ingress:
      name: my-gitops-repo
      namespace: gitops-promoter
    spec:
-     url: https://github.com/your-org/gitops-repo
+     github:
+       owner: your-org
+       name: gitops-repo
      scmProviderRef:
+       kind: ScmProvider
        name: github-provider
    ```
 
@@ -252,7 +256,7 @@ ingress:
      name: my-promotion-strategy
      namespace: gitops-promoter
    spec:
-     repository:
+     gitRepositoryRef:
        name: my-gitops-repo
      environments:
      - name: staging
@@ -270,10 +274,10 @@ controllerManager:
   resources:
     limits:
       cpu: 1000m
-      memory: 256Mi
+      memory: 1Gi
     requests:
       cpu: 100m
-      memory: 128Mi
+      memory: 512Mi
 
 hpa:
   enabled: true
@@ -303,7 +307,9 @@ ingress:
 
 # Enhanced controller configuration
 controllerConfiguration:
-  argocdCommitStatusRequeueDuration: "120s"
+  argocdCommitStatus:
+    workQueue:
+      requeueDuration: 2m
   pullRequest:
     template:
       title: "Promote {{ trunc 7 .ChangeTransferPolicy.Status.Proposed.Dry.Sha }} to `{{ .ChangeTransferPolicy.Spec.ActiveBranch }}`"
@@ -337,14 +343,16 @@ helm upgrade gitops-promoter novelcore/gitops-promoter -f values-new.yaml
 
 When a new version of GitOps Promoter is released:
 
+Maintainers: run `./scripts/update-gitops-promoter.sh vX.Y.Z` (see `UPDATE_STRATEGY.md`), which refreshes `crds/`, the image tags and `Chart.yaml`, and bump the chart `version`. Consumers:
+
 1. Check the [release notes](https://github.com/argoproj-labs/gitops-promoter/releases) for breaking changes
-2. Update the chart version in your values file:
+2. Upgrade to the new chart version (its `appVersion` is the promoter version), or pin the image yourself:
    ```yaml
    controllerManager:
      image:
-       tag: "v0.11.0"  # New version
+       tag: "v0.22.6"  # example
    ```
-3. Upgrade the release:
+3. Apply the new `crds/promoter-crds.yaml` (Helm does not upgrade `crds/`), then upgrade the release:
    ```bash
    helm upgrade gitops-promoter novelcore/gitops-promoter -f values.yaml
    ```
@@ -378,14 +386,7 @@ When a new version of GitOps Promoter is released:
 
 ### Debug Mode
 
-Enable debug logging:
-
-```yaml
-controllerManager:
-  env:
-  - name: LOG_LEVEL
-    value: "debug"
-```
+`controllerManager.args` only exposes `healthProbeBindAddress`, `metricsBindAddress` and `leaderElect`; there is no log-level value. Extra environment variables go in `controllerManager.env` (the chart sets `GIT_HTTP_LOW_SPEED_LIMIT` and `GIT_HTTP_LOW_SPEED_TIME` there by default; keep them if you override the list).
 
 ## Uninstalling
 
@@ -393,8 +394,8 @@ controllerManager:
 # Uninstall the release
 helm uninstall gitops-promoter
 
-# Remove CRDs (if desired)
-kubectl delete crd -l app.kubernetes.io/part-of=promoter
+# Remove CRDs (if desired; Helm leaves them in place)
+kubectl get crd -o name | grep '\.promoter\.argoproj\.io$' | xargs kubectl delete
 
 # Remove namespace (if created by the chart)
 kubectl delete namespace gitops-promoter
@@ -422,7 +423,7 @@ kubectl delete namespace gitops-promoter
 
 ## License
 
-This chart is licensed under the Apache License 2.0. See the [LICENSE](LICENSE) file for details.
+This chart is licensed under the Apache License 2.0. Apache-2.0 (see `artifacthub.io/license` in `Chart.yaml`; there is no LICENSE file in this chart).
 
 ## Support
 
@@ -432,9 +433,7 @@ This chart is licensed under the Apache License 2.0. See the [LICENSE](LICENSE) 
 
 ## Changelog
 
-### v0.1.0
-- Initial release of the GitOps Promoter Helm chart
-- Support for GitOps Promoter v0.10.2
-- Comprehensive configuration options
-- Production-ready defaults
+See `artifacthub.io/changes` in `Chart.yaml` for the current chart version's changes and
+`git log -- charts/custom/gitops-promoter` for history. The chart was first released for
+GitOps Promoter v0.10.2; `appVersion` in `Chart.yaml` is the promoter version it ships.
 - Monitoring and scaling support
