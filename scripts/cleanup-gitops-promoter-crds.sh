@@ -10,14 +10,16 @@ echo "🧹 Cleaning up GitOps Promoter CRDs..."
 CRDS=(
   "argocdcommitstatuses.promoter.argoproj.io"
   "changetransferpolicies.promoter.argoproj.io"
+  "clusterscmproviders.promoter.argoproj.io"
   "commitstatuses.promoter.argoproj.io"
+  "controllerconfigurations.promoter.argoproj.io"
+  "gitcommitstatuses.promoter.argoproj.io"
+  "gitrepositories.promoter.argoproj.io"
   "promotionstrategies.promoter.argoproj.io"
-  "proposedcommits.promoter.argoproj.io"
   "pullrequests.promoter.argoproj.io"
   "revertcommits.promoter.argoproj.io"
-  "scmrepositories.promoter.argoproj.io"
   "scmproviders.promoter.argoproj.io"
-  "scmrepositories.promoter.argoproj.io"
+  "timedcommitstatuses.promoter.argoproj.io"
 )
 
 # Check if any CRDs exist

@@ -28,7 +28,7 @@ There are **no GitHub Actions** in this repository (platform rule: all CI runs i
 
 1. **charts-validate**: every open PR head gets a `charts/validate` commit status (pending, then success/failure) whose link opens the Argo run. It runs the chart test suites under `charts/custom/*/tests`, `ct lint` (with `check-version-increment: true`, so ANY change under `charts/custom/<chart>/` or `charts/external/<chart>/`, docs included, needs a `Chart.yaml` `version` bump), and renders every changed chart. A PR that reports no status has not been checked; wait for it.
 2. **charts-release**: every commit on `main` gets a `charts/release` status; the run packages all charts, updates `gh-pages` (retention, `helm repo index`) and pushes `kubecore-observability-rules` to GHCR when a PAT is configured.
-3. **External chart sync** is manual: `scripts/sync-chart.sh` (the old daily workflow read a `sync-config.yaml` that does not exist, so it never synced anything).
+3. **External chart sync** is manual: `scripts/sync-chart.sh` (the old daily workflow never synced anything).
 
 A poller (`charts-poll`, every 2 minutes) submits the runs, so a status can appear up to two minutes after a push or merge.
 
@@ -85,7 +85,7 @@ helm dependency update charts/custom/<chart-name>
 
 ### scripts/synch-config.yaml
 
-Record of which external charts and upstream repositories this repo tracks (it is NOT read by `scripts/sync-chart.sh`: the script takes `<repo> <chart> [version]` as arguments and only looks for a file named `sync-config.yaml`, which does not exist, so the upstream Helm repository must already be added with `helm repo add`). Structure:
+Record of which external charts and upstream repositories this repo tracks (`scripts/sync-chart.sh <repo> <chart> [version]` adds the repositories listed here, then syncs the named chart; the chart pins themselves are recorded here, not read from it). Structure:
 
 ```yaml
 repositories:
@@ -129,7 +129,7 @@ This custom chart wraps the GitOps Promoter from argoproj-labs. Special handling
 - **Custom update script**: `scripts/update-gitops-promoter.sh` downloads upstream manifests and converts to Helm templates
 - **CRD management**: the 12 CRDs live in `crds/promoter-crds.yaml` (Helm installs them first and never deletes them); `templates/crds.yaml` is disabled (`{{- if false }}`) and `crds.keep` has no effect
 - **Backup on update**: Script creates a timestamped backup before updating (current chart 0.8.4, promoter v0.22.6)
-- **Cleanup script**: `scripts/cleanup-gitops-promoter-crds.sh` for CRD removal (its CRD list is outdated and misses several of the 12 current CRDs)
+- **Cleanup script**: `scripts/cleanup-gitops-promoter-crds.sh` for CRD removal (its CRD list matches the 12 CRDs in `crds/`)
 
 When updating: use the update script rather than manual edits, it handles version bumps, image updates, and manifest conversions automatically.
 

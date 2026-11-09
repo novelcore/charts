@@ -91,12 +91,13 @@ main() {
     local chart_name=$2
     local version=${3:-""}
     
-    # Load repositories from sync-config.yaml if it exists
-    if [ -f "sync-config.yaml" ]; then
-        print_info "Loading repositories from sync-config.yaml"
+    # Load repositories from synch-config.yaml (next to this script) if it exists
+    CONFIG_FILE="$(dirname "${BASH_SOURCE[0]}")/synch-config.yaml"
+    if [ -f "$CONFIG_FILE" ]; then
+        print_info "Loading repositories from $CONFIG_FILE"
         while IFS=' ' read -r name url; do
             helm repo add "$name" "$url" >/dev/null 2>&1 || true
-        done < <(yq eval '.repositories[] | .name + " " + .url' sync-config.yaml)
+        done < <(yq eval '.repositories[] | .name + " " + .url' "$CONFIG_FILE")
     fi
     
     # Update helm repos

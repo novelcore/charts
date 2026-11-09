@@ -88,7 +88,7 @@ The filer bootstraps these on first run via `gh label create --force`:
 ## Repo conventions this system honors
 
 - Charts are split into `charts/custom/` (in-repo) and `charts/external/` (synced from upstream via `scripts/synch-config.yaml`).
-- External charts are bumped by editing `synch-config.yaml` (the record of pins) and running `./scripts/sync-chart.sh <repo> <chart> <version>` (the script takes its arguments from the command line and needs the Helm repo already added). The executor follows this convention; it does not hand-edit `charts/external/` content.
+- External charts are bumped by editing `synch-config.yaml` (the record of pins) and running `./scripts/sync-chart.sh <repo> <chart> <version>` (the script takes its arguments from the command line and adds the repositories listed in `synch-config.yaml`). The executor follows this convention; it does not hand-edit `charts/external/` content.
 - Custom charts are bumped by editing `charts/custom/<chart>/Chart.yaml` directly.
 - All chart changes go through PR review on `main`. The executor never pushes to `main`.
 
