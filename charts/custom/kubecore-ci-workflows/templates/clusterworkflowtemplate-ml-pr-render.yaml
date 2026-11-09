@@ -29,6 +29,12 @@ enhance + release-hygiene gate + the step↔folder check (a declared step with
 no steps/<dir>/Dockerfile would ImagePullBackOff at run time, long after
 merge) — and then STOPS. Nothing is written anywhere.
 
+Alongside the render, Hera apps get a SECOND, independent check, `pipeline-lint`
+(PRD novelcore/kaos#1682 F-02): the pinned kaos-lib linter reads pipeline.py, config/
+and the step folders WITHOUT running them and answers with the `pipeline-lint` commit
+status (errors fail it, warnings and infos never do) and ONE PR comment, updated in
+place on every push. It never turns `wft-render` red; see the pipeline-lint templates.
+
 kubeline-frontend apps have no PR-time render (render-wft runs on merge);
 they get a success status saying so, so the check never blocks them.
 
@@ -135,6 +141,13 @@ spec:
           name: ml-ci-build
           template: hera-render
           clusterScope: true
+        when: "{{`{{steps.detect-frontend.outputs.parameters.frontend}}`}} == hera"
+      # The pipeline linter runs next to the render and never fails it: its own
+      # status is the verdict, and a linter that cannot run must not hide a render.
+      - name: pipeline-lint
+        template: pipeline-lint
+        continueOn:
+          failed: true
         when: "{{`{{steps.detect-frontend.outputs.parameters.frontend}}`}} == hera"
     - - name: hera-enhance-gate
         template: hera-enhance-gate
@@ -300,6 +313,206 @@ spec:
         Path("/workspace/summary").write_text(
             f"WorkflowTemplate rendered: {len(steps)} steps, {len(names)} form params")
         GATEEOF
+      volumeMounts:
+      - name: workspace
+        mountPath: /workspace
+      - name: github-token
+        mountPath: /etc/github-token
+        readOnly: true
+
+  # ── pipeline-lint (PRD novelcore/kaos#1682 F-02) ───────────────────────────
+  # Three pods, split by trust like hera-render / hera-enhance-gate:
+  #   prepare (token)    pending status; fetch + verify the pinned kaos-lib wheel; turn the
+  #                      gitops pipeline-context into a catalogue (classes, HPC limits only,
+  #                      none of the context's endpoints or secret names)
+  #   run (TOKENLESS)    unzip the wheel, lint /workspace/repo as DATA (the linter parses,
+  #                      never imports or runs it), write report.json / report.md / status.txt
+  #   report (token)     the final status and the one PR comment, from the report files
+  # prepare and run never fail the run: a problem is written to /workspace/lint/failed and
+  # report turns it into an `error` status. The check is advisory (not in any ruleset).
+  - name: pipeline-lint
+    steps:
+    - - name: prepare
+        template: pipeline-lint-prepare
+        continueOn:
+          failed: true
+    - - name: run
+        template: pipeline-lint-run
+        continueOn:
+          failed: true
+    - - name: report
+        template: pipeline-lint-report
+
+  - name: pipeline-lint-prepare
+{{ include "kubecore-ci-workflows.githubReportRetry" . | indent 4 }}
+    securityContext:
+      runAsUser: 0
+      runAsGroup: 0
+    container:
+      image: {{ .Values.tooling.toolboxImage | default "alpine/k8s:1.36.4" }}
+      {{- include "kubecore-ci-workflows.resources" .Values.tooling.enhanceResources | nindent 6 }}
+      command: [sh, -c]
+      securityContext:
+        runAsUser: 0
+        runAsGroup: 0
+      args:
+      - |
+        set +e
+        TOKEN=$(cat /etc/github-token/token)
+{{ include "kubecore-ci-workflows.gitAuth" . | indent 8 }}
+{{ include "kubecore-ci-workflows.pipelineLintWheel" . | indent 8 }}
+        ORG="{{ .Values.github.org }}"
+        OWNER_REPO=$(echo "{{`{{workflow.parameters.repo_url}}`}}" | sed 's|https://github.com/||; s|\.git$||')
+        SHA="{{`{{workflow.parameters.commit_sha}}`}}"
+        API="https://api.github.com/repos/${OWNER_REPO}"
+        AUTH="Authorization: token ${TOKEN}"
+        ACCEPT="Accept: application/vnd.github+json"
+        ARGO_BASE="{{ .Values.argo.uiBaseUrl }}"
+        RUN_URL=""
+        [ -n "${ARGO_BASE}" ] && RUN_URL="${ARGO_BASE}/workflows/{{`{{workflow.namespace}}`}}/{{`{{workflow.name}}`}}?uid={{`{{workflow.uid}}`}}"
+{{ include "kubecore-ci-workflows.ghApi" . | indent 8 }}
+{{ include "kubecore-ci-workflows.pipelineLintStatus" . | indent 8 }}
+        mkdir -p "${LINT_DIR}"
+        rm -f "${LINT_DIR}/failed" "${LINT_DIR}/catalogue.json"
+        fail() { echo "$1" > "${LINT_DIR}/failed"; echo "pipeline-lint: $1" >&2; }
+
+        # The pending status first, so the check is visible while the other steps run. A
+        # GitHub outage here exits 75 and the step is retried in a new pod.
+        post_status pending "Checking pipeline.py" || exit $?
+
+        if [ -z "${LINT_WHEEL_URL}" ] || [ -z "${LINT_WHEEL_SHA256}" ]; then
+          fail "the chart pins no kaos-lib for the linter (pipelineLint.kaosLibWheelUrl)"; exit 0
+        fi
+        lint_fetch || { fail "the pinned kaos-lib could not be downloaded and verified"; exit 0; }
+        lint_unpack || { fail "the pinned kaos-lib could not be unpacked"; exit 0; }
+
+        # The catalogue: the project's compute classes and HPC limits, from the same gitops
+        # pipeline-context the render uses. Only those facts are kept, in a file the tokenless
+        # step reads. Without a context the linter uses its built-in defaults (and says so).
+        GITOPS_REPO="{{`{{workflow.parameters.gitops_repository}}`}}"
+        GITOPS_BRANCH="{{`{{workflow.parameters.gitops_branch}}`}}"
+        APP_NAME="{{`{{workflow.parameters.app_name}}`}}"
+        rm -rf /tmp/gitops
+        if git clone --quiet --depth=1 --branch "${GITOPS_BRANCH}" "https://github.com/${ORG}/${GITOPS_REPO}.git" /tmp/gitops; then
+          git_assert_no_token /tmp/gitops
+          CONTEXT_PATH=$(find /tmp/gitops -path "*/${APP_NAME}/${GITOPS_BRANCH}/pipeline-context.yaml" | head -1)
+        fi
+        if [ -n "${CONTEXT_PATH:-}" ] && [ -f "${CONTEXT_PATH}" ]; then
+          python3 -I "${LINT_CLI}" --context "${CONTEXT_PATH}" --export-catalogue "${LINT_DIR}/catalogue.json" \
+            || { rm -f "${LINT_DIR}/catalogue.json"; echo "pipeline-lint: the platform context could not be read: built-in defaults apply"; }
+        else
+          echo "pipeline-lint: no platform context found: built-in defaults apply"
+        fi
+        exit 0
+      volumeMounts:
+      - name: workspace
+        mountPath: /workspace
+      - name: github-token
+        mountPath: /etc/github-token
+        readOnly: true
+
+  # TOKENLESS: the only step that reads the developer's checkout. Like hera-render it mounts no
+  # token and no service-account token. Unlike hera-render it runs no client code at all: the
+  # linter parses pipeline.py, config/ and steps/ as text (python3 -I, started from /tmp so
+  # nothing in the checkout can be imported).
+  - name: pipeline-lint-run
+{{ include "kubecore-ci-workflows.preemptionRetry" . | indent 4 }}
+    automountServiceAccountToken: false
+    executor:
+      serviceAccountName: hera-render-exec
+    container:
+      image: {{ .Values.tooling.toolboxImage | default "alpine/k8s:1.36.4" }}
+      {{- include "kubecore-ci-workflows.resources" .Values.tooling.heraRenderResources | nindent 6 }}
+      command: [sh, -c]
+      args:
+      - |
+        set +e
+{{ include "kubecore-ci-workflows.pipelineLintWheel" . | indent 8 }}
+        OWNER_REPO=$(echo "{{`{{workflow.parameters.repo_url}}`}}" | sed 's|https://github.com/||; s|\.git$||')
+        SHA="{{`{{workflow.parameters.commit_sha}}`}}"
+        fail() { echo "$1" > "${LINT_DIR}/failed"; echo "pipeline-lint: $1" >&2; exit 0; }
+        if [ -f "${LINT_DIR}/failed" ]; then echo "pipeline-lint: skipped: $(cat "${LINT_DIR}/failed")"; exit 0; fi
+        lint_unpack || fail "the pinned kaos-lib failed verification"
+        CATALOGUE=""
+        [ -f "${LINT_DIR}/catalogue.json" ] && CATALOGUE="--catalogue ${LINT_DIR}/catalogue.json"
+        cd /tmp
+        python3 -I "${LINT_CLI}" /workspace/repo --format json --output "${LINT_DIR}/report.json" \
+          ${CATALOGUE} --expect-ruleset "${LINT_RULESET}"
+        RC=$?
+        # Exit 0: no errors, 2: errors found (also when a saved report is rendered). Anything else:
+        # the linter could not run.
+        lint_ok() { [ "$1" = 0 ] || [ "$1" = 2 ]; }
+        lint_ok "${RC}" || fail "the linter could not run (exit ${RC})"
+        python3 -I "${LINT_CLI}" --from-report "${LINT_DIR}/report.json" --format markdown \
+          --file-link-base "https://github.com/${OWNER_REPO}/blob/${SHA}/" --output "${LINT_DIR}/report.md"
+        lint_ok $? || fail "the report could not be rendered"
+        python3 -I "${LINT_CLI}" --from-report "${LINT_DIR}/report.json" --format status \
+          --output "${LINT_DIR}/status.txt"
+        lint_ok $? || fail "the report could not be summarised"
+        python3 -I "${LINT_CLI}" --from-report "${LINT_DIR}/report.json" --format text
+        exit 0
+      volumeMounts:
+      - name: workspace
+        mountPath: /workspace
+      # NO github-token mount. This is the trust boundary.
+
+  - name: pipeline-lint-report
+{{ include "kubecore-ci-workflows.githubReportRetry" . | indent 4 }}
+    container:
+      image: {{ .Values.tooling.toolboxImage | default "alpine/k8s:1.36.4" }}
+      {{- include "kubecore-ci-workflows.resources" .Values.tooling.resources | nindent 6 }}
+      command: [sh, -c]
+      args:
+      - |
+        set +e
+        TOKEN=$(cat /etc/github-token/token)
+        LINT_DIR=/workspace/lint
+        OWNER_REPO=$(echo "{{`{{workflow.parameters.repo_url}}`}}" | sed 's|https://github.com/||; s|\.git$||')
+        SHA="{{`{{workflow.parameters.commit_sha}}`}}"
+        PR="{{`{{workflow.parameters.pr_number}}`}}"
+        API="https://api.github.com/repos/${OWNER_REPO}"
+        AUTH="Authorization: token ${TOKEN}"
+        ACCEPT="Accept: application/vnd.github+json"
+        ARGO_BASE="{{ .Values.argo.uiBaseUrl }}"
+        RUN_URL=""
+        [ -n "${ARGO_BASE}" ] && RUN_URL="${ARGO_BASE}/workflows/{{`{{workflow.namespace}}`}}/{{`{{workflow.name}}`}}?uid={{`{{workflow.uid}}`}}"
+{{ include "kubecore-ci-workflows.ghApi" . | indent 8 }}
+{{ include "kubecore-ci-workflows.pipelineLintStatus" . | indent 8 }}
+        # The linter did not produce a report: say so with an `error` status (never a silent pending).
+        if [ -f "${LINT_DIR}/failed" ] || [ ! -s "${LINT_DIR}/report.json" ] || [ ! -s "${LINT_DIR}/status.txt" ]; then
+          WHY=$(cat "${LINT_DIR}/failed" 2>/dev/null || echo "an earlier step did not finish")
+          post_status error "pipeline-lint could not run: ${WHY}"
+          exit 1
+        fi
+        ERRORS=$(jq -r '.summary.errors' "${LINT_DIR}/report.json")
+        if [ "${ERRORS}" = 0 ]; then STATE=success; else STATE=failure; fi
+        post_status "${STATE}" "$(cat "${LINT_DIR}/status.txt")"
+        RC=$?
+
+        # ONE comment per pull request, found by its marker and updated in place (the marker
+        # convention of the shared run report). A run without a PR number posts status only.
+        MARKER="<!-- kubecore-ci-report:pipeline-lint -->"
+        if [ -n "${PR}" ]; then
+          {
+            echo "${MARKER}"
+            cat "${LINT_DIR}/report.md"
+            [ -n "${RUN_URL}" ] && printf '\n[Argo run](%s)\n' "${RUN_URL}"
+          } > /tmp/body.md
+          PAYLOAD=$(jq -Rs '{body: .}' /tmp/body.md)
+          CID=""; PAGE=1
+          while [ -z "${CID}" ] && [ "${PAGE}" -le 10 ]; do
+            gh_api GET "${API}/issues/${PR}/comments?per_page=100&page=${PAGE}" || { RC=$?; break; }
+            CID=$(printf '%s' "${GH_BODY}" | jq -r --arg m "${MARKER}" '[.[]? | objects | select((.body // "") | startswith($m))] | .[0].id // empty')
+            [ "$(printf '%s' "${GH_BODY}" | jq 'length')" -lt 100 ] && break
+            PAGE=$((PAGE + 1))
+          done
+          if [ -n "${CID}" ]; then
+            gh_api PATCH "${API}/issues/comments/${CID}" "${PAYLOAD}" && echo "Updated pipeline-lint comment ${CID} on PR #${PR}" || RC=$?
+          elif [ "${RC}" = 0 ]; then
+            gh_api POST "${API}/issues/${PR}/comments" "${PAYLOAD}" && echo "Posted pipeline-lint comment on PR #${PR}" || RC=$?
+          fi
+        fi
+        exit "${RC}"
       volumeMounts:
       - name: workspace
         mountPath: /workspace

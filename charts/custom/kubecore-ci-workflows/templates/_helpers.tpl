@@ -787,3 +787,62 @@ cat > /tmp/dataset-choices.py <<'DATASETCHOICESEOF'
 {{ .Files.Get "files/dataset-choices.py" }}
 DATASETCHOICESEOF
 {{- end }}
+
+{{/*
+Pipeline lint (PRD novelcore/kaos#1682 F-02): the pinned kaos-lib wheel the PR gate runs.
+The wheel is NOT pip-installed: lint_fetch downloads the one pinned file from the platform's
+public package index and checks its sha256; lint_unpack unzips it. kaos_lib/lint/standalone.py
+then runs the linter with the standard library and PyYAML alone (the toolbox image has no
+requests or packaging), so the gate runs the very module `kaosctl lint` runs on a laptop.
+Run it as `python3 -I "$LINT_CLI" ...` from outside the app checkout.
+Caller: python3 (tooling.toolboxImage), sha256sum; /workspace mounted.
+*/}}
+{{- define "kubecore-ci-workflows.pipelineLintWheel" -}}
+LINT_WHEEL_URL="{{ .Values.pipelineLint.kaosLibWheelUrl }}"
+LINT_WHEEL_SHA256="{{ .Values.pipelineLint.kaosLibWheelSha256 }}"
+LINT_RULESET="{{ .Values.pipelineLint.rulesetVersion }}"
+LINT_DIR=/workspace/lint
+lint_verify() {
+  echo "${LINT_WHEEL_SHA256}  ${LINT_DIR}/kaos-lib.whl" | sha256sum -c - >/dev/null 2>&1
+}
+lint_fetch() {
+  _n=1
+  while [ "${_n}" -le 3 ]; do
+    python3 - "${LINT_WHEEL_URL}" "${LINT_DIR}/kaos-lib.whl" <<'FETCHEOF' && lint_verify && return 0
+import sys, urllib.request
+with urllib.request.urlopen(sys.argv[1], timeout=60) as r, open(sys.argv[2], "wb") as f:
+    f.write(r.read())
+FETCHEOF
+    _n=$((_n + 1)); sleep 5
+  done
+  return 1
+}
+lint_unpack() {
+  lint_verify || return 1
+  python3 - "${LINT_DIR}/kaos-lib.whl" /tmp/kaos-lib-lint <<'UNPACKEOF'
+import sys, zipfile
+zipfile.ZipFile(sys.argv[1]).extractall(sys.argv[2])
+UNPACKEOF
+  LINT_CLI=/tmp/kaos-lib-lint/kaos_lib/lint/standalone.py
+}
+{{- end }}
+
+{{/*
+The `pipeline-lint` commit status on the PR head SHA. post_status STATE DESCRIPTION: one status
+(context pipeline-lint, target_url = this Argo run), through gh_api (retries transient answers,
+returns 75 when GitHub stays unavailable). The description is cut to GitHub's 140 characters.
+Caller: ghApi included; API, AUTH, ACCEPT, SHA, RUN_URL set; image has curl and jq.
+*/}}
+{{- define "kubecore-ci-workflows.pipelineLintStatus" -}}
+post_status() {
+  _payload=$(jq -nc --arg s "$1" --arg d "$(printf '%s' "$2" | cut -c1-140)" --arg u "${RUN_URL}" \
+    '{state: $s, description: $d, context: "pipeline-lint"} + (if $u != "" then {target_url: $u} else {} end)')
+  if gh_api POST "${API}/statuses/${SHA}" "${_payload}"; then
+    echo "Posted commit status pipeline-lint=$1 on ${OWNER_REPO}@${SHA}"
+  else
+    _rc=$?
+    echo "ERROR: commit status pipeline-lint=$1 not posted (HTTP ${GH_CODE})" >&2
+    return "${_rc}"
+  fi
+}
+{{- end }}
