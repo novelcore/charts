@@ -48,7 +48,7 @@ ALL_SCRIPTS=$(yq -o=json 'select(.kind == "WorkflowTemplate" or .kind == "Cluste
   | "\($wf)/\($t)/\(.n) \(((.c.args // []) | join("\n")) | test("(?m)^git\\(\\) \\{"))"')
 NO_WRAPPER=$(printf '%s\n' "$ALL_SCRIPTS" | awk '$2 != "true" {print $1}' | tr '\n' ' ')
 expect_eq "${NO_WRAPPER:-none}" "none" "every step that runs a networked git command defines the gitAuth wrapper"
-expect_eq "$(printf '%s\n' "$ALL_SCRIPTS" | grep -c true)" "15" "the wrapper covers all 15 networked git steps"
+expect_eq "$(printf '%s\n' "$ALL_SCRIPTS" | grep -c true)" "16" "the wrapper covers all 16 networked git steps"
 
 # ── executed: the clone steps leave no credential in the build context ───────
 

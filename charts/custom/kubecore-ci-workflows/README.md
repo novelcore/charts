@@ -25,6 +25,25 @@ ClusterWorkflowTemplates for the platform CI: `ml-ci-build`, `ml-ci-reconcile`, 
 
 **Lock holders.** A build that hangs holds its app's lock until the build ends (existing behaviour, unchanged); the sync behind it fails at its deadline with `Step exceeded its deadline` on the `decide` node.
 
+## pipeline-lint: the pipeline linter on every PR of a Hera ML app
+
+`ml-ci-pr-render` runs the kaos-lib pipeline linter (PRD novelcore/kaos#1682, F-02) next to the `wft-render` check, for apps with a `pipeline.py`. It posts a **`pipeline-lint`** commit status on the PR head (errors fail it, warnings and infos never do) and **one PR comment**, found by its marker `<!-- kubecore-ci-report:pipeline-lint -->` and updated in place on every push. It is **advisory**: the chart does not add it to any ruleset (PRD OQ-12 decides that), and a linter that cannot run never turns `wft-render` red.
+
+| Step | Trust | What it does |
+|---|---|---|
+| `pipeline-lint-prepare` | holds the GitHub token | posts `pending`; downloads the pinned kaos-lib wheel and checks its sha256; turns the gitops `pipeline-context.yaml` into a **catalogue** (the project's compute classes and HPC (Slurm) limits only: no endpoint, no secret name) |
+| `pipeline-lint-run` | **tokenless**, reads the checkout | unzips the wheel and lints `/workspace/repo` as data: the linter parses `pipeline.py`, `config/` and `steps/`, it never imports or runs them. Writes `report.json`, `report.md`, `status.txt` |
+| `pipeline-lint-report` | holds the token | posts the final status (`success`, `failure`, or `error` when the check could not run) and the one comment |
+
+**Pin.** `pipelineLint.kaosLibWheelUrl` and `pipelineLint.kaosLibWheelSha256` name one exact kaos-lib wheel from the platform's package index; it is downloaded, verified and unzipped, never `pip install`ed (the toolbox image has Python and PyYAML but not `requests` or `packaging`, so the wheel's `kaos_lib/lint/standalone.py` runs the linter without importing the rest of kaos-lib). `pipelineLint.rulesetVersion` is the rule set of that release: the run refuses a different one, so the gate and `kaosctl lint` of the same release give the same JSON. Bump the three values together with each kaos-lib release.
+
+**Without a context.** If the gitops context cannot be read the linter runs with its built-in defaults and the report says so (`catalogue.source`); the check that needs the project's classes (`L-E03`) is then listed as skipped, never as passed.
+
+```bash
+bash charts/custom/kubecore-ci-workflows/tests/pipeline-lint/run.sh /tmp/rendered.yaml                        # stand-in wheel, no network
+KAOS_LIB_WHEEL=/path/kaos_lib-X-py3-none-any.whl bash .../tests/pipeline-lint/run.sh /tmp/rendered.yaml       # the real linter
+```
+
 ## Tests
 
 ```bash

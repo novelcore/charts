@@ -341,6 +341,18 @@ pendingReaper:
 kaosLib:
   changelogUrl: https://raw.githubusercontent.com/kaos-io/kaos-lib/main/CHANGELOG.md
 
+# Pipeline lint (PRD novelcore/kaos#1682 F-02): ml-ci-pr-render runs the kaos-lib linter on every
+# PR of a Hera ML app and posts the `pipeline-lint` status plus one PR comment. The linter is
+# pinned like the other tools: ONE exact kaos-lib wheel from the platform's public package index,
+# verified by sha256 and unzipped, never pip-installed (a wheel of the kaos-lib-rc or kaos-lib
+# index; the file name carries the version). Bump both values together with a kaos-lib release;
+# rulesetVersion must be the rule set of that release (the run refuses a different one, so a
+# gate and `kaosctl lint` of the same release always agree).
+pipelineLint:
+  kaosLibWheelUrl: "https://europe-west1-python.pkg.dev/kaos-dev-511509/kaos-lib-rc/kaos-lib/kaos_lib-0.4.0rc19-py3-none-any.whl"
+  kaosLibWheelSha256: "5e1d12d0400b6dce84f434721ec42cf34e44f42220e33863637571c217058923"
+  rulesetVersion: "1.0.0"
+
 # Platform enhancer (kubecore-operator#1161): ml-ci-build and ml-ci-pr-render run
 # kubecore.enhance from THIS pinned copy (the template repo's kubecore/), overlaid
 # on the app's vendored kubecore/ (kept for local dev only). Bump `ref` to roll
