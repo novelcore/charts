@@ -4156,13 +4156,16 @@ commitServer:
 rollouts:
   # -- Enable Argo Rollouts installation
   enabled: true
-  # NOTE: only `rollouts.enabled` is read (it is the dependency condition). The
-  # controller/dashboard keys below are NOT passed to the argo-rollouts subchart,
-  # whose values live under the top-level `argo-rollouts:` key
-  # (see https://github.com/argoproj/argo-helm/tree/main/charts/argo-rollouts).
+  # -- Argo Rollouts configuration
+  # All argo-rollouts chart values can be configured here
+  # See: https://github.com/argoproj/argo-helm/tree/main/charts/argo-rollouts
   controller:
-    # -- Unused placeholder (set argo-rollouts.controller.* instead)
+    # -- Enable Argo Rollouts controller
     enabled: true
+    # -- Argo Rollouts controller configuration
+    # All controller values can be configured here
   dashboard:
-    # -- Unused placeholder; the dashboard is off by default, set argo-rollouts.dashboard.enabled=true
+    # -- Enable Argo Rollouts dashboard
     enabled: true
+    # -- Argo Rollouts dashboard configuration
+    # All dashboard values can be configured here
