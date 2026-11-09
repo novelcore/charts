@@ -42,8 +42,10 @@ helm install my-release novelcore/CHART_NAME -f values.yaml
 ├── charts/
 │   ├── custom/         # Custom Novelcore charts
 │   └── external/       # Synced external charts
+│   └── kubecore-observability-rules/  # First-party rules/dashboards chart (outside charts/custom)
+├── hack/              # Rules/dashboards generator
 ├── scripts/           # Utility scripts
-├── scripts/synch-config.yaml   # External chart sync configuration
+├── scripts/synch-config.yaml   # External chart sync record (not read by sync-chart.sh)
 └── ct.yaml           # Chart testing configuration
 ```
 
@@ -58,8 +60,8 @@ helm install my-release novelcore/CHART_NAME -f values.yaml
    ```
 
 2. Develop and test your chart locally
-3. Commit and push to main branch
-4. The CI/CD pipeline will automatically package and publish your chart
+3. Set the chart `version` in `Chart.yaml` (any change to a chart directory needs a version bump, enforced by `ct lint`) and open a PR to `main`
+4. Once `charts/validate` reports success and the PR is merged, `charts/release` packages and publishes your chart
 
 ### Chart Standards
 
@@ -92,18 +94,20 @@ External charts are synced by hand; there is no scheduled job.
 To manually sync a specific chart:
 
 ```bash
-# Sync latest version
-./scripts/sync-chart.sh bitnami postgresql
+# Sync latest version (the upstream repo must already be added: helm repo add <name> <url>)
+./scripts/sync-chart.sh <repo-name> <chart-name>
 
 # Sync specific version
-./scripts/sync-chart.sh bitnami postgresql 12.1.5
+./scripts/sync-chart.sh <repo-name> <chart-name> <version>
 ```
+
+`scripts/sync-chart.sh` takes the repository, chart and version as arguments; it does not read `scripts/synch-config.yaml`.
 
 ### Adding New External Charts
 
-1. Edit `scripts/synch-config.yaml`
+1. Edit `scripts/synch-config.yaml` (the record of tracked charts)
 2. Add the repository (if not already present) and chart details
-3. Run `scripts/sync-chart.sh` and open a PR
+3. `helm repo add` the repository locally, run `scripts/sync-chart.sh <repo> <chart> [version]` and open a PR
 
 ## CI/CD
 
@@ -111,7 +115,7 @@ CI runs in Argo Workflows (the repository has no GitHub Actions). It is defined 
 under `kubetools/system/argo-workflows/ci/overlays/dev/charts-ci/` and reports as commit statuses.
 
 ### `charts/validate` (every open PR)
-- Runs the chart test suites, `ct lint` and renders every changed chart
+- Runs the chart test suites (`charts/custom/*/tests`), `ct lint` (including the `Chart.yaml` version-increment check) and renders every changed chart
 - The status link opens the run in the Argo Workflows UI
 
 ### `charts/release` (every commit on `main`)
@@ -143,9 +147,9 @@ For production use, consider creating a GitHub App with read access to the repos
 
 ## Security
 
-- All charts are scanned for security vulnerabilities using Trivy
-- External charts are reviewed before syncing
-- GitHub secrets are used for sensitive operations
+- External charts are reviewed via PR before syncing
+- CI credentials are the org GitHub App token mounted in the Argo CI pods; none live in this repository
+- Chart CVE scanning is done on demand by the `.claude/agents/chart-cve-*` agents (Trivy), not by `charts/validate`
 
 ## Contributing
 
@@ -154,10 +158,7 @@ For production use, consider creating a GitHub App with read access to the repos
 3. Make your changes
 4. Submit a pull request
 
-All PRs must pass:
-- Chart linting
-- Security scanning
-- Installation testing (if applicable)
+All PRs must pass the `charts/validate` status (chart test suites, `ct lint`, render of changed charts). Merge only after it has reported success; a PR with no status has not been checked.
 
 ## License
 

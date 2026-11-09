@@ -6,10 +6,10 @@ This is a **Helm Charts Repository** that manages both **custom charts** and **e
 
 ### Key Capabilities
 - **Custom Chart Development**: Create and maintain organization-specific Helm charts
-- **External Chart Curation**: Automatically sync and manage external charts from upstream repositories
-- **Automated CI/CD**: Full automation for chart validation, packaging, and publishing
-- **Security Scanning**: Built-in security scanning with Trivy
-- **Chart Testing**: Comprehensive testing with chart-testing (ct) tool
+- **External Chart Curation**: Manually sync (`scripts/sync-chart.sh`) and manage external charts from upstream repositories
+- **Automated CI/CD**: Argo Workflows validate PRs (`charts/validate`) and publish `main` (`charts/release`)
+- **Security Scanning**: On-demand chart CVE scans via the `.claude/agents/chart-cve-*` agents (Trivy)
+- **Chart Testing**: chart-testing (`ct lint`) plus per-chart test suites under `charts/custom/*/tests`
 
 ## Repository Structure
 
@@ -20,7 +20,10 @@ charts/
 │   └── external/       # Synced external charts from third parties
 ├── scripts/
 │   ├── sync-chart.sh   # Manual chart synchronization script
-│   └── synch-config.yaml # External chart sync configuration
+│   ├── validate-charts.sh # Local validation of all charts
+│   ├── update-gitops-promoter.sh # Custom updater for the gitops-promoter chart
+│   └── synch-config.yaml # Record of tracked external charts (not read by sync-chart.sh)
+├── hack/rules-and-dashboards/ # Generator for kubecore-observability-rules
 ├── (no .github/: CI runs in Argo Workflows, defined in novelcore/kaos)
 ├── init.sh            # Repository initialization script
 └── README.md          # Main documentation
@@ -69,7 +72,7 @@ All custom charts MUST include:
 
 ### Understanding External Chart Sync
 
-External charts are managed through `scripts/synch-config.yaml` configuration file:
+`scripts/synch-config.yaml` records the tracked external charts (the sync script does not read it; run `helm repo add` for the upstream repo first):
 
 ```yaml
 repositories:
@@ -130,7 +133,7 @@ For immediate sync needs, use the sync script:
 There are no GitHub Actions. CI runs in Argo Workflows (defined in `novelcore/kaos`,
 `kubetools/system/argo-workflows/ci/overlays/dev/charts-ci/`) and reports as commit statuses.
 
-- `charts/validate` on every open PR: chart test suites, `ct lint`, render of changed charts.
+- `charts/validate` on every open PR: chart test suites, `ct lint` (version-increment check: any change under a chart directory needs a `Chart.yaml` version bump), render of changed charts. Merge only after it reports success.
 - `charts/release` on every commit on `main`: package all charts, update `gh-pages` and the index at
   `https://novelcore.github.io/charts/`, push `kubecore-observability-rules` to GHCR when a token exists.
 - External chart sync is manual (`scripts/sync-chart.sh`); there is no scheduled job.
@@ -171,7 +174,7 @@ helm install my-release novelcore/<chart-name>
 ## Security Considerations
 
 - **Private Repository**: Requires GitHub authentication for access
-- **Security Scanning**: All charts scanned with Trivy for vulnerabilities
+- **Security Scanning**: on-demand chart CVE scans via the `.claude/agents/chart-cve-*` agents (Trivy)
 - **Credential Management**: Never commit sensitive files (*.pem, *.key, secrets.yaml)
 - **Access Control**: Use GitHub Personal Access Tokens or GitHub Apps
 
@@ -185,7 +188,7 @@ helm install my-release novelcore/<chart-name>
 ### Build Failures
 - Check chart lint errors: `helm lint charts/<type>/<chart-name>`
 - Verify all dependencies are available
-- Review workflow logs for specific errors
+- Open the Argo run linked from the `charts/validate` status for specific errors
 
 ### Repository Access Issues
 - Verify GitHub token has proper permissions
@@ -195,11 +198,11 @@ helm install my-release novelcore/<chart-name>
 ## Best Practices for Cursor Agent
 
 1. **Always validate charts locally** before committing
-2. **Use the sync script** for external chart management rather than manual copying
+2. **Use the sync script** for external chart management rather than manual copying (add the Helm repo first; the script does not read `synch-config.yaml`)
 3. **Follow the established directory structure** strictly
 4. **Include comprehensive documentation** for any new charts
 5. **Test chart installations** in development environments
-6. **Monitor CI/CD workflows** for any failures
+6. **Monitor the `charts/validate` / `charts/release` statuses** (Argo runs) for any failures
 7. **Keep sync configuration updated** with proper versions
 8. **Review security scan results** and address vulnerabilities
 
@@ -230,4 +233,4 @@ ct lint --charts <chart-path>
 ct install --charts <chart-path>
 ```
 
-This repository follows enterprise-grade practices for Helm chart management with full automation, security scanning, and proper versioning controls.
+This repository packages and publishes charts automatically from `main` and gates PRs on `charts/validate`.

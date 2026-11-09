@@ -1,20 +1,16 @@
 # Argo CD with Argo Rollouts
 
-This is a custom Helm chart that combines Argo CD with Argo Rollouts for a complete GitOps and progressive delivery solution.
+This is a custom Helm chart intended to combine Argo CD with Argo Rollouts (see the limitation below).
 
 ## Overview
 
-This chart installs:
-- **Argo CD**: Declarative GitOps continuous delivery tool for Kubernetes
-- **Argo Rollouts**: Advanced deployment strategies for Kubernetes
+This chart declares two dependencies (`Chart.yaml`):
+- `redis-ha` 4.33.7 (condition `redis-ha.enabled`)
+- `argo-rollouts` 2.40.3, taken from this repository's own index (`https://novelcore.github.io/charts/`, the synced chart in `charts/external/argo-rollouts`; condition `rollouts.enabled`)
 
-## Features
+and a `values.yaml` copied from the upstream argo-cd chart 8.2.5 (Argo CD v3.0.12, see `syncMetadata` in `Chart.yaml`).
 
-- ✅ Argo CD with all standard features
-- ✅ Argo Rollouts controller and dashboard
-- ✅ Pre-configured resource customizations for Rollouts
-- ✅ Single installation for both tools
-- ✅ Consistent versioning and management
+**Current limitation.** The chart has no `templates/` directory, so rendering it produces only the dependency resources. It does not install Argo CD itself. Install Argo CD from the upstream `argo/argo-cd` chart (or `charts/external`) until the templates are restored, and use this chart, or `novelcore/argo-rollouts` directly, for Argo Rollouts.
 
 ## Installation
 
@@ -23,12 +19,12 @@ This chart installs:
 helm repo add novelcore https://novelcore.github.io/charts/
 helm repo update
 
-# Install Argo CD with Rollouts
 helm install argocd-with-rollouts novelcore/argo-cd-with-rollouts \
   --namespace argocd \
-  --create-namespace \
-  --set rollouts.enabled=true
+  --create-namespace
 ```
+
+`rollouts.enabled` defaults to `true`.
 
 ## Configuration
 
@@ -36,21 +32,19 @@ helm install argocd-with-rollouts novelcore/argo-cd-with-rollouts \
 
 ```yaml
 rollouts:
-  enabled: true  # Enable Argo Rollouts
-controller:
-    enabled: true  # Enable Rollouts controller
-  dashboard:
-    enabled: true  # Enable Rollouts dashboard
+  enabled: true  # install the argo-rollouts dependency
 ```
 
-### Customize Rollouts Configuration
+### Customize Rollouts
+
+Values for the dependency go under its chart name, `argo-rollouts` (not under `rollouts`). The `rollouts.controller.enabled` and `rollouts.dashboard.enabled` keys in `values.yaml` are not read by the dependency; the dashboard is off in the upstream chart unless you set `argo-rollouts.dashboard.enabled: true`.
 
 ```yaml
 rollouts:
   enabled: true
-controller:
-    # All argo-rollouts controller values can be configured here
-    replicaCount: 1
+argo-rollouts:
+  controller:
+    replicas: 1
     resources:
       limits:
         cpu: 500m
@@ -59,16 +53,12 @@ controller:
         cpu: 250m
         memory: 256Mi
   dashboard:
-    # All argo-rollouts dashboard values can be configured here
-    replicaCount: 1
-  ingress:
     enabled: true
-      className: nginx
 ```
 
 ## Usage
 
-### Access Argo CD
+### Access Argo CD (when installed by the upstream chart)
 
 ```bash
 # Port forward to Argo CD server
@@ -81,24 +71,13 @@ kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.pas
 ### Access Argo Rollouts Dashboard
 
 ```bash
-# Port forward to Rollouts dashboard
+# Port forward to Rollouts dashboard (needs argo-rollouts.dashboard.enabled=true)
 kubectl port-forward svc/argo-rollouts-dashboard -n argocd 3100:3100
 ```
 
-## Benefits
+## Notes
 
-1. **Unified Installation**: Install both Argo CD and Rollouts in one command
-2. **Version Compatibility**: Ensures compatible versions of both tools
-3. **Simplified Management**: Single chart to manage both tools
-4. **Pre-configured**: Rollouts are already configured to work with Argo CD
-
-## Differences from Standard Argo CD
-
-This chart extends the standard Argo CD chart with:
-- Argo Rollouts as a dependency
-- Pre-configured resource customizations for Rollouts
-- Simplified installation for both tools
-- Consistent versioning
+- Argo CD config in `values.yaml` includes `resource.customizations.ignoreResourceUpdates.*` entries for Rollouts (`argoproj.io_Rollout`), which only take effect when an Argo CD chart consumes these values.
 
 ## Support
 
