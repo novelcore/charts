@@ -128,7 +128,7 @@ This custom chart wraps the GitOps Promoter from argoproj-labs. Special handling
 
 - **Custom update script**: `scripts/update-gitops-promoter.sh` downloads upstream manifests and converts to Helm templates
 - **CRD management**: the 12 CRDs live in `crds/promoter-crds.yaml` (Helm installs them first and never deletes them); `templates/crds.yaml` is disabled (`{{- if false }}`) and `crds.keep` has no effect
-- **Backup on update**: Script creates timestamped backup before updating
+- **Backup on update**: Script creates a timestamped backup before updating (current chart 0.8.4, promoter v0.22.6)
 - **Cleanup script**: `scripts/cleanup-gitops-promoter-crds.sh` for CRD removal (its CRD list is outdated and misses several of the 12 current CRDs)
 
 When updating: use the update script rather than manual edits, it handles version bumps, image updates, and manifest conversions automatically.
