@@ -138,9 +138,9 @@ When updating: use the update script rather than manual edits, it handles versio
 This custom chart bundles Argo CD with Argo Rollouts as a dependency:
 
 - **Dependency**: Pulls argo-rollouts from `https://novelcore.github.io/charts/` (self-referential) and redis-ha
-- **Conditional rollouts**: Enabled via `rollouts.enabled` in values; subchart values go under `argo-rollouts:`
+- **Conditional rollouts**: Enabled via `rollouts.enabled` in values
 - **Sync metadata**: Tracks upstream argo-cd chart version from Argo Helm repo
-- **No templates**: the chart has no `templates/` directory, so it does not render Argo CD itself
+- **No templates**: the chart has no `templates/` directory, so it does not render Argo CD itself; its README still describes an Argo CD + Rollouts install, and `rollouts.controller.*`/`rollouts.dashboard.*` in values.yaml are not passed to the subchart (subchart values go under `argo-rollouts:`). `ct lint` cannot build its dependencies (redis-ha and novelcore repos are not in `ct.yaml`), so any edit under this directory fails `charts/validate` until that is fixed
 
 ## Special Chart: kubecore-ci-workflows
 
