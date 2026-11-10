@@ -349,9 +349,9 @@ kaosLib:
 # rulesetVersion must be the rule set of that release (the run refuses a different one, so a
 # gate and `kaosctl lint` of the same release always agree).
 pipelineLint:
-  kaosLibWheelUrl: "https://europe-west1-python.pkg.dev/kaos-dev-511509/kaos-lib-rc/kaos-lib/kaos_lib-0.4.0rc22-py3-none-any.whl"
-  kaosLibWheelSha256: "dc7a04a75ad52fe67bc31eda28db4d0cbaf41058e79d2d2e637dea4bdd2d3e5d"
-  rulesetVersion: "1.2.0"
+  kaosLibWheelUrl: "https://europe-west1-python.pkg.dev/kaos-dev-511509/kaos-lib-rc/kaos-lib/kaos_lib-0.4.0rc25-py3-none-any.whl"
+  kaosLibWheelSha256: "45d1cdd7d43df75adc54cebe63b6af7947c9c17e26dc43d066d7b84e7a5ddc25"
+  rulesetVersion: "1.3.0"
 
 # Rendered WorkflowTemplate size guard (ml-ci-build hera-enhance-commit and ml-ci-pr-render
 # hera-enhance-gate): a render above this many KiB fails with a clear message. The etcd
@@ -367,4 +367,4 @@ wftSize:
 # (kubecore-operator#1199). Must be a full 40-character commit sha.
 platformEnhancer:
   repo: novelcore/hera-pipeline-template
-  ref: 032e00af2a56391083123c93cfcbdd293ee5fdc9
+  ref: d167461ad4b4876b4ead4bf331c7fcf1e505f708
