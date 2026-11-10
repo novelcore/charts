@@ -211,7 +211,8 @@ OVERLAYEOF
 ( cd /tmp/kubecore-enhancer && python3 -m kubecore.enhance \
     --raw /workspace/out/raw-workflow-template.yaml \
     --context /tmp/context.yaml \
-    --output /workspace/out/workflow-template.yaml )
+    --output /workspace/out/workflow-template.yaml \
+    --helper-configmap /workspace/out/ckpt-helper.yaml )
 python3 - /workspace/out/workflow-template.yaml /tmp/context.yaml <<'STEPTOKEOF'
 import sys
 import yaml
@@ -221,6 +222,33 @@ wft, ctx = yaml.safe_load(open(wft_path)), yaml.safe_load(open(ctx_path)) or {}
 if add_step_token(wft, ctx):
     yaml.dump(wft, open(wft_path, "w"), default_flow_style=False, allow_unicode=True, sort_keys=False)
 STEPTOKEOF
+{{- end }}
+
+{{/*
+Size guard for a rendered WorkflowTemplate. Run as `python3 - <wft> <summary|""> <<'EOF'`.
+Fails the render, with the biggest templates named, when the file exceeds
+wftSize.limitKiB (the etcd object limit is ~1.5 MiB; Argo CD applies the
+object server-side, so the 256 KiB last-applied annotation limit no longer
+applies, but a render near etcd's limit would stop updating the app silently).
+Prints `wft-size: <bytes>`, and appends the size to the PR status summary file.
+*/}}
+{{- define "kubecore-ci-workflows.wftSizeGuard" -}}
+import json, sys, yaml
+wft_path, summary = sys.argv[1], sys.argv[2]
+limit = {{ int .Values.wftSize.limitKiB }} * 1024
+raw = open(wft_path, "rb").read()
+size = len(raw)
+print(f"wft-size: {size} bytes ({size / 1024:.1f} KiB, limit {limit // 1024} KiB)")
+if summary:
+    open(summary, "a").write(f", {size / 1024:.0f} KiB")
+if size > limit:
+    spec = yaml.safe_load(raw)["spec"]
+    per = sorted(((len(json.dumps(t)), t["name"]) for t in spec.get("templates", [])), reverse=True)
+    print(f"GATE FAIL: the rendered WorkflowTemplate is {size / 1024:.0f} KiB, over the {limit // 1024} KiB limit "
+          "(etcd stores an object of at most ~1.5 MiB; past that Argo CD cannot apply the pipeline and the app stops updating).")
+    print("Biggest templates: " + ", ".join(f"{n} {b / 1024:.1f} KiB" for b, n in per[:5]))
+    print("Fix: split the pipeline into smaller ones, or remove steps; platform-injected per-step blocks are already shared.")
+    sys.exit(1)
 {{- end }}
 
 {{/*

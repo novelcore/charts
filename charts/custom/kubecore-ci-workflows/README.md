@@ -46,6 +46,18 @@ bash charts/custom/kubecore-ci-workflows/tests/pipeline-lint/run.sh /tmp/rendere
 KAOS_LIB_WHEEL=/path/kaos_lib-X-py3-none-any.whl bash .../tests/pipeline-lint/run.sh /tmp/rendered.yaml       # the real linter
 ```
 
+## Rendered WorkflowTemplate size
+
+A Hera app's rendered WorkflowTemplate used to carry the 19 KB checkpoint helper twice per GPU step; five parallel GPU steps pushed it past the 256 KiB `kubectl.kubernetes.io/last-applied-configuration` limit and Argo CD stopped applying it. Now:
+
+- The helper source ships once per app as the ConfigMap `{app}-ckpt-helper` (`ckpt-helper.yaml`, committed beside `workflow-template.yaml`); steps mount it read-only.
+- `wftSize.limitKiB` (900) is enforced by `hera-enhance-commit` and the PR gate `hera-enhance-gate`; the size is recorded as `wft-bytes` in `{app}-pipeline-images`.
+- The ml ApplicationSet created by the kubecore-operator syncs with `ServerSideApply=true`.
+
+```bash
+bash charts/custom/kubecore-ci-workflows/tests/wft-size/run.sh /tmp/rendered.yaml
+```
+
 ## Tests
 
 ```bash

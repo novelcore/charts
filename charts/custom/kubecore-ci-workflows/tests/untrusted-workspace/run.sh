@@ -110,6 +110,7 @@ p = argparse.ArgumentParser()
 for a in ("--raw", "--context", "--output"):
     p.add_argument(a, required=True)
 p.add_argument("--catalog", default="")
+p.add_argument("--helper-configmap", default="")
 args = p.parse_args()
 wft = yaml.safe_load(open(args.raw))
 wft.setdefault("metadata", {})["annotations"] = {"enhanced-by": "platform", "yaml-from": yaml.__file__,
@@ -143,7 +144,7 @@ echo "namespace: proj-ml" > "$T/tmp/context.yaml"
 # enhance_section WORKFLOW TEMPLATE: from the enhancer unpack through the
 # enhance call, with the download served from the fixture tarball.
 enhance_section() {
-  script_of "$1" "$2" | awk "/python3 - <<'OVERLAYEOF'/ {on=1} on {print} on && /--output \/workspace\/out\/workflow-template.yaml \)/ {exit}" \
+  script_of "$1" "$2" | awk "/python3 - <<'OVERLAYEOF'/ {on=1} on {print} on && /--helper-configmap \/workspace\/out\/ckpt-helper.yaml \)/ {exit}" \
     | sed -e "s#/tmp/kubecore-enhancer#$T/tmp/kubecore-enhancer#g" \
           -e "s#/tmp/context.yaml#$T/tmp/context.yaml#g" \
           -e "s#/workspace/#$T/workspace/#g" \

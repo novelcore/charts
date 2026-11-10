@@ -313,6 +313,11 @@ spec:
         Path("/workspace/summary").write_text(
             f"WorkflowTemplate rendered: {len(steps)} steps, {len(names)} form params")
         GATEEOF
+        # GATE 3: size. Over wftSize.limitKiB the merge build would refuse the render too;
+        # on success the size is appended to the status summary.
+        python3 - /workspace/out/workflow-template.yaml /workspace/summary <<'WFTSIZEEOF'
+{{ include "kubecore-ci-workflows.wftSizeGuard" . | indent 8 }}
+        WFTSIZEEOF
       volumeMounts:
       - name: workspace
         mountPath: /workspace
