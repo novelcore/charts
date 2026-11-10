@@ -326,6 +326,24 @@ ci:
   # threshold — see clusterworkflowtemplate-ml.yaml. Raise together with the
   # project's `ci: maxNodes:`.
   mlBuildParallelism: 2
+  # Per-project cap on concurrent ML image builds (kaniko build-push pods), as an
+  # Argo semaphore. The semaphore's ConfigMap lives in each project's -ci
+  # namespace, written by the githubproject composition from the project's CI pool
+  # size: max(1, maxNodes - 1), so one pool node always stays free for render pods.
+  # Off by default: a namespace without the ConfigMap would fail every build at
+  # build-push. The clusteroperators composition turns it on for pools whose
+  # projects get the ConfigMap.
+  # kaos-lib rebuild policy (on-demand + background trickle), see ml-ci-reconcile:
+  # an app whose pipeline ran within hotSeconds is rebuilt at once; one that ran
+  # within idleSeconds is rebuilt in the background, one per project at a time; an
+  # idle or never-run app is rebuilt only when used (a push).
+  kaosLibRebuild:
+    hotSeconds: 86400
+    idleSeconds: 2592000
+  buildSlots:
+    enabled: false
+    configMapName: ci-build-slots
+    key: slots
   # Upper bound (seconds) of one ml-ci-reconcile run, including its wait for the
   # app's build lock (check-drift takes the same mutex as ml-ci-build). A build
   # that never releases the lock fails the waiting run at this deadline.

@@ -295,23 +295,29 @@ spec:
         # every other app's reconcile (e2e-suite-ml-jq4vp, 2026-10-07: yolo never
         # built behind mlci's). app_name is on webhook and reconciled builds alike.
         APP="{{`{{workflow.parameters.app_name}}`}}"
-        # Builds of this app that are not finished. Phase Pending is a build
-        # QUEUED on the app's mutex (it has started nothing); Running holds it.
+        # Builds of this app that are not finished. A build is QUEUED on the app's
+        # mutex when its workflow is Pending, or (ml-ci-build takes the lock on
+        # its ml-ci-run-locked node, after a probe) Running with a node Pending
+        # on "Waiting for ... lock": it has started nothing. Any other Running
+        # build holds the lock or is a render-only run that takes none.
         COUNTS=$(echo "$INFLIGHT" | jq -r --arg app "$APP" '
           [.items[] | select((.metadata.name|startswith("ml-ci-build"))
                              and ([.spec.arguments.parameters[]? | select(.name=="app_name") | .value] | index($app)))
-                    | .status.phase] as $p
-          | "\([$p[] | select(. == "Running" or . == "Pending" or . == null)] | length) \([$p[] | select(. == "Running")] | length)"')
+                    | if (.status.phase == "Pending" or .status.phase == null
+                          or ([.status.nodes[]? | select(.phase == "Pending" and ((.message // "") | test("Waiting for .*lock")))] | length) > 0)
+                      then "Queued" else .status.phase end] as $p
+          | "\([$p[] | select(. == "Running" or . == "Queued")] | length) \([$p[] | select(. == "Running")] | length)"')
         ACTIVE=${COUNTS% *}
         RUNNING=${COUNTS#* }
         MODE="{{`{{inputs.parameters.mode}}`}}"
         if [ "$MODE" = "await" ]; then
           : # waits for inputs only; a build in flight is decide mode's lock to wait on
         elif [ "$RETRY" = "true" ]; then
-          # decide mode holds the build mutex, so a Running build here should be
-          # impossible (a build that predates the mutex, or a lock handed over
-          # between the list and now): wait it out the old way. Builds merely
-          # QUEUED behind us are not a reason to wait; they run after this step.
+          # decide mode holds the build mutex, so a Running build here is a run
+          # that takes no lock (a probe, or a render-only run that may render the
+          # context this trigger is for) or a lock handed over between the list
+          # and now: wait it out. Builds merely QUEUED behind us are not a reason
+          # to wait; they run after this step.
           [ "${RUNNING:-0}" != "0" ] && not_yet "build running outside the build lock (${RUNNING} running ml-ci-build workflow(s) for ${APP})"
         elif [ "${ACTIVE:-0}" != "0" ]; then
           echo "reconcile: build already in flight (${ACTIVE} active ml-ci-build workflow(s) for ${APP}) - skipping submit this poll"
@@ -443,7 +449,8 @@ spec:
           # queue a duplicate (two syncs fired at once must yield one build).
           QUEUED=$(echo "$INFLIGHT" | jq -r --arg app "$APP" --arg sha "$HEAD_SHA" '
             [.items[] | select((.metadata.name|startswith("ml-ci-build"))
-                               and (.status.phase == "Pending" or .status.phase == null)
+                               and (.status.phase == "Pending" or .status.phase == null
+                                    or ([.status.nodes[]? | select(.phase == "Pending" and ((.message // "") | test("Waiting for .*lock")))] | length) > 0)
                                and ([.spec.arguments.parameters[]? | select(.name=="app_name") | .value] | index($app))
                                and ([.spec.arguments.parameters[]? | select(.name=="commit_sha") | .value] | index($sha)))
                       | .metadata.name] | first // empty')
@@ -588,10 +595,49 @@ spec:
           if [ -n "$LAST_TRY" ]; then
             echo "reconcile: KAOS-LIB DRIFT (${KL_HAVE:-<unrecorded>} -> ${KL_WANT}) — not rebuilding this poll: an attempt at this spec ended within the hour: ${LAST_TRY}"
           else
-            printf '%s' "$KL_REF" > /tmp/kaos_lib_ref
-            printf 'true' > /tmp/needs_build
-            echo "reconcile: KAOS-LIB DRIFT — the images have kaos-lib ${KL_HAVE:-<unrecorded>} but the platform delivers ${KL_WANT}; submitting ml-ci-build to rebuild and re-render"
-            exit 0
+            # ON-DEMAND REBUILD + BACKGROUND TRICKLE. A kaos-lib pin move makes every
+            # app STALE; it must not rebuild the fleet at once (HPC lab 2026-11-10:
+            # 8 kaniko builds queued 40+ min). A stale app keeps running on the
+            # images it has (kaos-lib is compatible within a minor: the operator
+            # holds an app whose desired version leaves its compat range) and is
+            # rebuilt when it is USED: a push rebuilds it as part of the build
+            # (detect-steps), and a pipeline run seen here within hotSeconds queues
+            # the rebuild at once ("run on the old image, rebuild after"). A
+            # recently used app (idleSeconds) is rebuilt in the background, ONE at a
+            # time per project, and an idle or never-run app only when used. Every
+            # rebuild is paced by the project's build semaphore. Unknown use (the
+            # runs cannot be listed) is never a reason to rebuild.
+            USE_RUN=$(kubectl get workflows -n "${ML_NS}" -l "workflows.argoproj.io/workflow-template=${APP}-pipeline" -o json 2>/dev/null \
+                      | jq -r 'try ([.items[].metadata.creationTimestamp | fromdateiso8601] | max | if . == null then "never" else (now - .) | floor end) catch "unknown"' 2>/dev/null) || USE_RUN=unknown
+            [ -n "$USE_RUN" ] || USE_RUN=unknown
+            HOT={{ int (.Values.ci.kaosLibRebuild.hotSeconds | default 86400) }}
+            IDLE={{ int (.Values.ci.kaosLibRebuild.idleSeconds | default 2592000) }}
+            case "$USE_RUN" in
+              unknown|never)
+                echo "reconcile: KAOS-LIB STALE (${KL_HAVE:-<unrecorded>} -> ${KL_WANT}) — app use: ${USE_RUN}: not rebuilt in the background; it rebuilds when it is next used"
+                ;;
+              *)
+                if [ "$USE_RUN" -ge "$IDLE" ]; then
+                  echo "reconcile: KAOS-LIB STALE (${KL_HAVE:-<unrecorded>} -> ${KL_WANT}) — idle ${USE_RUN}s (>= ${IDLE}s): not rebuilt in the background; it rebuilds when it is next used"
+                else
+                  BUSY=0
+                  if [ "$USE_RUN" -ge "$HOT" ]; then
+                    # warm: the trickle takes one background rebuild at a time per project
+                    BUSY=$(echo "$INFLIGHT" | jq -r '[.items[]
+                      | select(((.metadata.labels // {})["platform.kubecore.io/kaos-lib"] // "") != ""
+                               and (.status.phase == "Running" or .status.phase == "Pending" or .status.phase == null))] | length')
+                  fi
+                  if [ "${BUSY:-0}" != "0" ]; then
+                    echo "reconcile: KAOS-LIB STALE (${KL_HAVE:-<unrecorded>} -> ${KL_WANT}) — last run ${USE_RUN}s ago: ${BUSY} background kaos-lib rebuild(s) already in flight in this project; next poll"
+                  else
+                    printf '%s' "$KL_REF" > /tmp/kaos_lib_ref
+                    printf 'true' > /tmp/needs_build
+                    echo "reconcile: KAOS-LIB DRIFT — the images have kaos-lib ${KL_HAVE:-<unrecorded>} but the platform delivers ${KL_WANT}; the app ran ${USE_RUN}s ago (hot < ${HOT}s); submitting ml-ci-build to rebuild and re-render"
+                    exit 0
+                  fi
+                fi
+                ;;
+            esac
           fi
         fi
 
@@ -778,3 +824,7 @@ spec:
               value: "{{`{{workflow.parameters.workflow_template_path}}`}}"
             - name: node_class
               value: "{{`{{workflow.parameters.node_class}}`}}"
+            # true only for the KAOS-LIB DRIFT build (kaos_lib_ref set): every other
+            # reconcile-submitted build leaves stale kaos-lib images alone.
+            - name: kaos_lib_rebuild
+              value: "{{`{{=inputs.parameters.kaos_lib_ref != '' ? 'true' : 'false'}}`}}"

@@ -24,7 +24,7 @@ expect_eq() {
 }
 
 GROUP=$(yq 'select(.kind == "ClusterWorkflowTemplate" and .metadata.name == "ml-ci-build")
-  | .spec.templates[] | select(.name == "ml-ci-build") | .steps[]
+  | .spec.templates[] | select(.name == "ml-ci-run") | .steps[]
   | select(map(.name) | contains(["build-push"])) | map(.name) | join(",")' "$RENDERED")
 expect_eq "$GROUP" "render-wft,render-hera,build-push" \
   "ml-ci-build: the renders take a parallelism slot before the build matrix"
