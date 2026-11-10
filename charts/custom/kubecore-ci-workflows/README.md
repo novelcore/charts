@@ -60,6 +60,18 @@ A Hera app's rendered WorkflowTemplate used to carry the 19 KB checkpoint helper
 bash charts/custom/kubecore-ci-workflows/tests/wft-size/run.sh /tmp/rendered.yaml
 ```
 
+## ML build pacing and on-demand kaos-lib rebuilds
+
+Why: on the HPC lab (2026-11-10) a kaos-lib pin move made every app rebuild every step at once; eight 3 CPU / 11Gi kaniko pods sat Pending behind a one-node CI pool and render-only runs queued behind them for about an hour.
+
+**Cap on concurrent image builds.** `build-push` carries an Argo semaphore (`ci.buildSlots`, off by default) read from the ConfigMap `ci-build-slots`, key `slots`, in the workflow's own namespace (the project's `-ci`). The githubproject composition writes it as `max(1, ciPoolMaxNodes - 1)`, so one pool node always stays free for render pods. A template-level semaphore holds the node in Argo until a slot frees: no Pending pod, so no pending-reaper kill and no scale-up demand past the pool. It counts every app and run of the project.
+
+**A render-only run holds no lock.** `ml-ci-build` probes (clone, detect-steps) with no lock. Steps to build: `ml-ci-run-locked` takes the per-app mutex `{app}-build` and runs `ml-ci-run`. Nothing to build: `ml-ci-run` runs without any lock, never builds or tags, and records `last-built-sha` only when it built nothing. `ml-ci-run` clones and detects again under the lock, so what a build records is what it was before (the previous build's last-built-sha and tags are committed first). ml-ci-reconcile treats a Running build with a node Pending on a lock as queued.
+
+**On-demand kaos-lib rebuild, background trickle.** A pin move makes apps stale; it does not rebuild them. A push rebuilds a stale app (detect-steps, as ever). A reconcile-submitted build (re-render, dataset, context) leaves stale images alone and keeps recording the spec they have. The hourly poll rebuilds a stale app only by its use, read from its pipeline runs in the ML namespace: ran within `ci.kaosLibRebuild.hotSeconds` (24h) - rebuilt now; within `idleSeconds` (30d) - rebuilt in the background, one kaos-lib rebuild at a time per project; idle, never run or unreadable - only when used. The run that triggered it used the old images (compatible within a minor, which the operator enforces) and the next run gets the new ones. Stale is `pipeline-images.kaos-lib-package != pipeline-context kaosLib.spec`; no extra key is written (it would be a gitops commit per app at the pin move).
+
+Tests: `tests/build-pacing/run.sh` (render guards), `tests/build-pacing/kind/run.sh` (real Argo: cap, render-only, mutex), `tests/kaos-lib/run.sh` (detect gate, trickle classes).
+
 ## Tests
 
 ```bash
@@ -67,4 +79,6 @@ helm template t charts/custom/kubecore-ci-workflows > /tmp/rendered.yaml
 bash charts/custom/kubecore-ci-workflows/tests/sync-wait/run.sh                  # render guards
 bash charts/custom/kubecore-ci-workflows/tests/reconcile-trigger/run.sh          # check-drift script against stubs
 bash charts/custom/kubecore-ci-workflows/tests/sync-wait/kind/run.sh [outdir]    # real Argo v4.0.6 in kind (needs docker, kind)
+bash charts/custom/kubecore-ci-workflows/tests/build-pacing/run.sh               # pacing render guards
+bash charts/custom/kubecore-ci-workflows/tests/build-pacing/kind/run.sh [outdir] # real Argo: cap, render-only, mutex
 ```

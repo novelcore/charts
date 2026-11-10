@@ -109,6 +109,7 @@ run_detect() {
       -e "s#{{workflow.parameters.gitops_branch}}#main#g" \
       -e "s#{{workflow.parameters.app_name}}#${APP}#g" \
       -e "s#{{workflow.parameters.event_type}}#${EVENT:-push}#g" \
+      -e "s#{{workflow.parameters.kaos_lib_rebuild}}#${KL_REBUILD:-false}#g" \
       -e "s#/tmp/#${T}/#g" \
       -e "s#/workspace#${T}/workspace#g" \
       -e "s#/etc/github-token/token#${T}/token#g" \
@@ -131,6 +132,18 @@ expect_eq "$KL_PKG" "$SPEC" "detect-steps: a step that rebuilds for its own reas
 
 detect_case "-"; context_cm "$T/fixture/kubeapps/${APP}/main/pipeline-context.yaml" "-"; run_detect
 expect_eq "$KL_PKG/$KL_REC/$CHANGED" "//[]" "detect-steps: a context without kaosLib changes nothing"
+
+# ON-DEMAND REBUILD: a stale app is rebuilt when it is used (a push), not by every reconcile-submitted build.
+detect_case "$OLD"; context_cm "$T/fixture/kubeapps/${APP}/main/pipeline-context.yaml" "$SPEC"; EVENT=reconcile run_detect
+expect_eq "$CHANGED" "[]" "detect-steps: a reconcile build (re-render, dataset, context) leaves STALE kaos-lib images alone"
+expect_eq "$KL_PKG/$KL_REC" "$OLD/$OLD" "detect-steps: ... and keeps recording the spec the images really have"
+expect_has "$OUT" "kaos-lib STALE" "detect-steps: says the app is stale and rebuilt when next used"
+detect_case "$OLD"; context_cm "$T/fixture/kubeapps/${APP}/main/pipeline-context.yaml" "$SPEC"; EVENT=reconcile KL_REBUILD=true run_detect
+expect_eq "$CHANGED" '[{"name":"a","path":"steps/a"}]' "detect-steps: the reconciler's kaos-lib build (kaos_lib_rebuild=true) rebuilds the stale step"
+detect_case "$OLD"; context_cm "$T/fixture/kubeapps/${APP}/main/pipeline-context.yaml" "$SPEC"; EVENT=push run_detect
+expect_eq "$CHANGED/$KL_REC" '[{"name":"a","path":"steps/a"}]/'"$SPEC" "detect-steps: a push (the app is in use) rebuilds the stale step: the run gets the fresh image"
+detect_case "-"; context_cm "$T/fixture/kubeapps/${APP}/main/pipeline-context.yaml" "$SPEC"; EVENT=reconcile run_detect
+expect_eq "$CHANGED" '[{"name":"a","path":"steps/a"}]' "detect-steps: an app with NO record (built before delivery) is rebuilt by a reconcile build once"
 
 # A commit that touched step b is built (last-built-sha = HEAD). A reconcile of it rebuilds nothing
 # (the pool's ConfigMap trails gitops, so the backstop can run for the SHA that just finished: live,
@@ -231,7 +244,8 @@ expect_eq "$REC/$COMPAT" "<absent>/<absent>" "patch-images: nothing to report le
 DRIFT_SRC="${BASE_TMP}/check-drift.src"; src ml-ci-reconcile check-drift > "$DRIFT_SRC"
 PIN=$(yq '.platformEnhancer.ref' "${HERE}/../../values.yaml")
 REF=$(printf '%s' "$SPEC" | sha256sum | cut -c1-12)
-drift_case() {  # drift_case RECORDED(-=absent) CONTEXT_SPEC(-=none)
+drift_case() {  # drift_case RECORDED(-=absent) CONTEXT_SPEC(-=none); RUN_AGE = seconds since the app's last pipeline run (default 1h: hot)
+  RUN_AGE="${RUN_AGE-3600}"; RUN_TS=""; [ -n "$RUN_AGE" ] && RUN_TS=$(ago "$RUN_AGE")
   T=$(mktemp -d "${BASE_TMP}/drift-XXXXXX"); mkdir -p "$T/bin"; printf 'token' > "$T/token"
   context_cm "$T/gitops-context.yaml" "$2"
   CTX_SHA=$(sha256sum < "$T/gitops-context.yaml" | cut -c1-64)
@@ -244,6 +258,9 @@ drift_case() {  # drift_case RECORDED(-=absent) CONTEXT_SPEC(-=none)
   cat > "$T/bin/kubectl" <<EOF
 #!/usr/bin/env bash
 case "\$*" in
+  *"workflow-template=${APP}-pipeline"*)
+    [ "${RUNS_UNREADABLE:-}" = 1 ] && exit 1
+    if [ -n "${RUN_AGE:-}" ]; then printf '{"items": [{"metadata": {"creationTimestamp": "%s"}}]}' "${RUN_TS}"; else printf '{"items": []}'; fi ;;
   *"get workflows"*) cat "$T/workflows.json" ;;
   *"get configmap ${APP}-pipeline-images"*) cat "$T/cm.json" ;;
   *"get configmap ${APP}-pipeline-context"*) cat "$T/context.yaml" ;;
@@ -299,6 +316,23 @@ drift_case "$OLD" "$SPEC"; attempt Failed 7200 "$REF"; run_drift
 expect_eq "$NEEDS" "true" "reconcile: the last attempt is over an hour old: retry"
 drift_case "$OLD" "$SPEC"; attempt Failed 600 "000000000000"; run_drift
 expect_eq "$NEEDS" "true" "reconcile: a recent attempt at ANOTHER spec does not hold this one back"
+# ON-DEMAND REBUILD + BACKGROUND TRICKLE (the app's last pipeline run decides when a stale app is rebuilt)
+RUN_AGE=3600 drift_case "$OLD" "$SPEC"; run_drift
+expect_eq "$NEEDS" "true" "reconcile: STALE app that ran within the day (hot): rebuilt at once"
+RUN_AGE=3600 drift_case "$OLD" "$SPEC"; printf '{"items": [{"metadata": {"name": "bg", "labels": {"platform.kubecore.io/kaos-lib": "abc"}}, "status": {"phase": "Running"}, "spec": {"arguments": {"parameters": [{"name": "app_name", "value": "other"}]}}}]}' > "$T/workflows.json"; run_drift
+expect_eq "$NEEDS" "true" "reconcile: a hot app is not held back by another app's background rebuild"
+RUN_AGE=259200 drift_case "$OLD" "$SPEC"; run_drift
+expect_eq "$NEEDS" "true" "reconcile: STALE app that ran 3 days ago (warm), nothing else rebuilding: rebuilt in the background"
+RUN_AGE=259200 drift_case "$OLD" "$SPEC"; printf '{"items": [{"metadata": {"name": "bg", "labels": {"platform.kubecore.io/kaos-lib": "abc"}}, "status": {"phase": "Running"}, "spec": {"arguments": {"parameters": [{"name": "app_name", "value": "other"}]}}}]}' > "$T/workflows.json"; run_drift
+expect_eq "$NEEDS" "false" "reconcile: a warm app waits while another background kaos-lib rebuild runs (one at a time per project)"
+expect_has "$OUT" "background kaos-lib rebuild(s) already in flight" "reconcile: says why"
+RUN_AGE=3456000 drift_case "$OLD" "$SPEC"; run_drift
+expect_eq "$NEEDS" "false" "reconcile: STALE app idle 40 days: not rebuilt in the background"
+expect_has "$OUT" "rebuilds when it is next used" "reconcile: says it rebuilds when used"
+RUN_AGE="" drift_case "$OLD" "$SPEC"; run_drift
+expect_eq "$NEEDS" "false" "reconcile: STALE app that never ran: not rebuilt in the background"
+RUNS_UNREADABLE=1 drift_case "$OLD" "$SPEC"; run_drift
+expect_eq "$NEEDS" "false" "reconcile: the runs cannot be listed: unknown use is never a reason to rebuild"
 LABEL=$(yq 'select(.metadata.name == "ml-ci-reconcile") | .spec.templates[] | select(.name == "submit-build") | .resource.manifest' "$RENDERED" \
         | yq '.metadata.labels["platform.kubecore.io/kaos-lib"]')
 expect_eq "$LABEL" "{{inputs.parameters.kaos_lib_ref}}" "reconcile: the submitted build carries the spec ref (the attempt guard's label)"
@@ -362,7 +396,7 @@ for doc in yaml.safe_load_all(open(rendered)):
     if not doc or doc.get("kind") != "ClusterWorkflowTemplate" or doc["metadata"]["name"] != wf:
         continue
     for t in doc["spec"]["templates"]:
-        if t["name"] != wf:
+        if t["name"] != ("ml-ci-run" if wf == "ml-ci-build" else wf):  # ml-ci-build's steps live in ml-ci-run
             continue
         for group in t.get("steps", []):
             for step in group:

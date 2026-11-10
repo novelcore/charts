@@ -37,13 +37,12 @@ spec:
   ttlStrategy:
     secondsAfterSuccess: {{ int .Values.workflow.ttlStrategy.secondsAfterSuccess }}
     secondsAfterFailure: {{ int .Values.workflow.ttlStrategy.secondsAfterFailure }}
-  # One build per app at a time (kubecore-operator#1126): the project's CI
-  # pool is small (default 1 node) and consecutive pushes otherwise spawn
-  # concurrent builds of the same app that starve each other's build-push
-  # pods. Argo queues the later run until the earlier one completes.
-  synchronization:
-    mutexes:
-    - name: "{{`{{workflow.parameters.app_name}}`}}-build"
+  # One BUILD per app at a time (kubecore-operator#1126) is a template-level
+  # mutex on ml-ci-run-locked below, NOT a workflow-level one: a run whose
+  # detect-steps finds nothing to build (render-only) must not queue behind
+  # the app's image builds (live, HPC lab 2026-11-10: a pipeline change waited
+  # ~1h behind a fleet rebuild). The pool-wide cap on concurrent kaniko pods
+  # is the semaphore on build-push.
   # Bound the build-push fan-out (kubecore-operator#1124, 2026-08-27): the
   # matrix creates one pod per changed step at once — 17 for a yolo-pipelines
   # app — while the kaniko request is sized "one build per node" and the
@@ -152,6 +151,12 @@ spec:
     # class ("{step}-class", e.g. cpu-standard/gpu-a100) that render-wft
     # resolves separately per pipeline step — this parameter only targets
     # the short-lived utility steps, never an ML workload step itself.
+    # kaos-lib rebuild on a reconcile-submitted build: "true" only from the
+    # reconciler's KAOS-LIB DRIFT submission. A push always rebuilds stale
+    # kaos-lib images (the app is being used); any other reconcile build
+    # (re-render, dataset, context) leaves them stale. See detect-steps.
+    - name: kaos_lib_rebuild
+      value: "false"
     - name: node_class
       value: {{ .Values.ci.defaultNodeClass | default (dig "platform.kubecore.io/nodegroup-type" "kubecorecpu" .Values.nodeSelector) | quote }}
     # pull request number when the run came from a PR ("" otherwise): the
@@ -160,6 +165,12 @@ spec:
       value: ""
 
   templates:
+  # ml-ci-build — the entrypoint. PROBE, then run the SAME pipeline either under
+  # the app's build mutex (the probe found steps to build) or without one (it
+  # found none: render-only). The probe is advisory: it decides only which lock
+  # the run takes. The run (ml-ci-run) clones and detects again under that lock,
+  # so what it builds and records is exactly what today's single run did: the
+  # previous build's last-built-sha and tags are committed before it looks.
   - name: ml-ci-build
     steps:
     # Report "pending" (with the Argo UI run URL) BEFORE any work: a merge that
@@ -178,6 +189,48 @@ spec:
             value: "pending"
           - name: description
             value: "Building in Argo Workflows"
+      - name: probe-clone
+        template: clone
+    - - name: probe-detect
+        template: detect-steps
+    - - name: build-run
+        template: ml-ci-run-locked
+        when: "{{`{{steps.probe-detect.outputs.parameters.has_changes}}`}} == true"
+      - name: render-run
+        template: ml-ci-run
+        when: "{{`{{steps.probe-detect.outputs.parameters.has_changes}}`}} != true"
+        arguments:
+          parameters:
+          - name: locked
+            value: "false"
+
+  # ml-ci-run-locked — ml-ci-run under the app's build mutex. Argo queues a
+  # second build of the same app here (Pending node "Waiting for ... lock",
+  # no pod) until the first one ends. The mutex covers detect-steps ..
+  # patch-images, as the workflow-level mutex did.
+  - name: ml-ci-run-locked
+    synchronization:
+      mutexes:
+      - name: "{{`{{workflow.parameters.app_name}}`}}-build"
+    steps:
+    - - name: run
+        template: ml-ci-run
+        arguments:
+          parameters:
+          - name: locked
+            value: "true"
+
+  # ml-ci-run — clone -> detect-steps -> version -> render + build-push ->
+  # patch-images -> tag -> status. locked=false (the render-only path) never
+  # builds or tags: if its own detect-steps finds steps to build after all
+  # (the platform context moved since the probe), it records nothing and the
+  # next reconcile builds them under the lock.
+  - name: ml-ci-run
+    inputs:
+      parameters:
+      - name: locked
+        value: "true"
+    steps:
     - - name: clone
         template: clone
     - - name: detect-steps
@@ -238,7 +291,7 @@ spec:
             value: "{{`{{steps.detect-steps.outputs.parameters.changed_steps}}`}}"
       - name: build-push
         template: build-push
-        when: "{{`{{steps.detect-steps.outputs.parameters.has_changes}}`}} == true"
+        when: "{{`{{steps.detect-steps.outputs.parameters.has_changes}}`}} == true && {{`{{inputs.parameters.locked}}`}} == true"
         arguments:
           parameters:
           - name: step_name
@@ -263,7 +316,9 @@ spec:
         # reconcile exception it still rebuilt every such SHA once more
         # (charts#158). The step is a no-op when neither an image tag nor
         # last-built-sha moved: it exits early on "No changes to commit".
-        when: "{{`{{workflow.parameters.branch_type}}`}} != chore"
+        # An unlocked (render-only) run records only when it built nothing, so it
+        # can never mark a commit built that a locked build still owes.
+        when: "{{`{{workflow.parameters.branch_type}}`}} != chore && ({{`{{inputs.parameters.locked}}`}} == true || {{`{{steps.detect-steps.outputs.parameters.has_changes}}`}} != true)"
         arguments:
           parameters:
           - name: image_tag
@@ -276,7 +331,7 @@ spec:
             value: "{{`{{steps.detect-steps.outputs.parameters.kaos_lib_compat}}`}}"
     - - name: tag
         template: tag
-        when: "{{`{{steps.detect-steps.outputs.parameters.has_changes}}`}} == true && {{`{{workflow.parameters.branch_type}}`}} != chore && {{`{{workflow.parameters.branch_type}}`}} != rc"
+        when: "{{`{{steps.detect-steps.outputs.parameters.has_changes}}`}} == true && {{`{{inputs.parameters.locked}}`}} == true && {{`{{workflow.parameters.branch_type}}`}} != chore && {{`{{workflow.parameters.branch_type}}`}} != rc"
         arguments:
           parameters:
           - name: image_tag
@@ -572,6 +627,18 @@ spec:
         else
           printf '%s' "$KL_NONE" > /tmp/kaos_lib.json
         fi
+        # STALE, REBUILT ON USE: a reconcile-submitted build that is not the
+        # KAOS-LIB DRIFT build (a re-render, a dataset or context event) must not
+        # rebuild every managed step because the pin moved. It keeps the recorded
+        # spec for anything it does build, so the record stays true. A push, or the
+        # reconciler's kaos-lib build, rebuilds as before.
+        if [ "{{`{{workflow.parameters.event_type}}`}}" = "reconcile" ] \
+           && [ "{{`{{workflow.parameters.kaos_lib_rebuild}}`}}" != "true" ] && [ -n "$KL_REC" ] \
+           && [ "$(jq -r '.rebuild' /tmp/kaos_lib.json)" = "true" ]; then
+          jq --arg rec "$KL_REC" '.spec as $want | .rebuild = false | .spec = $rec | .record = $rec
+              | .reason = "kaos-lib STALE (\($rec) -> \($want)): not rebuilt by this run; rebuilt when the app is next used"' \
+             /tmp/kaos_lib.json > /tmp/kaos_lib.json.new && mv /tmp/kaos_lib.json.new /tmp/kaos_lib.json
+        fi
         jq -j '.spec' /tmp/kaos_lib.json > /tmp/kaos_lib_package
         jq -j '.record' /tmp/kaos_lib.json > /tmp/kaos_lib_record
         jq -j '.compat' /tmp/kaos_lib.json > /tmp/kaos_lib_compat
@@ -724,6 +791,20 @@ spec:
     metadata:
       labels:
         app.kubernetes.io/name: "{{`{{workflow.parameters.app_name}}`}}"
+    {{- if .Values.ci.buildSlots.enabled }}
+    # Cap concurrent kaniko builds per project (charts: build pacing, HPC lab
+    # 2026-11-10). A template-level semaphore holds the NODE in Argo until a slot
+    # frees: no Pending pod (so no pending-reaper kill, no autoscaler
+    # scale-up demand beyond the pool), across ALL apps and runs of the
+    # project's CI namespace. The ConfigMap lives in that namespace
+    # (githubproject composition) and holds max(1, ciPoolMax - 1) slots, so at
+    # least one pool node stays free for render/enhance/commit pods.
+    synchronization:
+      semaphores:
+      - configMapKeyRef:
+          name: {{ .Values.ci.buildSlots.configMapName | quote }}
+          key: {{ .Values.ci.buildSlots.key | quote }}
+    {{- end }}
     # Template-level nodeSelector overrides the workflow-level one above so
     # this build lands on the per-submission CI pool (PRD-962 F-09) instead
     # of the shared cluster default. Tolerations are intentionally left to

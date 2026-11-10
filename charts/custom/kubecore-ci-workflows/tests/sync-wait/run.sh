@@ -15,7 +15,8 @@ expect_eq() { if [ "$1" = "$2" ]; then PASSED=$((PASSED+1)); echo "PASS: $3"; el
 R=$(mktemp); trap 'rm -f "$R"' EXIT
 helm template t "$CHART" > "$R" || { echo "FAIL: helm template"; exit 1; }
 
-BUILD_LOCK=$(yq 'select(.kind=="ClusterWorkflowTemplate" and .metadata.name=="ml-ci-build") | .spec.synchronization.mutexes[0].name' "$R")
+# ml-ci-build takes the lock on its ml-ci-run-locked template (a render-only run takes none: tests/build-pacing).
+BUILD_LOCK=$(yq 'select(.kind=="ClusterWorkflowTemplate" and .metadata.name=="ml-ci-build") | .spec.templates[] | select(.name=="ml-ci-run-locked") | .synchronization.mutexes[0].name' "$R")
 SYNC_LOCK=$(yq 'select(.metadata.name=="ml-ci-reconcile") | .spec.templates[] | select(.name=="decide-and-submit") | .synchronization.mutexes[0].name' "$R")
 expect_eq "$SYNC_LOCK" "$BUILD_LOCK" "decide-and-submit (check-drift AND submit-build) takes the mutex ml-ci-build holds"
 expect_eq "$SYNC_LOCK" "{{workflow.parameters.app_name}}-build" "the mutex is the per-app build lock"

@@ -56,9 +56,9 @@ expect_eq "$(printf '%s' "$ML_SCRIPTS" | grep -v '^[[:space:]]*#' | grep -c 'dat
 # the backstop rebuilds the same SHA. patch-images records it; it must run on
 # every non-chore build, not only when a step image changed.
 PATCH_WHEN=$(yq 'select(.kind == "ClusterWorkflowTemplate" and .metadata.name == "ml-ci-build")
-    | .spec.templates[] | select(.name == "ml-ci-build") | .steps[][] | select(.name == "patch-images") | .when' "$RENDERED")
-expect_eq "$PATCH_WHEN" "{{workflow.parameters.branch_type}} != chore" \
-  "patch-images (records last-built-sha) runs on every non-chore build"
+    | .spec.templates[] | select(.name == "ml-ci-run") | .steps[][] | select(.name == "patch-images") | .when' "$RENDERED")
+expect_eq "$PATCH_WHEN" "{{workflow.parameters.branch_type}} != chore && ({{inputs.parameters.locked}} == true || {{steps.detect-steps.outputs.parameters.has_changes}} != true)" \
+  "patch-images (records last-built-sha) runs on every non-chore build (an unlocked render-only run records only when it built nothing)"
 
 DRIFT_SRC="${BASE_TMP}/check-drift.src"
 yq 'select(.kind == "ClusterWorkflowTemplate" and .metadata.name == "ml-ci-reconcile")
@@ -133,6 +133,11 @@ QUEUED_OTHER='{"items": [{"metadata": {"name": "ml-ci-build-q"}, "status": {"pha
   "spec": {"arguments": {"parameters": [{"name": "app_name", "value": "app1"}, {"name": "commit_sha", "value": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}]}}}]}'
 QUEUED_HEAD='{"items": [{"metadata": {"name": "ml-ci-build-q"}, "status": {"phase": "Pending"},
   "spec": {"arguments": {"parameters": [{"name": "app_name", "value": "app1"}, {"name": "commit_sha", "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}]}}}]}'
+# ml-ci-build takes its lock on a template AFTER a probe: the workflow is Running and a node is Pending on the lock.
+QUEUED_ON_LOCK='{"items": [{"metadata": {"name": "ml-ci-build-q"}, "status": {"phase": "Running", "nodes": {"n1": {"phase": "Pending", "message": "Waiting for ci/Mutex/app1-build lock. Lock status: 0/1"}}},
+  "spec": {"arguments": {"parameters": [{"name": "app_name", "value": "app1"}, {"name": "commit_sha", "value": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}]}}}]}'
+QUEUED_ON_LOCK_HEAD='{"items": [{"metadata": {"name": "ml-ci-build-q"}, "status": {"phase": "Running", "nodes": {"n1": {"phase": "Pending", "message": "Waiting for ci/Mutex/app1-build lock. Lock status: 0/1"}}},
+  "spec": {"arguments": {"parameters": [{"name": "app_name", "value": "app1"}, {"name": "commit_sha", "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}]}}}]}'
 IDLE='{"items": []}'
 BUSY='{"items": [{"metadata": {"name": "ml-ci-build-x"}, "status": {"phase": "Running"},
   "spec": {"arguments": {"parameters": [{"name": "app_name", "value": "app1"}]}}}]}'
@@ -170,6 +175,13 @@ expect_eq "$RC/$NEEDS" "0/false" "force, a build of HEAD is already queued: subm
 expect_has "$OUT" "already queues a build of HEAD" "force, queued build of HEAD: says why"
 run_case false "$QUEUED_OTHER" "$HEAD_SHA" unbuilt
 expect_eq "$RC/$NEEDS" "0/false" "backstop, a build is queued: still skips (no stacking, kubecore-operator#872)"
+# The same queue as a RUNNING workflow whose lock node is Pending (the build probes, then takes the lock):
+run_case true "$QUEUED_ON_LOCK" "$HEAD_SHA" unbuilt
+expect_eq "$RC/$NEEDS/$SHA" "0/true/$HEAD_SHA" "force, a build waiting on the lock (workflow Running): is queued, not running: decides now (no deadlock)"
+run_case true "$QUEUED_ON_LOCK_HEAD" "$HEAD_SHA" unbuilt
+expect_eq "$RC/$NEEDS" "0/false" "force, a build of HEAD waiting on the lock: submits nothing (no duplicate)"
+run_case false "$QUEUED_ON_LOCK" "$HEAD_SHA" unbuilt
+expect_eq "$RC/$NEEDS" "0/false" "backstop, a build waiting on the lock: still skips"
 # await mode (the unlocked wait for non-build inputs) ignores a running build.
 MODE=await run_case true "$BUSY" "$HEAD_SHA" unbuilt
 expect_eq "$RC" "0" "await mode, build running: does not wait on it (decide mode's lock does)"
