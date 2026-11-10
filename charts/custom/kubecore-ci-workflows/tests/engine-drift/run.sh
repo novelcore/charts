@@ -1,27 +1,28 @@
 #!/usr/bin/env bash
-# Tests for the enhancer-drift re-render (kubecore-operator#1199): ml-ci-build
-# records the platform enhancer it rendered with (`enhancer-ref` in the app's
-# pipeline-images), and ml-ci-reconcile re-renders an app whose recorded ref is
-# not the chart's pin. Also the force-mode "already satisfied" no-op: a forced
-# reconcile of a HEAD already built and rendered from the current context by
-# the pin submits nothing (kaos e2e a3c48d99). Usage (from the repo root):
+# Tests for ENGINE DRIFT (PRD-HPC-1461 D-80): ml-ci-build records the engine its render
+# and its compose-and-validate image ran on (`engine-version`, `engine-compose` in the
+# app's pipeline-images), and ml-ci-reconcile re-renders an app whose record is not the
+# context's engine.version. A failing engine records `engine-attempt`
+# (<version>@<epoch>) and ml-ci-reconcile submits at most one drift build per hour
+# per engine version. Also the force-mode "already satisfied" no-op: a forced
+# reconcile of a HEAD already built and rendered from the current context by the
+# current engine submits nothing (kaos e2e a3c48d99). Usage (from the repo root):
 #
 #   helm template t charts/custom/kubecore-ci-workflows > /tmp/rendered.yaml
-#   bash charts/custom/kubecore-ci-workflows/tests/enhancer-drift/run.sh /tmp/rendered.yaml
+#   bash charts/custom/kubecore-ci-workflows/tests/engine-drift/run.sh /tmp/rendered.yaml
 #
 # The scripts under test are EXECUTED, not grepped: check-drift is extracted
 # from the rendered ml-ci-reconcile and run against stub kubectl/curl, and the
 # render step's pipeline-images writer is extracted from ml-ci-build and run on
-# fixture files. Needs yq v4, jq, python3 + PyYAML, and helm for the one
-# render-time refusal case. Exit status is the number of failed assertions.
+# fixture files. Needs yq v4, jq and python3 + PyYAML. Exit status is the number of failed assertions.
 set -u
 RENDERED="$1"
 HERE=$(cd "$(dirname "$0")" && pwd)
 CHART="${HERE}/../.."
 FAILED=0
 PASSED=0
-PIN=$(yq '.platformEnhancer.ref' "${CHART}/values.yaml")
-OLD_PIN=0123456789abcdef0123456789abcdef01234567
+ENG=v0.4.7
+OLD_ENG=v0.4.6
 HEAD_SHA=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 APP=app1
 
@@ -51,12 +52,16 @@ yq 'select(.kind == "ClusterWorkflowTemplate" and .metadata.name == "ml-ci-recon
     | .spec.templates[] | select(.name == "check-drift") | .container.args[0]' \
   "$RENDERED" > "$DRIFT_SRC"
 
-GITOPS_CONTEXT='kind: ConfigMap  # the gitops pipeline-context.yaml, as fetched raw'
+GITOPS_CONTEXT=$(python3 -c '
+import yaml
+ctx = {"engine": {"version": "v0.4.7", "image": "reg.example/kaos-pipeline-engine:v0.4.7",
+                  "wheel": "https://example.com/engine.whl", "wheelSha256": "a" * 64}}
+print(yaml.safe_dump({"kind": "ConfigMap", "data": {"context.yaml": yaml.safe_dump(ctx)}}))')
 CTX_SHA=$(printf '%s\n' "$GITOPS_CONTEXT" | sha256sum | cut -c1-64)
 
 # new_case: a sandbox where every OTHER input of check-drift is in sync — HEAD
 # built, context-sha current, the cpu budget and the ml environment matching the
-# live WFT — so the enhancer is the only thing a case varies.
+# live WFT — so the engine is the only thing a case varies.
 new_case() {
   T=$(mktemp -d "${BASE_TMP}/case-XXXX")
   mkdir -p "$T/bin"
@@ -78,7 +83,8 @@ EOF
           "templates": [{"name": "step-a",
                          "nodeSelector": {"platform.kubecore.io/environment": "train"}}]}}
 EOF
-  cm "$PIN"
+  cm
+  images "$ENG" "$ENG"
   cat > "$T/bin/kubectl" <<EOF
 #!/usr/bin/env bash
 case "\$*" in
@@ -96,32 +102,41 @@ EOF
 case "\$*" in
   *"/commits/dev"*) printf '{"sha": "%s"}' "$HEAD_SHA" ;;
   *"pipeline-context.yaml"*) cat "$T/gitops-context.yaml" ;;
+  *"pipeline-images.yaml"*) [ -f "$T/fixture-images.yaml" ] && cat "$T/fixture-images.yaml" || exit 22 ;;
   *) exit 22 ;;
 esac
 EOF
   chmod +x "$T/bin/kubectl" "$T/bin/curl"
 }
 
-# cm REF [CONTEXT_SHA]: the app's pipeline-images; REF "-" omits enhancer-ref,
-# CONTEXT_SHA "-" omits context-sha.
+# cm [CONTEXT_SHA]: the live {app}-pipeline-images; CONTEXT_SHA "-" omits context-sha.
 cm() {
-  jq -n --arg head "$HEAD_SHA" --arg ctx "${2:-$CTX_SHA}" --arg ref "$1" '
+  jq -n --arg head "$HEAD_SHA" --arg ctx "${1:-$CTX_SHA}" '
     {data: ({"last-built-sha": $head, "step-a": "reg/app:step-a-dev-v1-x-aaaaaaa"}
-            + (if $ctx == "-" then {} else {"context-sha": $ctx} end)
-            + (if $ref == "-" then {} else {"enhancer-ref": $ref} end))}' > "$T/cm.json"
+            + (if $ctx == "-" then {} else {"context-sha": $ctx} end))}' > "$T/cm.json"
 }
 
-# reconcile_build NAME PHASE FINISHED_AT PIN [APP]: one reconcile-submitted build.
+# images ENGINE_VERSION COMPOSE_VERSION [CONTEXT_SHA [ATTEMPT]]: the pipeline-images in GITOPS, which the
+# engine checks read (the live ConfigMap trails it by an ArgoCD sync). "-" omits a key.
+images() {
+  jq -n --arg v "$1" --arg c "$2" --arg ctx "${3:-$CTX_SHA}" --arg att "${4:--}" '
+    {data: ({"last-built-sha": "x"}
+            + (if $v == "-" then {} else {"engine-version": $v} end)
+            + (if $c == "-" then {} else {"engine-compose": $c} end)
+            + (if $ctx == "-" then {} else {"context-sha": $ctx} end)
+            + (if $att == "-" then {} else {"engine-attempt": $att} end))}' | yq -P > "$T/fixture-images.yaml"
+}
+# reconcile_build NAME PHASE FINISHED_AT [APP]: one reconcile-submitted build.
 reconcile_build() {
-  jq --arg name "$1" --arg phase "$2" --arg fin "$3" --arg pin "$4" --arg app "${5:-$APP}" '
+  jq --arg name "$1" --arg phase "$2" --arg fin "$3" --arg app "${4:-$APP}" '
     .items += [{metadata: {name: $name, creationTimestamp: $fin,
                            labels: {"platform.kubecore.io/app": $app,
-                                    "platform.kubecore.io/submitted-by": "ml-ci-reconcile",
-                                    "platform.kubecore.io/enhancer-ref": $pin}},
+                                    "platform.kubecore.io/submitted-by": "ml-ci-reconcile"}},
                 spec: {arguments: {parameters: [{name: "app_name", value: $app}]}},
                 status: {phase: $phase, finishedAt: $fin}}]' \
     "$T/workflows.json" > "$T/w.tmp" && mv "$T/w.tmp" "$T/workflows.json"
 }
+now_minus() { echo "${ENG}@$(( $(date +%s) - $1 ))"; }
 
 # run_drift: check-drift with the Argo placeholders filled and its fixed paths
 # moved into the sandbox; FORCE / WANT_CTX set the force and context_sha
@@ -148,57 +163,75 @@ run_drift() {
 }
 
 new_case; run_drift
-expect_eq "$RC/$NEEDS" "0/false" "in sync: the recorded enhancer is the pin — no build"
+expect_eq "$RC/$NEEDS" "0/false" "in sync: the render and the compose image ran on the context's engine — no build"
 expect_has "$OUT" "up to date" "in sync: reports up to date"
 
-new_case; cm "$OLD_PIN"; run_drift
-expect_eq "$RC/$NEEDS" "0/true" "the pin moved: re-render"
-expect_has "$OUT" "ENHANCER DRIFT" "the pin moved: says why"
-expect_eq "$(cat "$T/head_sha")" "$HEAD_SHA" "the pin moved: builds the already-built HEAD (render only)"
+new_case; images "$OLD_ENG" "$ENG"; run_drift
+expect_eq "$RC/$NEEDS" "0/true" "the engine moved: re-render"
+expect_has "$OUT" "ENGINE DRIFT" "the engine moved: says why"
+expect_eq "$(cat "$T/head_sha")" "$HEAD_SHA" "the engine moved: builds the already-built HEAD (render and compose only)"
 
-new_case; cm "-"; run_drift
-expect_eq "$RC/$NEEDS" "0/true" "rendered before enhancer-ref was recorded: re-render once"
+new_case; images "$ENG" "$OLD_ENG"; run_drift
+expect_eq "$RC/$NEEDS" "0/true" "the compose image is on an older engine: build"
+expect_has "$OUT" "ENGINE DRIFT" "the compose image is on an older engine: says why"
 
-new_case; cm "-" "-"; run_drift
-expect_eq "$RC/$NEEDS" "0/false" "no context-sha (not a Hera render path): never enhancer drift"
+new_case; images "-" "-"; run_drift
+expect_eq "$RC/$NEEDS" "0/true" "no engine recorded yet: render once"
 
-new_case; cm "$OLD_PIN"; reconcile_build b1 Failed "$(ago 600)" "$PIN"; run_drift
-expect_eq "$RC/$NEEDS" "0/false" "a re-render at this pin failed 10 min ago: wait, do not storm"
-expect_has "$OUT" "b1" "a recent failed re-render is named"
+new_case; rm "$T/fixture-images.yaml"; run_drift
+expect_eq "$RC/$NEEDS" "0/false" "gitops pipeline-images unreadable: unknown never submits work"
 
-new_case; cm "$OLD_PIN"; reconcile_build b1 Succeeded "$(ago 300)" "$PIN"; run_drift
-expect_eq "$RC/$NEEDS" "0/false" "a re-render at this pin succeeded 5 min ago (ArgoCD not synced yet): wait"
+new_case; printf 'kind: ConfigMap\ndata: {context.yaml: "app: x"}\n' > "$T/gitops-context.yaml"
+jq --arg c "$(sha256sum < "$T/gitops-context.yaml" | cut -c1-64)" '.data["context-sha"] = $c' "$T/cm.json" > "$T/c.tmp" && mv "$T/c.tmp" "$T/cm.json"
+images "$OLD_ENG" "$OLD_ENG"; run_drift
+expect_eq "$RC/$NEEDS" "0/false" "a context with no engine block: no engine drift"
 
-new_case; cm "$OLD_PIN"; reconcile_build b1 Failed "$(ago 7200)" "$PIN"; run_drift
-expect_eq "$RC/$NEEDS" "0/true" "the last attempt at this pin is over an hour old: retry"
+new_case; cm "-"; images "$OLD_ENG" "$OLD_ENG"; run_drift
+expect_eq "$RC/$NEEDS" "0/true" "engine drift without a recorded context-sha still re-renders"
 
-new_case; cm "$OLD_PIN"; reconcile_build b1 Failed "$(ago 600)" "$OLD_PIN"; run_drift
-expect_eq "$RC/$NEEDS" "0/true" "a recent failure at an OLDER pin does not hold back the new one"
+# An engine bump moves the context too: exactly one re-render, not one per poll.
+new_case; cm "$(printf 'old' | sha256sum | cut -c1-64)"; images "$OLD_ENG" "$OLD_ENG" "$(printf 'old' | sha256sum | cut -c1-64)"; run_drift
+expect_eq "$RC/$NEEDS" "0/true" "the engine bumped (context changed, nothing rendered yet): one re-render"
+expect_has "$OUT" "CONTEXT DRIFT" "the engine bumped: reported as the context drift it also is"
+new_case; cm "$(printf 'old' | sha256sum | cut -c1-64)"; images "$ENG" "$ENG"; run_drift
+expect_eq "$RC/$NEEDS" "0/false" "the render is already pushed to gitops, the live record not synced yet: no second render"
+expect_has "$OUT" "waiting for ArgoCD" "... and says so"
 
-new_case; cm "$OLD_PIN"; reconcile_build b1 Failed "$(ago 600)" "$PIN" other-app; run_drift
-expect_eq "$RC/$NEEDS" "0/true" "another app's failed re-render does not hold this one back"
+# ── one attempt per hour per engine version after a failure ──────────────────
 
-new_case; cm "$OLD_PIN"; reconcile_build b1 Failed "$(ago 7200)" "$PIN"
-jq 'del(.items[0].status.finishedAt)' "$T/workflows.json" > "$T/w.tmp" && mv "$T/w.tmp" "$T/workflows.json"
-run_drift
-expect_eq "$RC/$NEEDS" "0/true" "no finishedAt: the attempt is dated by its creation — two hours old, retry"
+new_case; cm "$(printf 'old' | sha256sum | cut -c1-64)"; images "$OLD_ENG" "$OLD_ENG" "$(printf 'old' | sha256sum | cut -c1-64)" "$(now_minus 600)"; run_drift
+expect_eq "$RC/$NEEDS" "0/false" "the build for this engine failed 10 min ago: no new attempt"
+expect_has "$OUT" "ENGINE ATTEMPT GUARD" "the guard says why"
 
-new_case; cm "$OLD_PIN"; reconcile_build b1 Failed "not-a-time" "$PIN"; run_drift
-expect_eq "$RC/$NEEDS" "0/false" "an unreadable attempt time is unknown — unknown never submits work"
+new_case; images "$OLD_ENG" "$ENG" "$CTX_SHA" "$(now_minus 600)"; run_drift
+expect_eq "$RC/$NEEDS" "0/false" "the guard also holds back ENGINE DRIFT itself"
 
-new_case; cm "$OLD_PIN"; reconcile_build b1 Running "" "$PIN"
+new_case; images "$OLD_ENG" "$OLD_ENG" "$CTX_SHA" "$(now_minus 7200)"; run_drift
+expect_eq "$RC/$NEEDS" "0/true" "the failed attempt is over an hour old: retry"
+
+new_case; images "$OLD_ENG" "$OLD_ENG" "$CTX_SHA" "${OLD_ENG}@$(( $(date +%s) - 600 ))"; run_drift
+expect_eq "$RC/$NEEDS" "0/true" "a recent failure at ANOTHER engine version does not hold the new one back"
+
+new_case; images "$OLD_ENG" "$OLD_ENG" "$CTX_SHA" "garbage"; run_drift
+expect_eq "$RC/$NEEDS" "0/true" "an unreadable attempt record is ignored"
+
+new_case; images "$OLD_ENG" "$OLD_ENG" "$CTX_SHA" "$(now_minus 600)"
+jq '.data["last-built-sha"] = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"' "$T/cm.json" > "$T/c.tmp" && mv "$T/c.tmp" "$T/cm.json"; run_drift
+expect_has "$OUT" "COMMIT DRIFT" "a new push is still built while the engine is held back"
+
+new_case; images "$OLD_ENG" "$OLD_ENG"; reconcile_build b1 Running ""
 jq '.items[0].status = {phase: "Running"} | .items[0].metadata.name = "ml-ci-build-reconciled-x"' \
   "$T/workflows.json" > "$T/w.tmp" && mv "$T/w.tmp" "$T/workflows.json"; run_drift
 expect_eq "$RC/$NEEDS" "0/false" "a build in flight: the existing in-flight guard still wins"
 
 # Another app's build in the shared {project}-ci namespace must not block this app
 # (e2e-suite-ml-jq4vp: yolo never built behind mlci's stuck build).
-new_case; cm "$OLD_PIN"; reconcile_build b1 Running "" "$PIN" other-app
+new_case; images "$OLD_ENG" "$OLD_ENG"; reconcile_build b1 Running "" other-app
 jq '.items[0].status = {phase: "Running"} | .items[0].metadata.name = "ml-ci-build-x"' \
   "$T/workflows.json" > "$T/w.tmp" && mv "$T/w.tmp" "$T/workflows.json"; run_drift
 expect_eq "$RC/$NEEDS" "0/true" "another app's build in flight does not block this app's reconcile"
 
-new_case; cm "$OLD_PIN"
+new_case; images "$OLD_ENG" "$OLD_ENG"
 jq '.data["last-built-sha"] = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"' "$T/cm.json" > "$T/c.tmp" \
   && mv "$T/c.tmp" "$T/cm.json"; run_drift
 expect_has "$OUT" "COMMIT DRIFT" "an unbuilt commit is still reported as commit drift first"
@@ -206,12 +239,12 @@ expect_has "$OUT" "COMMIT DRIFT" "an unbuilt commit is still reported as commit 
 # ── force: already satisfied ─────────────────────────────────────────────────
 # kaos e2e a3c48d99 (2026-10-19): the app-creation ci-sync (force) waited out
 # the webhook build and then rebuilt the same SHA. A HEAD that is built and
-# whose render recorded the current gitops context and the pinned enhancer is
+# whose render recorded the current gitops context and the current engine is
 # already what the force asks for; anything unknown still forces.
 
 new_case; FORCE=true run_drift
-expect_eq "$RC/$NEEDS" "0/false" "force, HEAD built + rendered from the current context by the pin: no build"
-expect_has "$OUT" "FORCED but already satisfied — HEAD ${HEAD_SHA} built and rendered from the current context (${CTX_SHA:0:12}) by enhancer ${PIN}; nothing to do" "force satisfied: says why"
+expect_eq "$RC/$NEEDS" "0/false" "force, HEAD built + rendered from the current context by the current engine: no build"
+expect_has "$OUT" "FORCED but already satisfied — HEAD ${HEAD_SHA} built and rendered from the current context (${CTX_SHA:0:12}) by engine ${ENG}; nothing to do" "force satisfied: says why"
 
 new_case; FORCE=true WANT_CTX="$CTX_SHA" run_drift
 expect_eq "$RC/$NEEDS" "0/false" "force for the context already rendered (context_sha = recorded = gitops): no build"
@@ -232,18 +265,21 @@ new_case; jq 'del(.data["last-built-sha"])' "$T/cm.json" > "$T/c.tmp" && mv "$T/
 FORCE=true run_drift
 expect_eq "$RC/$NEEDS" "0/true" "force, new app (no last-built-sha): builds"
 
-new_case; cm "$PIN" "$(printf 'old' | sha256sum | cut -c1-64)"; FORCE=true run_drift
+new_case; cm "$(printf 'old' | sha256sum | cut -c1-64)"; FORCE=true run_drift
 expect_eq "$RC/$NEEDS" "0/true" "force, recorded context-sha differs from gitops: builds"
 expect_has "$OUT" "not proven current" "force, not satisfied: says which input is unproven"
 
-new_case; cm "$PIN" "-"; FORCE=true run_drift
+new_case; cm "-"; FORCE=true run_drift
 expect_eq "$RC/$NEEDS" "0/true" "force, no context-sha recorded (unknown): builds"
 
-new_case; cm "$OLD_PIN"; FORCE=true run_drift
-expect_eq "$RC/$NEEDS" "0/true" "force, rendered by another enhancer: builds"
+new_case; images "$OLD_ENG" "$OLD_ENG"; FORCE=true run_drift
+expect_eq "$RC/$NEEDS" "0/true" "force, rendered by another engine: builds"
 
-new_case; cm "-"; FORCE=true run_drift
-expect_eq "$RC/$NEEDS" "0/true" "force, no enhancer-ref recorded (unknown): builds"
+new_case; images "-" "-"; FORCE=true run_drift
+expect_eq "$RC/$NEEDS" "0/true" "force, no engine recorded (unknown): builds"
+
+new_case; images "$ENG" "$OLD_ENG"; FORCE=true run_drift
+expect_eq "$RC/$NEEDS" "0/true" "force, compose image on another engine: builds"
 
 new_case; : > "$T/gitops-context.yaml"; FORCE=true run_drift
 expect_eq "$RC/$NEEDS" "0/true" "force, gitops context empty/unreadable (unknown): builds"
@@ -263,27 +299,27 @@ new_case; rm -f "$T/cm.json"; FORCE=true run_drift
 expect_eq "$RC" "0" "force, pipeline-images unreadable: never reaches the satisfied check"
 expect_eq "$NEEDS" "false" "force, pipeline-images unreadable: unchanged (gitops NotFound path)"
 
-# ── submit-build carries the pin ──────────────────────────────────────────────
+# ── submit-build no longer carries an enhancer label ─────────────────────────
 
-LABEL=$(yq 'select(.kind == "ClusterWorkflowTemplate" and .metadata.name == "ml-ci-reconcile")
+LABELS=$(yq 'select(.kind == "ClusterWorkflowTemplate" and .metadata.name == "ml-ci-reconcile")
             | .spec.templates[] | select(.name == "submit-build") | .resource.manifest' "$RENDERED" \
-        | yq '.metadata.labels["platform.kubecore.io/enhancer-ref"]')
-expect_eq "$LABEL" "$PIN" "a reconcile-submitted build is labelled with the pin it renders at"
+        | yq '.metadata.labels | keys | join(",")')
+expect_eq "$LABELS" "platform.kubecore.io/app,platform.kubecore.io/submitted-by,platform.kubecore.io/kaos-lib" "a reconcile-submitted build is labelled by app, submitter and kaos-lib spec only"
 
-# ── ml-ci-build records the enhancer it rendered with ─────────────────────────
+# ── ml-ci-build records the engine it rendered with ───────────────────────────
 
 RENDER_SRC="${BASE_TMP}/hera-enhance-commit.src"
 yq 'select(.kind == "ClusterWorkflowTemplate" and .metadata.name == "ml-ci-build")
     | .spec.templates[] | select(.name == "hera-enhance-commit") | .container.args[0]' \
   "$RENDERED" > "$RENDER_SRC"
-expect_has "$(grep -F "<<'IMGEOF'" "$RENDER_SRC")" "\"${PIN}\"" \
-  "the render passes the pinned enhancer ref to the pipeline-images writer"
+expect_has "$(grep -F "<<'IMGEOF'" "$RENDER_SRC")" '"$ENGINE_VERSION"' \
+  "the render passes the engine version to the pipeline-images writer"
 WRITER="${BASE_TMP}/writer.py"
 awk '/<<'"'"'IMGEOF'"'"'/{on=1; next} /^IMGEOF$/{on=0} on' "$RENDER_SRC" > "$WRITER"
 
 W=$(mktemp -d "${BASE_TMP}/writer-XXXX")
 wft() {
-  python3 - "$W/wft.yaml" "$@" <<'PYEOF'
+  python3 - "$W/wft.yaml" "$@" <<'EOF'
 import sys, yaml
 steps = sys.argv[2:]
 yaml.safe_dump({"metadata": {"name": "app1-pipeline", "namespace": "proj-train"},
@@ -291,7 +327,7 @@ yaml.safe_dump({"metadata": {"name": "app1-pipeline", "namespace": "proj-train"}
                     {"name": f"image-{s}",
                      "valueFrom": {"configMapKeyRef": {"name": "app1-pipeline-images", "key": s}}}
                     for s in steps]}}}, open(sys.argv[1], "w"))
-PYEOF
+EOF
 }
 images_key() { python3 -c 'import sys, yaml; print((yaml.safe_load(open(sys.argv[1]))["data"]).get(sys.argv[2], "<absent>"))' "$W/images.yaml" "$1"; }
 write() { python3 "$WRITER" "$W/wft.yaml" "$W/images.yaml" "$APP" "$CTX_SHA" "$1" 2>&1; }
@@ -300,40 +336,34 @@ cat > "$W/images.yaml" <<'EOF'
 apiVersion: v1
 kind: ConfigMap
 metadata: {name: app1-pipeline-images, namespace: proj-train}
-data: {last-built-sha: aaaa, context-sha: stale, step-a: "reg/app:step-a-1", step-b: "reg/app:step-b-1"}
+data: {last-built-sha: aaaa, context-sha: stale, step-a: "reg/app:step-a-1", step-b: "reg/app:step-b-1",
+       engine-compose: v0.4.7, engine-last-error: "render: boom", engine-attempt: "v0.4.7@1"}
 EOF
 wft step-a step-b
-OUT=$(write "$PIN")
-expect_eq "$(images_key enhancer-ref)" "$PIN" "a render records the enhancer it ran"
+OUT=$(write "$ENG")
+expect_eq "$(images_key engine-version)" "$ENG" "a render records the engine it ran"
 expect_eq "$(images_key context-sha)" "$CTX_SHA" "context-sha is still recorded beside it"
+expect_eq "$(images_key engine-compose)/$(images_key engine-last-error)/$(images_key engine-attempt)" "v0.4.7/render: boom/v0.4.7@1" \
+  "the other engine records are never pruned as stale step keys (the exit handler owns them)"
 
-BEFORE=$(cat "$W/images.yaml"); OUT=$(write "$PIN")
-expect_eq "$(cat "$W/images.yaml")" "$BEFORE" "re-rendering with the same enhancer rewrites nothing"
-expect_has "$OUT" "already has" "re-rendering with the same enhancer says so"
+BEFORE=$(cat "$W/images.yaml"); OUT=$(write "$ENG")
+expect_eq "$(cat "$W/images.yaml")" "$BEFORE" "re-rendering with the same engine rewrites nothing"
+expect_has "$OUT" "already has" "re-rendering with the same engine says so"
 
-wft step-a; OUT=$(write "$PIN")
+wft step-a; OUT=$(write "$ENG")
 expect_eq "$(images_key step-b)" "<absent>" "a step that left the render is pruned"
-expect_eq "$(images_key enhancer-ref)" "$PIN" "enhancer-ref is never pruned as a stale step key"
+expect_eq "$(images_key engine-version)" "$ENG" "engine-version is never pruned as a stale step key"
 
-OUT=$(write "$OLD_PIN")
-expect_eq "$(images_key enhancer-ref)" "$OLD_PIN" "a render with another pin records that pin"
+OUT=$(write "$OLD_ENG")
+expect_eq "$(images_key engine-version)" "$OLD_ENG" "a render on another engine records that engine"
 
-# ── the digest pin leaves the record alone ────────────────────────────────────
+# ── the digest pin leaves the records alone ───────────────────────────────────
 
 PATCH=$(yq 'select(.kind == "ClusterWorkflowTemplate" and .metadata.name == "ml-ci-build")
             | .spec.templates[] | select(.name == "patch-images") | .container.args[0]' "$RENDERED")
-expect_has "$PATCH" '[ "${KEY}" = "enhancer-ref" ] && continue' \
-  "the digest-pin loop skips enhancer-ref (it is not an image)"
+for k in engine-version engine-compose engine-last-error engine-attempt; do
+  expect_has "$PATCH" "[ \"\${KEY}\" = \"$k\" ] && continue" "the digest-pin loop skips $k (it is not an image)"
+done
 
-# ── the pin must be a commit ──────────────────────────────────────────────────
-
-if command -v helm >/dev/null 2>&1; then
-  REFUSAL=$(helm template t "$CHART" --set platformEnhancer.ref=main 2>&1 >/dev/null); RC=$?
-  expect_eq "$RC" 1 "helm refuses a platformEnhancer.ref that is not a full commit sha"
-  expect_has "$REFUSAL" "platformEnhancer.ref" "the refusal names the value"
-else
-  FAILED=$((FAILED + 1)); echo "FAIL: helm not on PATH — the pin-format case cannot run"
-fi
-
-echo "enhancer-drift: ${PASSED} passed, ${FAILED} failed"
+echo "engine-drift: ${PASSED} passed, ${FAILED} failed"
 exit "$FAILED"

@@ -143,72 +143,51 @@ so the files it writes carry the same ownership kaniko (root) had before.
 {{- end }}
 
 {{/*
-The platform enhancer pin (platformEnhancer.ref), refused unless it is a full
-commit sha (kubecore-operator#1199). ml-ci-build records it as the enhancer an
-app was rendered with, and ml-ci-reconcile re-renders an app whose record
-differs from it, labelling the build with it. A branch or tag would move under
-the same name, so drift could never be seen, and a "/" in it is not a valid
-label value, which would reject every reconcile-submitted build.
+files/engine.py (PRD-HPC-1461 D-80): the platform pipeline engine's context check, wheel fetch and stamp,
+written to /tmp/engine.py. Tested in tests/engine (pytest) and tests/engine-ci (the scripts that call it).
+Caller: python3 + PyYAML (tooling.toolboxImage). Run as `python3 -I`.
 */}}
-{{- define "kubecore-ci-workflows.enhancerRef" -}}
-{{- $ref := toString .Values.platformEnhancer.ref -}}
-{{- if not (regexMatch "^[0-9a-f]{40}$" $ref) -}}
-{{- fail (printf "platformEnhancer.ref must be a full 40-character commit sha, got %q" $ref) -}}
-{{- end -}}
-{{- $ref -}}
+{{- define "kubecore-ci-workflows.engineScript" -}}
+cat > /tmp/engine.py <<'ENGINEPYEOF'
+{{ .Files.Get "files/engine.py" }}
+ENGINEPYEOF
 {{- end }}
 
 {{/*
-Run the pinned platform enhancer (kubecore-operator#1161) on the raw Hera WFT,
-isolated from the app checkout (kubecore-operator#1375). Used by the two
-token-holding Hera steps, hera-enhance-commit (merge) and hera-enhance-gate (PR).
+The chart-owned compose-and-validate Dockerfile (files/compose.Dockerfile), written to
+${COMPOSE_DOCKERFILE} by the steps that need it (detect-steps for the kaos-lib check, build-push to build
+it); the app's config/ folder is the build context.
+*/}}
+{{- define "kubecore-ci-workflows.composeDockerfile" -}}
+cat > "${COMPOSE_DOCKERFILE}" <<'COMPOSEDOCKEREOF'
+{{ .Files.Get "files/compose.Dockerfile" }}
+COMPOSEDOCKEREOF
+{{- end }}
 
-The enhancer is unpacked OUTSIDE the workspace and run from there with nothing
-of the app's on sys.path. /workspace/repo is developer-controlled: hera-render
-just ran untrusted pipeline.py against it with write access (and on a PR it is
-the PR head, possibly a fork). Installing it (`pip install -e`) or importing
-from it (PYTHONPATH) ran that code next to the GitHub App token. The enhancer
-needs only the standard library and PyYAML, and reads its inputs as data.
+{{/*
+Enhance with the engine of this build (PRD-HPC-1461 D-80) on the raw WFT the engine render wrote, isolated
+from the app checkout (kubecore-operator#1375). Used by the two token-holding steps, hera-enhance-commit
+(merge) and hera-enhance-gate (PR). The engine wheel the context pins is downloaded, verified by its
+sha256 and unzipped OUTSIDE the workspace (no pip, nothing of the app's on sys.path: /workspace/repo is
+developer-controlled and hera-render just ran untrusted pipeline.py against it). A wheel that does not
+download or whose sha256 differs FAILS the step: enhancing with unknown code is not an option. The WFT is
+then stamped with the engine version (annotation, and the `platform.kubecore.io/engine` run label).
 
-Caller: PyYAML installed, /tmp/context.yaml written, the raw WFT at
-/workspace/out/raw-workflow-template.yaml. Writes
-/workspace/out/workflow-template.yaml. Fails loud: rendering with unknown
-enhancer code is not an option.
+Caller: ENGINE_JSON set (the `engine.py context` JSON of detect-steps/detect-engine, an immutable Argo
+parameter), PyYAML installed, /tmp/context.yaml written, the raw WFT at
+/workspace/out/raw-workflow-template.yaml. Writes /workspace/out/workflow-template.yaml and sets
+ENGINE_VERSION.
 */}}
 {{- define "kubecore-ci-workflows.platformEnhance" -}}
-python3 - <<'OVERLAYEOF'
-import io, os, shutil, tarfile, urllib.request
-repo, ref = "{{ .Values.platformEnhancer.repo }}", "{{ .Values.platformEnhancer.ref }}"
-req = urllib.request.Request(f"https://api.github.com/repos/{repo}/tarball/{ref}",
-                             headers={"Accept": "application/vnd.github+json", "User-Agent": "kubecore-ci"})
-tok = open("/etc/github-token/token").read().strip() if os.path.exists("/etc/github-token/token") else ""
-if tok:
-    req.add_header("Authorization", f"Bearer {tok}")
-with urllib.request.urlopen(req, timeout=60) as r:
-    tb = tarfile.open(fileobj=io.BytesIO(r.read()), mode="r:gz")
-dst = "/tmp/kubecore-enhancer/kubecore"
-shutil.rmtree(dst, ignore_errors=True); os.makedirs(dst)
-n = 0
-for m in tb.getmembers():
-    parts = m.name.split("/", 1)
-    if len(parts) < 2 or not parts[1].startswith("kubecore/") or "/local-dev/" in parts[1] + "/":
-        continue
-    rel = parts[1][len("kubecore/"):]
-    if not rel or "__pycache__" in rel:
-        continue
-    out = os.path.join(dst, rel)
-    if m.isdir():
-        os.makedirs(out, exist_ok=True)
-    elif m.isfile():
-        os.makedirs(os.path.dirname(out), exist_ok=True)
-        with tb.extractfile(m) as src, open(out, "wb") as f:
-            f.write(src.read())
-        n += 1
-if n == 0:
-    raise SystemExit(f"platform enhancer: no kubecore/ files in {repo}@{ref}")
-print(f"platform enhancer: {repo}@{ref[:12]} ({n} files) unpacked to /tmp/kubecore-enhancer")
-OVERLAYEOF
-( cd /tmp/kubecore-enhancer && python3 -m kubecore.enhance \
+{{ include "kubecore-ci-workflows.engineScript" . }}
+ENGINE_VERSION=$(printf '%s' "${ENGINE_JSON:-}" | jq -r '.version // ""')
+ENGINE_WHEEL=$(printf '%s' "${ENGINE_JSON:-}" | jq -r '.wheel // ""')
+ENGINE_WHEEL_SHA256=$(printf '%s' "${ENGINE_JSON:-}" | jq -r '.wheel_sha256 // ""')
+[ -n "${ENGINE_VERSION}" ] || { echo "engine: FATAL: no engine for this build" >&2; exit 1; }
+rm -rf /tmp/kubecore-engine
+ENGINE_DIR=$(python3 -I /tmp/engine.py fetch --wheel "${ENGINE_WHEEL}" --sha256 "${ENGINE_WHEEL_SHA256}" --dest /tmp/kubecore-engine)
+echo "platform enhancer: engine ${ENGINE_VERSION} (wheel sha256 $(printf %s "${ENGINE_WHEEL_SHA256}" | cut -c1-12) verified) unpacked to ${ENGINE_DIR}"
+( cd "${ENGINE_DIR}" && python3 -m kubecore.enhance \
     --raw /workspace/out/raw-workflow-template.yaml \
     --context /tmp/context.yaml \
     --output /workspace/out/workflow-template.yaml \
@@ -222,6 +201,7 @@ wft, ctx = yaml.safe_load(open(wft_path)), yaml.safe_load(open(ctx_path)) or {}
 if add_step_token(wft, ctx):
     yaml.dump(wft, open(wft_path, "w"), default_flow_style=False, allow_unicode=True, sort_keys=False)
 STEPTOKEOF
+python3 -I /tmp/engine.py stamp --wft /workspace/out/workflow-template.yaml --version "${ENGINE_VERSION}"
 {{- end }}
 
 {{/*
@@ -260,7 +240,7 @@ token mounted read-only at /var/run/secrets/kaos-lake and KAOS_LAKE_TOKEN_FILE
 pointing at it. Returns how many templates it changed; with no audience it changes
 nothing, so existing renders stay byte-identical. The volume name and mount path
 are the ones the enhance step itself uses for the dataset catalog. Shared by
-render-wft and the Hera path (platformEnhance), neither of which can import it.
+the enhance steps (platformEnhance), which cannot import it.
 */}}
 {{- define "kubecore-ci-workflows.stepToken" -}}
 def add_step_token(wft, ctx):

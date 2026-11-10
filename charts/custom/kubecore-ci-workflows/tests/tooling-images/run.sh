@@ -1,8 +1,7 @@
 #!/bin/sh
 # Render assertions for EVERY container the chart runs: each container,
 # script and initContainer of every ClusterWorkflowTemplate, WorkflowTemplate
-# and CronWorkflow, plus the step images render-wft writes into an ML app's
-# pipeline WorkflowTemplate. Each must:
+# and CronWorkflow. Each must:
 #   - run an image pinned to an exact version (x.y.z, optionally v-prefixed and
 #     suffixed): floating tags (alpine, latest, slim, 3.20) and untagged images
 #     fail;
@@ -29,7 +28,7 @@ ko() { FAILED=$((FAILED + 1)); echo "FAIL: $1"; }
 # Steps allowed to install at start-up: "<owner>/<template>/<container>" and
 # the reason. Every entry must still match a rendered step (a stale entry
 # fails), so the list cannot silently outlive its step.
-ALLOW='ml-ci-build/hera-render/main|pip install -e . installs the app repo'"'"'s own pyproject.toml (hera, hydra and whatever the developer pins) before running pipeline.py. Those dependencies are the developer'"'"'s and change per app, so no platform image can carry them; the step is tokenless and its image is pinned.'
+ALLOW='ml-ci-build/hera-render/main|D-80 engine render: pip installs ONLY the app pyproject dependencies the engine image does not already provide, under the engine'"'"'s own versions as constraints (never pip install -e . of the app). Those dependencies are the developer'"'"'s and change per app, so no platform image can carry them; the step is tokenless and its image is the pinned engine release.'
 
 allowed() {
   printf '%s\n' "$ALLOW" | while IFS='|' read -r key reason; do
@@ -75,12 +74,17 @@ script_of() {
 
 # A step's script without its comment lines: a comment that mentions an
 # install is not one.
-code_of() { script_of "$@" | grep -v '^[[:space:]]*#'; }
+# The chart-owned compose-and-validate Dockerfile (a heredoc) is data: it builds an image, it is not run by the step.
+code_of() { script_of "$@" | grep -v '^[[:space:]]*#' | sed '/<<.COMPOSEDOCKEREOF./,/^COMPOSEDOCKEREOF$/d'; }
 
 printf '%s\n' "$LIST" | grep . > "${TMPDIR:-/tmp}/tooling-images.$$"
 while IFS="$TAB" read -r owner tmpl cname img cpu mem; do
   id="$owner/$tmpl/$cname"
-  if pinned "$img"; then ok "$id: image '$img' is pinned"
+  if [ "$img" = '{{inputs.parameters.engine_image}}' ]; then
+    # The engine release comes from the context; files/engine.py refuses any image that is not
+    # registry/path:<pinned tag> (not latest), tested in tests/engine.
+    ok "$id: image is the context's pinned engine release (validated by engine.py)"
+  elif pinned "$img"; then ok "$id: image '$img' is pinned"
   else ko "$id: image '$img' is pinned to an exact version"; fi
   if [ -n "$cpu" ] && [ -n "$mem" ]; then ok "$id: requests cpu=$cpu memory=$mem"
   else ko "$id: requests cpu and memory (cpu='$cpu' memory='$mem')"; fi
@@ -101,21 +105,6 @@ printf '%s\n' "$ALLOW" | while IFS='|' read -r key reason; do
   if code_of "$o" "$t" "$c" | grep -Eq "$INSTALL_RE"; then ok "allow-list entry $key is still needed"
   else echo "FAIL: allow-list entry $key matches no installing step: remove it"; exit 1; fi
 done || FAILED=$((FAILED + 1))
-
-# The step images render-wft writes into the app's pipeline WorkflowTemplate
-# (create/destroy-nodegroups, the stockout guard, hpc-follower, hpc-burst) are
-# Python literals inside the render-wft script.
-RW=$(script_of ml-ci-build render-wft main)
-GEN=$(printf '%s\n' "$RW" | sed -n "s/.*'image': '\([^']*\)'.*/\1/p")
-[ -n "$GEN" ] && ok "render-wft writes literal step images" || ko "render-wft step images found"
-for g in $GEN; do
-  if pinned "$g"; then ok "render-wft generated image '$g' is pinned"
-  else ko "render-wft generated image '$g' is pinned to an exact version"; fi
-done
-# The nodegroup steps run gcloud on a CI node: they carry requests too.
-NG=$(printf '%s\n' "$RW" | grep -A1 "'image': '[^']*cloud-sdk" | grep -c "'resources': {\"requests\":{\"cpu\":\"[^\"]*\",\"memory\":\"[^\"]*\"}}")
-[ "$NG" -eq 2 ] && ok "create/destroy-nodegroups request cpu and memory" \
-  || ko "create/destroy-nodegroups request cpu and memory (found $NG of 2)"
 
 # The gcloud image has no kubectl: it comes from the pinned init container.
 tpl() {

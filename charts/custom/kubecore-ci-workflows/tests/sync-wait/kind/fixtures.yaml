@@ -32,9 +32,9 @@ data:
             if '/commits/' in self.path:
                 body = '{"sha":"%s"}' % head
             elif 'pipeline-context.yaml' in self.path:
-                body = 'kind: ConfigMap  # gitops pipeline-context.yaml, raw'
+                body = 'kind: ConfigMap\ndata:\n  context.yaml: "{engine: {version: v0.4.7, image: reg.example/kaos-pipeline-engine:v0.4.7, wheel: https://example.com/e.whl, wheelSha256: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa}}"\n'
             elif 'pipeline-images.yaml' in self.path:
-                body = 'metadata:\n  namespace: ml-proj\n'
+                body = 'metadata:\n  namespace: ml-proj\ndata:\n  engine-version: v0.4.7\n  engine-compose: v0.4.7\n'
             else:
                 self.send_response(404); self.end_headers(); return
             self.send_response(200); self.end_headers(); self.wfile.write(body.encode())

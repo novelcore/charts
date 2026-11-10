@@ -53,7 +53,6 @@ tpl() { yq "$PR | .spec.templates[] | select(.name == \"$1\") | $2" "$RENDERED";
 CALL=$(yq "$PR | .spec.templates[] | select(.name == \"ml-ci-pr-render\") | .steps[][] | select(.name == \"pipeline-lint\")" "$RENDERED")
 expect_has "$CALL" "template: pipeline-lint" "ml-ci-pr-render calls the pipeline-lint steps"
 expect_has "$CALL" "failed: true" "a linter that cannot run never fails the render (continueOn failed)"
-expect_has "$CALL" "== hera" "only Hera apps are linted (they have a pipeline.py)"
 expect_eq "$(tpl pipeline-lint-run '.automountServiceAccountToken')" "false" "run: no service-account token in the pod that reads the checkout"
 expect_eq "$(tpl pipeline-lint-run '.container.volumeMounts[].name' | tr '\n' ' ')" "workspace " "run: only the workspace is mounted (no github-token)"
 expect_not "$(tpl pipeline-lint-run '.container.args[0]')" "github-token" "run: the tokenless script never names the token"

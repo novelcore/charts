@@ -27,6 +27,7 @@ SHA40=0136a205a82fbe4ed4a82037329e048f58e7e740
 # A spec is the whole requirement (name, extras, @ url or ==version).
 SPEC="kubecore[zitadel] @ https://github.com/novelcore/hera-pipeline-template/archive/${SHA40}.zip#subdirectory=packages/kubecore"
 OLD="kaos-lib==0.2.0"
+ENGINE_V=v0.4.7
 HEAD_SHA=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 
 expect_eq() {
@@ -59,7 +60,9 @@ context_cm() {
   python3 - "$@" <<'PY'
 import json, sys, yaml
 path, spec = sys.argv[1], sys.argv[2]
-ctx = {"project": "proj", "app": "app1"}
+ctx = {"project": "proj", "app": "app1",
+       "engine": {"version": "v0.4.7", "image": "reg.example/kaos-pipeline-engine:v0.4.7",
+                  "wheel": "https://example.com/engine.whl", "wheelSha256": "a" * 64}}
 if spec != "-":
     ctx["kaosLib"] = {"spec": spec, "version": sys.argv[4] if len(sys.argv) > 4 else "0.2.1"}
     if len(sys.argv) > 3 and sys.argv[3]:
@@ -91,7 +94,8 @@ detect_case() {
   BUILT=$(git -C "$T/workspace/repo" rev-parse HEAD)
   python3 - "$T/fixture/kubeapps/${APP}/main/pipeline-images.yaml" "$BUILT" "$1" <<'PY'
 import sys, yaml
-data = {"last-built-sha": sys.argv[2], "a": "reg/app:a-dev-v1-x-1", "b": "reg/app:b-dev-v1-x-1"}
+data = {"last-built-sha": sys.argv[2], "a": "reg/app:a-dev-v1-x-1", "b": "reg/app:b-dev-v1-x-1",
+        "compose-and-validate": "reg/app:compose-and-validate-dev-v1-x-1", "engine-compose": "v0.4.7"}
 if sys.argv[3] != "-":
     data["kaos-lib-package"] = sys.argv[3]
 yaml.safe_dump({"kind": "ConfigMap", "metadata": {"name": "app1-pipeline-images"}, "data": data}, open(sys.argv[1], "w"))
@@ -123,7 +127,7 @@ detect_case "$OLD"; context_cm "$T/fixture/kubeapps/${APP}/main/pipeline-context
 expect_eq "$RC" 0 "detect-steps: runs"
 expect_eq "$KL_PKG" "$SPEC" "detect-steps: builds with the spec the context delivers"
 expect_eq "$KL_REC/$KL_COMPAT" "$SPEC/>=0.2,<0.3" "detect-steps: reports the spec and the app's compat range"
-expect_eq "$CHANGED" '[{"name":"a","path":"steps/a"}]' "detect-steps: a moved spec rebuilds only the step that declares the ARG"
+expect_eq "$CHANGED" '[{"name":"a","path":"steps/a"},{"name":"compose-and-validate","path":"config"}]' "detect-steps: a moved spec rebuilds the steps that declare the ARG and the compose image, not the others"
 expect_has "$OUT" "kaos-lib package moved to ${SPEC}" "detect-steps: says why the step rebuilds"
 
 detect_case "$SPEC"; context_cm "$T/fixture/kubeapps/${APP}/main/pipeline-context.yaml" "$SPEC"; run_detect
@@ -167,11 +171,11 @@ expect_has "$OUT" "REFUSED" "detect-steps: the refusal is loud"
 
 detect_case "-"; context_cm "$T/fixture/kubeapps/${APP}/main/pipeline-context.yaml" "$SPEC"
 rm "$T/fixture/kubeapps/${APP}/main/pipeline-context.yaml"; run_detect
-expect_eq "$RC/$KL_PKG/$KL_REC" "0//" "detect-steps: no context in gitops: kaos-lib left as it is"
+expect_eq "$RC/$KL_PKG/$KL_REC" "1//" "detect-steps: no context in gitops: no engine, the build fails and kaos-lib is left as it is"
 
 detect_case "-"; sed -i '/ARG KAOS_LIB_PACKAGE/d' "$T/workspace/repo/steps/a/Dockerfile"
 context_cm "$T/fixture/kubeapps/${APP}/main/pipeline-context.yaml" "$SPEC"; run_detect
-expect_eq "$KL_PKG/$KL_REC/$CHANGED" "/none/[]" "detect-steps: no Dockerfile declares the ARG: reports none, rebuilds nothing"
+expect_eq "$KL_PKG/$KL_REC/$CHANGED" "$SPEC/$SPEC/"'[{"name":"compose-and-validate","path":"config"}]' "detect-steps: no step Dockerfile declares the ARG: the chart's compose Dockerfile does, so the spec is still delivered through it"
 
 # ── build-push ───────────────────────────────────────────────────────────────
 
@@ -242,7 +246,6 @@ expect_eq "$REC/$COMPAT" "<absent>/<absent>" "patch-images: nothing to report le
 # ── ml-ci-reconcile: KAOS-LIB DRIFT ──────────────────────────────────────────
 
 DRIFT_SRC="${BASE_TMP}/check-drift.src"; src ml-ci-reconcile check-drift > "$DRIFT_SRC"
-PIN=$(yq '.platformEnhancer.ref' "${HERE}/../../values.yaml")
 REF=$(printf '%s' "$SPEC" | sha256sum | cut -c1-12)
 drift_case() {  # drift_case RECORDED(-=absent) CONTEXT_SPEC(-=none); RUN_AGE = seconds since the app's last pipeline run (default 1h: hot)
   RUN_AGE="${RUN_AGE-3600}"; RUN_TS=""; [ -n "$RUN_AGE" ] && RUN_TS=$(ago "$RUN_AGE")
@@ -252,8 +255,8 @@ drift_case() {  # drift_case RECORDED(-=absent) CONTEXT_SPEC(-=none); RUN_AGE = 
   printf '{"items": []}' > "$T/workflows.json"
   printf 'computeClasses:\n  cpu:\n    allocatable:\n      memoryGiB: 13\nmlEnvironment:\n  name: train\n' > "$T/context.yaml"
   printf '{"spec": {"arguments": {"parameters": [{"name": "a-mem", "value": "13Gi"}]}, "templates": [{"nodeSelector": {"platform.kubecore.io/environment": "train"}}]}}' > "$T/wft.json"
-  jq -n --arg head "$HEAD_SHA" --arg ctx "$CTX_SHA" --arg pin "$PIN" --arg rec "$1" \
-    '{data: ({"last-built-sha": $head, "context-sha": $ctx, "enhancer-ref": $pin}
+  jq -n --arg head "$HEAD_SHA" --arg ctx "$CTX_SHA" --arg rec "$1" \
+    '{data: ({"last-built-sha": $head, "context-sha": $ctx}
              + (if $rec == "-" then {} else {"kaos-lib-package": $rec} end))}' > "$T/cm.json"
   cat > "$T/bin/kubectl" <<EOF
 #!/usr/bin/env bash

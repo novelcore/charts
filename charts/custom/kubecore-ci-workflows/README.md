@@ -11,7 +11,7 @@ ClusterWorkflowTemplates for the platform CI: `ml-ci-build`, `ml-ci-reconcile`, 
 | Property | How it holds |
 |---|---|
 | ordering kept | one mutex per app orders builds and syncs; a commit pushed during a build is a webhook build that queues behind it, and a sync that then finds HEAD unbuilt submits (or finds a queued build of HEAD and submits nothing) |
-| no duplicate first build | after the wait the sync sees `last-built-sha == HEAD` with the current `context-sha` and `enhancer-ref`, so it submits nothing |
+| no duplicate first build | after the wait the sync sees `last-built-sha == HEAD` with the current `context-sha` and the context's engine (`engine-version`, `engine-compose`), so it submits nothing |
 | restarts | the queue is in the Workflow status; a controller restart loses nothing; a build that dies releases the lock |
 | bounded | `activeDeadlineSeconds` of the run (`ci.reconcileDeadlineSeconds`, default 10800) includes the wait; a build that never ends fails the waiting run with a deadline message and the hourly CronWorkflow re-detects the drift |
 | no polling pod | nothing runs while it waits |
@@ -37,7 +37,7 @@ ClusterWorkflowTemplates for the platform CI: `ml-ci-build`, `ml-ci-reconcile`, 
 
 **Dockerfile doctor.** Since rule set `1.2.0` (kaos-lib 0.4.0rc22) the same check also reads each step's `Dockerfile` (never builds or runs it) and reports the `L-D01` to `L-D08` findings: an error such as a `COPY` outside the build context or a missing `app/entry.py` turns `pipeline-lint` red, warnings and infos never do. A Dockerfile that does not use kaos-lib is not asked to declare `ARG KAOS_LIB_PACKAGE`. Since rule set `1.3.0` (kaos-lib 0.4.0rc25) `L-D08` also warns, never errors, when a `gpu=True` step's plain (non-CUDA) base image sets no NVIDIA driver path.
 
-**GPU driver prelude.** The enhancer pinned at `platformEnhancer.ref` (hera-pipeline-template#100, chart 0.12.151) wraps the command of every `gpu=True` step that runs on a KAOS GPU node in a `sh -c` prelude: the NVIDIA driver folders (`/usr/local/nvidia/lib64`, `/usr/local/nvidia/lib`, `/usr/local/nvidia/bin`) are prepended to the image's own `LD_LIBRARY_PATH` and `PATH`, a ctypes `cuInit` check fails the step in its first second with a `KAOS: this GPU step cannot reach the NVIDIA driver (...)` line, and `exec "$@"` runs the original command. HPC (Slurm) steps are never wrapped; a step given 0 GPUs (cpu class) skips the check.
+**GPU driver prelude.** The enhancer of the platform engine (hera-pipeline-template#100, chart 0.12.151) wraps the command of every `gpu=True` step that runs on a KAOS GPU node in a `sh -c` prelude: the NVIDIA driver folders (`/usr/local/nvidia/lib64`, `/usr/local/nvidia/lib`, `/usr/local/nvidia/bin`) are prepended to the image's own `LD_LIBRARY_PATH` and `PATH`, a ctypes `cuInit` check fails the step in its first second with a `KAOS: this GPU step cannot reach the NVIDIA driver (...)` line, and `exec "$@"` runs the original command. HPC (Slurm) steps are never wrapped; a step given 0 GPUs (cpu class) skips the check.
 
 **Pin.** `pipelineLint.kaosLibWheelUrl` and `pipelineLint.kaosLibWheelSha256` name one exact kaos-lib wheel from the platform's package index; it is downloaded, verified and unzipped, never `pip install`ed (the toolbox image has Python and PyYAML but not `requests` or `packaging`, so the wheel's `kaos_lib/lint/standalone.py` runs the linter without importing the rest of kaos-lib). `pipelineLint.rulesetVersion` is the rule set of that release: the run refuses a different one, so the gate and `kaosctl lint` of the same release give the same JSON. Bump the three values together with each kaos-lib release.
 
@@ -71,6 +71,32 @@ Why: on the HPC lab (2026-11-10) a kaos-lib pin move made every app rebuild ever
 **On-demand kaos-lib rebuild, background trickle.** A pin move makes apps stale; it does not rebuild them. A push rebuilds a stale app (detect-steps, as ever). A reconcile-submitted build (re-render, dataset, context) leaves stale images alone and keeps recording the spec they have. The hourly poll rebuilds a stale app only by its use, read from its pipeline runs in the ML namespace: ran within `ci.kaosLibRebuild.hotSeconds` (24h) - rebuilt now; within `idleSeconds` (30d) - rebuilt in the background, one kaos-lib rebuild at a time per project; idle, never run or unreadable - only when used. The run that triggered it used the old images (compatible within a minor, which the operator enforces) and the next run gets the new ones. Stale is `pipeline-images.kaos-lib-package != pipeline-context kaosLib.spec`; no extra key is written (it would be a gitops commit per app at the pin move).
 
 Tests: `tests/build-pacing/run.sh` (render guards), `tests/build-pacing/kind/run.sh` (real Argo: cap, render-only, mutex), `tests/kaos-lib/run.sh` (detect gate, trickle classes).
+
+## Platform pipeline engine (PRD-HPC-1461 D-80, chart 0.13.0, BREAKING)
+
+The platform pipeline engine is the ONLY way this chart renders, enhances and composes an ML app. There is no legacy mode, no shadow mode, no kubeline DSL and no `platformEnhancer.ref`. An app is `pipeline.py`, `config/` and `steps/<name>/`; it carries no `kubecore/` and no `steps/compose_and_validate/`. The operator writes `engine: {version, image, wheel, wheelSha256}` into the app's gitops `pipeline-context.yaml` (a `mode` key is ignored); a context without a usable engine FAILS the build and the live WorkflowTemplate stays as it is.
+
+| | what runs |
+|---|---|
+| render (`hera-render`, tokenless) | the context's engine image, `python -I -m kaos_engine.render pipeline.py --repo ... --profile <p>`. No `pip install -e .`: only the app pyproject dependencies the engine lacks are installed, under the engine's own versions as constraints. Profile `yolo` when `config/` has a `quantization` section (`config/quantization.yaml` or `config/quantization/`), else `hera`. |
+| enhance (`hera-enhance-commit`, `hera-enhance-gate`) | the engine wheel: download, sha256 check against `engine.wheelSha256`, unzip, no pip. A wheel that does not download or whose sha256 differs fails the step. The WorkflowTemplate is stamped with the engine version (annotation `platform.kubecore.io/engine-version`, label `platform.kubecore.io/engine` on its Workflows). |
+| compose-and-validate image | built by CI from the chart's `files/compose.Dockerfile`, never from the app: `FROM` the engine image, `kaos-lib` from the same `KAOS_LIB_PACKAGE` build-arg the step images get (`--no-deps`, under constraints frozen from the engine image: it ships no constraints file), `KUBECORE_SCHEMA_PROFILE` / `KUBECORE_CONFIG_DIR=/work/config`, `COPY . /work/config/` with the app's `config/` as the ONLY build context, label `io.kaos.engine`. The rendered WorkflowTemplate carries the command (`python -I -m kaos_engine.compose`). |
+
+The compose image is rebuilt when `config/` changed, when `engine-compose` in `{app}-pipeline-images` is not the context's `engine.version`, or when the kaos-lib package moved (its Dockerfile counts as one more step that declares the ARG).
+
+`{app}-pipeline-images` records `engine-version` (the render), `engine-compose` (the compose image), and, after a failed run, `engine-last-error` and `engine-attempt` (`<engine version>@<epoch>`). The exit handler's `engine-record` step writes them to the gitops file (one line, at most 200 characters, from the failed pod's log: engine check, render, enhance or the compose image build) and clears them after a run that rendered or built the compose image. The operator reads `engine-last-error` to show state `failed`.
+
+**ENGINE DRIFT** (`ml-ci-reconcile`): a render or compose image whose recorded engine is not the context's `engine.version` submits one build. It re-renders and rebuilds the compose image only: `detect-steps` rebuilds no other image. The records are read from gitops, so a render already pushed is not submitted again while ArgoCD has not synced it. **One attempt per hour:** while `engine-attempt` names the context's engine version and is younger than an hour, the poll submits nothing (a broken engine release does not loop builds; a new engine version has another name and is tried at once). A failed render never replaces the live WorkflowTemplate: `hera-enhance-commit` only starts after `hera-render` succeeded, and writes the file only after the enhance, the gate and the size guard.
+
+The PR check (`ml-ci-pr-render`) renders with the same template and the same engine. The step-folder gate does not look for a `compose-and-validate` folder.
+
+```bash
+python -m pytest charts/custom/kubecore-ci-workflows/tests/engine                      # files/engine.py
+bash charts/custom/kubecore-ci-workflows/tests/engine-ci/run.sh /tmp/rendered.yaml     # render, detect-steps, compose Dockerfile, engine-record, executed
+bash charts/custom/kubecore-ci-workflows/tests/engine-drift/run.sh /tmp/rendered.yaml  # ENGINE DRIFT and the hourly guard
+```
+
+The engine's `enhance.py` must understand every flag this chart passes (`--helper-configmap` since 0.12.149).
 
 ## Tests
 

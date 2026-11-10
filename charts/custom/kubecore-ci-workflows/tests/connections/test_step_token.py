@@ -1,10 +1,10 @@
-"""The step's kaos-lake token (kaos PRD 1217 F-05): both pipeline renderers project an
+"""The step's kaos-lake token (kaos PRD 1217 F-05): the pipeline renderer projects an
 audience-bound service-account token into every step that runs as the app's own account,
 only when the pipeline context carries workloadIdentity.audience.
 
-render-wft is run end to end. The Hera path is the platformEnhance post-pass of the
-rendered `hera-enhance-commit` step, applied to the committed enhancer goldens (the
-enhancer itself needs the network and is covered by test_hera_enhancer.py).
+It is the platformEnhance post-pass of the rendered `hera-enhance-commit` step, applied to
+the committed enhancer goldens (the enhancer itself needs the network and is covered by
+test_hera_enhancer.py).
 """
 import os
 import subprocess
@@ -14,9 +14,8 @@ import tempfile
 import pytest
 import yaml
 
-from harness import FIXTURES, GOLDEN, golden_text, render
+from harness import FIXTURES, GOLDEN, golden_text
 
-RW = [n for n, f in FIXTURES.items() if f.kind == "render-wft"]
 HERA = [n for n, f in FIXTURES.items() if f.kind == "hera"]
 AUDIENCE = "kaos-lake"
 APP_SA = "app-workflow"
@@ -76,28 +75,6 @@ def _assert_token(t):
     assert {"name": "kaos-lake-token", "mountPath": "/var/run/secrets/kaos-lake", "readOnly": True} \
         in t["container"]["volumeMounts"]
     assert {"name": "KAOS_LAKE_TOKEN_FILE", "value": "/var/run/secrets/kaos-lake/token"} in t["container"]["env"]
-
-
-@pytest.mark.parametrize("name", RW)
-def test_render_wft_token_golden(name):
-    out = render(name, None, rendered=os.environ["RENDERED"], ctx_override=_with_token)
-    assert out == golden_text("render-wft-step-token", name)
-    wft = yaml.safe_load(out)
-    steps = _steps(wft, APP_SA)
-    assert steps, "no step runs as the app's account"
-    for t in steps:
-        _assert_token(t)
-    for t in wft["spec"]["templates"]:  # pods on another account (nodegroup lifecycle) get none
-        if t not in steps:
-            assert "kaos-lake-token" not in str(t.get("volumes", ""))
-
-
-@pytest.mark.parametrize("name", RW)
-def test_render_wft_without_audience_unchanged(name):
-    out = render(name, None, rendered=os.environ["RENDERED"])
-    assert "kaos-lake-token" not in out and "KAOS_LAKE_TOKEN_FILE" not in out
-    assert out == render(name, None, rendered=os.environ["RENDERED"],
-                         ctx_override=lambda c: dict(c, workloadIdentity={}))
 
 
 @pytest.mark.parametrize("name", HERA)

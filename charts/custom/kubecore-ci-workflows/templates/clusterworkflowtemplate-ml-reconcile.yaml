@@ -30,7 +30,10 @@ Dataset changes (PRD novelcore/kaos#1283 D-05) are the second input of a render
 besides the commit that the poll can see: the pipeline's `dataset` dropdown is
 read from kaos-lake's catalog at render time only. The render records a digest of
 the choices it offered (dataset-sha, in {app}-pipeline-images); DATASET DRIFT
-compares it with the catalog now and re-renders when they differ. kaos-lake
+compares it with the catalog now and re-renders when they differ. The engine is
+the third (PRD-HPC-1461 D-80): ENGINE DRIFT compares the engine the gitops context
+pins with the one the last render and the compose image were built on
+(engine-version, engine-compose) and re-renders when it moved. kaos-lake
 creates a `ml-ci-dataset-release` Workflow when a version is released, which
 submits this template for each ML app with dataset_event=true: the same check,
 run at once instead of at the next poll, and retried while a build is in flight.
@@ -420,8 +423,7 @@ spec:
         printf '%s' "$HEAD_SHA" > /tmp/head_sha
 
         # The gitops pipeline-context.yaml the build renders from, and the
-        # enhancer this chart pins: the two inputs of a render besides the
-        # commit. gitops_ctx_sha prints the sha256 of the file's raw bytes (what
+        # engine it pins: the two inputs of a render besides the commit. gitops_ctx_sha prints the sha256 of the file's raw bytes (what
         # the render records as context-sha), or nothing when it is unreadable
         # or empty.
         GORG="{{ .Values.github.org }}"; GREPO="{{`{{workflow.parameters.gitops_repository}}`}}"; GBRANCH="{{`{{workflow.parameters.gitops_branch}}`}}"
@@ -431,9 +433,29 @@ spec:
             "https://api.github.com/repos/${GORG}/${GREPO}/contents/${CTX_REL}?ref=${GBRANCH}" | sha256sum | cut -c1-64)
           [ "$_cs" = "$(printf '' | sha256sum | cut -c1-64)" ] || printf '%s' "$_cs"
         }
-        ENH_PIN="{{ include "kubecore-ci-workflows.enhancerRef" . }}"
         CTX_LAST=$(echo "$CM" | jq -r '.data["context-sha"] // empty')
-        ENH_LAST=$(echo "$CM" | jq -r '.data["enhancer-ref"] // empty')
+        # ENGINE (PRD-HPC-1461 D-80): the engine the gitops context pins (ENG_WANT), and what the gitops
+        # pipeline-images records of the last engine run: the engine the render ran with (ENG_HAVE), the
+        # engine the compose image was built on (ENG_COMPOSE), the context the render consumed
+        # (ENG_CTX) and the last failed attempt, <engine version>@<epoch> (ENG_ATTEMPT). Gitops is read,
+        # not the live ConfigMap: that trails gitops by an ArgoCD sync, and a render already pushed must
+        # not be submitted again. ENG_KNOWN stays empty when gitops is unreadable: unknown never
+        # submits work.
+{{ include "kubecore-ci-workflows.engineScript" . | indent 8 }}
+        IMAGES_REL="$(dirname "{{`{{workflow.parameters.workflow_template_path}}`}}")/pipeline-images.yaml"
+        ENG_WANT=""; ENG_KNOWN=""; ENG_HAVE=""; ENG_COMPOSE=""; ENG_CTX=""; ENG_ATTEMPT=""
+        if curl -sf -H "Authorization: Bearer ${TOKEN}" -H "Accept: application/vnd.github.raw" \
+             "https://api.github.com/repos/${GORG}/${GREPO}/contents/${CTX_REL}?ref=${GBRANCH}" > /tmp/engine-context.yaml; then
+          ENG_WANT=$(python3 -I /tmp/engine.py version --context /tmp/engine-context.yaml 2>/dev/null || true)
+        fi
+        if curl -sf -H "Authorization: Bearer ${TOKEN}" -H "Accept: application/vnd.github.raw" \
+             "https://api.github.com/repos/${GORG}/${GREPO}/contents/${IMAGES_REL}?ref=${GBRANCH}" > /tmp/gitops-images.yaml; then
+          ENG_KNOWN=yes
+          ENG_HAVE=$(yq e '.data."engine-version" // ""' /tmp/gitops-images.yaml)
+          ENG_COMPOSE=$(yq e '.data."engine-compose" // ""' /tmp/gitops-images.yaml)
+          ENG_CTX=$(yq e '.data."context-sha" // ""' /tmp/gitops-images.yaml)
+          ENG_ATTEMPT=$(yq e '.data."engine-attempt" // ""' /tmp/gitops-images.yaml)
+        fi
 
         if [ "$FORCE" = "true" ]; then
           WANT_CTX="{{`{{workflow.parameters.context_sha}}`}}"
@@ -460,10 +482,10 @@ spec:
             exit 0
           fi
           # ALREADY SATISFIED: the force exists because the webhook build of
-          # HEAD may predate the context or enhancer this trigger is for. When
+          # HEAD may predate the context or engine this trigger is for. When
           # the last build IS HEAD and its render recorded the context-sha now
-          # in gitops (and the trigger's, when it names one) and the pinned
-          # enhancer, that render used exactly the inputs a forced build would:
+          # in gitops (and the trigger's, when it names one) and the engine the
+          # context pins, that render used exactly the inputs a forced build would:
           # it would rebuild the same SHA and render the same WFT. Live, kaos
           # e2e a3c48d99 (2026-10-19): every ML app's first commit was built
           # twice — the creation ci-sync waited out the webhook build (exit 3)
@@ -471,19 +493,19 @@ spec:
           # 47887e3d twice, yolo 626086d3, e2e-pcon fdc53f6b: 5 wasted builds),
           # each opening a second GitHub Deployment for an already-reported SHA
           # that sat in_progress for ~3 min. Anything unknown (no last-built-sha,
-          # no context-sha or enhancer-ref recorded, gitops unreadable) is NOT
+          # no context-sha or engine-version recorded, gitops unreadable) is NOT
           # satisfied and forces as before: unknown must never suppress the
           # first render of a new app.
           if [ -n "$LAST" ] && [ "$LAST" = "$HEAD_SHA" ]; then
             [ -n "$HAVE_CTX" ] || HAVE_CTX=$(gitops_ctx_sha)
             if [ -n "$CTX_LAST" ] && [ -n "$HAVE_CTX" ] && [ "$CTX_LAST" = "$HAVE_CTX" ] \
                && { [ -z "$WANT_CTX" ] || [ "$CTX_LAST" = "$WANT_CTX" ]; } \
-               && [ "$ENH_LAST" = "$ENH_PIN" ]; then
+               && [ -n "$ENG_WANT" ] && [ "$ENG_HAVE" = "$ENG_WANT" ] && [ "$ENG_COMPOSE" = "$ENG_WANT" ]; then
               printf 'false' > /tmp/needs_build
-              echo "reconcile: FORCED but already satisfied — HEAD ${HEAD_SHA} built and rendered from the current context (${CTX_LAST:0:12}) by enhancer ${ENH_PIN}; nothing to do"
+              echo "reconcile: FORCED but already satisfied — HEAD ${HEAD_SHA} built and rendered from the current context (${CTX_LAST:0:12}) by engine ${ENG_WANT}; nothing to do"
               exit 0
             fi
-            echo "reconcile: HEAD ${HEAD_SHA} is built, but its render is not proven current (context-sha ${CTX_LAST:-<none>} vs gitops ${HAVE_CTX:-<unreadable>}, enhancer-ref ${ENH_LAST:-<none>} vs pin ${ENH_PIN})"
+            echo "reconcile: HEAD ${HEAD_SHA} is built, but its render is not proven current (context-sha ${CTX_LAST:-<none>} vs gitops ${HAVE_CTX:-<unreadable>}, engine-version ${ENG_HAVE:-<none>} vs context ${ENG_WANT:-<none>})"
           fi
           printf 'true' > /tmp/needs_build
           echo "reconcile: FORCED — app created or its platform context changed; submitting ml-ci-build to (re)render"
@@ -495,6 +517,23 @@ spec:
           echo "reconcile: COMMIT DRIFT — a push was never built (dropped webhook?); submitting ml-ci-build"
           exit 0
         fi
+
+        # ENGINE ATTEMPT GUARD (PRD-HPC-1461 D-80): a build that failed in the engine (render, enhance or
+        # the compose image) recorded engine-attempt = <engine version>@<epoch> in the pipeline-images. A
+        # broken engine release fails every render, and a new engine moves the context too (so CONTEXT
+        # DRIFT below would fire on every poll): for the SAME engine version, at most one drift re-render
+        # per hour. A successful render clears the record; a newer engine release has another version.
+        case "${ENG_ATTEMPT##*@}" in
+          ""|*[!0-9]*) ;;
+          *)
+            ENG_AGE=$(( $(date +%s) - ${ENG_ATTEMPT##*@} ))
+            if [ -n "$ENG_WANT" ] && [ "${ENG_ATTEMPT%@*}" = "$ENG_WANT" ] && [ "$ENG_AGE" -ge 0 ] && [ "$ENG_AGE" -lt 3600 ]; then
+              printf 'false' > /tmp/needs_build
+              echo "reconcile: ENGINE ATTEMPT GUARD — the build for engine ${ENG_WANT} failed ${ENG_AGE}s ago; not re-rendering before an hour has passed"
+              exit 0
+            fi
+            ;;
+        esac
 
         # CONTEXT DRIFT (kubecore-operator#1158): the platform rewrote the gitops
         # pipeline-context.yaml (compute classes, ml-environment selector, …)
@@ -508,6 +547,9 @@ spec:
           CTX_NOW=$(gitops_ctx_sha)
           if [ -z "$CTX_NOW" ]; then
             echo "reconcile: gitops ${CTX_REL} unreadable — context drift unknown this poll"
+          elif [ "$CTX_NOW" != "$CTX_LAST" ] && [ "$CTX_NOW" = "$ENG_CTX" ]; then
+            # The render of this context is already pushed to gitops and not synced to the pool yet.
+            echo "reconcile: gitops ${CTX_REL} changed (${CTX_LAST:0:12} -> ${CTX_NOW:0:12}) but gitops already carries a render for it — waiting for ArgoCD"
           elif [ "$CTX_NOW" != "$CTX_LAST" ]; then
             printf 'true' > /tmp/needs_build
             echo "reconcile: CONTEXT DRIFT — gitops ${CTX_REL} changed since the last render (${CTX_LAST:0:12} -> ${CTX_NOW:0:12}); submitting ml-ci-build to re-render"
@@ -515,41 +557,17 @@ spec:
           fi
         fi
 
-        # ENHANCER DRIFT (kubecore-operator#1199): the enhancer is platform code
-        # pinned by this chart, and moving the pin is how a fix reaches every app
-        # — with no push, so neither check above sees it. Compare the enhancer the
-        # last render recorded (enhancer-ref) with the pin. Only for an app whose
-        # renders record context-sha: those run the Hera render, which records
-        # enhancer-ref, so the build submitted here clears the drift. Any other
-        # app has no platform enhancer to drift. context-sha without enhancer-ref
-        # is a render from before the record existed, by an unknown enhancer —
-        # drift, cleared by one render.
-        if [ -n "$CTX_LAST" ] && [ "$ENH_LAST" != "$ENH_PIN" ]; then
-          # A pin bump reaches every app at once, so it must never become a
-          # build per app per poll. Any reconcile build at THIS pin that ended
-          # within the hour means the re-render was tried: a failure would fail
-          # again (a bad pin), and a success is still reaching the pool through
-          # ArgoCD. Wait — at most one attempt per app per pin per hour. An
-          # unreadable attempt is unknown, and unknown never submits work.
-          LAST_TRY=$(echo "$INFLIGHT" | jq -r --arg app "$APP" --arg pin "$ENH_PIN" '
-            [.items[]
-             | select((.metadata.labels // {})["platform.kubecore.io/app"] == $app
-                      and (.metadata.labels // {})["platform.kubecore.io/submitted-by"] == "ml-ci-reconcile"
-                      and (.metadata.labels // {})["platform.kubecore.io/enhancer-ref"] == $pin
-                      and (.status.phase == "Succeeded" or .status.phase == "Failed" or .status.phase == "Error"))
-             | {name: .metadata.name, phase: .status.phase,
-                age: (now - ((.status.finishedAt // .metadata.creationTimestamp // "")
-                             | try fromdateiso8601 catch now))}
-             | select(.age < 3600)]
-            | sort_by(.age) | first
-            | if . == null then "" else "\(.name) (\(.phase), \(.age | floor)s ago)" end' 2>&1) || LAST_TRY="unreadable: ${LAST_TRY}"
-          if [ -n "$LAST_TRY" ]; then
-            echo "reconcile: ENHANCER DRIFT (${ENH_LAST:-<unrecorded>} -> ${ENH_PIN}) — not re-rendering this poll: an attempt at this pin ended within the hour: ${LAST_TRY}"
-          else
-            printf 'true' > /tmp/needs_build
-            echo "reconcile: ENHANCER DRIFT — the live WFT was rendered by enhancer ${ENH_LAST:-<unrecorded>} but the platform pins ${ENH_PIN}; submitting ml-ci-build to re-render"
-            exit 0
-          fi
+        # ENGINE DRIFT (PRD-HPC-1461 D-80): the engine is platform code the operator pins in the gitops
+        # context, and moving the pin is how a fix reaches every app — with no push. The render and the
+        # compose-and-validate image each record the engine they ran on (engine-version, engine-compose in
+        # the gitops pipeline-images); either one differing from the context's engine.version is a build
+        # to submit. It re-renders and rebuilds the compose image only: detect-steps rebuilds no other
+        # image. Unknown (an unreadable context or pipeline-images, a context with no engine) is never
+        # drift. The one-attempt-per-hour guard for a failing engine is above.
+        if [ -n "$ENG_WANT" ] && [ -n "$ENG_KNOWN" ] && { [ "$ENG_HAVE" != "$ENG_WANT" ] || [ "$ENG_COMPOSE" != "$ENG_WANT" ]; }; then
+          printf 'true' > /tmp/needs_build
+          echo "reconcile: ENGINE DRIFT — the render ran on engine ${ENG_HAVE:-<unrecorded>} and the compose image on ${ENG_COMPOSE:-<unrecorded>} but the platform pins ${ENG_WANT}; submitting ml-ci-build to re-render"
+          exit 0
         fi
 
         # KAOS-LIB DRIFT (PRD novelcore/kaos#1147): the kaos-lib version the
@@ -561,7 +579,7 @@ spec:
         # rebuild to do: the build submitted here rebuilds every step that
         # declares ARG KAOS_LIB_PACKAGE (detect-steps) and re-renders. Nothing
         # delivered, or an app whose Dockerfiles declare no ARG ("none"), is
-        # not drift. The same one-attempt-per-hour guard as ENHANCER DRIFT, per
+        # not drift. The same one-attempt-per-hour idea as the engine guard, per
         # spec: a spec that cannot install fails once an hour, not every poll.
 {{ include "kubecore-ci-workflows.kaosLibScript" . | indent 8 }}
         KL_WANT=""
@@ -782,8 +800,6 @@ spec:
           labels:
             platform.kubecore.io/app: {{`{{workflow.parameters.app_name}}`}}
             platform.kubecore.io/submitted-by: ml-ci-reconcile
-            # The enhancer this build renders with: ENHANCER DRIFT's attempt guard.
-            platform.kubecore.io/enhancer-ref: "{{ include "kubecore-ci-workflows.enhancerRef" . }}"
             # The kaos-lib spec (sha256[:12]) this build is for: KAOS-LIB DRIFT's attempt guard.
             platform.kubecore.io/kaos-lib: "{{`{{inputs.parameters.kaos_lib_ref}}`}}"
         spec:

@@ -1,5 +1,5 @@
 {{/*
-ml-ci-pr-render — in-cluster PR gate for Hera ML apps (kubecore-operator#1126).
+ml-ci-pr-render — in-cluster PR gate for ML apps (kubecore-operator#1126).
 
 The platform runs NO GitHub Actions. Every check runs as an Argo Workflow on
 the workload cluster and reports back to GitHub through commit statuses (and,
@@ -17,26 +17,23 @@ target_url is the Argo UI run, so the developer reads the render error (or
 the rendered DAG) where the platform produced it — never in a GitHub job.
 
 Flow (mirrors the merge build's render path, minus the gitops commit):
-  status(pending) → clone → detect-frontend → hera-render (tokenless)
+  status(pending) → clone → detect-engine → hera-render (tokenless)
                   → hera-enhance-gate (token-holding, platform code only)
                   → status(success)
 
 clone and hera-render are the SAME templates ml-ci-build runs on merge
 (templateRef, clusterScope) — a PR is validated exactly the way the merge
-build will render it, from the real pipeline-context.yaml in the gitops repo,
-not a placeholder context. hera-enhance-gate = hera-enhance-commit's
+build will render it, with the platform engine the real pipeline-context.yaml
+in the gitops repo pins (PRD-HPC-1461 D-80), not a placeholder context. hera-enhance-gate = hera-enhance-commit's
 enhance + release-hygiene gate + the step↔folder check (a declared step with
 no steps/<dir>/Dockerfile would ImagePullBackOff at run time, long after
 merge) — and then STOPS. Nothing is written anywhere.
 
-Alongside the render, Hera apps get a SECOND, independent check, `pipeline-lint`
+Alongside the render, the PR gets a SECOND, independent check, `pipeline-lint`
 (PRD novelcore/kaos#1682 F-02): the pinned kaos-lib linter reads pipeline.py, config/
 and the step folders WITHOUT running them and answers with the `pipeline-lint` commit
 status (errors fail it, warnings and infos never do) and ONE PR comment, updated in
 place on every push. It never turns `wft-render` red; see the pipeline-lint templates.
-
-kubeline-frontend apps have no PR-time render (render-wft runs on merge);
-they get a success status saying so, so the check never blocks them.
 
 Required secrets in the workflow namespace:
   - {{ .Values.github.tokenSecretName }}  (GitHub App installation token —
@@ -125,8 +122,8 @@ spec:
           name: ml-ci-build
           template: clone
           clusterScope: true
-    - - name: detect-frontend
-        template: detect-frontend
+    - - name: detect-engine
+        template: detect-engine
       # kaos-lib/support commit status on the PR head (PRD novelcore/kaos#1147):
       # reporting only, never a red render.
       - name: kaos-lib-support
@@ -141,22 +138,26 @@ spec:
           name: ml-ci-build
           template: hera-render
           clusterScope: true
-        when: "{{`{{steps.detect-frontend.outputs.parameters.frontend}}`}} == hera"
+        arguments:
+          parameters:
+          - name: engine_image
+            value: "{{`{{steps.detect-engine.outputs.parameters.engine_image}}`}}"
+          - name: engine_profile
+            value: "{{`{{steps.detect-engine.outputs.parameters.engine_profile}}`}}"
       # The pipeline linter runs next to the render and never fails it: its own
       # status is the verdict, and a linter that cannot run must not hide a render.
       - name: pipeline-lint
         template: pipeline-lint
         continueOn:
           failed: true
-        when: "{{`{{steps.detect-frontend.outputs.parameters.frontend}}`}} == hera"
     - - name: hera-enhance-gate
         template: hera-enhance-gate
-        when: "{{`{{steps.detect-frontend.outputs.parameters.frontend}}`}} == hera"
+        arguments:
+          parameters:
+          - name: engine
+            value: "{{`{{steps.detect-engine.outputs.parameters.engine}}`}}"
     # The success description is read from /workspace/summary (written by
-    # detect-frontend for kubeline apps, overwritten by hera-enhance-gate
-    # for Hera apps) rather than a step output: a skipped step has no
-    # outputs, and a steps.x.outputs reference to one fails the
-    # workflow at substitution time.
+    # hera-enhance-gate) rather than a step output.
     - - name: status-success
         template: status
         arguments:
@@ -166,35 +167,24 @@ spec:
           - name: description
             value: "@/workspace/summary"
 
-  # Surfaces the frontend marker clone wrote (hera|kubeline) as a step output
-  # so the entrypoint can route: only Hera apps have a PR-time render. Seeds
-  # the kubeline success description; hera-enhance-gate overwrites it.
-  - name: detect-frontend
+  # TOKEN-HOLDING, platform code only: the engine of this PR (PRD-HPC-1461 D-80), validated by the same
+  # engine.py as ml-ci-build's detect-steps from the app's gitops pipeline-context and the PR head as DATA
+  # (looked up, never imported or run: python3 -I). Outputs are immutable Argo parameters: they choose the
+  # render image and are handed to the gate, so nothing the untrusted render writes can change them.
+  # A context with no usable engine fails this step, and with it the check.
+  - name: detect-engine
 {{ include "kubecore-ci-workflows.preemptionRetry" . | indent 4 }}
     outputs:
       parameters:
-      - name: frontend
+      - name: engine
         valueFrom:
-          path: /workspace/frontend
-    container:
-      image: {{ .Values.tooling.alpineImage | default "alpine:3.20.10" }}
-      {{- include "kubecore-ci-workflows.resources" .Values.tooling.resources | nindent 6 }}
-      command: [sh, -c]
-      args:
-      - |
-        set -e
-        echo "frontend=$(cat /workspace/frontend)"
-        printf '%s' "kubeline frontend: WorkflowTemplate is rendered on merge (render-wft)" > /workspace/summary
-      volumeMounts:
-      - name: workspace
-        mountPath: /workspace
-
-  # TOKEN-HOLDING, platform code only (same trust boundary as
-  # hera-enhance-commit): the developer's pipeline.py already ran tokenless in
-  # hera-render; this step only runs the vendored platform enhancer on the raw
-  # WFT it produced, then gates. It never writes to any repo.
-  - name: hera-enhance-gate
-{{ include "kubecore-ci-workflows.preemptionRetry" . | indent 4 }}
+          path: /tmp/engine.json
+      - name: engine_image
+        valueFrom:
+          path: /tmp/engine_image
+      - name: engine_profile
+        valueFrom:
+          path: /tmp/engine_profile
     securityContext:
       runAsUser: 0
       runAsGroup: 0
@@ -202,6 +192,55 @@ spec:
       image: {{ .Values.tooling.toolboxImage | default "alpine/k8s:1.36.4" }}
       {{- include "kubecore-ci-workflows.resources" .Values.tooling.enhanceResources | nindent 6 }}
       command: [sh, -c]
+      securityContext:
+        runAsUser: 0
+        runAsGroup: 0
+      args:
+      - |
+        set -e
+        TOKEN=$(cat /etc/github-token/token)
+{{ include "kubecore-ci-workflows.gitAuth" . | indent 8 }}
+        ORG="{{ .Values.github.org }}"
+        GITOPS_REPO="{{`{{workflow.parameters.gitops_repository}}`}}"
+        GITOPS_BRANCH="{{`{{workflow.parameters.gitops_branch}}`}}"
+        APP_NAME="{{`{{workflow.parameters.app_name}}`}}"
+{{ include "kubecore-ci-workflows.engineScript" . | indent 8 }}
+        git clone --quiet --depth=1 --branch "${GITOPS_BRANCH}" "https://github.com/${ORG}/${GITOPS_REPO}.git" /tmp/gitops
+        git_assert_no_token /tmp/gitops
+        CONTEXT_PATH=$(find /tmp/gitops -path "*/${APP_NAME}/${GITOPS_BRANCH}/pipeline-context.yaml" | head -1)
+        [ -n "$CONTEXT_PATH" ] && [ -f "$CONTEXT_PATH" ] || { echo "engine: FATAL: no pipeline-context in ${ORG}/${GITOPS_REPO}@${GITOPS_BRANCH}" >&2; exit 1; }
+        python3 -I /tmp/engine.py context --context "$CONTEXT_PATH" --repo /workspace/repo > /tmp/engine.json \
+          || { echo "engine: FATAL: the pipeline context has no usable engine; failing the render" >&2; exit 1; }
+        jq -j '.image' /tmp/engine.json > /tmp/engine_image
+        jq -j '.profile' /tmp/engine.json > /tmp/engine_profile
+        echo "engine: $(jq -r '.version' /tmp/engine.json) image $(cat /tmp/engine_image) profile $(cat /tmp/engine_profile)"
+      volumeMounts:
+      - name: workspace
+        mountPath: /workspace
+      - name: github-token
+        mountPath: /etc/github-token
+        readOnly: true
+
+  # TOKEN-HOLDING, platform code only (same trust boundary as
+  # hera-enhance-commit): the developer's pipeline.py already ran tokenless in
+  # hera-render; this step only runs the engine's platform enhancer on the raw
+  # WFT it produced, then gates. It never writes to any repo.
+  - name: hera-enhance-gate
+{{ include "kubecore-ci-workflows.preemptionRetry" . | indent 4 }}
+    inputs:
+      parameters:
+      # The engine JSON of detect-engine. Read through the env var, never spliced into the script.
+      - name: engine
+    securityContext:
+      runAsUser: 0
+      runAsGroup: 0
+    container:
+      image: {{ .Values.tooling.toolboxImage | default "alpine/k8s:1.36.4" }}
+      {{- include "kubecore-ci-workflows.resources" .Values.tooling.enhanceResources | nindent 6 }}
+      command: [sh, -c]
+      env:
+      - name: ENGINE_JSON
+        value: "{{`{{inputs.parameters.engine}}`}}"
       securityContext:
         runAsUser: 0
         runAsGroup: 0
@@ -239,8 +278,8 @@ spec:
             yaml.safe_dump(doc, sys.stdout, sort_keys=False)
         CTXEOF
 
-        # Platform enhancer, isolated from the app checkout: see
-        # kubecore-ci-workflows.platformEnhance (kubecore-operator#1161, #1375).
+        # Platform enhancer (the engine wheel), isolated from the app checkout: see
+        # kubecore-ci-workflows.platformEnhance (kubecore-operator#1161, #1375, D-80).
 {{ include "kubecore-ci-workflows.platformEnhance" . | indent 8 }}
 
         # GATE 1: release hygiene — the same checks the merge build enforces
@@ -249,7 +288,8 @@ spec:
         # platform-built image (container.image is the
         # workflow.parameters.image-<step> moustache, kubecore/enhance.py) must
         # have steps/<dir>/Dockerfile (dir = step name with '-' → '_').
-        # Steps with a verbatim image are NOT checked: the
+        # Steps with a verbatim image are NOT checked, nor is compose-and-validate (the
+        # platform builds it from the app's config/ and its own Dockerfile): the
         # platform.kubecore.io/image escape hatch, and platform-injected
         # templates such as hpc-follower (HPC-ready pools; python:3.12.13-alpine)
         # — the first live run of this gate (#1126 e2e) failed on exactly
@@ -278,7 +318,10 @@ spec:
                 continue
             image = str(t["container"].get("image", ""))
             m = re.fullmatch(moustache, image)
-            src = f"built from `steps/{m.group(1).replace('-', '_')}/`" if m else f"verbatim `{image}`"
+            if m and m.group(1) == "compose-and-validate":
+                src = "built by the platform from `config/`"
+            else:
+                src = f"built from `steps/{m.group(1).replace('-', '_')}/`" if m else f"verbatim `{image}`"
             rows.append(f"| `{t['name']}` | {src} |")
         Path("/workspace/report-extra.md").write_text(
             f"#### Rendered pipeline — {len(rows)} steps, {len(names)} form params\n\n"
@@ -295,8 +338,8 @@ spec:
         for t in steps:
             # regex split in two so the Helm renderer never sees a double brace
             ref = re.fullmatch(r"\{" + r"\{workflow\.parameters\.image-(.+)\}" + r"\}", str(t["container"].get("image", "")))
-            if ref is None:
-                continue  # verbatim image (escape hatch or platform-injected step): nothing to build
+            if ref is None or ref.group(1) == "compose-and-validate":
+                continue  # verbatim image (escape hatch or platform-injected step), or the platform's compose image: nothing to build
             dockerfile = Path("steps") / ref.group(1).replace("-", "_") / "Dockerfile"
             if not (Path("/workspace/repo") / dockerfile).is_file():
                 missing.append((t["name"], str(dockerfile)))

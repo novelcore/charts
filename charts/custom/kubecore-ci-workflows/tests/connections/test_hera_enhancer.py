@@ -3,7 +3,7 @@ import re
 import pytest
 import yaml
 
-from harness import CONNECTIONS, EXPECTED_ENV_FROM, FIXTURES, golden_text, pinned_ref, raw_container_names, render
+from harness import CONNECTIONS, EXPECTED_ENV_FROM, FIXTURES, golden_text, raw_container_names, render
 
 HERA = [n for n, f in FIXTURES.items() if f.kind == "hera"]
 
@@ -11,12 +11,12 @@ HERA = [n for n, f in FIXTURES.items() if f.kind == "hera"]
 @pytest.mark.parametrize("name", HERA)
 @pytest.mark.parametrize("conns", [None, []], ids=["absent", "empty"])
 def test_hera_golden(name, conns):
-    assert render(name, conns, ref=pinned_ref()) == golden_text("hera", name)
+    assert render(name, conns) == golden_text("hera", name)
 
 
-# The pinned enhancer names the HPC twin template meluxina-run until the pin moves to the
+# The pinned enhancer names the HPC twin template meluxina-run until the engine syncs the
 # hpc-follower rename (hera-pipeline-template, PRD-HPC-1461 AC-12); accept both so this suite
-# passes before and after that pin bump.
+# passes before and after that bump.
 TWINS = ("hpc-follower", "meluxina-run")
 
 
@@ -38,15 +38,15 @@ def test_fixture_preconditions_hera():
 
 @pytest.mark.parametrize("name", HERA)
 def test_envfrom_optional_true(name):
-    out = yaml.safe_load(render(name, CONNECTIONS, ref=pinned_ref()))
+    out = yaml.safe_load(render(name, CONNECTIONS))
     users = [t for t in out["spec"]["templates"] if t["name"] in raw_container_names(name)]
     assert users and all(t["container"].get("envFrom") == EXPECTED_ENV_FROM for t in users)
 
 
 @pytest.mark.parametrize("name", ["yolo-vision-pipeline", "yolo-meluxina-poc"])
 def test_meluxina_twin_untouched(name):
-    a = yaml.safe_load(render(name, CONNECTIONS, ref=pinned_ref()))
-    b = yaml.safe_load(render(name, None, ref=pinned_ref()))
+    a = yaml.safe_load(render(name, CONNECTIONS))
+    b = yaml.safe_load(render(name, None))
     pick = lambda w, n: next(t for t in w["spec"]["templates"] if t["name"] == n)
     twin = _twin({t["name"] for t in a["spec"]["templates"]})
     assert pick(a, twin) == pick(b, twin)
@@ -55,8 +55,8 @@ def test_meluxina_twin_untouched(name):
 
 @pytest.mark.parametrize("name", HERA)
 def test_platform_templates_untouched(name):
-    a = yaml.safe_load(render(name, CONNECTIONS, ref=pinned_ref()))
-    b = yaml.safe_load(render(name, None, ref=pinned_ref()))
+    a = yaml.safe_load(render(name, CONNECTIONS))
+    b = yaml.safe_load(render(name, None))
     user = raw_container_names(name)
     ta = {t["name"]: t for t in a["spec"]["templates"]}
     tb = {t["name"]: t for t in b["spec"]["templates"]}
@@ -69,5 +69,5 @@ def test_platform_templates_untouched(name):
 
 @pytest.mark.parametrize("name", HERA)
 def test_envfrom_no_yaml_aliases(name):
-    out = render(name, CONNECTIONS, ref=pinned_ref())
+    out = render(name, CONNECTIONS)
     assert not re.search(r"(?m)[&*]id\d+\b", out)
