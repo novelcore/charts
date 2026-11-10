@@ -98,6 +98,21 @@ expect_has "$PATCH" '[ "${KEY}" = "wft-bytes" ] && continue' "the digest-pin loo
 expect_has "$(cat "$COMMIT")" "--helper-configmap /workspace/out/ckpt-helper.yaml" "the enhancer is asked for the helper ConfigMap"
 expect_has "$(cat "$COMMIT")" 'cp /workspace/out/ckpt-helper.yaml "$HELPER_FILE"' "the merge build copies it next to the WFT"
 expect_has "$(cat "$COMMIT")" 'git add -A -- "${HELPER_FILE}"' "the merge build commits it (and its removal)"
+
+# EXECUTED: the staging snippet must not fail for an app without a helper (git add -A on a missing,
+# untracked path exits 128 and reddened every first build of a Hera app without checkpointed steps).
+STAGE="${T}/stage.sh"
+awk '/^ *if \[ -e "\$\{HELPER_FILE\}" \]/{on=1} on{print} on && /^ *fi$/{exit}' "$COMMIT" > "$STAGE"
+expect_eq "$([ -s "$STAGE" ] && echo yes)" "yes" "the merge build guards the helper staging"
+G="${T}/gitops"; mkdir -p "$G"; ( cd "$G" && git init -q && git -c user.name=t -c user.email=t@t commit -q --allow-empty -m init )
+stage() { ( cd "$G" && set -e && HELPER_FILE="$G/ckpt-helper.yaml" && . "$STAGE" ) >/dev/null 2>&1; echo $?; }
+expect_eq "$(stage)" "0" "no helper on disk, none tracked: staging succeeds (a first build)"
+echo "kind: ConfigMap" > "$G/ckpt-helper.yaml"
+expect_eq "$(stage)" "0" "helper written: staging succeeds"
+expect_eq "$(cd "$G" && git diff --cached --name-only)" "ckpt-helper.yaml" "the helper is staged"
+( cd "$G" && git -c user.name=t -c user.email=t@t commit -q -m add && rm ckpt-helper.yaml )
+expect_eq "$(stage)" "0" "helper removed after being tracked: staging succeeds"
+expect_eq "$(cd "$G" && git diff --cached --name-only)" "ckpt-helper.yaml" "the removal is staged"
 expect_has "$(cat "$GATE")" "--helper-configmap" "the PR gate renders with the same enhancer flags"
 
 echo "wft-size: ${PASSED} passed, ${FAILED} failed"

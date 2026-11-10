@@ -3055,7 +3055,13 @@ spec:
 
         cd /tmp/gitops
         git add "${WFT_FILE}" "${IMAGES_FILE}" 2>/dev/null || git add "${WFT_FILE}"
-        git add -A -- "${HELPER_FILE}"   # the helper ConfigMap: added, updated or removed with the WFT
+        # The helper ConfigMap: added, updated or removed with the WFT. `git add -A -- <path>` exits 128
+        # ("pathspec did not match any files") for a path that is neither on disk nor tracked, which is
+        # every app whose steps do not mount the helper (a first build, a CPU-only pipeline) — so only
+        # stage it when it exists or is tracked (a removal).
+        if [ -e "${HELPER_FILE}" ] || git ls-files --error-unmatch -- "${HELPER_FILE}" >/dev/null 2>&1; then
+          git add -A -- "${HELPER_FILE}"
+        fi
         if git diff --cached --quiet; then
           echo "hera-enhance-commit: rendered WFT already current — nothing to commit"
         else
