@@ -143,11 +143,12 @@ expect_eq "$CHANGED" "[]" "detect-steps: a reconcile build (re-render, dataset, 
 expect_eq "$KL_PKG/$KL_REC" "$OLD/$OLD" "detect-steps: ... and keeps recording the spec the images really have"
 expect_has "$OUT" "kaos-lib STALE" "detect-steps: says the app is stale and rebuilt when next used"
 detect_case "$OLD"; context_cm "$T/fixture/kubeapps/${APP}/main/pipeline-context.yaml" "$SPEC"; EVENT=reconcile KL_REBUILD=true run_detect
-expect_eq "$CHANGED" '[{"name":"a","path":"steps/a"}]' "detect-steps: the reconciler's kaos-lib build (kaos_lib_rebuild=true) rebuilds the stale step"
+# The compose image carries kaos-lib too (it resolves the run's data with it), so a kaos-lib move rebuilds it with the steps.
+expect_eq "$CHANGED" '[{"name":"a","path":"steps/a"},{"name":"compose-and-validate","path":"config"}]' "detect-steps: the reconciler's kaos-lib build (kaos_lib_rebuild=true) rebuilds the stale step and the compose image"
 detect_case "$OLD"; context_cm "$T/fixture/kubeapps/${APP}/main/pipeline-context.yaml" "$SPEC"; EVENT=push run_detect
-expect_eq "$CHANGED/$KL_REC" '[{"name":"a","path":"steps/a"}]/'"$SPEC" "detect-steps: a push (the app is in use) rebuilds the stale step: the run gets the fresh image"
+expect_eq "$CHANGED/$KL_REC" '[{"name":"a","path":"steps/a"},{"name":"compose-and-validate","path":"config"}]/'"$SPEC" "detect-steps: a push (the app is in use) rebuilds the stale step and the compose image: the run gets the fresh image"
 detect_case "-"; context_cm "$T/fixture/kubeapps/${APP}/main/pipeline-context.yaml" "$SPEC"; EVENT=reconcile run_detect
-expect_eq "$CHANGED" '[{"name":"a","path":"steps/a"}]' "detect-steps: an app with NO record (built before delivery) is rebuilt by a reconcile build once"
+expect_eq "$CHANGED" '[{"name":"a","path":"steps/a"},{"name":"compose-and-validate","path":"config"}]' "detect-steps: an app with NO record (built before delivery) is rebuilt, with the compose image, by a reconcile build once"
 
 # A commit that touched step b is built (last-built-sha = HEAD). A reconcile of it rebuilds nothing
 # (the pool's ConfigMap trails gitops, so the backstop can run for the SHA that just finished: live,
