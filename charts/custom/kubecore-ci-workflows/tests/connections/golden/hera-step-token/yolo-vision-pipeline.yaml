@@ -611,6 +611,21 @@ spec:
       - --manifest-summary
       - '{{inputs.parameters.manifest-summary}}'
       command:
+      - sh
+      - -c
+      - "LD_LIBRARY_PATH=/usr/local/nvidia/lib64:/usr/local/nvidia/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}\n\
+        export LD_LIBRARY_PATH\nPATH=/usr/local/nvidia/bin:$PATH\nexport PATH\nkaos_gpus=$1\n\
+        shift\nif [ \"$kaos_gpus\" != \"0\" ]; then\n  if command -v python3 >/dev/null\
+        \ 2>&1; then\n    if ! kaos_why=`python3 -c 'import ctypes, sys\ntry:\n  \
+        \  lib = ctypes.CDLL(\"libcuda.so.1\")\nexcept OSError as e:\n    sys.exit(\"\
+        libcuda.so.1 not found: \" + str(e).replace(chr(10), \" \"))\nrc = lib.cuInit(0)\n\
+        if rc != 0:\n    sys.exit(\"cuInit returned error \" + str(rc))\n' 2>&1`;\
+        \ then\n      echo \"KAOS: this GPU step cannot reach the NVIDIA driver ($kaos_why);\
+        \ the image or node is not set up for GPU\" >&2\n      exit 1\n    fi\n  else\n\
+        \    echo \"KAOS: python3 not found in the image; skipping the NVIDIA driver\
+        \ check\" >&2\n  fi\nfi\nexec \"$@\"\n"
+      - kaos-gpu-prelude
+      - '{{inputs.parameters.gpus}}'
       - python
       - -m
       - app.entry
@@ -750,6 +765,21 @@ spec:
       - --training-result
       - '{{inputs.parameters.training-result}}'
       command:
+      - sh
+      - -c
+      - "LD_LIBRARY_PATH=/usr/local/nvidia/lib64:/usr/local/nvidia/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}\n\
+        export LD_LIBRARY_PATH\nPATH=/usr/local/nvidia/bin:$PATH\nexport PATH\nkaos_gpus=$1\n\
+        shift\nif [ \"$kaos_gpus\" != \"0\" ]; then\n  if command -v python3 >/dev/null\
+        \ 2>&1; then\n    if ! kaos_why=`python3 -c 'import ctypes, sys\ntry:\n  \
+        \  lib = ctypes.CDLL(\"libcuda.so.1\")\nexcept OSError as e:\n    sys.exit(\"\
+        libcuda.so.1 not found: \" + str(e).replace(chr(10), \" \"))\nrc = lib.cuInit(0)\n\
+        if rc != 0:\n    sys.exit(\"cuInit returned error \" + str(rc))\n' 2>&1`;\
+        \ then\n      echo \"KAOS: this GPU step cannot reach the NVIDIA driver ($kaos_why);\
+        \ the image or node is not set up for GPU\" >&2\n      exit 1\n    fi\n  else\n\
+        \    echo \"KAOS: python3 not found in the image; skipping the NVIDIA driver\
+        \ check\" >&2\n  fi\nfi\nexec \"$@\"\n"
+      - kaos-gpu-prelude
+      - '{{inputs.parameters.gpus}}'
       - python
       - -m
       - app.entry
