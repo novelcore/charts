@@ -30,6 +30,9 @@ ko() { FAILED=$((FAILED + 1)); echo "FAIL: $1"; }
 # the reason. Every entry must still match a rendered step (a stale entry
 # fails), so the list cannot silently outlive its step.
 ALLOW='ml-ci-build/hera-render/main|pip install -e . installs the app repo'"'"'s own pyproject.toml (hera, hydra and whatever the developer pins) before running pipeline.py. Those dependencies are the developer'"'"'s and change per app, so no platform image can carry them; the step is tokenless and its image is pinned.'
+ALLOW="${ALLOW}
+ml-ci-build/hera-render-engine/main|D-79 engine render: pip installs ONLY the app pyproject dependencies the engine image does not already provide, under the engine's own versions as constraints (never pip install -e . of the app); the step is tokenless and its image is the pinned engine release."
+
 
 allowed() {
   printf '%s\n' "$ALLOW" | while IFS='|' read -r key reason; do
@@ -80,7 +83,11 @@ code_of() { script_of "$@" | grep -v '^[[:space:]]*#'; }
 printf '%s\n' "$LIST" | grep . > "${TMPDIR:-/tmp}/tooling-images.$$"
 while IFS="$TAB" read -r owner tmpl cname img cpu mem; do
   id="$owner/$tmpl/$cname"
-  if pinned "$img"; then ok "$id: image '$img' is pinned"
+  if [ "$img" = '{{inputs.parameters.engine_image}}' ]; then
+    # The engine release comes from the context; files/engine.py decide refuses any image that is not
+    # registry/path:<pinned tag> (not latest), tested in tests/engine.
+    ok "$id: image is the engine decision's pinned release (validated by engine.py decide)"
+  elif pinned "$img"; then ok "$id: image '$img' is pinned"
   else ko "$id: image '$img' is pinned to an exact version"; fi
   if [ -n "$cpu" ] && [ -n "$mem" ]; then ok "$id: requests cpu=$cpu memory=$mem"
   else ko "$id: requests cpu and memory (cpu='$cpu' memory='$mem')"; fi

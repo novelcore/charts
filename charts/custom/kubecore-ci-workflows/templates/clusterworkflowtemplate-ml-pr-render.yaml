@@ -136,12 +136,30 @@ spec:
           clusterScope: true
         continueOn:
           failed: true
+    # Which engine renders this PR (PRD-HPC-1461 D-79): the same decision the merge build makes, so a PR
+    # renders exactly as the merge will. Runs for every frontend (a skipped step has no outputs to route
+    # on) and answers legacy for a kubeline app.
+    - - name: detect-engine
+        template: detect-engine
     - - name: hera-render
         templateRef:
           name: ml-ci-build
           template: hera-render
           clusterScope: true
-        when: "{{`{{steps.detect-frontend.outputs.parameters.frontend}}`}} == hera"
+        when: "{{`{{steps.detect-frontend.outputs.parameters.frontend}}`}} == hera && {{`{{steps.detect-engine.outputs.parameters.engine_mode}}`}} != engine"
+      # mode engine: the platform engine renders the PR head; the app's vendored kubecore/ is never run.
+      - name: hera-render-engine
+        templateRef:
+          name: ml-ci-build
+          template: hera-render-engine
+          clusterScope: true
+        when: "{{`{{steps.detect-frontend.outputs.parameters.frontend}}`}} == hera && {{`{{steps.detect-engine.outputs.parameters.engine_mode}}`}} == engine"
+        arguments:
+          parameters:
+          - name: engine_image
+            value: "{{`{{steps.detect-engine.outputs.parameters.engine_image}}`}}"
+          - name: engine_profile
+            value: "{{`{{steps.detect-engine.outputs.parameters.engine_profile}}`}}"
       # The pipeline linter runs next to the render and never fails it: its own
       # status is the verdict, and a linter that cannot run must not hide a render.
       - name: pipeline-lint
@@ -149,9 +167,19 @@ spec:
         continueOn:
           failed: true
         when: "{{`{{steps.detect-frontend.outputs.parameters.frontend}}`}} == hera"
+        arguments:
+          parameters:
+          - name: engine_mode
+            value: "{{`{{steps.detect-engine.outputs.parameters.engine_mode}}`}}"
+          - name: engine_vendored
+            value: "{{`{{steps.detect-engine.outputs.parameters.engine_vendored}}`}}"
     - - name: hera-enhance-gate
         template: hera-enhance-gate
         when: "{{`{{steps.detect-frontend.outputs.parameters.frontend}}`}} == hera"
+        arguments:
+          parameters:
+          - name: engine
+            value: "{{`{{steps.detect-engine.outputs.parameters.engine}}`}}"
     # The success description is read from /workspace/summary (written by
     # detect-frontend for kubeline apps, overwritten by hera-enhance-gate
     # for Hera apps) rather than a step output: a skipped step has no
@@ -189,12 +217,32 @@ spec:
       - name: workspace
         mountPath: /workspace
 
-  # TOKEN-HOLDING, platform code only (same trust boundary as
-  # hera-enhance-commit): the developer's pipeline.py already ran tokenless in
-  # hera-render; this step only runs the vendored platform enhancer on the raw
-  # WFT it produced, then gates. It never writes to any repo.
-  - name: hera-enhance-gate
+  # TOKEN-HOLDING, platform code only: the engine decision for this PR (PRD-HPC-1461 D-79), made by
+  # the same files/engine.py decide as ml-ci-build's detect-steps, from the app's gitops
+  # pipeline-context and the PR head as DATA (hashed and parsed, never imported or run: python3 -I,
+  # and no git command runs in the checkout). Outputs are immutable Argo parameters: they choose the
+  # render image and are handed to the gate, so nothing the untrusted render writes can change them.
+  # A shadow or engine app whose wheel cannot be verified fails this step, and with it the check.
+  - name: detect-engine
 {{ include "kubecore-ci-workflows.preemptionRetry" . | indent 4 }}
+    outputs:
+      parameters:
+      - name: engine
+        valueFrom:
+          path: /tmp/engine.json
+      - name: engine_mode
+        valueFrom:
+          path: /tmp/engine_mode
+      - name: engine_image
+        valueFrom:
+          path: /tmp/engine_image
+      - name: engine_profile
+        valueFrom:
+          path: /tmp/engine_profile
+      - name: engine_vendored
+        valueFrom:
+          path: /tmp/engine_vendored
+          default: ""
     securityContext:
       runAsUser: 0
       runAsGroup: 0
@@ -202,6 +250,69 @@ spec:
       image: {{ .Values.tooling.toolboxImage | default "alpine/k8s:1.36.4" }}
       {{- include "kubecore-ci-workflows.resources" .Values.tooling.enhanceResources | nindent 6 }}
       command: [sh, -c]
+      securityContext:
+        runAsUser: 0
+        runAsGroup: 0
+      args:
+      - |
+        set -e
+        TOKEN=$(cat /etc/github-token/token)
+{{ include "kubecore-ci-workflows.gitAuth" . | indent 8 }}
+        ORG="{{ .Values.github.org }}"
+        GITOPS_REPO="{{`{{workflow.parameters.gitops_repository}}`}}"
+        GITOPS_BRANCH="{{`{{workflow.parameters.gitops_branch}}`}}"
+        APP_NAME="{{`{{workflow.parameters.app_name}}`}}"
+{{ include "kubecore-ci-workflows.engineScript" . | indent 8 }}
+        LEGACY='{"engine_image":"","version":"","mode":"legacy","requested_mode":"legacy","profile":"","vendored":"","compose_dockerfile":"","rebuild_compose":false,"wheel":"","wheel_sha256":"","reason":"%s"}'
+        if [ "$(cat /workspace/frontend 2>/dev/null)" != "hera" ]; then
+          printf "$LEGACY" "NotHera: only Hera apps render with the engine" > /tmp/engine.json
+        else
+          git clone --quiet --depth=1 --branch "${GITOPS_BRANCH}" "https://github.com/${ORG}/${GITOPS_REPO}.git" /tmp/gitops
+          git_assert_no_token /tmp/gitops
+          CONTEXT_PATH=$(find /tmp/gitops -path "*/${APP_NAME}/${GITOPS_BRANCH}/pipeline-context.yaml" | head -1)
+          IMAGES_PATH=$(find /tmp/gitops -path "*/${APP_NAME}/${GITOPS_BRANCH}/pipeline-images.yaml" | head -1)
+          if [ -n "$CONTEXT_PATH" ] && [ -f "$CONTEXT_PATH" ]; then
+            python3 -I /tmp/engine.py decide --context "$CONTEXT_PATH" --repo /workspace/repo --work /tmp/kaos-engine-decide \
+              ${IMAGES_PATH:+--images "$IMAGES_PATH"} > /tmp/engine.json \
+              || { echo "engine: FATAL: the platform engine could not be set up for this app; failing the render" >&2; exit 1; }
+          else
+            printf "$LEGACY" "NoEngineBlock: no pipeline-context in the gitops repo" > /tmp/engine.json
+          fi
+        fi
+        jq -j '.mode' /tmp/engine.json > /tmp/engine_mode
+        jq -j '.engine_image' /tmp/engine.json > /tmp/engine_image
+        jq -j '.profile' /tmp/engine.json > /tmp/engine_profile
+        jq -j '.vendored' /tmp/engine.json > /tmp/engine_vendored
+        echo "engine: mode=$(cat /tmp/engine_mode) vendored=$(cat /tmp/engine_vendored)"
+        echo "engine: $(jq -r '.reason' /tmp/engine.json)"
+      volumeMounts:
+      - name: workspace
+        mountPath: /workspace
+      - name: github-token
+        mountPath: /etc/github-token
+        readOnly: true
+
+  # TOKEN-HOLDING, platform code only (same trust boundary as
+  # hera-enhance-commit): the developer's pipeline.py already ran tokenless in
+  # hera-render; this step only runs the vendored platform enhancer on the raw
+  # WFT it produced, then gates. It never writes to any repo.
+  - name: hera-enhance-gate
+{{ include "kubecore-ci-workflows.preemptionRetry" . | indent 4 }}
+    inputs:
+      parameters:
+      # The engine decision of detect-engine (JSON); "" = legacy. Read through the env var, never spliced.
+      - name: engine
+        value: ""
+    securityContext:
+      runAsUser: 0
+      runAsGroup: 0
+    container:
+      image: {{ .Values.tooling.toolboxImage | default "alpine/k8s:1.36.4" }}
+      {{- include "kubecore-ci-workflows.resources" .Values.tooling.enhanceResources | nindent 6 }}
+      command: [sh, -c]
+      env:
+      - name: ENGINE_DECISION
+        value: "{{`{{inputs.parameters.engine}}`}}"
       securityContext:
         runAsUser: 0
         runAsGroup: 0
@@ -337,6 +448,12 @@ spec:
   # prepare and run never fail the run: a problem is written to /workspace/lint/failed and
   # report turns it into an `error` status. The check is advisory (not in any ruleset).
   - name: pipeline-lint
+    inputs:
+      parameters:
+      - name: engine_mode
+        value: "legacy"
+      - name: engine_vendored
+        value: ""
     steps:
     - - name: prepare
         template: pipeline-lint-prepare
@@ -348,6 +465,12 @@ spec:
           failed: true
     - - name: report
         template: pipeline-lint-report
+        arguments:
+          parameters:
+          - name: engine_mode
+            value: "{{`{{inputs.parameters.engine_mode}}`}}"
+          - name: engine_vendored
+            value: "{{`{{inputs.parameters.engine_vendored}}`}}"
 
   - name: pipeline-lint-prepare
 {{ include "kubecore-ci-workflows.githubReportRetry" . | indent 4 }}
@@ -465,10 +588,21 @@ spec:
 
   - name: pipeline-lint-report
 {{ include "kubecore-ci-workflows.githubReportRetry" . | indent 4 }}
+    inputs:
+      parameters:
+      - name: engine_mode
+        value: "legacy"
+      - name: engine_vendored
+        value: ""
     container:
       image: {{ .Values.tooling.toolboxImage | default "alpine/k8s:1.36.4" }}
       {{- include "kubecore-ci-workflows.resources" .Values.tooling.resources | nindent 6 }}
       command: [sh, -c]
+      env:
+      - name: ENGINE_MODE
+        value: "{{`{{inputs.parameters.engine_mode}}`}}"
+      - name: ENGINE_VENDORED
+        value: "{{`{{inputs.parameters.engine_vendored}}`}}"
       args:
       - |
         set +e
@@ -493,7 +627,16 @@ spec:
         fi
         ERRORS=$(jq -r '.summary.errors' "${LINT_DIR}/report.json")
         if [ "${ERRORS}" = 0 ]; then STATE=success; else STATE=failure; fi
-        post_status "${STATE}" "$(cat "${LINT_DIR}/status.txt")"
+        # PRD-HPC-1461 D-79: in mode engine the platform renders with its own engine and never imports the
+        # app's kubecore/. An edited copy is not an error (it is simply not used), but its owner should
+        # know their edits do nothing: a warning on the status and in the comment.
+        ENGINE_WARN=""
+        if [ "${ENGINE_MODE}" = engine ] && [ "${ENGINE_VENDORED}" = modified ]; then
+          ENGINE_WARN="warning: kubecore/ edits are ignored (platform engine)"
+        fi
+        DESC="$(cat "${LINT_DIR}/status.txt")"
+        [ -n "${ENGINE_WARN}" ] && DESC="${DESC} | ${ENGINE_WARN}"
+        post_status "${STATE}" "${DESC}"
         RC=$?
 
         # ONE comment per pull request, found by its marker and updated in place (the marker
@@ -503,6 +646,7 @@ spec:
           {
             echo "${MARKER}"
             cat "${LINT_DIR}/report.md"
+            [ -n "${ENGINE_WARN}" ] && printf '\n> **Warning (platform engine):** `kubecore/` in this repository was edited. The platform renders this pipeline with its own engine and does not run that copy, so those edits have no effect; the WorkflowTemplate is rendered as for an unedited copy. Restore the file, or move the change to `pipeline.py` or `config/`.\n'
             [ -n "${RUN_URL}" ] && printf '\n[Argo run](%s)\n' "${RUN_URL}"
           } > /tmp/body.md
           PAYLOAD=$(jq -Rs '{body: .}' /tmp/body.md)

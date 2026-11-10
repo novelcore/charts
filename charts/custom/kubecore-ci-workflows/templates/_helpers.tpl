@@ -159,6 +159,89 @@ label value, which would reject every reconcile-submitted build.
 {{- end }}
 
 {{/*
+files/engine.py (PRD-HPC-1461 D-79): the platform pipeline engine decision, wheel fetch, stamp and
+shadow comparison, written to /tmp/engine.py. Tested in tests/engine (pytest) and tests/engine-ci
+(the scripts that call it). Caller: python3 + PyYAML (tooling.toolboxImage). Run as `python3 -I`.
+*/}}
+{{- define "kubecore-ci-workflows.engineScript" -}}
+cat > /tmp/engine.py <<'ENGINEPYEOF'
+{{ .Files.Get "files/engine.py" }}
+ENGINEPYEOF
+{{- end }}
+
+{{/*
+The engine DECISION of this build (the JSON `engine.py decide` printed in detect-steps/detect-engine,
+passed to the step as the ENGINE_DECISION env var, an immutable Argo parameter: nothing the untrusted
+render wrote to /workspace is read back for a decision). Sets ENGINE_MODE (legacy|shadow|engine; legacy
+when there is no decision), ENGINE_VERSION, ENGINE_WHEEL and ENGINE_WHEEL_SHA256.
+*/}}
+{{- define "kubecore-ci-workflows.engineDecisionVars" -}}
+ENGINE_MODE=$(printf '%s' "${ENGINE_DECISION:-}" | jq -r '.mode // "legacy"' 2>/dev/null || echo legacy)
+case "${ENGINE_MODE}" in legacy|shadow|engine) ;; *) ENGINE_MODE=legacy ;; esac
+ENGINE_VERSION=$(printf '%s' "${ENGINE_DECISION:-}" | jq -r '.version // ""' 2>/dev/null || true)
+ENGINE_WHEEL=$(printf '%s' "${ENGINE_DECISION:-}" | jq -r '.wheel // ""' 2>/dev/null || true)
+ENGINE_WHEEL_SHA256=$(printf '%s' "${ENGINE_DECISION:-}" | jq -r '.wheel_sha256 // ""' 2>/dev/null || true)
+{{- end }}
+
+{{/*
+Enhance from the engine wheel (mode engine): the wheel the context pins is downloaded, verified by its
+sha256 and unzipped OUTSIDE the workspace (no pip, no GitHub tarball of platformEnhancer.ref), and its
+kubecore.enhance runs over the engine's own raw render. A sha256 that differs fails the step. The
+legacy block next to it is untouched.
+Caller: ENGINE_* set (engineDecisionVars), /tmp/context.yaml, the engine raw render at
+/workspace/out/engine/raw-workflow-template.yaml. Writes /workspace/out/workflow-template.yaml.
+*/}}
+{{- define "kubecore-ci-workflows.engineEnhance" -}}
+rm -rf /tmp/kubecore-engine
+ENGINE_DIR=$(python3 -I /tmp/engine.py fetch --wheel "${ENGINE_WHEEL}" --sha256 "${ENGINE_WHEEL_SHA256}" --dest /tmp/kubecore-engine)
+echo "platform enhancer: engine ${ENGINE_VERSION} (wheel sha256 ${ENGINE_WHEEL_SHA256:0:12} verified) unpacked to ${ENGINE_DIR}"
+cp /workspace/out/engine/raw-workflow-template.yaml /workspace/out/raw-workflow-template.yaml
+( cd "${ENGINE_DIR}" && python3 -m kubecore.enhance \
+    --raw /workspace/out/raw-workflow-template.yaml \
+    --context /tmp/context.yaml \
+    --output /workspace/out/workflow-template.yaml \
+    --helper-configmap /workspace/out/ckpt-helper.yaml )
+{{- end }}
+
+{{/*
+Shadow mode (hera-enhance-commit only): enhance the ENGINE render with the engine wheel's enhancer and
+compare it, as parsed YAML, with the committed (legacy) output. Writes /tmp/engine-shadow-result:
+`equal`, `differs:<n>` or `failed` (the engine render or its enhance did not produce a document). The
+legacy output is what gets committed either way. Caller: platformEnhance ran (legacy), then this.
+*/}}
+{{- define "kubecore-ci-workflows.engineShadow" -}}
+rm -f /tmp/engine-shadow-result
+if [ "${ENGINE_MODE}" = shadow ]; then
+  rm -rf /tmp/kubecore-engine /tmp/engine-shadow; mkdir -p /tmp/engine-shadow
+  ENGINE_DIR=$(python3 -I /tmp/engine.py fetch --wheel "${ENGINE_WHEEL}" --sha256 "${ENGINE_WHEEL_SHA256}" --dest /tmp/kubecore-engine)
+  SHADOW=failed
+  if [ -s /workspace/out/engine/raw-workflow-template.yaml ] \
+     && ( cd "${ENGINE_DIR}" && python3 -m kubecore.enhance \
+            --raw /workspace/out/engine/raw-workflow-template.yaml \
+            --context /tmp/context.yaml \
+            --output /tmp/engine-shadow/workflow-template.yaml \
+            --helper-configmap /tmp/engine-shadow/ckpt-helper.yaml ); then
+    SHADOW=ok
+    python3 - /tmp/engine-shadow/workflow-template.yaml /tmp/context.yaml <<'SHADOWTOKEOF' || SHADOW=failed
+import sys
+import yaml
+{{ include "kubecore-ci-workflows.stepToken" . }}
+wft_path, ctx_path = sys.argv[1:3]
+wft, ctx = yaml.safe_load(open(wft_path)), yaml.safe_load(open(ctx_path)) or {}
+if add_step_token(wft, ctx):
+    yaml.dump(wft, open(wft_path, "w"), default_flow_style=False, allow_unicode=True, sort_keys=False)
+SHADOWTOKEOF
+  fi
+  if [ "${SHADOW}" = ok ]; then
+    SHADOW=$(python3 -I /tmp/engine.py compare /workspace/out/workflow-template.yaml /tmp/engine-shadow/workflow-template.yaml \
+               /workspace/out/ckpt-helper.yaml /tmp/engine-shadow/ckpt-helper.yaml) || SHADOW=failed
+  fi
+  printf '%s' "${SHADOW}" > /tmp/engine-shadow-result
+  echo "engine-shadow: ${SHADOW}"
+fi
+{{- end }}
+
+{{/*
 Run the pinned platform enhancer (kubecore-operator#1161) on the raw Hera WFT,
 isolated from the app checkout (kubecore-operator#1375). Used by the two
 token-holding Hera steps, hera-enhance-commit (merge) and hera-enhance-gate (PR).
@@ -176,6 +259,11 @@ Caller: PyYAML installed, /tmp/context.yaml written, the raw WFT at
 enhancer code is not an option.
 */}}
 {{- define "kubecore-ci-workflows.platformEnhance" -}}
+{{ include "kubecore-ci-workflows.engineScript" . }}
+{{ include "kubecore-ci-workflows.engineDecisionVars" . }}
+if [ "${ENGINE_MODE}" = engine ]; then
+{{ include "kubecore-ci-workflows.engineEnhance" . }}
+else
 python3 - <<'OVERLAYEOF'
 import io, os, shutil, tarfile, urllib.request
 repo, ref = "{{ .Values.platformEnhancer.repo }}", "{{ .Values.platformEnhancer.ref }}"
@@ -213,6 +301,7 @@ OVERLAYEOF
     --context /tmp/context.yaml \
     --output /workspace/out/workflow-template.yaml \
     --helper-configmap /workspace/out/ckpt-helper.yaml )
+fi
 python3 - /workspace/out/workflow-template.yaml /tmp/context.yaml <<'STEPTOKEOF'
 import sys
 import yaml
@@ -222,6 +311,11 @@ wft, ctx = yaml.safe_load(open(wft_path)), yaml.safe_load(open(ctx_path)) or {}
 if add_step_token(wft, ctx):
     yaml.dump(wft, open(wft_path, "w"), default_flow_style=False, allow_unicode=True, sort_keys=False)
 STEPTOKEOF
+if [ "${ENGINE_MODE}" = engine ]; then
+  # The WorkflowTemplate says which engine produced it; the Workflow label is what the fleet count
+  # and the removal gate read from running Workflows.
+  python3 -I /tmp/engine.py stamp --wft /workspace/out/workflow-template.yaml --version "${ENGINE_VERSION}"
+fi
 {{- end }}
 
 {{/*

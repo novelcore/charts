@@ -263,6 +263,24 @@ new_case; rm -f "$T/cm.json"; FORCE=true run_drift
 expect_eq "$RC" "0" "force, pipeline-images unreadable: never reaches the satisfied check"
 expect_eq "$NEEDS" "false" "force, pipeline-images unreadable: unchanged (gitops NotFound path)"
 
+# ── mode engine (PRD-HPC-1461 D-79): a render by the platform engine has no ENHANCER DRIFT ───
+# The engine wheel's enhancer rendered it, so it records no enhancer-ref and a moved pin is no reason to
+# re-render. A render by the vendored code (legacy, shadow) is unchanged.
+
+set_engine_mode() { jq --arg m "$1" '.data["engine-mode"] = $m' "$T/cm.json" > "$T/c.tmp" && mv "$T/c.tmp" "$T/cm.json"; }
+new_case; cm "$OLD_PIN"; set_engine_mode engine; run_drift
+expect_eq "$RC/$NEEDS" "0/false" "engine mode: the pin moved but the render did not use it: no ENHANCER DRIFT"
+new_case; cm "-"; set_engine_mode engine; run_drift
+expect_eq "$RC/$NEEDS" "0/false" "engine mode, no enhancer-ref recorded (never recorded in engine mode): no drift"
+new_case; cm "$OLD_PIN"; set_engine_mode legacy; run_drift
+expect_eq "$RC/$NEEDS" "0/true" "legacy mode recorded: ENHANCER DRIFT as before"
+new_case; cm "$OLD_PIN"; set_engine_mode shadow; run_drift
+expect_eq "$RC/$NEEDS" "0/true" "shadow mode recorded (the legacy output was committed): ENHANCER DRIFT as before"
+new_case; cm "-"; set_engine_mode engine; FORCE=true run_drift
+expect_eq "$RC/$NEEDS" "0/false" "force, built HEAD, engine mode render from the current context: already satisfied"
+new_case; cm "-"; set_engine_mode legacy; FORCE=true run_drift
+expect_eq "$RC/$NEEDS" "0/true" "force, legacy mode with no enhancer-ref recorded (unknown): builds, as before"
+
 # ── submit-build carries the pin ──────────────────────────────────────────────
 
 LABEL=$(yq 'select(.kind == "ClusterWorkflowTemplate" and .metadata.name == "ml-ci-reconcile")

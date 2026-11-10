@@ -168,6 +168,7 @@ scenario() {
   ( cd "$T" && sh "$T/report.sh" > "$T/report.log" 2>&1 ); REP_RC=$?
   CALLS=$(cat "$T/calls"); BODIES=$(cat "$T/bodies")
 }
+pr_lint_inputs() { yq "$PR | .spec.templates[] | select(.name == \"pipeline-lint\") | .inputs.parameters[].name" "$RENDERED" | grep -v '^---$' | sed '/^$/d' | tr '\n' ' ' | sed 's/ $//'; }
 CLEAN_PY='with open("PWNED-pipeline", "w") as f: f.write("ran")
 from kubecore.authoring import pipeline, step
 with pipeline("p") as p:
@@ -227,6 +228,27 @@ expect_eq "$REP_RC" "1" "bad wheel: report exits 1 so the node is red in the Arg
 expect_eq "$(grep '"state"' "$T/bodies" | jq -r .state | tr '\n' ' ')" "pending error " "bad wheel: the status ends as error"
 expect_has "$(grep '"state"' "$T/bodies" | tail -1 | jq -r .description)" "could not run" "bad wheel: the status says the check could not run"
 expect_eq "$(printf '%s\n' "$CALLS" | grep -c 'comments')" "0" "bad wheel: no comment"
+
+# 5. PRD-HPC-1461 D-79: in mode engine an edited kubecore/ is ignored by the platform; the status and the
+# comment carry a warning (never a failure). In every other mode the copy IS used: no warning.
+engine_report() {  # engine_report MODE VENDORED
+  scenario 7 '[]' 0 "$CLEAN_PY"
+  fresh_workspace; : > "$T/prepare.log"
+  ( cd "$T" && sh "$T/prepare.sh" > "$T/prepare.log" 2>&1 ); ( cd "$T" && sh "$T/run.sh" > "$T/run.log" 2>&1 )
+  ( cd "$T" && ENGINE_MODE="$1" ENGINE_VENDORED="$2" sh "$T/report.sh" > "$T/report.log" 2>&1 ); REP_RC=$?
+  CALLS=$(cat "$T/calls"); BODIES=$(cat "$T/bodies")
+}
+engine_report engine modified
+expect_eq "$(grep '"state"' "$T/bodies" | jq -r .state | tr '\n' ' ')" "pending success " "engine + modified: still success (a warning, never a failure)"
+expect_has "$(grep '"state"' "$T/bodies" | tail -1 | jq -r .description)" "warning: kubecore/ edits are ignored (platform engine)" "engine + modified: the status description carries the warning"
+expect_has "$(jq -r 'select(has("body")) | .body' "$T/bodies")" "Warning (platform engine)" "engine + modified: the PR comment carries the warning"
+for combo in "engine pristine" "engine absent" "shadow modified" "legacy modified" "legacy ''"; do
+  eval set -- "$combo"
+  engine_report "$1" "$2"
+  expect_not "$(printf '%s' "$BODIES")" "edits are ignored" "mode $1, vendored ${2:-none}: no engine warning"
+  expect_not "$(printf '%s' "$BODIES")" "Warning (platform engine)" "mode $1, vendored ${2:-none}: no engine warning in the comment"
+done
+expect_eq "$(pr_lint_inputs)" "engine_mode engine_vendored" "pipeline-lint takes the engine decision as inputs (defaults legacy/empty)"
 
 echo "passed: ${PASSED}, failed: ${FAILED}"
 exit "$FAILED"

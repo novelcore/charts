@@ -58,6 +58,29 @@ A Hera app's rendered WorkflowTemplate used to carry the 19 KB checkpoint helper
 bash charts/custom/kubecore-ci-workflows/tests/wft-size/run.sh /tmp/rendered.yaml
 ```
 
+## Platform pipeline engine (PRD-HPC-1461 D-79)
+
+The platform renders and enhances an ML app's pipeline with one engine release, so a platform change never needs a commit in a client repository. The operator publishes `engine: {version, image, wheel, wheelSha256, mode}` in the app's gitops `pipeline-context.yaml`; the chart reads it, nothing in `values.yaml`.
+
+| mode | render | enhance | committed |
+|---|---|---|---|
+| `legacy` (default) | `hera-render`: the app's `pipeline.py` + its vendored `kubecore/` (unchanged) | the pinned `platformEnhancer.ref` tarball | that render |
+| `shadow` | legacy, then `hera-render-shadow` (engine image, comparison only) | legacy, then the engine wheel's enhancer on the engine render | the legacy output; `engine-shadow: equal\|differs:<n>\|failed` in `{app}-pipeline-images` |
+| `engine` | `hera-render-engine`: engine image, `python -I -m kaos_engine.render`, the app's `kubecore/` never imported | the engine wheel (download, sha256, unzip, no pip), then the WFT is stamped with `platform.kubecore.io/engine-version` and Workflows get the label `platform.kubecore.io/engine` | the engine output |
+
+`files/engine.py decide` (run in `detect-steps` and, for a PR, `detect-engine`) HOLDS an app at `legacy` and says why when the pin has no wheel (`NoWheel`), no schema profile can be told (`NoProfile`) or the app's `steps/compose_and_validate/Dockerfile` is not the platform's (`CustomComposeDockerfile`, engine mode only). An unknown never silently becomes the old path: in `shadow`/`engine` a wheel that cannot be downloaded or whose sha256 differs from the context FAILS the build (`engine wheel sha256 mismatch ... failing closed`), and the live WorkflowTemplate stays as it is. Legacy fetches nothing and cannot fail on the engine.
+
+`{app}-pipeline-images` gains `engine-mode` (effective mode), `engine-version` (engine mode), `engine-shadow` (shadow) and `engine-vendored` (`pristine|modified|absent`, shadow/engine). An app whose context has no engine block is not touched. `modified` means the app edited its vendored `authoring.py`/`derive_tree.py`; in engine mode the edits are ignored and the PR gets a `pipeline-lint` warning.
+
+```bash
+python -m pytest charts/custom/kubecore-ci-workflows/tests/engine                      # files/engine.py
+bash charts/custom/kubecore-ci-workflows/tests/engine-ci/run.sh /tmp/rendered.yaml     # the chart's scripts, executed
+# opt-in, local, no Docker: the chart's scripts against a real engine wheel and real template checkouts
+ENGINE_WHEEL=... ENGINE_PYTHON=... TEMPLATES=... bash charts/custom/kubecore-ci-workflows/tests/engine-ci/real-engine.sh /tmp/rendered.yaml
+```
+
+The engine's own `enhance.py` must understand every flag this chart passes (`--helper-configmap` since 0.12.149): an engine built from an older template commit makes engine mode fail and shadow record `engine-shadow: failed` until it is synced with the enhancer pin.
+
 ## Tests
 
 ```bash

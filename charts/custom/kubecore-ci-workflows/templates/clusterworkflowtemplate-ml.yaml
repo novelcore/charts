@@ -236,6 +236,15 @@ spec:
           parameters:
           - name: changed_steps
             value: "{{`{{steps.detect-steps.outputs.parameters.changed_steps}}`}}"
+          # The platform pipeline engine decision (PRD-HPC-1461 D-79); mode legacy = today's render.
+          - name: engine
+            value: "{{`{{steps.detect-steps.outputs.parameters.engine}}`}}"
+          - name: engine_mode
+            value: "{{`{{steps.detect-steps.outputs.parameters.engine_mode}}`}}"
+          - name: engine_image
+            value: "{{`{{steps.detect-steps.outputs.parameters.engine_image}}`}}"
+          - name: engine_profile
+            value: "{{`{{steps.detect-steps.outputs.parameters.engine_profile}}`}}"
       - name: build-push
         template: build-push
         when: "{{`{{steps.detect-steps.outputs.parameters.has_changes}}`}} == true"
@@ -387,6 +396,24 @@ spec:
       - name: kaos_lib_compat
         valueFrom:
           path: /tmp/kaos_lib_compat
+          default: ""
+      # Platform pipeline engine (PRD-HPC-1461 D-79), see the ENGINE block below: the whole decision
+      # (JSON) and the fields the steps route on. mode legacy = today's path, unchanged.
+      - name: engine
+        valueFrom:
+          path: /tmp/engine.json
+          default: ""
+      - name: engine_mode
+        valueFrom:
+          path: /tmp/engine_mode
+          default: "legacy"
+      - name: engine_image
+        valueFrom:
+          path: /tmp/engine_image
+          default: ""
+      - name: engine_profile
+        valueFrom:
+          path: /tmp/engine_profile
           default: ""
     container:
       image: {{ .Values.tooling.toolboxImage | default "alpine/k8s:1.36.4" }}
@@ -577,6 +604,31 @@ spec:
         jq -j '.compat' /tmp/kaos_lib.json > /tmp/kaos_lib_compat
         jq -r 'if .rebuild then .managed[] else empty end' /tmp/kaos_lib.json > /tmp/kaos_lib_rebuild
         echo "kaos-lib: $(jq -r '.reason' /tmp/kaos_lib.json)"
+
+        # ENGINE (PRD-HPC-1461 D-79): which engine renders this app. The operator writes engine:
+        # {version, image, wheel, wheelSha256, mode} into the gitops pipeline-context; engine.py decides
+        # the mode (legacy = the app's vendored code, today's path; shadow = both, legacy committed;
+        # engine = the platform engine only), the schema profile (the vendored derive_tree.py blob
+        # against the engine's known-vendored table), and what the vendored copy and the compose
+        # Dockerfile look like. It reads the checkout as DATA (python3 -I, hashes and parses). Legacy
+        # needs no network and never fails the build; a shadow or engine app whose wheel cannot be
+        # downloaded or verified FAILS it (the live WFT stays as it is) rather than falling back.
+{{ include "kubecore-ci-workflows.engineScript" . | indent 8 }}
+        ENG_LEGACY='{"engine_image":"","version":"","mode":"legacy","requested_mode":"legacy","profile":"","vendored":"","compose_dockerfile":"","rebuild_compose":false,"wheel":"","wheel_sha256":"","reason":"%s"}'
+        if [ "$FRONTEND" != "hera" ]; then
+          printf "$ENG_LEGACY" "NotHera: only Hera apps render with the engine" > /tmp/engine.json
+        elif [ -n "$KL_CTX" ]; then
+          python3 -I /tmp/engine.py decide --context "$KL_CTX" --repo /workspace/repo --work /tmp/kaos-engine-decide \
+            ${IMAGES_PATH:+--images "$IMAGES_PATH"} > /tmp/engine.json \
+            || { echo "engine: FATAL: the platform engine could not be set up for this app; failing the build, the live WorkflowTemplate stays as it is" >&2; exit 1; }
+        else
+          printf "$ENG_LEGACY" "NoEngineBlock: no pipeline-context in the gitops repo" > /tmp/engine.json
+        fi
+        jq -j '.mode' /tmp/engine.json > /tmp/engine_mode
+        jq -j '.engine_image' /tmp/engine.json > /tmp/engine_image
+        jq -j '.profile' /tmp/engine.json > /tmp/engine_profile
+        echo "engine: mode=$(cat /tmp/engine_mode) vendored=$(jq -r '.vendored' /tmp/engine.json) compose_dockerfile=$(jq -r '.compose_dockerfile' /tmp/engine.json) rebuild_compose=$(jq -r '.rebuild_compose' /tmp/engine.json)"
+        echo "engine: $(jq -r '.reason' /tmp/engine.json)"
 
         CHANGED_JSON="[]"
         while IFS='|' read -r STEP_NAME STEP_PATH; do
@@ -2775,11 +2827,50 @@ spec:
     inputs:
       parameters:
       - name: changed_steps
+      # Platform pipeline engine decision of detect-steps (PRD-HPC-1461 D-79). Defaults = legacy.
+      - name: engine
+        value: ""
+      - name: engine_mode
+        value: "legacy"
+      - name: engine_image
+        value: ""
+      - name: engine_profile
+        value: ""
     steps:
+    # legacy and shadow: the app's own pipeline.py with the app's vendored kubecore/ (today's path,
+    # untouched). It runs FIRST and alone: the engine render below writes into the same checkout's out/.
     - - name: hera-render
         template: hera-render
+        when: "{{`{{inputs.parameters.engine_mode}}`}} != engine"
+    # engine: the platform engine's runner in the engine image; a failure fails the build.
+    # shadow: the same render for comparison only; a failure is recorded as engine-shadow: failed,
+    # never a red build, and the legacy output is what gets committed.
+    - - name: hera-render-engine
+        template: hera-render-engine
+        when: "{{`{{inputs.parameters.engine_mode}}`}} == engine"
+        arguments:
+          parameters:
+          - name: engine_image
+            value: "{{`{{inputs.parameters.engine_image}}`}}"
+          - name: engine_profile
+            value: "{{`{{inputs.parameters.engine_profile}}`}}"
+      - name: hera-render-shadow
+        template: hera-render-engine
+        when: "{{`{{inputs.parameters.engine_mode}}`}} == shadow"
+        continueOn:
+          failed: true
+        arguments:
+          parameters:
+          - name: engine_image
+            value: "{{`{{inputs.parameters.engine_image}}`}}"
+          - name: engine_profile
+            value: "{{`{{inputs.parameters.engine_profile}}`}}"
     - - name: hera-enhance-commit
         template: hera-enhance-commit
+        arguments:
+          parameters:
+          - name: engine
+            value: "{{`{{inputs.parameters.engine}}`}}"
 
   # STEP 1 (TOKENLESS): run the developer's pipeline.py -> raw WFT.
   # automountServiceAccountToken:false keeps the MAIN container (untrusted client
@@ -2824,11 +2915,69 @@ spec:
         mountPath: /workspace
       # NO github-token mount. NO registry-auth. This is the trust boundary.
 
+  # STEP 1 in mode engine (and the comparison render of mode shadow), TOKENLESS like hera-render: the
+  # app's pipeline.py rendered by the PLATFORM engine image through its runner (PRD-HPC-1461 D-79).
+  #   - the image is the engine release the context pins; the runner (python -I -m kaos_engine.render)
+  #     imports kubecore and every engine module from the engine first, so the app's vendored copy is
+  #     never executed (its extra files still import, engine names win);
+  #   - no `pip install -e .`: the app's pyproject dependencies are read as data and ONLY those the
+  #     engine does not already provide are installed, under the engine's own versions as constraints
+  #     (a conflicting pin fails the render, it never replaces an engine library);
+  #   - the raw WorkflowTemplate lands in /workspace/out/engine/, never over the legacy render.
+  # The image is a parameter (the engine decision's engine_image, validated by engine.py as a pinned
+  # release); tests/tooling-images allow-lists exactly that one templated image.
+  - name: hera-render-engine
+{{ include "kubecore-ci-workflows.preemptionRetry" . | indent 4 }}
+    inputs:
+      parameters:
+      - name: engine_image
+      - name: engine_profile
+    automountServiceAccountToken: false
+    executor:
+      # Locked-down executor SA, as hera-render (workflowtaskresults only, no secret-reader).
+      serviceAccountName: hera-render-exec
+    securityContext:
+      runAsUser: 0
+      runAsGroup: 0
+    container:
+      image: "{{`{{inputs.parameters.engine_image}}`}}"
+      {{- include "kubecore-ci-workflows.resources" .Values.tooling.heraRenderResources | nindent 6 }}
+      command: [sh, -c]
+      env:
+      - name: ENGINE_PROFILE
+        value: "{{`{{inputs.parameters.engine_profile}}`}}"
+      args:
+      - |
+        set -e
+        cd /workspace/repo
+        mkdir -p /workspace/out/engine
+        rm -f /workspace/out/engine/raw-workflow-template.yaml out/raw-workflow-template.yaml
+        echo "hera-render-engine: rendering pipeline.py with the platform engine {{`{{inputs.parameters.engine_image}}`}} (profile ${ENGINE_PROFILE}); the app's vendored kubecore/ is not imported"
+        # The app's pyproject dependencies the engine lacks (data only; the runner's own check).
+        python -I -c 'import sys; from pathlib import Path; from kaos_engine.render import extra_dependencies; sys.stdout.write("".join(d + "\n" for d in extra_dependencies(Path(sys.argv[1]))))' /workspace/repo > /tmp/extra-deps.txt
+        if [ -s /tmp/extra-deps.txt ]; then
+          echo "hera-render-engine: installing the app dependencies the engine lacks (under the engine's versions):"
+          cat /tmp/extra-deps.txt
+          python -m pip freeze --exclude-editable > /tmp/engine-constraints.txt
+          python -m pip install --quiet -c /tmp/engine-constraints.txt -r /tmp/extra-deps.txt
+        fi
+        python -I -m kaos_engine.render pipeline.py --repo /workspace/repo --profile "${ENGINE_PROFILE}"
+        cp out/raw-workflow-template.yaml /workspace/out/engine/raw-workflow-template.yaml
+        echo "hera-render-engine: wrote /workspace/out/engine/raw-workflow-template.yaml (tokenless)"
+      volumeMounts:
+      - name: workspace
+        mountPath: /workspace
+      # NO github-token mount. NO registry-auth. This is the trust boundary.
+
   # STEP 2 (TOKEN-HOLDING, platform code only): enhance -> gate -> commit.
   - name: hera-enhance-commit
 {{ include "kubecore-ci-workflows.preemptionRetry" . | indent 4 }}
     inputs:
-      parameters: []
+      parameters:
+      # The engine DECISION (JSON) of detect-steps; "" = legacy. Read through the env var below,
+      # never spliced into the script.
+      - name: engine
+        value: ""
     securityContext:
       runAsUser: 0
       runAsGroup: 0
@@ -2836,6 +2985,9 @@ spec:
       image: {{ .Values.tooling.toolboxImage | default "alpine/k8s:1.36.4" }}
       {{- include "kubecore-ci-workflows.resources" .Values.tooling.enhanceResources | nindent 6 }}
       command: [sh, -c]
+      env:
+      - name: ENGINE_DECISION
+        value: "{{`{{inputs.parameters.engine}}`}}"
       securityContext:
         runAsUser: 0
         runAsGroup: 0
@@ -2883,6 +3035,10 @@ spec:
         # Platform enhancer, isolated from the app checkout: see
         # kubecore-ci-workflows.platformEnhance (kubecore-operator#1161, #1375).
 {{ include "kubecore-ci-workflows.platformEnhance" . | indent 8 }}
+        # Shadow mode: the engine's render, enhanced by the engine wheel, compared with the output above.
+{{ include "kubecore-ci-workflows.engineShadow" . | indent 8 }}
+        # What pipeline-images records about the engine (engine-mode/-version/-shadow/-vendored).
+        python3 -I /tmp/engine.py record --shadow-file /tmp/engine-shadow-result --out /tmp/engine-record.json
 
         # DATASETS (PRD novelcore/kaos#1283 D-05): offer the project's datasets in
         # the `dataset` dropdown — <dataset>@<vN> newest first and <dataset>@latest,
@@ -2976,7 +3132,7 @@ spec:
         IMAGES_FILE="${GITOPS_DIR}/pipeline-images.yaml"
         if [ -f "$IMAGES_FILE" ]; then
           CONTEXT_SHA=$(sha256sum "$CONTEXT_PATH" | cut -c1-64)
-          python3 - "$WFT_FILE" "$IMAGES_FILE" "$APP_NAME" "$CONTEXT_SHA" "{{ include "kubecore-ci-workflows.enhancerRef" . }}" /tmp/dataset-sha "$WFT_BYTES" <<'IMGEOF'
+          python3 - "$WFT_FILE" "$IMAGES_FILE" "$APP_NAME" "$CONTEXT_SHA" "$([ "${ENGINE_MODE}" = engine ] || printf '%s' "{{ include "kubecore-ci-workflows.enhancerRef" . }}")" /tmp/dataset-sha "$WFT_BYTES" /tmp/engine-record.json <<'IMGEOF'
         import sys, yaml, re
         wft = yaml.safe_load(open(sys.argv[1]))
         images_doc = yaml.safe_load(open(sys.argv[2]))
@@ -2988,7 +3144,9 @@ spec:
         context_sha = sys.argv[4]
         # enhancer-ref (kubecore-operator#1199): the platform enhancer this render
         # ran — the pin overlaid above. ml-ci-reconcile compares it with the
-        # chart's pin and re-renders when the pin moved without a push.
+        # chart's pin and re-renders when the pin moved without a push. "" in mode
+        # engine: that render used the engine wheel's enhancer, not the pin, so the
+        # record is left as it was (ml-ci-reconcile skips ENHANCER DRIFT for it).
         enhancer_ref = sys.argv[5]
         # dataset-sha: digest of the `dataset` choices this render offered ("none": no such
         # parameter; missing file: the catalog was unreadable, keep the record). ml-ci-reconcile
@@ -2998,6 +3156,12 @@ spec:
         # wft-bytes: the size of the rendered WorkflowTemplate, reported here so a pipeline growing
         # towards the size guard (wftSize.limitKiB) is visible before it fails.
         wft_bytes = sys.argv[7] if len(sys.argv) > 7 else ""
+        # engine-record (PRD-HPC-1461 D-79): {"set": {...}, "clear": [...]} of the engine-* keys from
+        # `engine.py record`; empty for an app whose context has no engine block.
+        import json
+        engine_rec = {}
+        if len(sys.argv) > 8 and os.path.exists(sys.argv[8]):
+            engine_rec = json.load(open(sys.argv[8]))
         # collect image-<step> configMapKeyRef keys the WFT expects
         wanted = set()
         for p in wft["spec"].get("arguments", {}).get("parameters", []):
@@ -3014,7 +3178,7 @@ spec:
         # renamed step): otherwise the ConfigMap — and the image parameters the
         # submit form derives from it — keep stale entries forever
         # (kubecore-operator#1126, ml-dev-loop e2e "delete"/"rename").
-        removed = [k for k in list(data) if k not in ("last-built-sha", "context-sha", "enhancer-ref", "dataset-sha", "wft-bytes", "kaos-lib-package", "kaos-lib-compat") and k not in wanted]
+        removed = [k for k in list(data) if k not in ("last-built-sha", "context-sha", "enhancer-ref", "dataset-sha", "wft-bytes", "kaos-lib-package", "kaos-lib-compat", "engine-mode", "engine-version", "engine-shadow", "engine-vendored") and k not in wanted]
         for k in removed:
             del data[k]
         context_moved = bool(context_sha) and data.get("context-sha") != context_sha
@@ -3045,7 +3209,16 @@ spec:
         bytes_moved = bool(wft_bytes) and data.get("wft-bytes") != wft_bytes
         if bytes_moved:
             data["wft-bytes"] = wft_bytes
-        if added or removed or moved or context_moved or enhancer_moved or dataset_moved or bytes_moved:
+        engine_moved = False
+        for k, v in engine_rec.get("set", {}).items():
+            if data.get(k) != v:
+                data[k] = v
+                engine_moved = True
+        for k in engine_rec.get("clear", []):
+            if k in data:
+                del data[k]
+                engine_moved = True
+        if added or removed or moved or context_moved or enhancer_moved or dataset_moved or bytes_moved or engine_moved:
             yaml.safe_dump(images_doc, open(sys.argv[2], "w"), sort_keys=False)
             print(f"pipeline-images keys — added: {added} removed: {removed} moved: {moved} context-sha: {context_sha[:12] if context_moved else 'unchanged'} enhancer-ref: {enhancer_ref[:12] if enhancer_moved else 'unchanged'} dataset-sha: {dataset_sha[:12] if dataset_moved else 'unchanged'}")
         else:

@@ -428,6 +428,9 @@ spec:
         ENH_PIN="{{ include "kubecore-ci-workflows.enhancerRef" . }}"
         CTX_LAST=$(echo "$CM" | jq -r '.data["context-sha"] // empty')
         ENH_LAST=$(echo "$CM" | jq -r '.data["enhancer-ref"] // empty')
+        # A render by the platform engine (engine-mode: engine, PRD-HPC-1461 D-79) enhanced with the engine
+        # wheel, not the pinned enhancer: it records no enhancer-ref and has no ENHANCER DRIFT.
+        ENG_MODE=$(echo "$CM" | jq -r '.data["engine-mode"] // empty')
 
         if [ "$FORCE" = "true" ]; then
           WANT_CTX="{{`{{workflow.parameters.context_sha}}`}}"
@@ -471,7 +474,7 @@ spec:
             [ -n "$HAVE_CTX" ] || HAVE_CTX=$(gitops_ctx_sha)
             if [ -n "$CTX_LAST" ] && [ -n "$HAVE_CTX" ] && [ "$CTX_LAST" = "$HAVE_CTX" ] \
                && { [ -z "$WANT_CTX" ] || [ "$CTX_LAST" = "$WANT_CTX" ]; } \
-               && [ "$ENH_LAST" = "$ENH_PIN" ]; then
+               && { [ "$ENG_MODE" = engine ] || [ "$ENH_LAST" = "$ENH_PIN" ]; }; then
               printf 'false' > /tmp/needs_build
               echo "reconcile: FORCED but already satisfied — HEAD ${HEAD_SHA} built and rendered from the current context (${CTX_LAST:0:12}) by enhancer ${ENH_PIN}; nothing to do"
               exit 0
@@ -517,7 +520,7 @@ spec:
         # app has no platform enhancer to drift. context-sha without enhancer-ref
         # is a render from before the record existed, by an unknown enhancer —
         # drift, cleared by one render.
-        if [ -n "$CTX_LAST" ] && [ "$ENH_LAST" != "$ENH_PIN" ]; then
+        if [ -n "$CTX_LAST" ] && [ "$ENG_MODE" != engine ] && [ "$ENH_LAST" != "$ENH_PIN" ]; then
           # A pin bump reaches every app at once, so it must never become a
           # build per app per poll. Any reconcile build at THIS pin that ended
           # within the hour means the re-render was tried: a failure would fail
