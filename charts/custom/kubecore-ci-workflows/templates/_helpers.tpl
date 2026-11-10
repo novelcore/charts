@@ -194,7 +194,7 @@ Caller: ENGINE_* set (engineDecisionVars), /tmp/context.yaml, the engine raw ren
 {{- define "kubecore-ci-workflows.engineEnhance" -}}
 rm -rf /tmp/kubecore-engine
 ENGINE_DIR=$(python3 -I /tmp/engine.py fetch --wheel "${ENGINE_WHEEL}" --sha256 "${ENGINE_WHEEL_SHA256}" --dest /tmp/kubecore-engine)
-echo "platform enhancer: engine ${ENGINE_VERSION} (wheel sha256 ${ENGINE_WHEEL_SHA256:0:12} verified) unpacked to ${ENGINE_DIR}"
+echo "platform enhancer: engine ${ENGINE_VERSION} (wheel sha256 $(printf %s "${ENGINE_WHEEL_SHA256}" | cut -c1-12) verified) unpacked to ${ENGINE_DIR}"
 cp /workspace/out/engine/raw-workflow-template.yaml /workspace/out/raw-workflow-template.yaml
 ( cd "${ENGINE_DIR}" && python3 -m kubecore.enhance \
     --raw /workspace/out/raw-workflow-template.yaml \

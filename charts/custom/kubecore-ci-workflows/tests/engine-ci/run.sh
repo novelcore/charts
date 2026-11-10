@@ -183,7 +183,7 @@ expect_not "$(ml_script hera-render-engine)" "PYTHONPATH" "hera-render-engine: n
 mkdir -p "$T/bin"
 cat > "$T/bin/python" <<'STUB'
 #!/bin/sh
-echo "python $*" >> "$STUB_LOG"
+printf 'python %s\n' "$*" >> "$STUB_LOG"
 case "$*" in
   "-I -c "*) printf '%s' "${STUB_EXTRA_DEPS:-}" ;;
   "-m pip freeze"*) printf 'hera==5.27.0\npyyaml==6.0.3\n' ;;
@@ -217,7 +217,8 @@ run_render STUB_EXTRA_DEPS='numpy>=2'
 expect_has "$LOG" "python -m pip freeze --exclude-editable" "extra deps: the engine's own versions become the constraints"
 expect_has "$LOG" "python -m pip install --quiet -c /tmp/engine-constraints.txt -r /tmp/extra-deps.txt" "extra deps: installed under those constraints"
 expect_not "$LOG" "pip install --quiet -e" "extra deps: the app itself is never installed"
-expect_eq "$(printf '%s\n' "$LOG" | grep -n 'pip install' | cut -d: -f1)" "3" "extra deps: installed after the dependency check and before the render"
+INST=$(printf '%s\n' "$LOG" | grep -n 'pip install' | head -1 | cut -d: -f1); REND=$(printf '%s\n' "$LOG" | grep -n -- '-m kaos_engine.render' | head -1 | cut -d: -f1); DEPC=$(printf '%s\n' "$LOG" | grep -n '^python -I -c' | head -1 | cut -d: -f1)
+expect_eq "$([ "$DEPC" -lt "$INST" ] && [ "$INST" -lt "$REND" ] && echo ordered)" "ordered" "extra deps: installed after the dependency check and before the render"
 
 run_render STUB_RENDER_FAILS=1
 expect_eq "$RC" "1" "engine render: a failing pipeline.py fails the step"
