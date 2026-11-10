@@ -84,10 +84,10 @@ if a.from_report:
     out({"markdown": "#### Pipeline lint: %d errors\n" % s["errors"], "status": "%d errors (rule set %s)\n" % (s["errors"], r["ruleset_version"]),
          "text": "stub text\n"}[a.format])
     sys.exit(0)
-if a.expect_ruleset and a.expect_ruleset != "1.2.0":
+if a.expect_ruleset and a.expect_ruleset != "1.3.0":
     sys.exit(1)
 n = int(os.environ.get("STUB_ERRORS", "0"))
-out(json.dumps({"ruleset_version": "1.2.0", "summary": {"errors": n, "warnings": 0, "infos": 0, "skipped": 0},
+out(json.dumps({"ruleset_version": "1.3.0", "summary": {"errors": n, "warnings": 0, "infos": 0, "skipped": 0},
                 "catalogue": {"given": a.catalogue}}))
 sys.exit(2 if n else 0)
 PYEOF
