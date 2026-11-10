@@ -353,6 +353,12 @@ pipelineLint:
   kaosLibWheelSha256: "dc7a04a75ad52fe67bc31eda28db4d0cbaf41058e79d2d2e637dea4bdd2d3e5d"
   rulesetVersion: "1.2.0"
 
+# Rendered WorkflowTemplate size guard (ml-ci-build hera-enhance-commit and ml-ci-pr-render
+# hera-enhance-gate): a render above this many KiB fails with a clear message. The etcd
+# object limit is ~1.5 MiB; the size is also recorded as `wft-bytes` in {app}-pipeline-images.
+wftSize:
+  limitKiB: 900
+
 # Platform enhancer (kubecore-operator#1161): ml-ci-build and ml-ci-pr-render run
 # kubecore.enhance from THIS pinned copy (the template repo's kubecore/), overlaid
 # on the app's vendored kubecore/ (kept for local dev only). Bump `ref` to roll
@@ -361,4 +367,4 @@ pipelineLint:
 # (kubecore-operator#1199). Must be a full 40-character commit sha.
 platformEnhancer:
   repo: novelcore/hera-pipeline-template
-  ref: b61f049e19c5fdb90c46deecde08b60f19bb1aeb
+  ref: 032e00af2a56391083123c93cfcbdd293ee5fdc9

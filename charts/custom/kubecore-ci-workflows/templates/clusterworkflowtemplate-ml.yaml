@@ -2952,7 +2952,21 @@ spec:
         # Anti-churn: only re-render if this commit is newer than what produced
         # the live WFT (mirrors render-wft's monotonic guard).
         WFT_FILE="${GITOPS_DIR}/workflow-template.yaml"
+        # SIZE GUARD: a render over the limit fails here, before anything is committed.
+        python3 - /workspace/out/workflow-template.yaml "" <<'WFTSIZEEOF'
+{{ include "kubecore-ci-workflows.wftSizeGuard" . | indent 8 }}
+        WFTSIZEEOF
+        WFT_BYTES=$(wc -c < /workspace/out/workflow-template.yaml | tr -d ' ')
         cp /workspace/out/workflow-template.yaml "$WFT_FILE"
+        # The checkpoint helper source ships once per app as a ConfigMap next to the WFT
+        # (the enhancer wrote it only when a step mounts it); a render that no longer needs
+        # it removes the stale file.
+        HELPER_FILE="${GITOPS_DIR}/ckpt-helper.yaml"
+        if [ -f /workspace/out/ckpt-helper.yaml ]; then
+          cp /workspace/out/ckpt-helper.yaml "$HELPER_FILE"
+        else
+          rm -f "$HELPER_FILE"
+        fi
 
         # Ensure every image-<step> key the WFT references exists in
         # pipeline-images.yaml (the composition seeds a fixed key list that may
@@ -2962,7 +2976,7 @@ spec:
         IMAGES_FILE="${GITOPS_DIR}/pipeline-images.yaml"
         if [ -f "$IMAGES_FILE" ]; then
           CONTEXT_SHA=$(sha256sum "$CONTEXT_PATH" | cut -c1-64)
-          python3 - "$WFT_FILE" "$IMAGES_FILE" "$APP_NAME" "$CONTEXT_SHA" "{{ include "kubecore-ci-workflows.enhancerRef" . }}" /tmp/dataset-sha <<'IMGEOF'
+          python3 - "$WFT_FILE" "$IMAGES_FILE" "$APP_NAME" "$CONTEXT_SHA" "{{ include "kubecore-ci-workflows.enhancerRef" . }}" /tmp/dataset-sha "$WFT_BYTES" <<'IMGEOF'
         import sys, yaml, re
         wft = yaml.safe_load(open(sys.argv[1]))
         images_doc = yaml.safe_load(open(sys.argv[2]))
@@ -2981,6 +2995,9 @@ spec:
         # compares it with the catalog and re-renders on DATASET DRIFT.
         import os
         dataset_sha = open(sys.argv[6]).read().strip() if len(sys.argv) > 6 and os.path.exists(sys.argv[6]) else ""
+        # wft-bytes: the size of the rendered WorkflowTemplate, reported here so a pipeline growing
+        # towards the size guard (wftSize.limitKiB) is visible before it fails.
+        wft_bytes = sys.argv[7] if len(sys.argv) > 7 else ""
         # collect image-<step> configMapKeyRef keys the WFT expects
         wanted = set()
         for p in wft["spec"].get("arguments", {}).get("parameters", []):
@@ -2997,7 +3014,7 @@ spec:
         # renamed step): otherwise the ConfigMap — and the image parameters the
         # submit form derives from it — keep stale entries forever
         # (kubecore-operator#1126, ml-dev-loop e2e "delete"/"rename").
-        removed = [k for k in list(data) if k not in ("last-built-sha", "context-sha", "enhancer-ref", "dataset-sha", "kaos-lib-package", "kaos-lib-compat") and k not in wanted]
+        removed = [k for k in list(data) if k not in ("last-built-sha", "context-sha", "enhancer-ref", "dataset-sha", "wft-bytes", "kaos-lib-package", "kaos-lib-compat") and k not in wanted]
         for k in removed:
             del data[k]
         context_moved = bool(context_sha) and data.get("context-sha") != context_sha
@@ -3025,7 +3042,10 @@ spec:
         dataset_moved = bool(dataset_sha) and data.get("dataset-sha") != dataset_sha
         if dataset_moved:
             data["dataset-sha"] = dataset_sha
-        if added or removed or moved or context_moved or enhancer_moved or dataset_moved:
+        bytes_moved = bool(wft_bytes) and data.get("wft-bytes") != wft_bytes
+        if bytes_moved:
+            data["wft-bytes"] = wft_bytes
+        if added or removed or moved or context_moved or enhancer_moved or dataset_moved or bytes_moved:
             yaml.safe_dump(images_doc, open(sys.argv[2], "w"), sort_keys=False)
             print(f"pipeline-images keys — added: {added} removed: {removed} moved: {moved} context-sha: {context_sha[:12] if context_moved else 'unchanged'} enhancer-ref: {enhancer_ref[:12] if enhancer_moved else 'unchanged'} dataset-sha: {dataset_sha[:12] if dataset_moved else 'unchanged'}")
         else:
@@ -3035,6 +3055,7 @@ spec:
 
         cd /tmp/gitops
         git add "${WFT_FILE}" "${IMAGES_FILE}" 2>/dev/null || git add "${WFT_FILE}"
+        git add -A -- "${HELPER_FILE}"   # the helper ConfigMap: added, updated or removed with the WFT
         if git diff --cached --quiet; then
           echo "hera-enhance-commit: rendered WFT already current — nothing to commit"
         else
@@ -3279,6 +3300,7 @@ spec:
             [ "${KEY}" = "last-built-sha" ] && continue
             [ "${KEY}" = "enhancer-ref" ] && continue
             [ "${KEY}" = "dataset-sha" ] && continue
+            [ "${KEY}" = "wft-bytes" ] && continue
             [ "${KEY}" = "kaos-lib-package" ] && continue
             [ "${KEY}" = "kaos-lib-compat" ] && continue
             CUR_VALUE=$(yq e ".data.\"${KEY}\"" "${IMAGES_PATH}")
