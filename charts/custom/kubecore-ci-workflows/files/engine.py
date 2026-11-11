@@ -70,6 +70,9 @@ def load_context(path):
         return {}
 
 
+# MIGRATION-REMOVE(after=every ML app on prod is recreated from a template without kubecore/ (PRD-HPC-1461 D-80),
+# issue=novelcore/kubecore-operator#1830): _dataclass_fields, vendored_schema_profile, _config_data_has_ref and
+# their use in profile_of. They keep apps that still carry the vendored kubecore/ rendering after the train.
 def _dataclass_fields(tree, name):
     """{field: default node} of the first `class <name>` in a parsed module, None when there is none."""
     for node in ast.walk(tree):
