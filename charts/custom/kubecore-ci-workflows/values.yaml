@@ -228,12 +228,15 @@ workflow:
   # TTL for completed workflows. These runs are what every GitHub commit
   # status / Deployment / report comment links to (argo.uiBaseUrl/workflows/
   # {ns}/{name}) and gke-dev has no workflow archive, so a run must outlive
-  # the review it belongs to: 3 days after success, 14 days after failure
+  # the review it belongs to: 1 day after success, 14 days after failure
   # (the failed run — pods kept by podGC OnWorkflowSuccess — is the thing a
   # developer opens from the report). Was 1 h, which broke every link an hour
-  # after the run (kubecore-operator#1126).
+  # after the run (kubecore-operator#1126). Success was 3 days until 0.13.1:
+  # the pool's Argo controller holds every retained run in memory and an
+  # ml-ci-build run keeps two copies of its template (~570 KB), so 3 days of
+  # builds on a busy pool (~260 runs) OOM-killed it (kubecore-operator#1826).
   ttlStrategy:
-    secondsAfterSuccess: 259200
+    secondsAfterSuccess: 86400
     secondsAfterFailure: 1209600
     # utility / reconciler runs (probes, janitor, healer, reaper, ci-reconcile,
     # ml-ci-reconcile) — nothing links to them and they run every few
