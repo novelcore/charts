@@ -31,12 +31,6 @@ CAPPED=$(yq 'select(.kind == "ClusterWorkflowTemplate" or .kind == "WorkflowTemp
   | .spec.templates[] | select(.retryStrategy.backoff.maxDuration) | .name' "$RENDERED" | grep -vc '^---$')
 expect_eq "$CAPPED" "0" "no workflow-template retryStrategy caps its window with maxDuration (${STRATEGIES} checked)"
 
-# render-wft builds the pipeline steps' retryStrategy in Python; check the
-# script text, ignoring comments.
-EMBEDDED=$(yq 'select(.metadata.name == "ml-ci-build") | .spec.templates[] | select(.name == "render-wft") | .container.args[0]' "$RENDERED" \
-  | grep -v '^\s*#' | grep -c "maxDuration")
-expect_eq "$EMBEDDED" "0" "render-wft's pipeline-step retryStrategy has no maxDuration"
-
 # ml-ci-reconcile's check-drift is the one exception: its retry is not a
 # preemption retry but the force-mode "not yet" wait (exit 3 only,
 # kubecore-operator#1439), bounded by its own limit instead.

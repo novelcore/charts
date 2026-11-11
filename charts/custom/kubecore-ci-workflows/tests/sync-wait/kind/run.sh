@@ -37,9 +37,10 @@ $K wait --for=condition=Ready pod/fakegh --timeout=180s >/dev/null
 reset_app() { # $1 = built sha ("" for a fresh app), $2 = HEAD
   $K delete workflows --all --wait=true >/dev/null 2>&1
   kubectl -n ml-proj delete cm app1-pipeline-images --ignore-not-found >/dev/null
-  CTX=$(printf '%s' 'kind: ConfigMap  # gitops pipeline-context.yaml, raw' | sha256sum | cut -c1-64)
+  # the pipeline-context fakegh serves (fixtures.yaml): its engine is the one the images record
+  CTX=$(printf 'kind: ConfigMap\ndata:\n  context.yaml: "{engine: {version: v0.4.7, image: reg.example/kaos-pipeline-engine:v0.4.7, wheel: https://example.com/e.whl, wheelSha256: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa}}"\n' | sha256sum | cut -c1-64)
   kubectl -n ml-proj create cm app1-pipeline-images --from-literal=last-built-sha="$1" \
-    --from-literal=context-sha="$CTX" --from-literal=enhancer-ref="$(helm template t "$CHART" | grep -m1 -o 'enhancer-ref: "[^"]*"' | cut -d'"' -f2)" >/dev/null
+    --from-literal=context-sha="$CTX" >/dev/null
   $K exec fakegh -- sh -c "echo $2 > /data/head"
 }
 build() { # name sha seconds [deadline]

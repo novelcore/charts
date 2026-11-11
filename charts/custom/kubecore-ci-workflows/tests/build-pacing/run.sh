@@ -43,7 +43,7 @@ expect_eq "$(tmpl "$ON" build-push '.synchronization.semaphores[0].configMapKeyR
 expect_eq "$(tmpl "$ON" build-push '.synchronization.semaphores[0].configMapKeyRef.key')" "slots" "... key slots"
 HOLDERS=$(yq "$ML | .spec.templates[] | select(.synchronization.semaphores) | .name" "$ON" | tr '\n' ' ')
 expect_eq "$HOLDERS" "build-push " "only build-push holds a semaphore slot"
-for t in clone detect-steps version render-wft render-hera hera-render hera-enhance-commit patch-images tag status; do
+for t in clone detect-steps version render-hera hera-render hera-enhance-commit patch-images tag status; do
   expect_eq "$(tmpl "$ON" "$t" '.synchronization')" "null" "$t takes no lock or slot"
 done
 

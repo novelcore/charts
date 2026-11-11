@@ -9,8 +9,8 @@
 #
 # The scripts under test are EXECUTED against a booby-trapped workspace: every
 # trap writes a PWNED-* marker if it ever runs. The tag steps push to a local
-# bare repo; the enhancer download is served from a fixture tarball. Needs helm,
-# yq v4, git, python3 + PyYAML. Exit status is the number of failed assertions.
+# bare repo; the engine wheel download is served from a fixture wheel on localhost.
+# Needs helm, yq v4, git, jq, python3 + PyYAML. Exit status is the number of failed assertions.
 set -u
 HERE=$(cd "$(dirname "$0")" && pwd)
 CHART="${HERE}/../.."
@@ -95,16 +95,16 @@ for wf in ml-ci-build ci-build ci-rc-build; do
   expect_no_pwn "$T" "$wf/tag: no hook or .git/config of the checkout runs"
 done
 
-# ── enhancer: unpacked outside the workspace, nothing of the app imported ───
+# ── enhancer: the engine wheel unpacked outside the workspace, nothing of the app imported ───
 
 T=$(mktemp -d "${BASE_TMP}/enh-XXXX")
 printf 'token' > "$T/token"
 mkdir -p "$T/tmp" "$T/workspace/out" "$T/workspace/repo/kubecore" "$T/workspace/repo/steps/step_a" \
-         "$T/src/org-enhancer-abc/kubecore/local-dev"
-# Fixture platform enhancer: records where yaml came from and its sys.path.
-cat > "$T/src/org-enhancer-abc/kubecore/__init__.py" <<'EOF'
-EOF
-cat > "$T/src/org-enhancer-abc/kubecore/enhance.py" <<'EOF'
+         "$T/serve" "$T/wheel/kaos_pipeline_engine/kubecore" "$T/wheel/kaos_engine"
+# Fixture engine wheel: records where yaml came from and its sys.path.
+: > "$T/wheel/kaos_pipeline_engine/kubecore/__init__.py"
+: > "$T/wheel/kaos_engine/__init__.py"
+cat > "$T/wheel/kaos_pipeline_engine/kubecore/enhance.py" <<'EOF'
 import argparse, sys, yaml
 p = argparse.ArgumentParser()
 for a in ("--raw", "--context", "--output"):
@@ -117,8 +117,17 @@ wft.setdefault("metadata", {})["annotations"] = {"enhanced-by": "platform", "yam
                                                  "sys-path": ":".join(sys.path)}
 yaml.safe_dump(wft, open(args.output, "w"))
 EOF
-echo "must not be unpacked" > "$T/src/org-enhancer-abc/kubecore/local-dev/x"
-tar -C "$T/src" -czf "$T/enhancer.tar.gz" org-enhancer-abc
+( cd "$T/wheel" && python3 -I -c "
+import zipfile
+with zipfile.ZipFile('$T/serve/engine.whl', 'w') as z:
+    z.write('kaos_pipeline_engine/kubecore/__init__.py'); z.write('kaos_pipeline_engine/kubecore/enhance.py')
+    z.write('kaos_engine/__init__.py')" )
+WHEEL_SHA=$(sha256sum "$T/serve/engine.whl" | cut -c1-64)
+PORT=$(python3 -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')
+python3 -m http.server "$PORT" --bind 127.0.0.1 -d "$T/serve" > /dev/null 2>&1 &
+HTTP_PID=$!
+trap 'kill $HTTP_PID 2>/dev/null; rm -rf "$BASE_TMP"' EXIT
+sleep 1
 # The trapped app checkout: shadows yaml, hooks interpreter start-up, and ships
 # its own (vendored) kubecore.enhance.
 for m in yaml sitecustomize usercustomize; do
@@ -141,25 +150,31 @@ spec:
 EOF
 echo "namespace: proj-ml" > "$T/tmp/context.yaml"
 
-# enhance_section WORKFLOW TEMPLATE: from the enhancer unpack through the
-# enhance call, with the download served from the fixture tarball.
+# enhance_section WORKFLOW TEMPLATE: from the engine.py write through the stamp.
 enhance_section() {
-  script_of "$1" "$2" | awk "/python3 - <<'OVERLAYEOF'/ {on=1} on {print} on && /--helper-configmap \/workspace\/out\/ckpt-helper.yaml \)/ {exit}" \
-    | sed -e "s#/tmp/kubecore-enhancer#$T/tmp/kubecore-enhancer#g" \
-          -e "s#/tmp/context.yaml#$T/tmp/context.yaml#g" \
+  script_of "$1" "$2" | awk "/cat > \/tmp\/engine.py <</ {on=1} on {print} on && /engine.py stamp/ {exit}" \
+    | sed -e "s#/tmp/#$T/tmp/#g" \
           -e "s#/workspace/#$T/workspace/#g" \
-          -e "s#/etc/github-token/token#$T/token#g" \
-          -e "s#urllib.request.urlopen(req, timeout=60)#open(\"$T/enhancer.tar.gz\", \"rb\")#"
+          -e "s#/etc/github-token/token#$T/token#g"
+}
+engine_json() {  # engine_json URL SHA
+  printf '{"version":"v0.4.7","wheel":"%s","wheel_sha256":"%s"}' "$1" "$2"
+}
+run_enhance() {  # run_enhance ENGINE_JSON
+  OUT=$(cd "$T" && env -u PYTHONPATH ENGINE_JSON="$1" sh "$T/enhance.sh" 2>&1); RC=$?
 }
 
 for pair in "ml-ci-build hera-enhance-commit" "ml-ci-pr-render hera-enhance-gate"; do
   set -- $pair
-  rm -f "$T"/PWNED-* "$T/workspace/out/workflow-template.yaml"
+  rm -rf "$T"/PWNED-* "$T/workspace/out/workflow-template.yaml" "$T/tmp/kubecore-engine"
   { echo 'set -e'; enhance_section "$1" "$2"; } > "$T/enhance.sh"
-  OUT=$(cd "$T" && env -u PYTHONPATH sh "$T/enhance.sh" 2>&1); RC=$?
+  run_enhance "$(engine_json "http://127.0.0.1:${PORT}/engine.whl" "$WHEEL_SHA")"
   expect_eq "$RC" "0" "$2: enhance exits 0"
   ANN=$(yq '.metadata.annotations' "$T/workspace/out/workflow-template.yaml" 2>/dev/null)
   expect_has "$ANN" "enhanced-by: platform" "$2: the platform enhancer ran (not the vendored copy)"
+  expect_has "$ANN" "platform.kubecore.io/engine-version: v0.4.7" "$2: the WFT is stamped with the engine version"
+  expect_eq "$(yq '.spec.workflowMetadata.labels["platform.kubecore.io/engine"]' "$T/workspace/out/workflow-template.yaml")" "v0.4.7" \
+    "$2: the Workflows it makes carry the engine label"
   case "$ANN" in
     *"yaml-from: $T"*) FAILED=$((FAILED + 1)); echo "FAIL: $2: yaml imported from the checkout" ;;
     *"yaml-from: "*) PASSED=$((PASSED + 1)); echo "PASS: $2: yaml imported from site-packages, not the checkout" ;;
@@ -169,8 +184,22 @@ for pair in "ml-ci-build hera-enhance-commit" "ml-ci-pr-render hera-enhance-gate
     *"$T/workspace"*) FAILED=$((FAILED + 1)); echo "FAIL: $2: workspace on the enhancer's sys.path" ;;
     *) PASSED=$((PASSED + 1)); echo "PASS: $2: workspace not on the enhancer's sys.path" ;;
   esac
-  expect_eq "$(ls "$T/tmp/kubecore-enhancer/kubecore/local-dev" 2>/dev/null)" "" "$2: local-dev not unpacked"
   expect_no_pwn "$T" "$2: no module of the checkout imported"
+
+  # Fail closed: a wheel whose sha256 differs from the context's pin enhances nothing.
+  rm -rf "$T/workspace/out/workflow-template.yaml" "$T/tmp/kubecore-engine"
+  run_enhance "$(engine_json "http://127.0.0.1:${PORT}/engine.whl" "$(printf 'b%.0s' $(seq 64))")"
+  expect_eq "$([ "$RC" != 0 ] && echo failed)" "failed" "$2: a wheel whose sha256 differs fails the step"
+  expect_has "$OUT" "sha256 mismatch" "$2: ... and says why"
+  expect_eq "$(ls "$T/workspace/out/workflow-template.yaml" 2>/dev/null)" "" "$2: ... and writes no WorkflowTemplate"
+  # A wheel that does not download fails the step too (nothing listens on port 9; the retry pause is shortened).
+  sed -i 's/^FETCH_PAUSE_SECONDS = .*/FETCH_PAUSE_SECONDS = 0/' "$T/enhance.sh"
+  run_enhance "$(engine_json "http://127.0.0.1:9/engine.whl" "$WHEEL_SHA")"
+  expect_eq "$([ "$RC" != 0 ] && echo failed)" "failed" "$2: a wheel that does not download fails the step"
+  expect_has "$OUT" "could not be downloaded" "$2: ... and says why"
+  # No engine in the build: nothing to enhance with.
+  run_enhance ""
+  expect_eq "$([ "$RC" != 0 ] && echo failed)" "failed" "$2: no engine fails the step"
 done
 
 # ── PR gate: runs outside the checkout, still checks steps/<dir>/Dockerfile ──
@@ -180,6 +209,10 @@ gate_section() {
     | awk "/python3 - \/workspace\/out\/workflow-template.yaml <<'GATEEOF'/ {on=1} on {print} on && /^GATEEOF\$/ {exit}" \
     | sed -e "s#/workspace/#$T/workspace/#g"
 }
+# the enhanced WorkflowTemplate the gate reads (the last loop iteration ended on failure cases)
+{ echo 'set -e'; enhance_section ml-ci-pr-render hera-enhance-gate; } > "$T/enhance.sh"
+rm -rf "$T/tmp/kubecore-engine"
+run_enhance "$(engine_json "http://127.0.0.1:${PORT}/engine.whl" "$WHEEL_SHA")"
 rm -f "$T"/PWNED-*
 gate_section > "$T/gate.sh"
 expect_eq "$(script_of ml-ci-pr-render hera-enhance-gate | grep -c 'cd /workspace/repo')" "0" \

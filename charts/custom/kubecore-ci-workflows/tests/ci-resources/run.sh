@@ -9,8 +9,6 @@
 #   - the ML build-push (kaniko) request fits an e2-standard-4 CI node, the
 #     smallest pool CI class (3920m cpu / ~12.2 GiB left after GKE daemonsets)
 #     together with a render, a reconciler and a status step.
-# The step images render-wft writes into an ML app's pipeline are checked for
-# "no cpu limit" only where they come from the tooling values (gcloud steps).
 # Usage (from the repo root):
 #
 #   helm template t charts/custom/kubecore-ci-workflows > /tmp/rendered.yaml

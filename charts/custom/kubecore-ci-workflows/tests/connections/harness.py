@@ -1,23 +1,20 @@
-"""Golden harness for the connection envFrom renderers (kaos PRD 1034, CON-02).
+"""Golden harness for the connection envFrom renderer (kaos PRD 1034, CON-02).
 
-Runs the two pipeline renderers against fixture contexts:
-  * render-wft: the python embedded in the rendered ClusterWorkflowTemplate
-    `ml-ci-build` (template `render-wft`), extracted from `helm template` output.
-  * Hera enhancer: `kubecore.enhance` from the pinned `platformEnhancer.ref`,
-    fetched and unpacked the same way `kubecore-ci-workflows.platformEnhance` does.
+Runs the platform enhancer against fixture contexts: `kubecore.enhance` from
+ENHANCER_REF of the hera-pipeline-template, the commit the engine's `kubecore/` is a byte copy of
+(kaos-hpc-operator engine/UPSTREAM.json), fetched and unpacked here. The chart itself enhances with
+the engine wheel (kubecore-ci-workflows.platformEnhance), which tests/engine-ci exercises.
 
 Fixtures hold PLACEHOLDER values only; nothing captured from a real tenant.
 
 CLI:
-  harness.py write-goldens RENDERED
+  harness.py write-goldens
   harness.py diff-hera --raw R --context C [--catalog K] --ref-a SHA --ref-b SHA
-  harness.py diff-render-wft --rendered-a A --rendered-b B --kubeline K --context C
 """
 import argparse
 import copy
 import difflib
 import io
-import json
 import os
 import re
 import subprocess
@@ -35,15 +32,17 @@ CHART = os.path.abspath(os.path.join(HERE, "..", ".."))
 FIX = os.path.join(HERE, "fixtures")
 GOLDEN = os.path.join(HERE, "golden")
 
-WFT_SCRIPT_MARK = "<< 'PYEOF'"
-SA_DIR = "/var/run/secrets/kubernetes.io/serviceaccount/"
+# The enhancer code the goldens pin: hera-pipeline-template commit d167461 (GPU driver prelude), the one
+# the engine's kubecore/ is synced to. Move it together with the engine and rewrite the goldens.
+ENHANCER_REPO = "novelcore/hera-pipeline-template"
+ENHANCER_REF = "d167461ad4b4876b4ead4bf331c7fcf1e505f708"
 
 
 @dataclass(frozen=True)
 class Fixture:
-    kind: str            # "render-wft" or "hera"
+    kind: str            # "hera"
     context: str         # path to a bare context
-    source: str          # kubeline path (render-wft) or raw WFT path (hera)
+    source: str          # raw WFT path
     app: str
     project: str
     catalog: Optional[str] = None
@@ -57,7 +56,6 @@ def _fx(kind, app, project, source, catalog=None):
 
 _YOLO = "hera-raw/yolo-pipelines-template.yaml"
 _HERA = "hera-raw/hera-pipeline-template.yaml"
-_KL = "kubeline-yolo-mlops.yaml"
 
 FIXTURES = {
     "yolo-pipeline": _fx("hera", "yolo-pipeline", "vision", _YOLO),
@@ -66,10 +64,6 @@ FIXTURES = {
     "yolo-vision-pipeline": _fx("hera", "yolo-vision-pipeline", "data-room", _YOLO),
     "yolo-meluxina-poc": _fx("hera", "yolo-meluxina-poc", "data-room", _YOLO),
     "demo": _fx("hera", "demo", "data-room", _HERA),
-    "kubeline-static": _fx("render-wft", "kubeline-static", "vision", _KL),
-    "kubeline-static-hpc": _fx("render-wft", "kubeline-static-hpc", "data-room", _KL),
-    "kubeline-live-hpc": _fx("render-wft", "kubeline-live-hpc", "data-room", "kubeline-live.yaml",
-                             "compute-catalog.yaml"),
 }
 
 CONNECTIONS = [
@@ -81,84 +75,6 @@ EXPECTED_ENV_FROM = [
     {"configMapRef": {"name": "cm-inference", "optional": True}},
     {"configMapRef": {"name": "cm-features", "optional": True}},
 ]
-
-
-# ── render-wft ──────────────────────────────────────────────────────────────
-
-def extract_render_wft(rendered_path: str) -> str:
-    """The render_wft.py heredoc body of ml-ci-build / render-wft."""
-    with open(rendered_path) as f:
-        docs = [d for d in yaml.safe_load_all(f) if d]
-    for d in docs:
-        if d.get("kind") != "ClusterWorkflowTemplate" or d["metadata"]["name"] != "ml-ci-build":
-            continue
-        for t in d["spec"]["templates"]:
-            if t["name"] != "render-wft":
-                continue
-            lines = t["container"]["args"][0].split("\n")
-            start = next(i for i, ln in enumerate(lines) if ln.rstrip().endswith(WFT_SCRIPT_MARK))
-            end = next(i for i in range(start + 1, len(lines)) if lines[i] == "PYEOF")
-            return "\n".join(lines[start + 1:end]) + "\n"
-    raise RuntimeError(f"ml-ci-build/render-wft not found in {rendered_path}")
-
-
-_BOOTSTRAP = r'''
-import builtins, io, json, runpy, ssl, sys, urllib.request
-import yaml
-
-catalog = yaml.safe_load(open(sys.argv[2]))
-script = sys.argv[1]
-SA_DIR = %(sa)r
-
-class _Resp(io.BytesIO):
-    def __enter__(self): return self
-    def __exit__(self, *a): return False
-
-def _urlopen(req, *a, **k):
-    return _Resp(json.dumps({"data": {"catalog.yaml": yaml.safe_dump(catalog)}}).encode())
-
-urllib.request.urlopen = _urlopen
-ssl.create_default_context = lambda *a, **k: None
-_real_open = builtins.open
-def _open(path, *a, **k):
-    if isinstance(path, str) and path.startswith(SA_DIR):
-        return io.StringIO("fake-token")
-    return _real_open(path, *a, **k)
-builtins.open = _open
-runpy.run_path(script, run_name="__main__")
-''' % {"sa": SA_DIR}
-
-
-def render_wft(script: str, ctx: dict, kubeline_path: str, *, app: str, project: str,
-               catalog: Optional[dict] = None) -> str:
-    with tempfile.TemporaryDirectory() as td:
-        script_path = os.path.join(td, "render_wft.py")
-        with open(script_path, "w") as f:
-            f.write(script)
-        ctx_path = os.path.join(td, "pipeline-context.yaml")
-        cm = {"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": f"{app}-pipeline-context"},
-              "data": {"context.yaml": yaml.safe_dump(ctx, sort_keys=False)}}
-        with open(ctx_path, "w") as f:
-            yaml.safe_dump(cm, f, sort_keys=False)
-        out_path = os.path.join(td, "workflow-template.yaml")
-        env = dict(os.environ, KUBELINE_PATH=os.path.abspath(kubeline_path), CONTEXT_PATH=ctx_path, WFT_OUT=out_path,
-                   APP_NAME=app, PROJECT_NAME=project, BRANCH="main", NODE_CLASS="ci-standard",
-                   SRC_COMMIT_TIME="1700000000")
-        if catalog is not None:
-            cat_path = os.path.join(td, "catalog.yaml")
-            with open(cat_path, "w") as f:
-                yaml.safe_dump(catalog, f)
-            boot = os.path.join(td, "bootstrap.py")
-            with open(boot, "w") as f:
-                f.write(_BOOTSTRAP)
-            cmd = [sys.executable, boot, script_path, cat_path]
-        else:
-            cmd = [sys.executable, script_path]
-        p = subprocess.run(cmd, env=env, capture_output=True, text=True, cwd=td)
-        if p.returncode != 0:
-            raise RuntimeError(f"render_wft exited {p.returncode}\nstderr:\n{p.stderr}")
-        with open(out_path) as f:
-            return f.read()
 
 
 # ── Hera enhancer ───────────────────────────────────────────────────────────
@@ -250,35 +166,17 @@ def with_connections(ctx: dict, connections: Optional[list]) -> dict:
     return out
 
 
-def pinned_ref() -> str:
-    with open(os.path.join(CHART, "values.yaml")) as f:
-        return yaml.safe_load(f)["platformEnhancer"]["ref"]
-
-
-def pinned_repo() -> str:
-    with open(os.path.join(CHART, "values.yaml")) as f:
-        return yaml.safe_load(f)["platformEnhancer"]["repo"]
-
-
 def _load(path):
     with open(path) as f:
         return yaml.safe_load(f)
 
 
-def render(name: str, connections: Optional[list], *, rendered: Optional[str] = None,
-           ref: Optional[str] = None, ctx_override: Optional[Callable[[dict], dict]] = None) -> str:
+def render(name: str, connections: Optional[list], *, ctx_override: Optional[Callable[[dict], dict]] = None) -> str:
     fx = FIXTURES[name]
     ctx = with_connections(_load(fx.context), connections)
     if ctx_override is not None:
         ctx = ctx_override(ctx)
-    if fx.kind == "render-wft":
-        if rendered is None:
-            raise ValueError("render-wft fixtures need rendered=")
-        cat = _load(fx.catalog) if fx.catalog else None
-        return render_wft(extract_render_wft(rendered), ctx, fx.source, app=fx.app, project=fx.project, catalog=cat)
-    if ref is None:
-        raise ValueError("hera fixtures need ref=")
-    return enhance_hera(fetch_enhancer(ref, pinned_repo()), fx.source, ctx, fx.catalog)
+    return enhance_hera(fetch_enhancer(ENHANCER_REF, ENHANCER_REPO), fx.source, ctx, fx.catalog)
 
 
 def raw_container_names(name: str) -> set:
@@ -316,25 +214,18 @@ def _udiff(a: str, b: str, la: str, lb: str) -> int:
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
-    w = sub.add_parser("write-goldens")
-    w.add_argument("rendered")
+    sub.add_parser("write-goldens")
     h = sub.add_parser("diff-hera")
     h.add_argument("--raw", required=True)
     h.add_argument("--context", required=True)
     h.add_argument("--catalog")
     h.add_argument("--ref-a", required=True)
     h.add_argument("--ref-b", required=True)
-    r = sub.add_parser("diff-render-wft")
-    r.add_argument("--rendered-a", required=True)
-    r.add_argument("--rendered-b", required=True)
-    r.add_argument("--kubeline", required=True)
-    r.add_argument("--context", required=True)
-    r.add_argument("--catalog", help="compute catalog yaml (live-compute contexts)")
     a = ap.parse_args(argv)
 
     if a.cmd == "write-goldens":
         for name, fx in FIXTURES.items():
-            text = render(name, None, rendered=a.rendered, ref=pinned_ref())
+            text = render(name, None)
             p = golden_path(fx.kind, name)
             os.makedirs(os.path.dirname(p), exist_ok=True)
             with open(p, "w") as f:
@@ -351,16 +242,10 @@ def main(argv=None) -> int:
             return 2
     ctx = _bare_context(a.context)
     if a.cmd == "diff-hera":
-        repo = pinned_repo()
-        ta = enhance_hera(fetch_enhancer(a.ref_a, repo), a.raw, ctx, a.catalog)
-        tb = enhance_hera(fetch_enhancer(a.ref_b, repo), a.raw, ctx, a.catalog)
+        ta = enhance_hera(fetch_enhancer(a.ref_a, ENHANCER_REPO), a.raw, ctx, a.catalog)
+        tb = enhance_hera(fetch_enhancer(a.ref_b, ENHANCER_REPO), a.raw, ctx, a.catalog)
         return _udiff(ta, tb, a.ref_a, a.ref_b)
-    cat = _load(a.catalog) if a.catalog else None
-    app = ctx.get("app", "app")
-    project = ctx.get("project", "project")
-    ta = render_wft(extract_render_wft(a.rendered_a), ctx, a.kubeline, app=app, project=project, catalog=cat)
-    tb = render_wft(extract_render_wft(a.rendered_b), ctx, a.kubeline, app=app, project=project, catalog=cat)
-    return _udiff(ta, tb, a.rendered_a, a.rendered_b)
+    return 2
 
 
 if __name__ == "__main__":

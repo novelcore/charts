@@ -3,19 +3,23 @@ ml-ci-build — KubeCore ML pipeline CI ClusterWorkflowTemplate.
 
 Triggered by the per-KubeApp Sensor created by the k8smlapp composition
 (compositions/apis/kubeapp/k8smlapp/composition.yaml, generate-ci-resources
-step) on push/PR to a kubeline-* source repo.
+step) on push/PR to an ML app repo (pipeline.py + config/ + steps/<name>/).
 
 Flow:
-  clone → detect-steps → version → build-push (matrix) → patch-wft → status
+  clone → detect-steps → version → render-hera ∥ build-push (matrix) → patch-images → tag → status
 
-Each ML "step" is a sub-directory in the source repo carrying a Dockerfile;
-kubeline.yaml at the repo root declares the step DAG. Only the directories
-whose contents changed since HEAD~1 get rebuilt — kubeline.yaml is the
-single source of truth for step name → path → compute mapping. After a
-successful matrix build, this template clones the gitops repo and `yq`-
-patches the corresponding step's container.image in
-workflows/{appName}/{branch}/workflow-template.yaml so ArgoCD picks up the
-new image on its next sync.
+The platform pipeline engine (PRD-HPC-1461 D-80) is the ONLY render path: the
+app's pipeline.py is rendered by the engine image the gitops pipeline-context
+pins (engine.image), enhanced with the engine wheel (engine.wheel, verified by
+engine.wheelSha256), and committed to the gitops repo. The app carries no
+kubecore/ and no compose-and-validate step: the compose-and-validate image is
+built from the chart's own Dockerfile (files/compose.Dockerfile) with the app's
+config/ folder as its context. Each other ML "step" is a sub-directory
+steps/<dir>/ carrying a Dockerfile. Only the steps whose contents changed
+since the last built commit get rebuilt. After a successful matrix build, this
+template clones the gitops repo and `yq`-patches the corresponding step's
+image key in pipeline-images.yaml so ArgoCD picks up the new image on its next
+sync.
 
 Inputs come from the Sensor (Argo Events). See the Sensor template in the
 k8smlapp composition for the full parameter list.
@@ -141,16 +145,13 @@ spec:
       value: "main"
     - name: workflow_template_path
     # Per-submission CI node pool (PRD-962 F-09) for the static build-push
-    # template below, AND (kubecore-operator#1024) for the render-wft
-    # generator's CI_POOL further down — the create-nodegroups/
-    # destroy-nodegroups/validate-classes utility steps in the per-app
-    # rendered WFT. Optional: a submitter that omits it gets the
+    # template below. Optional: a submitter that omits it gets the
     # operator-resolved default, which itself falls back to today's single
     # workflow-level nodeSelector so behavior is unchanged until callers
     # start passing this parameter. Distinct from the PER-STEP ML compute
-    # class ("{step}-class", e.g. cpu-standard/gpu-a100) that render-wft
+    # class ("{step}-class", e.g. cpu-standard/gpu-a100) that the enhancer
     # resolves separately per pipeline step — this parameter only targets
-    # the short-lived utility steps, never an ML workload step itself.
+    # the CI build pods, never an ML workload step itself.
     # kaos-lib rebuild on a reconcile-submitted build: "true" only from the
     # reconciler's KAOS-LIB DRIFT submission. A push always rebuilds stale
     # kaos-lib images (the app is being used); any other reconcile build
@@ -243,52 +244,45 @@ spec:
         template: kaos-lib-support
         continueOn:
           failed: true
-    # build-push and render-wft run in the SAME step-group (both single-dash =
-    # parallel), because render-wft does NOT depend on build output — it only
-    # consumes version.image_tag + detect-steps.changed_steps (both produced
-    # before this group) and rebuilds the whole WFT from kubeline.yaml. Keeping
-    # render-wft in its own LATER group meant a fresh app's config + Argo form
-    # were gated behind ALL 6 image builds (~14 min each, and they don't all fit
-    # the build pool) — so a brand-new kubeapp couldn't get its real dataset
-    # config or its real submit form until the entire build finished (often
-    # hours, or never under node pressure). Running them in parallel lands the
-    # config + form immediately while the images build alongside. patch-images
-    # (next group) still correctly waits for build-push.
+    # build-push and render-hera run in the SAME step-group (both single-dash =
+    # parallel), because render-hera does NOT depend on build output — it only
+    # consumes detect-steps' engine outputs (produced before this group) and
+    # renders the whole WFT from pipeline.py. Keeping render-hera in its own
+    # LATER group meant a fresh app's config + Argo form were gated behind ALL
+    # its image builds (~14 min each, and they don't all fit the build pool) —
+    # so a brand-new kubeapp couldn't get its real dataset config or its real
+    # submit form until the entire build finished (often hours, or never under
+    # node pressure). Running them in parallel lands the config + form
+    # immediately while the images build alongside. patch-images (next group)
+    # still correctly waits for build-push.
     #
-    # The renders are listed BEFORE build-push (kubecore-operator#1374). The
+    # The render is listed BEFORE build-push (kubecore-operator#1374). The
     # workflow's `parallelism` (mlBuildParallelism, default 2) caps running
     # pods, and Argo hands each free slot to the group's first unstarted step
     # in list order. With build-push first, every slot went to the next of its
     # N matrix items, so the render started only after the LAST build had
     # (live, poolaki 2026-10-01: ~12 min behind 8 builds). Listed first, the
     # render takes a slot at once and the builds share the rest.
-    - - name: render-wft
-        template: render-wft
-        # KUBELINE frontend only. Fire when a step image changed OR the WFT source
-        # changed (wft_changed): kubeline.yaml IS the WFT source, so a kubeline-only
-        # change (e.g. a PARAMS_YAML tweak) must re-render even with
-        # has_changes=false. render-wft rebuilds the WHOLE WFT from kubeline.yaml,
-        # so an empty changed_steps is fine.
-        when: "{{`{{steps.detect-steps.outputs.parameters.frontend}}`}} == kubeline && ({{`{{steps.detect-steps.outputs.parameters.has_changes}}`}} == true || {{`{{steps.detect-steps.outputs.parameters.wft_changed}}`}} == true) && {{`{{workflow.parameters.branch_type}}`}} != chore"
-        arguments:
-          parameters:
-          - name: image_tag
-            value: "{{`{{steps.version.outputs.parameters.image_tag}}`}}"
-          - name: changed_steps
-            value: "{{`{{steps.detect-steps.outputs.parameters.changed_steps}}`}}"
-      - name: render-hera
+    - - name: render-hera
         template: render-hera
-        # HERA frontend only. Renders pipeline.py -> enhances -> gates -> commits.
-        # Same firing rule as render-wft (WFT source = pipeline.py + config/ + kubecore/).
+        # Renders pipeline.py with the platform engine -> enhances -> gates -> commits.
+        # Fires when the WFT source changed (pipeline.py + config/).
         # PRD-1124 D-07 (kubecore-operator#1124 AC-09): ALSO fire on a reconcile-
         # submitted build. The reconciler submits one when the platform context
         # moved (mlEnvironment / namespace drift) with NO commit; re-rendering is
         # idempotent (hera-enhance-commit commits only when the output differs).
-        when: "{{`{{steps.detect-steps.outputs.parameters.frontend}}`}} == hera && ({{`{{steps.detect-steps.outputs.parameters.has_changes}}`}} == true || {{`{{steps.detect-steps.outputs.parameters.wft_changed}}`}} == true || {{`{{workflow.parameters.event_type}}`}} == reconcile) && {{`{{workflow.parameters.branch_type}}`}} != chore"
+        when: "({{`{{steps.detect-steps.outputs.parameters.has_changes}}`}} == true || {{`{{steps.detect-steps.outputs.parameters.wft_changed}}`}} == true || {{`{{workflow.parameters.event_type}}`}} == reconcile) && {{`{{workflow.parameters.branch_type}}`}} != chore"
         arguments:
           parameters:
           - name: changed_steps
             value: "{{`{{steps.detect-steps.outputs.parameters.changed_steps}}`}}"
+          # The engine of this build (detect-steps, PRD-HPC-1461 D-80).
+          - name: engine
+            value: "{{`{{steps.detect-steps.outputs.parameters.engine}}`}}"
+          - name: engine_image
+            value: "{{`{{steps.detect-steps.outputs.parameters.engine_image}}`}}"
+          - name: engine_profile
+            value: "{{`{{steps.detect-steps.outputs.parameters.engine_profile}}`}}"
       - name: build-push
         template: build-push
         when: "{{`{{steps.detect-steps.outputs.parameters.has_changes}}`}} == true && {{`{{inputs.parameters.locked}}`}} == true"
@@ -304,6 +298,13 @@ spec:
             value: "{{`{{steps.version.outputs.parameters.new_version}}`}}"
           - name: kaos_lib_package
             value: "{{`{{steps.detect-steps.outputs.parameters.kaos_lib_package}}`}}"
+          # The compose-and-validate image is built from the chart's Dockerfile on the engine image.
+          - name: engine_image
+            value: "{{`{{steps.detect-steps.outputs.parameters.engine_image}}`}}"
+          - name: engine_version
+            value: "{{`{{steps.detect-steps.outputs.parameters.engine_version}}`}}"
+          - name: engine_profile
+            value: "{{`{{steps.detect-steps.outputs.parameters.engine_profile}}`}}"
         withParam: "{{`{{steps.detect-steps.outputs.parameters.changed_steps}}`}}"
     - - name: patch-images
         template: patch-images
@@ -329,6 +330,8 @@ spec:
             value: "{{`{{steps.detect-steps.outputs.parameters.kaos_lib_record}}`}}"
           - name: kaos_lib_compat
             value: "{{`{{steps.detect-steps.outputs.parameters.kaos_lib_compat}}`}}"
+          - name: engine_compose
+            value: "{{`{{steps.detect-steps.outputs.parameters.engine_compose}}`}}"
     - - name: tag
         template: tag
         when: "{{`{{steps.detect-steps.outputs.parameters.has_changes}}`}} == true && {{`{{inputs.parameters.locked}}`}} == true && {{`{{workflow.parameters.branch_type}}`}} != chore && {{`{{workflow.parameters.branch_type}}`}} != rc"
@@ -385,24 +388,12 @@ spec:
         # token may persist in it (kaos PRD 738 F-20).
         git_assert_no_token /workspace/repo
         echo "Cloned at $(git rev-parse HEAD)"
-        # Frontend detection: the ML app is authored EITHER as a Hera pipeline
-        # (pipeline.py + config/ tree, Hydra params) OR the legacy kubeline.yaml
-        # DSL. Detect which and write a marker the whole build keys off; both
-        # paths share version/build-push/patch-images/tag/status downstream.
-        if [ -f pipeline.py ] && [ -d config ]; then
-          printf "hera" > /workspace/frontend
-          echo "frontend=hera (pipeline.py + config/ detected)"
-          echo "--- pipeline.py ---"; cat pipeline.py
-        elif [ -f kubeline.yaml ]; then
-          printf "kubeline" > /workspace/frontend
-          echo "frontend=kubeline (kubeline.yaml detected)"
-          echo "--- kubeline.yaml ---"; cat kubeline.yaml
-        else
-          echo "ERROR: no ML frontend found at repo root — expected either"
-          echo "  pipeline.py + config/  (Hera + Hydra authoring), or"
-          echo "  kubeline.yaml          (legacy DSL)"
+        # An ML app is pipeline.py + config/ (Hera + Hydra authoring) + steps/<name>/.
+        if [ ! -f pipeline.py ] || [ ! -d config ]; then
+          echo "ERROR: no ML pipeline at the repo root — expected pipeline.py + config/ (Hera + Hydra authoring)"
           exit 1
         fi
+        echo "--- pipeline.py ---"; cat pipeline.py
       volumeMounts:
       - name: workspace
         mountPath: /workspace
@@ -423,11 +414,6 @@ spec:
       - name: wft_changed
         valueFrom:
           path: /tmp/wft_changed
-      # Frontend marker (hera|kubeline), written by clone, surfaced here so the
-      # entrypoint DAG can route render-wft (kubeline) vs render-hera (Hera).
-      - name: frontend
-        valueFrom:
-          path: /workspace/frontend
       # kaos-lib delivery (PRD novelcore/kaos#1147), see the KAOS-LIB block
       # below: the --build-arg KAOS_LIB_PACKAGE value ("" = none), and the
       # pipeline-images kaos-lib-package / kaos-lib-compat report ("" = leave).
@@ -443,6 +429,25 @@ spec:
         valueFrom:
           path: /tmp/kaos_lib_compat
           default: ""
+      # The platform pipeline engine of this build (PRD-HPC-1461 D-80), see the ENGINE block below: the
+      # `engine.py context` JSON and the fields the steps route on. engine_compose is the engine
+      # version to record as `engine-compose` once the compose-and-validate image is built ("" = not built).
+      - name: engine
+        valueFrom:
+          path: /tmp/engine.json
+      - name: engine_version
+        valueFrom:
+          path: /tmp/engine_version
+      - name: engine_image
+        valueFrom:
+          path: /tmp/engine_image
+      - name: engine_profile
+        valueFrom:
+          path: /tmp/engine_profile
+      - name: engine_compose
+        valueFrom:
+          path: /tmp/engine_compose
+          default: ""
     container:
       image: {{ .Values.tooling.toolboxImage | default "alpine/k8s:1.36.4" }}
       {{- include "kubecore-ci-workflows.resources" .Values.tooling.resources | nindent 6 }}
@@ -454,8 +459,6 @@ spec:
         # detect-steps needs both git and yq: both are baked into
         # tooling.toolboxImage.
         cd /workspace/repo
-        FRONTEND=$(cat /workspace/frontend 2>/dev/null || echo kubeline)
-        echo "frontend=${FRONTEND}"
 
         # Diff range — HEAD~1..HEAD when we have a parent, else "all steps"
         if git rev-parse HEAD~1 >/dev/null 2>&1; then
@@ -473,13 +476,8 @@ spec:
         # up the change — a silent drift. Emit wft_changed=true whenever a
         # DAG-source file is in the diff (or this is a full build with no parent),
         # and gate render/patch-images on (has_changes OR wft_changed).
-        # Hera sources: pipeline.py, config/**, kubecore/** (vendored helpers).
-        # kubeline source: kubeline.yaml.
-        if [ "$FRONTEND" = "hera" ]; then
-          WFT_SRC_RE="^(pipeline\.py|config/|kubecore/)"
-        else
-          WFT_SRC_RE="^kubeline\.ya?ml$"
-        fi
+        # Sources: pipeline.py and config/**.
+        WFT_SRC_RE="^(pipeline\.py|config/)"
         # A reconcile-submitted build ALSO renders. wft_changed is derived from a
         # git diff of the APP repo, but the WFT's other input — pipeline-context
         # (compute classes, endpoints) — lives in the GITOPS repo and is written
@@ -503,7 +501,7 @@ spec:
         # #457: a step must be (re)built if EITHER its source changed OR it has
         # no published image yet. detect-steps used to key only on the git diff,
         # so a step whose directory was untouched (typical first push: README /
-        # kubeline tweak) was never built — its pipeline-images ConfigMap key
+        # README tweak) was never built — its pipeline-images ConfigMap key
         # stayed at the Crossplane-seeded ":{step}-latest" placeholder, which is
         # never produced by build-push (it always tags {step}-{branch}-v…-{sha}).
         # The first training run then hit ImagePullBackOff on those steps with no
@@ -577,22 +575,19 @@ spec:
           fi
         fi
 
-        # Build the (step_name, step_path) list. kubeline: walk kubeline.yaml's
-        # .steps[]. Hera: every directory under steps/ that has a Dockerfile is a
-        # step; the DIRECTORY NAME is the step name (D14: step name ↔ directory ↔
-        # image ConfigMap key). Hyphens in step names map to underscores in dirs
-        # (dataset-loading ↔ steps/dataset_loading), matching the authoring
-        # convention, so record both the image key (name) and the build path.
-        if [ "$FRONTEND" = "hera" ]; then
-          STEP_PAIRS=$(for d in steps/*/; do
-            [ -f "${d}Dockerfile" ] || continue
-            dir=${d%/}; base=$(basename "$dir")
-            name=$(echo "$base" | tr '_' '-')
-            echo "${name}|${dir}"
-          done)
-        else
-          STEP_PAIRS=$(yq e '.steps[] | .name + "|" + .path' kubeline.yaml)
-        fi
+        # Build the (step_name, step_path) list: every directory under steps/ that
+        # has a Dockerfile is a step; the DIRECTORY NAME is the step name (D14: step
+        # name ↔ directory ↔ image ConfigMap key). Hyphens in step names map to
+        # underscores in dirs (dataset-loading ↔ steps/dataset_loading), matching the
+        # authoring convention, so record both the image key (name) and the build path.
+        # compose-and-validate is NOT an app step: its Dockerfile is the chart's.
+        STEP_PAIRS=$(for d in steps/*/; do
+          [ -f "${d}Dockerfile" ] || continue
+          dir=${d%/}; base=$(basename "$dir")
+          name=$(echo "$base" | tr '_' '-')
+          [ "$name" = "compose-and-validate" ] && continue
+          echo "${name}|${dir}"
+        done)
 
         # Emit a step if its path/* changed OR it has no published image yet (#457).
         # Write pairs to a file and loop with redirection (NOT a pipe) so the
@@ -616,6 +611,12 @@ spec:
         # The script reads the workspace as data only (python3 -I).
 {{ include "kubecore-ci-workflows.kaosLibScript" . | indent 8 }}
         cut -d'|' -f2 /tmp/step_pairs > /tmp/step_paths
+        # The compose-and-validate Dockerfile (chart-owned, declares the ARG) is one more managed step:
+        # an absolute path, which kaos-lib.py resolves as is.
+        mkdir -p /tmp/compose-ctx
+        COMPOSE_DOCKERFILE=/tmp/compose-ctx/Dockerfile
+{{ include "kubecore-ci-workflows.composeDockerfile" . | indent 8 }}
+        echo /tmp/compose-ctx >> /tmp/step_paths
         KL_CTX=$(find /tmp/gitops -path "*/${APP_NAME}/${GITOPS_BRANCH}/pipeline-context.yaml" 2>/dev/null | head -1)
         KL_REC=""
         if [ -n "${IMAGES_PATH:-}" ]; then KL_REC=$(yq e '.data."kaos-lib-package" // ""' "$IMAGES_PATH"); fi
@@ -645,6 +646,21 @@ spec:
         jq -r 'if .rebuild then .managed[] else empty end' /tmp/kaos_lib.json > /tmp/kaos_lib_rebuild
         echo "kaos-lib: $(jq -r '.reason' /tmp/kaos_lib.json)"
 
+        # ENGINE (PRD-HPC-1461 D-80): the platform pipeline engine is the only way to render, enhance and
+        # compose an app. The operator writes engine: {version, image, wheel, wheelSha256} into the gitops
+        # pipeline-context; engine.py validates it and picks the schema profile (yolo when the app's
+        # config/ has a quantization section, else hera). It reads the checkout as DATA (python3 -I).
+        # A context with no usable engine FAILS the build: the live WorkflowTemplate stays as it is.
+{{ include "kubecore-ci-workflows.engineScript" . | indent 8 }}
+        [ -n "$KL_CTX" ] || { echo "engine: FATAL: no pipeline-context in the gitops repo; failing the build, the live WorkflowTemplate stays as it is" >&2; exit 1; }
+        python3 -I /tmp/engine.py context --context "$KL_CTX" --repo /workspace/repo > /tmp/engine.json \
+          || { echo "engine: FATAL: the pipeline context has no usable engine; failing the build, the live WorkflowTemplate stays as it is" >&2; exit 1; }
+        jq -j '.version' /tmp/engine.json > /tmp/engine_version
+        jq -j '.image' /tmp/engine.json > /tmp/engine_image
+        jq -j '.profile' /tmp/engine.json > /tmp/engine_profile
+        ENGINE_VERSION=$(cat /tmp/engine_version)
+        echo "engine: ${ENGINE_VERSION} image $(cat /tmp/engine_image) profile $(cat /tmp/engine_profile)"
+
         CHANGED_JSON="[]"
         while IFS='|' read -r STEP_NAME STEP_PATH; do
           [ -n "$STEP_NAME" ] || continue
@@ -652,17 +668,6 @@ spec:
           REASON=""
           if echo "$CHANGED_FILES" | grep -qE "^${STEP_PATH}/"; then
             REASON="source changed"
-          elif [ "$FRONTEND" = "hera" ] && [ "$STEP_NAME" = "compose-and-validate" ] \
-               && echo "$CHANGED_FILES" | grep -qE "^(config/|kubecore/)"; then
-            # compose-and-validate is built with the repo ROOT as context and
-            # BAKES `config/` + `kubecore/` into its image (see its Dockerfile),
-            # so its build inputs live OUTSIDE steps/compose_and_validate/.
-            # Without this, adding a config section left the compose image stale
-            # and every run died on the reads= gate ("a step declares
-            # reads=['evaluation'] but the composed config has no 'evaluation'
-            # section") — the tree in the image predated the section. Live
-            # 2026-07-15.
-            REASON="config/ or kubecore/ changed (baked into this image)"
           elif [ "$UNBUILT_STEPS" = "__ALL__" ]; then
             REASON="no pipeline-images (first build)"
           elif grep -qxF "$STEP_PATH" /tmp/kaos_lib_rebuild; then
@@ -681,6 +686,30 @@ spec:
             echo "step changed: $STEP_NAME ($STEP_PATH) — ${REASON}"
           fi
         done < /tmp/step_pairs
+
+        # compose-and-validate: the image built from the chart's Dockerfile on the engine image with the
+        # app's config/ folder as its context. Rebuilt when config/ changed, when the engine moved since the
+        # recorded engine-compose, or when the kaos-lib package moved (it installs the same one as the steps).
+        printf '' > /tmp/engine_compose
+        COMPOSE_REASON=""
+        ENG_COMPOSE_REC=""
+        if [ -n "${IMAGES_PATH:-}" ]; then ENG_COMPOSE_REC=$(yq e '.data."engine-compose" // ""' "$IMAGES_PATH"); fi
+        if echo "$CHANGED_FILES" | grep -qE "^config/"; then
+          COMPOSE_REASON="config/ changed"
+        elif [ "$ENG_COMPOSE_REC" != "$ENGINE_VERSION" ]; then
+          COMPOSE_REASON="engine ${ENG_COMPOSE_REC:-<unrecorded>} -> ${ENGINE_VERSION}"
+        elif grep -qxF /tmp/compose-ctx /tmp/kaos_lib_rebuild; then
+          COMPOSE_REASON="kaos-lib package moved to $(cat /tmp/kaos_lib_package)"
+        elif [ -n "${IMAGES_PATH:-}" ]; then
+          case "$(yq e '.data."compose-and-validate" // ""' "$IMAGES_PATH")" in
+            ""|*-latest) COMPOSE_REASON="image unbuilt" ;;
+          esac
+        fi
+        if [ -n "$COMPOSE_REASON" ]; then
+          CHANGED_JSON=$(echo "$CHANGED_JSON" | yq e -o=json '. + [{"name":"compose-and-validate","path":"config"}]' -)
+          printf '%s' "$ENGINE_VERSION" > /tmp/engine_compose
+          echo "step changed: compose-and-validate (config) — ${COMPOSE_REASON}"
+        fi
 
         # Compact JSON for withParam
         echo "$CHANGED_JSON" | yq e -o=json -I=0 - > /tmp/changed_steps.json
@@ -787,6 +816,14 @@ spec:
       # kaos-lib spec for --build-arg KAOS_LIB_PACKAGE (detect-steps); "" = the
       # Dockerfile's default. Passed as an env var, never spliced into the script.
       - name: kaos_lib_package
+        value: ""
+      # The engine of this build (detect-steps): the base, version label and schema profile of the
+      # chart-owned compose-and-validate image. Unused by every other step.
+      - name: engine_image
+        value: ""
+      - name: engine_version
+        value: ""
+      - name: engine_profile
         value: ""
     metadata:
       labels:
@@ -936,6 +973,12 @@ spec:
       env:
       - name: KAOS_LIB_PACKAGE
         value: "{{`{{inputs.parameters.kaos_lib_package}}`}}"
+      - name: ENGINE_IMAGE
+        value: "{{`{{inputs.parameters.engine_image}}`}}"
+      - name: ENGINE_VERSION
+        value: "{{`{{inputs.parameters.engine_version}}`}}"
+      - name: ENGINE_PROFILE
+        value: "{{`{{inputs.parameters.engine_profile}}`}}"
       args:
       - |
         set -e
@@ -974,7 +1017,7 @@ spec:
         LATEST_IMAGE="${REGISTRY}/${IMAGE_REPO}:${STEP_NAME}-latest"
 
         # Each ML step has Dockerfile at <step_path>/Dockerfile and uses
-        # <step_path> as build context — kubeline.yaml's contract.
+        # <step_path> as build context.
         #
         # Kaniko strategy for fat ML images (#332):
         # --cache=true + --cache-repo: layer-level remote cache in Zot.
@@ -1005,26 +1048,31 @@ spec:
         # suffix keeps it per-app (no cross-tenant cache poisoning) and clear of
         # the app image tags.
         CACHE_REPO="${REGISTRY}/${IMAGE_REPO}-buildcache"
-        # Build context: normally the step dir. The Hera compose-and-validate
-        # step bundles the repo-root kubecore/ package + config/ tree, so it
-        # builds with the REPO ROOT as context (its Dockerfile still lives at
-        # <step_path>/Dockerfile and COPYs kubecore/ + config/ from root).
+        # Build context: the step dir, and its Dockerfile. compose-and-validate is the exception
+        # (PRD-HPC-1461 D-80): the chart's own Dockerfile (files/compose.Dockerfile) on the engine
+        # image, with the app's config/ folder (its step_path) as the ONLY context.
         BUILD_CONTEXT="/workspace/repo/${STEP_PATH}"
+        DOCKERFILE="/workspace/repo/${STEP_PATH}/Dockerfile"
+        COMPOSE_DOCKERFILE=/workspace/compose.Dockerfile
+{{ include "kubecore-ci-workflows.composeDockerfile" . | indent 8 }}
+        set --
         if [ "$STEP_NAME" = "compose-and-validate" ]; then
-          BUILD_CONTEXT="/workspace/repo"
+          DOCKERFILE="${COMPOSE_DOCKERFILE}"
+          set -- --build-arg="ENGINE_IMAGE=${ENGINE_IMAGE}" --build-arg="ENGINE_VERSION=${ENGINE_VERSION}" \
+                 --build-arg="ENGINE_PROFILE=${ENGINE_PROFILE}"
+          echo "engine: compose-and-validate is built on ${ENGINE_IMAGE} (profile ${ENGINE_PROFILE})"
         fi
         # kaos-lib (PRD novelcore/kaos#1147): the spec the platform chose, for a
         # step whose Dockerfile declares ARG KAOS_LIB_PACKAGE, plus the image
         # label io.kaos.lib naming it. Any other step builds as before.
-        set --
         if [ -n "${KAOS_LIB_PACKAGE:-}" ] \
-           && grep -qE '^[[:space:]]*ARG[[:space:]]+KAOS_LIB_PACKAGE([[:space:]=]|$)' "/workspace/repo/${STEP_PATH}/Dockerfile"; then
-          set -- --build-arg="KAOS_LIB_PACKAGE=${KAOS_LIB_PACKAGE}" --label="io.kaos.lib=${KAOS_LIB_PACKAGE}"
+           && grep -qE '^[[:space:]]*ARG[[:space:]]+KAOS_LIB_PACKAGE([[:space:]=]|$)' "${DOCKERFILE}"; then
+          set -- "$@" --build-arg="KAOS_LIB_PACKAGE=${KAOS_LIB_PACKAGE}" --label="io.kaos.lib=${KAOS_LIB_PACKAGE}"
           echo "kaos-lib: ${STEP_NAME} installs kaos-lib ${KAOS_LIB_PACKAGE}"
         fi
         /kaniko/executor \
           --context="${BUILD_CONTEXT}" \
-          --dockerfile="/workspace/repo/${STEP_PATH}/Dockerfile" \
+          --dockerfile="${DOCKERFILE}" \
           --destination="${VERSIONED_IMAGE}" \
           --destination="${LATEST_IMAGE}" \
           --build-arg="REGISTRY_URL=${REGISTRY}" \
@@ -1055,1794 +1103,7 @@ spec:
         mountPath: /etc/registry-auth
         readOnly: true
 
-  - name: render-wft
-{{ include "kubecore-ci-workflows.preemptionRetry" . | indent 4 }}
-    inputs:
-      parameters:
-      - name: image_tag
-      - name: changed_steps
-    securityContext:
-      runAsUser: 0
-      runAsGroup: 0
-    container:
-      image: {{ .Values.tooling.toolboxImage | default "alpine/k8s:1.36.4" }}
-      {{- include "kubecore-ci-workflows.resources" .Values.tooling.pythonResources | nindent 6 }}
-      command: [sh, -c]
-      securityContext:
-        runAsUser: 0
-        runAsGroup: 0
-      args:
-      - |
-        set -e
-        # git and PyYAML are baked into tooling.toolboxImage.
-
-        TOKEN=$(cat /etc/github-token/token)
-{{ include "kubecore-ci-workflows.gitAuth" . | indent 8 }}
-        ORG="{{ .Values.github.org }}"
-        GITOPS_REPO="{{`{{workflow.parameters.gitops_repository}}`}}"
-        GITOPS_BRANCH="{{`{{workflow.parameters.gitops_branch}}`}}"
-        APP_NAME="{{`{{workflow.parameters.app_name}}`}}"
-        PROJECT_NAME="{{`{{workflow.parameters.project_name}}`}}"
-        # kubecore-operator#1024: the project's own CI node class, threaded
-        # into render_wft.py so CI_POOL (the create/destroy-nodegroups and
-        # validate-classes utility steps' nodeSelector) stops hardcoding the
-        # name of the deprecated shared CI pool.
-        NODE_CLASS="{{`{{workflow.parameters.node_class}}`}}"
-        IMAGE_TAG="{{`{{inputs.parameters.image_tag}}`}}"
-        BRANCH=$(echo "{{`{{workflow.parameters.branch}}`}}" | sed 's|^refs/heads/||')
-
-        REPO_URL="https://github.com/${ORG}/${GITOPS_REPO}.git"
-        git clone --depth=1 --branch "${GITOPS_BRANCH}" "${REPO_URL}" /tmp/gitops
-        git_assert_no_token /tmp/gitops
-        git config --global user.name "KubeCore CI"
-        git config --global user.email "ci@kubecore.io"
-
-        # pipeline-context.yaml is written by the k8smlapp Crossplane composition
-        # at {basePath}/{appName}/{gitopsBranch}/pipeline-context.yaml. basePath
-        # is operator-configured (gitOpsConfig.basePath, default "kubeapps" —
-        # NOT "workflows"; live layout verified on gke-dev/yolo 2026-06-13) and
-        # is not passed to this workflow, so DISCOVER the directory by locating
-        # the context file in the clone. The WFT render output lands next to it
-        # so the ArgoCD app watching that path picks it up. The APP_BRANCH
-        # (dev/feature/etc) is used only for the kaniko build context and image
-        # tag; it does not drive gitops file paths.
-        CONTEXT_PATH=$(find /tmp/gitops -path "*/${APP_NAME}/${GITOPS_BRANCH}/pipeline-context.yaml" | head -1)
-
-        # Clone the APP repo FRESH at the exact commit_sha and read kubeline.yaml
-        # from there — do NOT trust /workspace/repo. The shared workspace PVC that
-        # the clone step checks out is not guaranteed clean by the time render-wft
-        # runs: a retained/racing checkout can leave a STALE kubeline.yaml, and the
-        # render then silently emits a WFT built from the old pipeline definition
-        # (live yolo/e2e 2026-07-02: the lakefs_repo PARAMS_YAML fix was on dev HEAD
-        # and in the built commit, yet the render dropped it because /workspace/repo
-        # held a pre-fix kubeline). A self-contained clone at commit_sha makes the
-        # render deterministic: the WFT always reflects the commit that was built.
-        APP_REPO_URL="{{`{{workflow.parameters.repo_url}}`}}"
-        APP_COMMIT="{{`{{workflow.parameters.commit_sha}}`}}"
-        rm -rf /tmp/apprepo
-        git clone --depth=50 --branch "${BRANCH}" "${APP_REPO_URL}" /tmp/apprepo
-        git -C /tmp/apprepo fetch --depth=1 origin "${APP_COMMIT}" || true
-        git -C /tmp/apprepo checkout "${APP_COMMIT}"
-        git_assert_no_token /tmp/apprepo
-        KUBELINE_PATH="/tmp/apprepo/kubeline.yaml"
-        echo "render-wft: reading kubeline from fresh clone at ${APP_COMMIT}"
-        # Source-commit committer epoch for the monotonic anti-churn guard below;
-        # computed once here (from the fresh clone) and passed into render_wft.py so
-        # it can stamp the WFT annotation directly.
-        SRC_COMMIT_TIME=$(git -C /tmp/apprepo show -s --format=%ct "${APP_COMMIT}" 2>/dev/null || echo 0)
-        echo "render-wft: source-commit epoch ${SRC_COMMIT_TIME}"
-
-        if [ -z "$CONTEXT_PATH" ] || [ ! -f "$CONTEXT_PATH" ]; then
-          echo "ERROR: pipeline-context.yaml not found anywhere under */${APP_NAME}/${GITOPS_BRANCH}/ in the gitops repo."
-          echo "The k8smlapp composition writes it; without it the WFT cannot be rendered. Failing loudly (a skipped render previously masked a path mismatch)."
-          exit 1
-        fi
-        GITOPS_WORKFLOWS_PATH=$(dirname "${CONTEXT_PATH#/tmp/gitops/}")
-        WFT_OUT="/tmp/gitops/${GITOPS_WORKFLOWS_PATH}/workflow-template.yaml"
-        echo "gitops pipeline dir discovered: ${GITOPS_WORKFLOWS_PATH}"
-
-        cat > /tmp/render_wft.py << 'PYEOF'
-        import sys, yaml, os, json, ssl, urllib.request
-
-        # Argo brace delimiters as variables so Helm does not parse them.
-        OB = chr(123) + chr(123)
-        CB = chr(125) + chr(125)
-
-{{ include "kubecore-ci-workflows.stepToken" . | indent 8 }}
-
-        kubeline_path = os.environ['KUBELINE_PATH']
-        context_path = os.environ['CONTEXT_PATH']
-        wft_out = os.environ['WFT_OUT']
-        app_name = os.environ['APP_NAME']
-        project_name = os.environ['PROJECT_NAME']
-        node_class = os.environ['NODE_CLASS']
-        branch = os.environ.get('BRANCH', 'main')
-
-        with open(kubeline_path) as f:
-            kubeline = yaml.safe_load(f)
-
-        version = kubeline.get('version')
-        if version != 2:
-            print(f"WARNING: kubeline.yaml version={version!r} (expected 2). Skipping WFT render (v1 fallback).", file=sys.stderr)
-            sys.exit(0)
-
-        with open(context_path) as f:
-            raw_cm = yaml.safe_load(f)
-        ctx = yaml.safe_load(raw_cm['data']['context.yaml'])
-
-        ml_ns = ctx['namespace']
-        pipeline_name = ctx['pipelineName']
-        registry_url = ctx.get('registryUrl', '')
-        image_repo = ctx.get('imageRepo', f"{project_name}/{app_name}")
-        lakefs = ctx.get('lakefs', {})
-        mlflow = ctx.get('mlflow', {})
-
-        # ── Live-compute detection (GCP ephemeral-nodegroup model) ──────────────
-        # The operator writes poolContext ONLY when the pool opted into the live
-        # model (features.mlConfig.ephemeralPipelineNodegroups). Its presence — a
-        # non-empty projectId — is the single gate that switches render-wft from the
-        # legacy cluster-shared numeric-request model to the per-step live-catalog +
-        # ephemeral per-pipeline NodePool model. Absent/empty ⇒ the legacy path below
-        # runs byte-for-byte as before, so every existing pool is 100% unchanged.
-        pool_context = ctx.get('poolContext') or {}
-        compute_catalog_ref = ctx.get('computeCatalog') or {}
-        live_compute = bool((pool_context.get('projectId') or '').strip())
-
-        # PRD-858 F-05: when the pipeline context targets an ml-type named
-        # environment, every step is pinned onto that environment's own
-        # scale-to-zero class pools: nodeSelector gains the environment label
-        # and tolerations gain the env-exclusivity taint (both mirror exactly
-        # what kubenv-gcp stamps on those pools). Absent -> byte-for-byte
-        # unchanged for every existing app.
-        ml_env = ctx.get('mlEnvironment') or {}
-        ml_env_name = (ml_env.get('name') or '').strip()
-
-        def _connection_env_from(ctx, ml_env_name):
-            # App connections: optional envFrom refs to the connection ConfigMaps
-            # listed in pipeline-context. Always a fresh list of fresh dicts (a
-            # shared object would make yaml.dump emit anchors/aliases).
-            out = []
-            seen = set()
-            for c in (ctx.get('connections') or []):
-                if not isinstance(c, dict):
-                    continue
-                cm = c.get('configMapName')
-                if not isinstance(cm, str) or not cm.strip():
-                    continue
-                if c.get('environment') and c.get('environment') != ml_env_name:
-                    continue
-                if cm in seen:
-                    continue
-                seen.add(cm)
-                out.append({'configMapRef': {'name': cm, 'optional': True}})
-            return out
-
-        compute = ctx.get('computeClasses', {})
-        cpu_cls = compute.get('cpu', {})
-        gpu_cls = compute.get('gpu', {})
-        # all = full catalog of every cpu/gpu class the pool declares; a developer can
-        # pick any of the right tier. Falls back to just the default cpu+gpu pair on
-        # older contexts that don't carry `all`.
-        all_classes = compute.get('all') or [c for c in (cpu_cls, gpu_cls) if c.get('name')]
-        cpu_classes = [c for c in all_classes if c.get('tier') == 'cpu']
-        gpu_classes = [c for c in all_classes if c.get('tier') == 'gpu']
-
-        def _class_line(c):
-            # one human line per class: "name — machineType (accel) — description"
-            bits = [c.get('name', '?')]
-            mt = c.get('machineType', '')
-            ga = c.get('guestAccelerator') or {}
-            accel = (' + %dx %s' % (ga.get('count', 1), ga.get('type', 'gpu'))) if ga else ''
-            if mt:
-                bits.append('%s%s' % (mt, accel))
-            d = c.get('description', '')
-            if d and d != mt:
-                bits.append(d)
-            return ' — '.join(bits)
-
-        def _allowed_desc(tier_classes, tier):
-            # field help text: lists every allowed class of this tier so the developer
-            # knows the valid values (Argo renders this as the ? tooltip).
-            if not tier_classes:
-                return '%s compute class for this pool.' % tier.upper()
-            names = ', '.join(c.get('name', '?') for c in tier_classes)
-            lines = '; '.join(_class_line(c) for c in tier_classes)
-            return ('%s compute class (node pool) this step runs on. Allowed on this pool: %s. [%s]'
-                    % (tier.upper(), names, lines))
-        hpc = ctx.get('hpc', {})
-        checkpoints = ctx.get('checkpoints', {})
-        sa = ctx.get('serviceAccountName', 'argo-workflow')
-
-        # ════════════════════════════════════════════════════════════════════
-        # LIVE-COMPUTE PATH (GCP ephemeral per-pipeline NodePools).
-        #
-        # Active only when poolContext.projectId is set. Reads the pool-scoped LIVE
-        # machine catalog (written by the compute-catalog probe CronWorkflow), emits
-        # a per-step compute-CLASS dropdown + a per-step disk-gb param, sizes each
-        # step to its chosen class's WHOLE node (requests==limits, sole-tenant), and
-        # provisions/destroys a dedicated GKE NodePool per (step, run) around the DAG.
-        # Everything below this block (the legacy cluster-shared numeric-request
-        # model) is UNTOUCHED and runs for every non-live pool.
-        # ════════════════════════════════════════════════════════════════════
-        def _read_live_catalog(cm_name, cm_ns):
-            # Read the compute-catalog ConfigMap straight from the in-cluster API
-            # using the render-wft pod's ServiceAccount token (operate-workflow-sa;
-            # RBAC grants get on configmaps in argo-workflows — see rbac.yaml). No
-            # kubectl binary in python:3.12-alpine, so hit the REST API directly.
-            sa_dir = '/var/run/secrets/kubernetes.io/serviceaccount'
-            with open(sa_dir + '/token') as f:
-                token = f.read().strip()
-            host = os.environ.get('KUBERNETES_SERVICE_HOST', 'kubernetes.default.svc')
-            port = os.environ.get('KUBERNETES_SERVICE_PORT', '443')
-            url = 'https://%s:%s/api/v1/namespaces/%s/configmaps/%s' % (host, port, cm_ns, cm_name)
-            sslctx = ssl.create_default_context(cafile=sa_dir + '/ca.crt')
-            req = urllib.request.Request(url, headers={'Authorization': 'Bearer ' + token})
-            with urllib.request.urlopen(req, context=sslctx, timeout=30) as resp:
-                cm = json.loads(resp.read().decode('utf-8'))
-            data = (cm.get('data') or {}).get('catalog.yaml')
-            if not data:
-                raise RuntimeError("ConfigMap %s/%s has no data['catalog.yaml']" % (cm_ns, cm_name))
-            return yaml.safe_load(data)
-
-        # Module-scope whole-node sizer usable by BOTH the live (ephemeral) and the
-        # static-class (scale-to-zero) paths. requests==limits == the class's
-        # platform-computed allocatable minus a margin (sole-tenant ⇒ Guaranteed
-        # QoS, the whole machine to the step). GPU classes add nvidia.com/gpu.
-        #
-        # Headroom is PROPORTIONAL to the node so it scales with machine size
-        # instead of being a fixed number tuned for one box. Two proportional
-        # reserves, both charged against the pod's own memory limit:
-        #   • /dev/shm  (dataloader worker shared memory) — see _shm_gib below,
-        #   • memory margin — the shm + the Argo `wait` sidecar + torch's transient
-        #     training peak (activations, worker buffers) above steady state.
-        # A fixed 0.5Gi margin OOMKilled model-training at the 24Gi limit on a 30Gi
-        # n1-standard-8 (exit 137, live 2026-07-07). The margin is now a % of the
-        # node (floored so tiny nodes still get real headroom) and is set larger
-        # than the shm % so the shm always fits inside it. Tune the constants below
-        # (in one place) if heavier runs still pressure memory.
-        WN_CPU_MARGIN = 0.5
-        WN_MEM_MARGIN_FRAC = 0.14   # reserve ~14% of node memory (covers shm+sidecar+peak)
-        WN_MEM_MARGIN_FLOOR_GI = 2.0
-
-        def _wn_mem_margin_gib(mem_alloc):
-            return max(WN_MEM_MARGIN_FLOOR_GI, mem_alloc * WN_MEM_MARGIN_FRAC)
-
-        # /dev/shm sizeLimit for a whole-node step: ~10% of the class allocatable,
-        # floored 1Gi (below which torch DataLoader workers wedge) and capped 4Gi
-        # (beyond which it's wasteful and eats the margin). Always < the memory
-        # margin % above, so the shm fits under the reserve. T4 25Gi → 2Gi;
-        # a2 340Gi → 4Gi (cap); a small 8Gi node → 1Gi (floor).
-        SHM_FRAC = 0.10
-        SHM_FLOOR_GI = 1
-        SHM_CAP_GI = 4
-
-        def _quant_gate_predicate(sn):
-            # The quantization-enable predicate for a quant step, as an Argo
-            # expression fragment (no braces). model-quantization runs for any
-            # quantization (ptq OR qat) → != 'none'. qat-finetune runs ONLY for
-            # qat → == 'qat'; without this it fired as a no-op during PTQ, pulling
-            # its ~14GB CUDA image (~14 min) and adding a phantom QAT node to the
-            # DAG. quantization-mode=none keeps both quant steps skipped.
-            if sn == 'qat-finetune':
-                return "workflow.parameters['quantization-mode'] == 'qat'"
-            return "workflow.parameters['quantization-mode'] != 'none'"
-
-        def _shm_gib(c):
-            mem_alloc = float((c.get('allocatable') or {}).get('memoryGiB', 8))
-            return int(min(SHM_CAP_GI, max(SHM_FLOOR_GI, round(mem_alloc * SHM_FRAC))))
-
-        def _rewrite_params_yaml(env_entry, has_catalog):
-            # Rewrites the copied-from-kubeline PARAMS_YAML env var (a multi-line YAML
-            # string) so the submit form carries no internal plumbing:
-            #   (a) dataset-path-override: the ref->commit resolution is an Argo
-            #       expression, which is NOT evaluated inside an env value (only in
-            #       task-arg/when/withParam). So point it at a STEP INPUT that the DAG
-            #       task supplies as an evaluated expression. (only when a catalog exists)
-            #   (b) lakefs-repo / lakefs-endpoint: BAKE the literal render-time values
-            #       (render-wft already knows them from pipeline-context) instead of
-            #       referencing workflow parameters — removes those editable plumbing
-            #       boxes from the form.
-            # Returns a copy; no-op on non-PARAMS_YAML entries. (Argo braces built from
-            # OB/CB at runtime, never literal.)
-            if not isinstance(env_entry, dict):
-                return env_entry
-            val = env_entry.get('value')
-            if not isinstance(val, str):
-                return env_entry
-            new = val
-            # (b) bake the lakeFS repo + endpoint literals
-            new = new.replace(OB + 'workflow.parameters.lakefs-repo' + CB,
-                              lakefs.get('repository', app_name))
-            new = new.replace(OB + 'workflow.parameters.lakefs-endpoint' + CB,
-                              lakefs.get('endpoint', ''))
-            # (a) point dataset-path-override at the step input (evaluated by the DAG)
-            if has_catalog:
-                new = new.replace(OB + 'workflow.parameters.dataset-path-override' + CB,
-                                  OB + 'inputs.parameters.dataset-path-override' + CB)
-            if new == val:
-                return env_entry
-            out = dict(env_entry)
-            out['value'] = new
-            return out
-
-        def _whole_node_resources(c):
-            alloc = c.get('allocatable') or {}
-            cpu_alloc = float(alloc.get('cpu', 1))
-            mem_alloc = float(alloc.get('memoryGiB', 2))
-            cpu = max(1, int(cpu_alloc - WN_CPU_MARGIN))
-            mem = max(1, int(round(mem_alloc - _wn_mem_margin_gib(mem_alloc))))
-            reqs = {'cpu': str(cpu), 'memory': '%dGi' % mem}
-            if c.get('tier') == 'gpu':
-                gcount = str(((c.get('gpu') or c.get('guestAccelerator') or {}).get('count', 1)))
-                reqs['nvidia.com/gpu'] = gcount
-            return dict(reqs), dict(reqs)
-
-        if live_compute:
-            cm_name = compute_catalog_ref.get('configMap') or 'kubecore-ml-compute-catalog'
-            cm_ns = compute_catalog_ref.get('namespace') or 'argo-workflows'
-            try:
-                catalog = _read_live_catalog(cm_name, cm_ns)
-            except Exception as e:
-                # FAIL LOUDLY — a live pool with no catalog means the probe has not
-                # run yet (or lost RBAC). Do NOT silently fall back to the legacy
-                # model: that would emit the wrong submit-form + no ephemeral nodes.
-                print("ERROR: live-compute pool but could not read compute-catalog "
-                      "ConfigMap %s/%s: %s" % (cm_ns, cm_name, e), file=sys.stderr)
-                print("The ml-compute-catalog-probe CronWorkflow must publish the live "
-                      "machine catalog before a pipeline can render. Failing.", file=sys.stderr)
-                sys.exit(1)
-
-            catalog_classes = catalog.get('classes') or []
-            if not catalog_classes:
-                print("ERROR: compute-catalog %s/%s has an empty classes[] — probe "
-                      "produced no machine catalog. Failing." % (cm_ns, cm_name), file=sys.stderr)
-                sys.exit(1)
-
-            by_name = {c['name']: c for c in catalog_classes if c.get('name')}
-            live_cpu = [c for c in catalog_classes if c.get('tier') == 'cpu']
-            live_gpu = [c for c in catalog_classes if c.get('tier') == 'gpu']
-            avail_cpu = [c for c in live_cpu if c.get('available') and not c.get('stockout')]
-            avail_gpu = [c for c in live_gpu if c.get('available') and not c.get('stockout')]
-
-            STOCKOUT_SUFFIX = ' (STOCKOUT)'
-
-            # The gcloud lifecycle steps (create/destroy-nodegroups) MUST run as the
-            # WI-bound KSA operate-workflow-sa — the gcp/system composition binds exactly
-            # argo-workflows/operate-workflow-sa → {org}-gcp-eso-sa (roles/container.developer).
-            # The pipeline SA (ctx.serviceAccountName, default argo-workflow) has no GCP WI,
-            # so it can't run gcloud. Node scheduling for the gcloud pods themselves uses the
-            # CI cpu class (they're short-lived, run on the system/CI pool, not an ML node).
-            GCLOUD_SA = 'operate-workflow-sa'
-            # kubecore-operator#1024: this used to be
-            # ctx.get('ciCpuClass', <hardcoded legacy pool name>). That
-            # context key is NEVER written into pipeline-context.yaml —
-            # grepped the sole writer (k8smlapp composition's context.yaml
-            # block) and the whole monorepo: the only 'ciCpuClass' key
-            # anywhere is a POOL-level XClusterOperators param
-            # (resolveCICPUClass, kubepool/phases/syncing_operators.go)
-            # that feeds the chart's OWN ci.defaultNodeClass Helm value /
-            # node_class fallback — a different mechanism, never this ctx
-            # dict. So the ctx.get lookup could only ever return its
-            # default.
-            #
-            # The legacy key is deliberately NOT resurrected as a
-            # precedence layer over node_class: if pipeline-context ever
-            # did start emitting ciCpuClass, its value would be
-            # resolveCICPUClass's pool-level answer — the retired shared
-            # legacy pool (or its catalog-mode substitute), which carries
-            # no platform.kubecore.io/project label. Preferring it here
-            # would silently re-widen the nodeSelector to cross-project
-            # (kubecore-operator#1067) or, once that legacy pool is
-            # deleted, Unschedulable (kubecore-operator#451/#1024) —
-            # exactly the two failure modes this fix and #1067 exist to
-            # close. node_class is the only value these utility steps
-            # honour now.
-            CI_POOL = node_class
-            # kubecore-operator#1067: nodegroup-type alone is not
-            # project-scoping — the operator names every synthesised CI
-            # environment the literal string "ci", so every project's CI
-            # pool carries the identical nodegroup-type=<class> label and
-            # any tenant's pool satisfies this selector on its own (measured
-            # live: a throwaway project's builds ran on two other tenants'
-            # CI nodes). platform.kubecore.io/project (unique per project,
-            # already carried by the node) closes that for these utility
-            # steps too.
-            CI_POOL_PROJECT = project_name
-            # The CI build pool carries the taint
-            # platform.kubecore.io/ml-workload=cpu:NoSchedule (gke.go builds it so).
-            # The management pods that run there (validate-classes, create/destroy-
-            # nodegroups) MUST tolerate it, or the autoscaler refuses to scale the
-            # pool up for them ("Pod didn't trigger scale-up: untolerated taint") and
-            # they Pend forever. Exists-match tolerates any ml-workload value.
-            CI_POOL_TOLERATIONS = [
-                {'key': 'platform.kubecore.io/ml-workload', 'operator': 'Exists',
-                 'effect': 'NoSchedule'},
-            ]
-
-            def _enum_value(c):
-                # The enum value the developer picks. Stocked-out classes stay IN the
-                # list (so the form shows the full pool catalog) but their value is
-                # suffixed so the guard step can reject a stocked-out selection.
-                v = c['name']
-                return v + STOCKOUT_SUFFIX if c.get('stockout') else v
-
-            def _enum_values(tier_classes):
-                # available first, stocked-out last — the first available of the tier
-                # is the field default.
-                ok = [_enum_value(c) for c in tier_classes if c.get('available') and not c.get('stockout')]
-                bad = [_enum_value(c) for c in tier_classes if not (c.get('available') and not c.get('stockout'))]
-                return ok + bad
-
-            def _strip_stockout(v):
-                return v[:-len(STOCKOUT_SUFFIX)] if v.endswith(STOCKOUT_SUFFIX) else v
-
-            def _catalog_line(c):
-                # human line for the field help, prefers the probe-supplied label.
-                lbl = c.get('label')
-                if lbl:
-                    return lbl
-                bits = [c.get('name', '?'), c.get('machineType', '')]
-                return ' — '.join(b for b in bits if b)
-
-            def _default_class_name(step):
-                # GPU-ish steps (model-training, or a step that opts into gpu via the
-                # legacy compute:gpu flag / an explicit nvidia.com/gpu request) default
-                # to the first AVAILABLE gpu class; everything else to the first
-                # available cpu class. If a tier has no available class, fall back to
-                # the first class of that tier (still selectable, guard will stop a
-                # stocked-out submit) so the form always has a concrete default.
-                res = (step.get('resources') or {}).get('requests') or {}
-                wants_gpu = str(res.get('nvidia.com/gpu', '')) not in ('', '0') or step.get('compute', 'cpu') == 'gpu'
-                pool = (avail_gpu or live_gpu) if wants_gpu else (avail_cpu or live_cpu)
-                if not pool:
-                    # no class of the wanted tier at all — fall back to any class.
-                    pool = avail_cpu or avail_gpu or live_cpu or live_gpu
-                return _enum_value(pool[0]) if pool else ''
-
-            # margin subtracted from a class's node allocatable so the sole-tenant step
-            # pod still fits alongside the per-node daemonsets (kube-proxy, csi, argo
-            # `wait` sidecar, nvidia device-plugin on gpu). The probe already reports
-            # allocatable = capacity − GKE reservation; this is the extra daemonset
-            # headroom. Keep it small + safe (mirror the legacy SAFETY_MARGIN concept).
-            LIVE_CPU_MARGIN = 0.5      # vCPU left for node daemonsets
-            LIVE_MEM_MARGIN_GI = 0.5   # GiB left for node daemonsets
-
-            def _whole_node_resources(c):
-                # requests==limits == the class node's allocatable minus a small fixed
-                # daemonset margin. Sole-tenant on its own ephemeral node ⇒ requests
-                # ==limits is safe (Guaranteed QoS, whole machine to the step). GPU
-                # classes add nvidia.com/gpu = the class's gpu.count.
-                alloc = c.get('allocatable') or {}
-                cpu_alloc = float(alloc.get('cpu', 1))
-                mem_alloc = float(alloc.get('memoryGiB', 2))
-                cpu = max(1, int(cpu_alloc - LIVE_CPU_MARGIN))
-                mem = max(1, int(round(mem_alloc - LIVE_MEM_MARGIN_GI)))
-                reqs = {'cpu': str(cpu), 'memory': '%dGi' % mem}
-                if c.get('tier') == 'gpu':
-                    gcount = str(((c.get('gpu') or {}).get('count', 1)))
-                    reqs['nvidia.com/gpu'] = gcount
-                return dict(reqs), dict(reqs)
-
-            steps = kubeline.get('steps', [])
-            pipeline_params = kubeline.get('pipeline', {}).get('parameters', [])
-
-            # ephemeral NodePool name for a (step, run): {prefix}{uid8}.
-            # uid8 is a RUN-time truncation of the Argo workflow.uid (concurrent runs
-            # of one app get isolated pools). GKE NodePool names are <=40 chars, so the
-            # literal "pl-{app}-{step}-" prefix is hashed down when it would overflow.
-            # SINGLE source of the prefix — create-nodegroups (the node label) and the
-            # DAG task's pool-name input (the pod's nodeSelector) MUST agree byte-for-
-            # byte, so both derive it from this one helper.
-            import hashlib as _hashlib
-            def _pool_prefix(step_name):
-                p = 'pl-%s-%s-' % (app_name, step_name)
-                if len(p) + 8 > 40:
-                    h = _hashlib.sha1(('%s-%s' % (app_name, step_name)).encode()).hexdigest()[:12]
-                    p = 'pl-%s-' % h
-                return p
-
-            enum_cpu = _enum_values(live_cpu)
-            enum_gpu = _enum_values(live_gpu)
-
-            args_params = []
-
-            # ── Read-only form doc (PIPELINE-INFO), live variant ────────────────
-            _cpu_lines = '\n'.join('  • ' + _catalog_line(c) for c in live_cpu) or '  • (none)'
-            _gpu_lines = '\n'.join('  • ' + _catalog_line(c) for c in live_gpu) or '  • (none)'
-            pipeline_info = (
-                'HOW TO RUN: defaults below are runnable as-is — just press Submit.\n'
-                'PER-STEP COMPUTE: pick a {step}-class for each step. Each step runs on '
-                'its OWN dedicated ephemeral GKE node (the WHOLE machine, sole-tenant) '
-                'created just for this run and destroyed when it ends.\n'
-                'PER-STEP DISK: {step}-disk-gb sizes that node\'s pd-ssd boot/data disk '
-                '(default 100 GiB — raise it for large datasets/checkpoints).\n'
-                'Classes suffixed "(STOCKOUT)" are temporarily unavailable in-region; '
-                'picking one FAILS the run at the guard step.\n'
-                'LIVE CATALOG (region %s):\n'
-                'CPU:\n' % (catalog.get('region', pool_context.get('region', '?'))) + _cpu_lines + '\n'
-                'GPU:\n' + _gpu_lines + '\n'
-                '(This field is informational — leave it unchanged.)'
-            )
-            args_params.append({'name': 'pipeline-info', 'value': pipeline_info,
-                                'description': 'Read-only: live pool machine catalog + how to fill this form. Leave unchanged.'})
-
-            for p in pipeline_params:
-                args_params.append({'name': p['name'], 'value': p.get('default', ''), 'description': p.get('description', '')})
-
-            for step in steps:
-                args_params.append({
-                    'name': f"image-{step['name']}",
-                    'valueFrom': {'configMapKeyRef': {'name': f"{app_name}-pipeline-images", 'key': step['name']}}
-                })
-
-            # ── Per-step class dropdown + disk-gb ───────────────────────────────
-            for step in steps:
-                sn = step['name']
-                default_cls = _default_class_name(step)
-                is_gpu_default = _strip_stockout(default_cls) in {c['name'] for c in live_gpu}
-                enum = enum_gpu if is_gpu_default else enum_cpu
-                # include EVERY class of the tier (available + stocked-out) so the
-                # developer sees the full catalog; guard rejects a stocked-out pick.
-                cls_param = {
-                    'name': f"{sn}-class",
-                    'value': default_cls,
-                    'description': ('Compute class (dedicated ephemeral node) for the %s step. '
-                                    'Allowed: %s. Classes marked (STOCKOUT) are unavailable now.'
-                                    % (sn, ', '.join(_catalog_line(by_name[_strip_stockout(v)])
-                                                     if _strip_stockout(v) in by_name else v for v in enum))),
-                }
-                if len(enum) > 1:
-                    cls_param['enum'] = enum
-                args_params.append(cls_param)
-                args_params.append({
-                    'name': f"{sn}-disk-gb",
-                    'value': '100',
-                    'description': ('pd-ssd disk size (GiB) for the %s step\'s ephemeral node. '
-                                    'Sized for the dataset + checkpoints this step reads/writes; '
-                                    'default 100.' % sn),
-                })
-
-            # Platform endpoints/IDs (mlflow/lakefs endpoints, zitadel domain+project
-            # id, kubepool-name, lakefs-repo/-branch) are baked into the step env, NOT
-            # exposed as form params — same as the static path. node-service-account
-            # stays a param: the create-nodegroups gcloud step reads it from
-            # workflow.parameters.
-            args_params += [
-                {'name': 'registered-model-name', 'value': f"{app_name}-model"},
-                {'name': 'promote-to', 'value': ''},
-                # node-service-account: the shared {org}-node SA the ephemeral nodes run
-                # as (workload-identity + registry pull) — matches the cluster's own
-                # pools. The operator populates poolContext.nodeServiceAccount; empty
-                # ⇒ create-nodegroups omits --service-account and gcloud falls back to
-                # the cluster default node SA.
-                {'name': 'node-service-account', 'value': pool_context.get('nodeServiceAccount', '')},
-            ]
-
-            # gcp coordinates surfaced as params so the create/destroy gcloud steps read
-            # them from workflow.parameters (keeps the templates free of render-time
-            # literals that would need re-escaping). location/locationType come straight
-            # from poolContext: the operator resolves the cluster's ACTUAL GKE location
-            # (zonal {region}-c for dev, regional {region} for prod) and the matching
-            # gcloud flag name — do NOT reconstruct from region/zone (zone is empty on
-            # default dev pools).
-            args_params += [
-                {'name': 'gcp-project', 'value': pool_context.get('projectId', '')},
-                {'name': 'gcp-cluster', 'value': pool_context.get('clusterName', '')},
-                {'name': 'gcp-location', 'value': pool_context.get('location', '')},
-                {'name': 'gcp-location-type', 'value': pool_context.get('locationType', 'region')},
-            ]
-
-            # PRD-1016 F-06: the per-run computation-target selector. The composition's
-            # placeholder WFT carried this param, but render-wft REPLACES the WFT and
-            # previously dropped it — re-emit it here so the form control survives the
-            # first CI render on HPC-ready pools.
-            hpc_provider = hpc.get('provider', 'meluxina')
-            if hpc.get('enabled'):
-                args_params.append({
-                    'name': 'target', 'value': 'gcp', 'enum': ['gcp', hpc_provider],
-                    'description': ('Computation target for this run. gcp = in-cluster '
-                                    'pools; %s = HPC burst (the GPU training step runs '
-                                    'on %s via Slurm).' % (hpc_provider, hpc_provider)),
-                })
-
-            QUANTIZATION_STEPS = {'qat-finetune', 'model-quantization'}
-
-            templates = []
-            dag_tasks = []
-
-            # ── create-nodegroups: FIRST task, provisions one ephemeral NodePool per
-            # step sized to that step's chosen class ─────────────────────────────
-            # Runs gcloud as operate-workflow-sa (WI-bound to {org}-gcp-eso-sa which
-            # carries roles/container.developer). Idempotent (tolerates already-exists).
-            # These templates reference many workflow params (gcp-* coords + per-step
-            # {step}-class / {step}-disk-gb). Argo cannot statically resolve a
-            # bracket-quoted hyphenated workflow.parameters['x-class'] embedded in a
-            # template body ("failed to resolve" at spec validation), so every value
-            # is threaded in as a TEMPLATE INPUT parameter and the DAG task passes the
-            # workflow.parameters[...] values as arguments (resolvable at the task layer).
-            nodegroup_inputs = [
-                {'name': 'gcp-project'}, {'name': 'gcp-cluster'},
-                {'name': 'gcp-location'}, {'name': 'gcp-location-type'},
-                {'name': 'node-service-account'}, {'name': 'quantization-mode'},
-            ]
-            for step in steps:
-                nodegroup_inputs.append({'name': step['name'] + '-class'})
-                nodegroup_inputs.append({'name': step['name'] + '-disk-gb'})
-            nodegroup_args = [
-                {'name': 'gcp-project', 'value': OB + "workflow.parameters.gcp-project" + CB},
-                {'name': 'gcp-cluster', 'value': OB + "workflow.parameters.gcp-cluster" + CB},
-                {'name': 'gcp-location', 'value': OB + "workflow.parameters.gcp-location" + CB},
-                {'name': 'gcp-location-type', 'value': OB + "workflow.parameters.gcp-location-type" + CB},
-                {'name': 'node-service-account', 'value': OB + "workflow.parameters.node-service-account" + CB},
-                {'name': 'quantization-mode', 'value': OB + "workflow.parameters.quantization-mode" + CB},
-            ]
-            for step in steps:
-                nodegroup_args.append({'name': step['name'] + '-class',
-                                       'value': OB + "workflow.parameters." + step['name'] + "-class" + CB})
-                nodegroup_args.append({'name': step['name'] + '-disk-gb',
-                                       'value': OB + "workflow.parameters." + step['name'] + "-disk-gb" + CB})
-            create_lines = [
-                'set -eu',
-                'PROJECT="' + OB + "inputs.parameters.gcp-project" + CB + '"',
-                'CLUSTER="' + OB + "inputs.parameters.gcp-cluster" + CB + '"',
-                'LOCATION="' + OB + "inputs.parameters.gcp-location" + CB + '"',
-                'LOCATION_TYPE="' + OB + "inputs.parameters.gcp-location-type" + CB + '"',
-                'NODE_SA="' + OB + "inputs.parameters.node-service-account" + CB + '"',
-                'UID8=$(echo "' + OB + 'workflow.uid' + CB + '" | tr -d - | cut -c1-8)',
-                # gcloud auth via the pod's GKE workload identity (the WI-annotated KSA);
-                # google-cloud-sdk picks it up from the metadata server automatically.
-                # --{locationType}={location} = --zone=us-central1-c (zonal dev) or
-                # --region=europe-west1 (regional prod), straight from poolContext.
-                'LOC="--${LOCATION_TYPE}=${LOCATION}"',
-            ]
-            destroy_lines = list(create_lines)  # same header (coords + UID8 + LOC)
-
-            for step in steps:
-                sn = step['name']
-                prefix = _pool_prefix(sn)
-                cls_param_ref = OB + "inputs.parameters." + sn + "-class" + CB
-                disk_param_ref = OB + "inputs.parameters." + sn + "-disk-gb" + CB
-                is_quant_step = sn in QUANTIZATION_STEPS
-                # A quantization-class step is Skipped on the default (quantization-mode
-                # =none) run, so don't provision (or pay for) its node pool — only create
-                # it when quantization is actually requested. Non-quant steps always run.
-                if is_quant_step:
-                    qmode = OB + "inputs.parameters.quantization-mode" + CB
-                    create_lines.append('if [ "%s" != "none" ]; then' % qmode)
-                create_lines += [
-                    'POOL="%s${UID8}"' % prefix,
-                    'CLS=$(echo "%s" | sed "s/ (STOCKOUT)//")' % cls_param_ref,
-                    'DISK="%s"' % disk_param_ref,
-                    'echo "create nodepool $POOL for step %s (class $CLS, disk ${DISK}Gi)"' % sn,
-                ]
-                # emit a shell case that maps the chosen class name → gcloud flags, so
-                # the machineType/accelerator/labels/taints are concrete at run time
-                # from the live catalog snapshot baked into the render.
-                create_lines.append('case "$CLS" in')
-                for c in catalog_classes:
-                    cn = c['name']
-                    mt = c.get('machineType', '')
-                    tier = c.get('tier', 'cpu')
-                    flags = ['--machine-type=%s' % mt, '--disk-type=pd-ssd', '--disk-size=${DISK}',
-                             '--num-nodes=1', '--enable-private-nodes']
-                    labels = 'platform.kubecore.io/nodegroup-type=${POOL},platform.kubecore.io/ml-workload=%s' % tier
-                    taints = 'platform.kubecore.io/ml-workload=%s:NoSchedule' % tier
-                    if tier == 'gpu':
-                        g = c.get('gpu') or {}
-                        flags.append('--accelerator=type=%s,count=%d,gpu-driver-version=LATEST'
-                                     % (g.get('type', 'nvidia-tesla-t4'), int(g.get('count', 1))))
-                        taints += ',nvidia.com/gpu=present:NoSchedule'
-                    flags.append('--node-labels=%s' % labels)
-                    flags.append('--node-taints=%s' % taints)
-                    create_lines.append('  %s)' % cn)
-                    create_lines.append('    if [ -n "$NODE_SA" ]; then SA_FLAG="--service-account=$NODE_SA"; else SA_FLAG=""; fi')
-                    # Capture output + exit code so a REAL failure (403 IAM, quota,
-                    # stockout) fails the step loudly — only an "already exists" pool
-                    # (idempotent re-run / concurrent create) is tolerated. The old
-                    # `| grep -v ... || true` swallowed every error → false "Succeeded".
-                    create_lines.append('    if ! OUT=$(gcloud container node-pools create "$POOL" '
-                                        '--cluster="$CLUSTER" $LOC --project="$PROJECT" '
-                                        + ' '.join(flags) + ' $SA_FLAG 2>&1); then')
-                    create_lines.append('      if echo "$OUT" | grep -q "already exists"; then')
-                    create_lines.append('        echo "node pool $POOL already exists — continuing"')
-                    create_lines.append('      else')
-                    create_lines.append('        echo "ERROR creating node pool $POOL:"; echo "$OUT"; exit 1')
-                    create_lines.append('      fi')
-                    create_lines.append('    fi ;;')
-                create_lines.append('  *) echo "ERROR: class $CLS not in live catalog"; exit 1 ;;')
-                create_lines.append('esac')
-                if is_quant_step:
-                    create_lines.append('fi')
-                # destroy is idempotent (tolerates a pool that was never created because
-                # the step was skipped), so it runs unconditionally for every step.
-                destroy_lines += [
-                    'POOL="%s${UID8}"' % prefix,
-                    'echo "destroy nodepool $POOL"',
-                    'gcloud container node-pools delete "$POOL" --cluster="$CLUSTER" '
-                    '$LOC --project="$PROJECT" --quiet 2>&1 | grep -v "was not found" || true',
-                ]
-
-            templates.append({
-                'name': 'create-nodegroups',
-                'metadata': {'labels': {'platform.kubecore.io/pipeline': pipeline_name,
-                                        'platform.kubecore.io/nodepool-lifecycle': 'create'}},
-                'serviceAccountName': GCLOUD_SA,
-                'nodeSelector': {'platform.kubecore.io/nodegroup-type': CI_POOL,
-                                 'platform.kubecore.io/project': CI_POOL_PROJECT},
-                'tolerations': CI_POOL_TOLERATIONS,
-                'inputs': {'parameters': nodegroup_inputs},
-                'container': {
-                    'image': '{{ .Values.tooling.gcloudImage | default "google/cloud-sdk:585.0.0-alpine" }}',
-                    'resources': {{ .Values.tooling.nodegroupStepResources | default dict | toJson }},
-                    'command': ['sh', '-c'],
-                    'args': ['\n'.join(create_lines) + '\n'],
-                },
-            })
-            # destroy-nodegroups is invoked as an onExit handler with NO explicit
-            # arguments, so its inputs carry DEFAULT values that reference
-            # workflow.parameters[...] — the onExit scope CAN resolve those (it runs at
-            # workflow level). Only the coords the destroy header needs get defaults.
-            destroy_inputs = [
-                {'name': 'gcp-project', 'value': OB + "workflow.parameters.gcp-project" + CB},
-                {'name': 'gcp-cluster', 'value': OB + "workflow.parameters.gcp-cluster" + CB},
-                {'name': 'gcp-location', 'value': OB + "workflow.parameters.gcp-location" + CB},
-                {'name': 'gcp-location-type', 'value': OB + "workflow.parameters.gcp-location-type" + CB},
-                {'name': 'node-service-account', 'value': OB + "workflow.parameters.node-service-account" + CB},
-                {'name': 'quantization-mode', 'value': OB + "workflow.parameters.quantization-mode" + CB},
-            ]
-            for step in steps:
-                destroy_inputs.append({'name': step['name'] + '-class',
-                                       'value': OB + "workflow.parameters." + step['name'] + "-class" + CB})
-                destroy_inputs.append({'name': step['name'] + '-disk-gb',
-                                       'value': OB + "workflow.parameters." + step['name'] + "-disk-gb" + CB})
-            templates.append({
-                'name': 'destroy-nodegroups',
-                'metadata': {'labels': {'platform.kubecore.io/pipeline': pipeline_name,
-                                        'platform.kubecore.io/nodepool-lifecycle': 'destroy'}},
-                'serviceAccountName': GCLOUD_SA,
-                'nodeSelector': {'platform.kubecore.io/nodegroup-type': CI_POOL,
-                                 'platform.kubecore.io/project': CI_POOL_PROJECT},
-                'tolerations': CI_POOL_TOLERATIONS,
-                'inputs': {'parameters': destroy_inputs},
-                'container': {
-                    'image': '{{ .Values.tooling.gcloudImage | default "google/cloud-sdk:585.0.0-alpine" }}',
-                    'resources': {{ .Values.tooling.nodegroupStepResources | default dict | toJson }},
-                    'command': ['sh', '-c'],
-                    'args': ['\n'.join(destroy_lines) + '\n'],
-                },
-            })
-
-            # ── stockout guard: FAIL if any chosen {step}-class is stocked out ──
-            # The chosen class values are passed in as TEMPLATE INPUT parameters
-            # (not referenced as workflow.parameters[...] inside the container args).
-            # Argo cannot statically resolve a bracket-quoted hyphenated
-            # workflow.parameters['x-class'] reference embedded in a template body
-            # ("failed to resolve" at spec validation), but inputs.parameters
-            # resolve reliably because they are declared on the template.
-            guard_inputs = []
-            guard_lines = ['set -eu', 'BAD=0']
-            for step in steps:
-                sn = step['name']
-                guard_inputs.append({'name': sn + '-class'})
-                ref = OB + "inputs.parameters." + sn + "-class" + CB
-                guard_lines.append('CLS="%s"' % ref)
-                guard_lines.append('case "$CLS" in')
-                guard_lines.append('  *"(STOCKOUT)") echo "step %s picked a stocked-out class: $CLS"; BAD=1 ;;' % sn)
-                guard_lines.append('esac')
-            guard_lines.append('if [ "$BAD" != 0 ]; then echo "One or more steps selected a '
-                               'stocked-out compute class. Pick an available class and resubmit."; exit 1; fi')
-            guard_lines.append('echo "compute-class stockout guard passed"')
-            templates.append({
-                'name': 'validate-classes',
-                'serviceAccountName': sa,
-                'nodeSelector': {'platform.kubecore.io/nodegroup-type': CI_POOL,
-                                 'platform.kubecore.io/project': CI_POOL_PROJECT},
-                'tolerations': CI_POOL_TOLERATIONS,
-                'inputs': {'parameters': guard_inputs},
-                'container': {
-                    'image': 'busybox:1.36.1',
-                    'command': ['sh', '-c'],
-                    'args': ['\n'.join(guard_lines) + '\n'],
-                },
-            })
-
-            # ── DAG: guard → create-nodegroups → steps → (onExit) destroy ───────
-            # Pass each chosen class into validate-classes as an argument — the DAG
-            # task layer CAN resolve workflow.parameters[...] (it is not a template body).
-            guard_args = [{'name': s['name'] + '-class',
-                           'value': OB + "workflow.parameters." + s['name'] + "-class" + CB}
-                          for s in steps]
-            dag_tasks.append({'name': 'validate-classes', 'template': 'validate-classes',
-                              'arguments': {'parameters': guard_args}})
-            dag_tasks.append({'name': 'create-nodegroups', 'template': 'create-nodegroups',
-                              'depends': 'validate-classes',
-                              'arguments': {'parameters': nodegroup_args}})
-
-            # PRD-1016 F-06: GPU-default non-quant steps gain a twin -meluxina task
-            # gated on workflow.parameters.target; exactly one twin runs per
-            # submission (complementary when: clauses), the other is Skipped.
-            hpc_routed_steps = set()
-            if hpc.get('enabled'):
-                for s_ in steps:
-                    if s_['name'] not in QUANTIZATION_STEPS and \
-                            by_name.get(_strip_stockout(_default_class_name(s_)), {}).get('tier') == 'gpu':
-                        hpc_routed_steps.add(s_['name'])
-
-            def _gate_live(dep):
-                # "dep ran-or-was-skipped" — a quant-step dependency (qat-finetune,
-                # model-quantization) is Skipped on the default quantization-mode=none
-                # run via its `when`; a plain .Succeeded gate would then Omit every
-                # downstream (e.g. model-registration depends on qat-finetune). Mirror
-                # the legacy Succeeded||Skipped gate so a skipped optional dep never
-                # blocks, while a REAL failure (Failed/Error, not Skipped) still does.
-                # An HPC-routed dep is a twin pair — gate on BOTH twins (one runs,
-                # one is Skipped; a real failure of the active twin still blocks).
-                if dep in hpc_routed_steps:
-                    return (f"(({dep}.Succeeded || {dep}.Skipped) && "
-                            f"({dep}-meluxina.Succeeded || {dep}-meluxina.Skipped))")
-                return f"({dep}.Succeeded || {dep}.Skipped)"
-
-            for step in steps:
-                sn = step['name']
-                deps = step.get('dependencies', []) or []
-                # every step depends on create-nodegroups (its pool must exist) plus its
-                # kubeline deps. A quant step additionally gates on quantization-mode.
-                dep_clauses = ['create-nodegroups.Succeeded'] + [_gate_live(d) for d in deps]
-                depends_expr = ' && '.join(dep_clauses)
-                inp_params = step.get('inputs', {}).get('parameters', []) if step.get('inputs') else []
-                is_quant_step = sn in QUANTIZATION_STEPS
-                task = {'name': sn, 'template': sn, 'depends': depends_expr}
-                task_params = []
-                # pool-name input: the concrete ephemeral pool for this run+step, built
-                # at run time to EXACTLY match the NodePool create-nodegroups made
-                # (same _pool_prefix + uid8). create-nodegroups computes uid8 as
-                # `echo <workflow.uid> | tr -d - | cut -c1-8`; mirror that transform
-                # with an Argo expression (sprig replace '-'->'' then trunc 8) so the
-                # pod's nodeSelector value is byte-identical to the node label.
-                prefix = _pool_prefix(sn)
-                # sprig funcs are exposed under the sprig.* namespace in Argo expression
-                # templates; replace(old,new,src) then trunc(len,src). Quotes are double
-                # inside the =expr (single-quote OB/CB literals are the Python string).
-                pool_val = (OB + '=' + '"' + prefix + '" + sprig.trunc(8, sprig.replace("-", "", workflow.uid))' + CB)
-                task_params.append({'name': 'pool-name', 'value': pool_val})
-                # class-name input: the chosen class for the pod's compute-class label
-                # (resolved at the task layer, then passed into the step template).
-                task_params.append({'name': 'class-name',
-                                    'value': OB + "workflow.parameters." + sn + "-class" + CB})
-                if is_quant_step:
-                    # when: is an Argo EXPRESSION — needs the =expr form (leading '=');
-                    # bracket subscript is valid inside an expression, unlike simple
-                    # tags which require dot notation. Per-step gate: qat-finetune
-                    # only on == 'qat'; model-quantization on any != 'none'.
-                    task['when'] = OB + "=" + _quant_gate_predicate(sn) + CB
-                for ip in inp_params:
-                    frm = ip.get('from')
-                    if not frm:
-                        continue
-                    # task-output ref in a simple-tag value uses dot notation (bracket
-                    # subscript only works inside an =expr). Argo supports dot for
-                    # dependency task outputs.
-                    expr = OB + f"tasks.{frm}.outputs.parameters.{ip['name']}" + CB
-                    task_params.append({'name': ip['name'], 'value': expr})
-                task['arguments'] = {'parameters': task_params}
-                if sn in hpc_routed_steps:
-                    # in-cluster twin runs unless the developer picked the HPC target
-                    task['when'] = OB + "=" + "workflow.parameters.target != 'meluxina'" + CB
-                dag_tasks.append(task)
-                if sn in hpc_routed_steps:
-                    dag_tasks.append({
-                        'name': sn + '-meluxina', 'template': 'hpc-follower',
-                        'depends': depends_expr,
-                        'when': OB + "=" + "workflow.parameters.target == 'meluxina'" + CB,
-                        'arguments': {'parameters': [
-                            {'name': 'step-name', 'value': sn},
-                            {'name': 'image', 'value': OB + 'workflow.parameters.image-' + sn + CB},
-                            {'name': 'step-command', 'value': json.dumps((step.get('command') or []) + (step.get('args') or []))},
-                        ]},
-                    })
-
-            templates.append({'name': f"{app_name}-pipeline", 'dag': {'tasks': dag_tasks}})
-
-            def build_live_step_template(step):
-                sn = step['name']
-                is_quant_step = sn in QUANTIZATION_STEPS
-                default_cls_name = _strip_stockout(_default_class_name(step))
-                default_cls = by_name.get(default_cls_name, {})
-                is_gpu_default = default_cls.get('tier') == 'gpu'
-                # concrete resources sized to the DEFAULT class (Argo needs concrete
-                # quantities in container.resources); the per-run whole-node override
-                # for the ACTUAL chosen class is applied via podSpecPatch below.
-                sized_req, sized_lim = _whole_node_resources(default_cls) if default_cls else (
-                    {'cpu': '1', 'memory': '2Gi'}, {'cpu': '1', 'memory': '2Gi'})
-
-                container = {
-                    'image': OB + 'workflow.parameters.image-' + sn + CB,
-                    'resources': {'requests': sized_req, 'limits': sized_lim},
-                }
-                if step.get('command'):
-                    container['command'] = step['command']
-                if step.get('args'):
-                    container['args'] = step['args']
-
-                env_list = [
-                    # Platform endpoints/IDs baked as literal render-time values (not
-                    # workflow parameters) — same as the static path — so they never
-                    # appear as editable plumbing boxes in the submit form.
-                    {'name': 'MLFLOW_TRACKING_URI', 'value': mlflow.get('trackingUri', '')},
-                    {'name': 'LAKEFS_ENDPOINT', 'value': lakefs.get('endpoint', '')},
-                    {'name': 'LAKEFS_ACCESS_KEY', 'valueFrom': {'secretKeyRef': {'name': lakefs.get('adminSecret', f"{project_name}-lakefs-admin"), 'key': 'accessKeyId'}}},
-                    {'name': 'LAKEFS_SECRET_KEY', 'valueFrom': {'secretKeyRef': {'name': lakefs.get('adminSecret', f"{project_name}-lakefs-admin"), 'key': 'secretAccessKey'}}},
-                    {'name': 'MLFLOW_TRACKING_AUTH', 'value': 'zitadel'},
-                    {'name': 'ZITADEL_MACHINE_KEY_FILE', 'value': '/etc/mlflow-svc/ZITADEL_MACHINE_KEY'},
-                    {'name': 'ZITADEL_DOMAIN', 'value': mlflow.get('oidcDomain', '')},
-                    {'name': 'ZITADEL_MLFLOW_PROJECT_ID', 'value': str(mlflow.get('oidcProjectId', ''))},
-                ]
-                ckpt_bucket = checkpoints.get('bucket', '')
-                ckpt_prefix = checkpoints.get('prefix', '')
-                if ckpt_bucket:
-                    env_list.append({'name': 'CHECKPOINT_BUCKET', 'value': ckpt_bucket})
-                if ckpt_prefix:
-                    env_list.append({'name': 'CHECKPOINT_PREFIX', 'value': ckpt_prefix})
-                for e in (step.get('env') or []):
-                    env_list.append(_rewrite_params_yaml(e, bool(dataset_pathoverride_expr)))
-                container['env'] = env_list
-
-                mlflow_svc_secret = mlflow.get('svcSecret', f"{project_name}-mlflow-svc")
-                container['volumeMounts'] = [
-                    {'name': 'mlflow-svc', 'mountPath': '/etc/mlflow-svc', 'readOnly': True},
-                    {'name': 'dshm', 'mountPath': '/dev/shm'},
-                ]
-                env_from = _connection_env_from(ctx, ml_env_name)
-                if env_from:
-                    container['envFrom'] = env_from
-
-                # tolerations: the ephemeral node is tainted with the step's tier
-                # (platform.kubecore.io/ml-workload) + nvidia.com/gpu for gpu. Tolerate
-                # BOTH tiers so whichever class the developer picks schedules; the
-                # nodeSelector (pool-name) still pins the pod to its own node.
-                step_tolerations = [
-                    {'key': 'platform.kubecore.io/ml-workload', 'operator': 'Exists', 'effect': 'NoSchedule'},
-                    {'key': 'nvidia.com/gpu', 'operator': 'Exists', 'effect': 'NoSchedule'},
-                ]
-                step_node_selector = {'platform.kubecore.io/nodegroup-type': OB + 'inputs.parameters.pool-name' + CB}
-                if ml_env_name:
-                    # PRD-858: the env pools carry the kubenv env-exclusivity
-                    # taint and the environment label - tolerate the former,
-                    # select on the latter, so steps land ONLY on this ml
-                    # environment's pools.
-                    step_tolerations.append({'key': 'platform.kubecore.io/kubenv', 'operator': 'Equal', 'value': ml_env_name, 'effect': 'NoSchedule'})
-                    step_node_selector['platform.kubecore.io/environment'] = ml_env_name
-
-                tmpl = {
-                    'name': sn,
-                    # class-name is threaded in as an input (the invoking task passes
-                    # workflow.parameters['{sn}-class']) — a bracket-quoted hyphenated
-                    # workflow.parameters ref in a pod-template label body does not
-                    # statically resolve, same as validate-classes/create-nodegroups.
-                    'inputs': {'parameters': [{'name': 'pool-name'}, {'name': 'class-name'}]},
-                    'metadata': {
-                        'labels': {
-                            'platform.kubecore.io/project': project_name,
-                            'platform.kubecore.io/pipeline': pipeline_name,
-                            'platform.kubecore.io/step': sn,
-                            'platform.kubecore.io/compute-type': 'gpu' if is_gpu_default else 'cpu',
-                            'platform.kubecore.io/compute-class': OB + 'inputs.parameters.class-name' + CB,
-                        }
-                    },
-                    'nodeSelector': step_node_selector,
-                    'tolerations': step_tolerations,
-                    'serviceAccountName': sa,
-                    'retryStrategy': {
-                        'limit': '2',
-                        'retryPolicy': 'OnError',
-                        # Do NOT retry OOMKilled (exit 137): retrying at the same memory
-                        # limit just OOMs again, wasting 3x the GPU time. OOM = "needs more
-                        # memory", a config fix, not a transient error. The expression keeps
-                        # retries for genuine infra errors (node lost, eviction, image-pull)
-                        # but stops immediately on an OOM so the user sees it and raises {step}-mem.
-                        'expression': 'lastRetry.exitCode != "137"',
-                        # No maxDuration: Argo counts it from the FIRST attempt's start, so a
-                        # 5m cap cancelled the retry of any step that ran past 5m — including
-                        # one killed at activeDeadlineSeconds below (kubecore-operator#1377).
-                        'backoff': {'duration': '30s', 'factor': '2'},
-                    },
-                    'activeDeadlineSeconds': 10800 if (is_gpu_default or is_quant_step) else 1800,
-                    'container': container,
-                    'volumes': [
-                        {'name': 'mlflow-svc', 'secret': {'secretName': mlflow_svc_secret, 'optional': True}},
-                        {'name': 'dshm', 'emptyDir': {'medium': 'Memory', 'sizeLimit': '1Gi'}},
-                    ],
-                }
-
-                # podSpecPatch: override the main container to the WHOLE-NODE resources
-                # of the ACTUAL chosen class. container.resources (above) carries the
-                # DEFAULT class's concrete quantities (Argo needs concrete values there);
-                # this patch swaps them for the chosen class at run time. Each class's
-                # whole-node resources are known at RENDER time, so bake a per-class
-                # ternary chain keyed on the {step}-class param value (pools carry a
-                # handful of classes, so the chain is short). This is the same
-                # podSpecPatch mechanism the legacy path uses to parameterize resources.
-                cpu_expr_parts = []
-                mem_expr_parts = []
-                gpu_expr_parts = []
-                for c in catalog_classes:
-                    r, _ = _whole_node_resources(c)
-                    cond = "workflow.parameters['" + sn + "-class'] == '" + c['name'] + "'"
-                    cpu_expr_parts.append((cond, r['cpu']))
-                    mem_expr_parts.append((cond, r['memory']))
-                    gpu_expr_parts.append((cond, r.get('nvidia.com/gpu', '0')))
-                def _ternary(parts, fallback):
-                    expr = "'" + fallback + "'"
-                    for cond, val in reversed(parts):
-                        expr = "(%s ? '%s' : %s)" % (cond, val, expr)
-                    return expr
-                cpu_e = OB + '=' + _ternary(cpu_expr_parts, sized_req['cpu']) + CB
-                mem_e = OB + '=' + _ternary(mem_expr_parts, sized_req['memory']) + CB
-                gpu_e = OB + '=' + _ternary(gpu_expr_parts, '0') + CB
-                patch_lines = [
-                    'containers:', '- name: main', '  resources:', '    requests:',
-                    '      cpu: "%s"' % cpu_e, '      memory: "%s"' % mem_e,
-                    '      nvidia.com/gpu: "%s"' % gpu_e,
-                    '    limits:',
-                    '      cpu: "%s"' % cpu_e, '      memory: "%s"' % mem_e,
-                    '      nvidia.com/gpu: "%s"' % gpu_e,
-                ]
-                tmpl['podSpecPatch'] = '\n'.join(patch_lines) + '\n'
-
-                inp = step.get('inputs', {}).get('parameters', []) if step.get('inputs') else []
-                extra_in = [{'name': p['name']} for p in inp]
-                if extra_in:
-                    tmpl['inputs']['parameters'] += extra_in
-                out = step.get('outputs', {}).get('parameters', []) if step.get('outputs') else []
-                if out:
-                    tmpl['outputs'] = {'parameters': [{'name': p['name'], 'valueFrom': {'path': p['path']}} for p in out]}
-                return tmpl
-
-            for step in steps:
-                templates.append(build_live_step_template(step))
-
-            if hpc.get('enabled'):
-                # PRD-HPC-1461 AC-12/F-35: this renderer has no HPC controller support. The
-                # in-pod Slurm submitter that used to live here (REST calls with the
-                # meluxina-jwt Secret) is retired together with the Secret in the ML
-                # namespaces, so a `<step>-meluxina` twin only refuses: it prints the
-                # message and fails, submits nothing and holds no credential. Moving the
-                # pipeline to the Hera renderer is what gives it the HPC controller.
-                # The template carries the HPC twin name the Hera enhancer uses (hpc-follower).
-                hpc_refusal = (
-                    "MeluXina steps run through the pool's HPC controller, which this "
-                    "kubeline pipeline cannot use: move the pipeline to the Hera "
-                    "pipeline template, or pick an in-cluster class. Nothing was submitted."
-                )
-                templates.append({
-                    'name': 'hpc-follower',
-                    'inputs': {'parameters': [{'name': 'step-name'}, {'name': 'image'}, {'name': 'step-command'}]},
-                    'serviceAccountName': sa,
-                    'nodeSelector': {'platform.kubecore.io/nodegroup-type': CI_POOL,
-                                     'platform.kubecore.io/project': CI_POOL_PROJECT},
-                    'tolerations': CI_POOL_TOLERATIONS,
-                    'metadata': {'labels': {
-                        'platform.kubecore.io/project': project_name,
-                        'platform.kubecore.io/pipeline': pipeline_name,
-                        'platform.kubecore.io/step': OB + 'inputs.parameters.step-name' + CB,
-                        'platform.kubecore.io/compute-type': 'hpc',
-                    }},
-                    'container': {
-                        'image': 'python:3.12.13-alpine',
-                        'command': ['sh', '-c'],
-                        'args': ['echo "$HPC_NOT_SERVED" >&2; exit 1'],
-                        'env': [{'name': 'HPC_NOT_SERVED', 'value': hpc_refusal}],
-                    },
-                })
-
-            wft = {
-                'apiVersion': 'argoproj.io/v1alpha1',
-                'kind': 'WorkflowTemplate',
-                'metadata': {
-                    'name': f"{app_name}-pipeline",
-                    'namespace': ml_ns,
-                    'annotations': {
-                        'platform.kubecore.io/cost-tracking': 'enabled',
-                        'platform.kubecore.io/pipeline': pipeline_name,
-                        'platform.kubecore.io/compute-model': 'live-ephemeral-nodegroups',
-                        'platform.kubecore.io/generated-by': 'ml-ci-build/render-wft',
-                        'platform.kubecore.io/rendered-from-commit-time': str(os.environ.get('SRC_COMMIT_TIME', '0')),
-                    },
-                    'labels': {
-                        'platform.kubecore.io/project': project_name,
-                        'platform.kubecore.io/app': app_name,
-                        'platform.kubecore.io/managed-by': 'kubecore-ci',
-                    }
-                },
-                'spec': {
-                    'serviceAccountName': sa,
-                    'entrypoint': f"{app_name}-pipeline",
-                    # onExit destroys every ephemeral NodePool for this run regardless of
-                    # success/failure — the primary teardown (janitor CronWorkflow is the
-                    # backstop for a crashed controller).
-                    'onExit': 'destroy-nodegroups',
-                    'arguments': {'parameters': args_params},
-                    'templates': templates,
-                }
-            }
-
-            add_step_token(wft, ctx)
-
-            os.makedirs(os.path.dirname(wft_out), exist_ok=True)
-            with open(wft_out, 'w') as f:
-                yaml.dump(wft, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
-            print(f"render-wft: wrote LIVE-compute WFT {wft_out}")
-            sys.exit(0)
-
-        # ── Headroom-aware step sizing ──────────────────────────────────────
-        # A step must NOT request the node's full capacity: the node also runs
-        # kube/system-reserved + the eviction threshold, the Argo `wait` sidecar
-        # that rides every workflow pod, and — on GPU nodes — the nvidia
-        # device-plugin + driver-installer daemonsets. Requesting the whole
-        # machine => the pod Pends forever. So we derive per-step requests from
-        # the chosen class's machineType capacity MINUS a reserve. cpu/mem of the
-        # common GCP + AWS ML machine types (vCPU, GiB). Unknown types fall back
-        # to a safe small request (the step still schedules; admin can size up).
-        MACHINE_CAP = {
-            # GCP
-            'e2-standard-2': (2, 8),   'e2-standard-4': (4, 16),  'e2-standard-8': (8, 32),
-            'n2-standard-4': (4, 16),  'n2-standard-8': (8, 32),  'n2-standard-16': (16, 64),
-            'n1-standard-4': (4, 15),  'n1-standard-8': (8, 30),  'n1-standard-16': (16, 60),
-            'g2-standard-4': (4, 16),  'g2-standard-8': (8, 32),  'g2-standard-16': (16, 64),
-            'a2-highgpu-1g': (12, 85),
-            # AWS
-            'm6i.large': (2, 8),   'm6i.xlarge': (4, 16),  'm6i.2xlarge': (8, 32),
-            'g4dn.xlarge': (4, 16), 'g4dn.2xlarge': (8, 32), 'g5.xlarge': (4, 16), 'g5.2xlarge': (8, 32),
-        }
-        ARGO_SIDECAR_CPU_M = 100           # the `wait` sidecar on every workflow pod
-        ARGO_SIDECAR_MEM_GI = 0.2          # wait sidecar + small per-pod overhead
-        SAFETY_MARGIN_GI = 1.0             # headroom below allocatable so the pod always fits
-
-        def _gke_mem_reserved_gib(cap_gib):
-            # GKE's memory eviction-reservation curve (the kube-reserved memory that
-            # makes node ALLOCATABLE < capacity). Requesting capacity*(1-flat%) is
-            # WRONG — a flat 15% under-reserves on small nodes and the pod goes
-            # Unschedulable (n2-standard-4 16Gi → ~12.96Gi allocatable, NOT 13.6).
-            # Curve: 25% of first 4Gi + 20% of next 4Gi + 10% of next 8Gi +
-            # 6% of next 112Gi + 2% beyond, plus 100Mi hard-eviction.
-            r = 0.0
-            tiers = [(4, 0.25), (4, 0.20), (8, 0.10), (112, 0.06)]
-            rem = cap_gib
-            for size, frac in tiers:
-                take = min(rem, size)
-                r += take * frac
-                rem -= take
-                if rem <= 0:
-                    break
-            if rem > 0:
-                r += rem * 0.02
-            return r + 0.1  # +100Mi eviction threshold
-
-        def _sized_requests(cls, is_gpu):
-            # Returns (requests, limits) sized to fit UNDER the class node's GKE
-            # allocatable (capacity - GKE-reserved - argo sidecar - safety margin),
-            # so a scale-to-0 nodepool actually schedules the pod (and the autoscaler
-            # provisions a node) instead of "Insufficient memory / didn't match".
-            mt = (cls or {}).get('machineType', '')
-            cap = MACHINE_CAP.get(mt)
-            if not cap:
-                req_cpu, req_mem = (2, 6) if is_gpu else (1, 3)
-                lim_cpu, lim_mem = (4, 10) if is_gpu else (2, 5)
-            else:
-                cap_cpu, cap_mem = cap
-                alloc_mem = cap_mem - _gke_mem_reserved_gib(cap_mem)
-                # CPU: GKE reserves only ~70-90m; leave 0.5 vCPU + the argo sidecar.
-                req_cpu = max(1, int(cap_cpu - 0.5 - ARGO_SIDECAR_CPU_M / 1000.0))
-                req_mem = max(2, int(alloc_mem - ARGO_SIDECAR_MEM_GI - SAFETY_MARGIN_GI))
-                # limit can use the full allocatable (burst into the sidecar/margin),
-                # but never above allocatable or the pod gets OOM-evicted at admission.
-                lim_cpu = max(req_cpu, int(cap_cpu - 0.5))
-                lim_mem = max(req_mem, int(alloc_mem - SAFETY_MARGIN_GI))
-            requests = {'cpu': str(req_cpu), 'memory': f'{req_mem}Gi', 'ephemeral-storage': '10Gi' if is_gpu else '2Gi'}
-            limits = {'cpu': str(lim_cpu), 'memory': f'{lim_mem}Gi', 'ephemeral-storage': '30Gi' if is_gpu else '4Gi'}
-            if is_gpu:
-                requests['nvidia.com/gpu'] = '1'
-                limits['nvidia.com/gpu'] = '1'
-            return requests, limits
-
-        steps = kubeline.get('steps', [])
-        pipeline_params = kubeline.get('pipeline', {}).get('parameters', [])
-
-        args_params = []
-
-        # ── Read-only form doc (PIPELINE-INFO) ──────────────────────────────────────
-        # A first parameter whose value is a human summary of the LIVE pool config +
-        # how the form works. Argo shows it at the top of the submit form; the
-        # developer reads it before filling anything. Its description tells them it is
-        # informational only. (Argo has no native section headers, so a doc param is
-        # the idiomatic way to surface live config + instructions on the form.)
-        _cpu_lines = '\n'.join('  • ' + _class_line(c) for c in cpu_classes) or '  • (none)'
-        _gpu_lines = '\n'.join('  • ' + _class_line(c) for c in gpu_classes) or '  • (none)'
-        pipeline_info = (
-            'HOW TO RUN: defaults below are headroom-sized and runnable as-is — just press Submit.\n'
-            'PER-STEP COMPUTE: set {step}-cpu / {step}-mem / {step}-gpu for each step. '
-            '{step}-gpu > 0 routes that step to a GPU node pool; 0 keeps it on CPU.\n'
-            'COMPUTE CLASSES on this pool (cpu-class / gpu-class pick the node pool):\n'
-            'CPU:\n' + _cpu_lines + '\n'
-            'GPU:\n' + _gpu_lines + '\n'
-            '(This field is informational — leave it unchanged.)'
-        )
-        args_params.append({'name': 'pipeline-info', 'value': pipeline_info,
-                            'description': 'Read-only: live pool compute classes + how to fill this form. Leave unchanged.'})
-
-        # ── dataset-ref: a plain TEXT box (default "main") ──────────────────
-        # A dataset = a lakeFS ref (branch/tag) whose ROOT holds a data.yaml. The
-        # dataset-ref is just the ref NAME the user types — defaults to "main". No
-        # catalog probe, no dropdown, no re-render: the run reads s3://{repo}/{ref}/
-        # directly (the ref's current content). The user can override the exact path
-        # with dataset-path-override. Simpler + always correct: a freshly-uploaded
-        # branch is usable immediately by typing its name — nothing to refresh.
-        _emitted_names = set()
-        for p in pipeline_params:
-            np = {'name': p['name'], 'value': p.get('default', ''), 'description': p.get('description', '')}
-            # preserve a kubeline-declared enum so a static dropdown survives render.
-            if p.get('enum'):
-                np['enum'] = list(p['enum'])
-            # dataset-ref is free text, pre-filled with "main" — no enum, no catalog.
-            if p['name'] == 'dataset-ref':
-                np.pop('enum', None)
-                if not np.get('value'):
-                    np['value'] = 'main'
-                np['description'] = ('lakeFS branch/tag to train on (the ref NAME, not a path). '
-                                     'Defaults to "main" — type another branch to train on it. '
-                                     'The run reads s3://{repo}/{ref}/ directly. To point at an exact '
-                                     'path/commit instead, set dataset-path-override.')
-            args_params.append(np)
-            _emitted_names.add(p['name'])
-
-        # Resolve the picked dataset-ref -> its frozen-commit path. This must NOT be
-        # a form-param default: the Argo submit form shows a param's value as literal
-        # text, so an Argo expression there renders as raw syntax in the field (ugly
-        # + wrong — and it clobbers dataset-path-override, the manual escape hatch).
-        # dataset-path-override is the manual escape hatch: if set, it wins; otherwise
-        # empty, and the dataset steps fall back to their native s3://{repo}/{dataset-ref}/
-        # reading (repo + branch=dataset-ref are threaded to the steps directly). No
-        # catalog / frozen-commit pinning — the run trains on the ref's current content.
-        dataset_pathoverride_expr = (OB + "=workflow.parameters['dataset-path-override']" + CB)
-
-        cpu_class_name = cpu_cls.get('name', f"{pipeline_name}-cpu")
-        gpu_class_name = gpu_cls.get('name', f"{pipeline_name}-gpu")
-        # NOTE: there are deliberately NO global 'cpu-class' / 'gpu-class' form
-        # params. They were dead redundant noise — each is set on the form but
-        # referenced ZERO times in the workflow; the PER-STEP '{step}-class'
-        # dropdowns (below) are the real, only compute selectors and drive every
-        # step's placement. Two global boxes next to six per-step boxes just
-        # confused clients about which one matters. Removed.
-
-        # NOTE: the per-step container images are NOT declared as workflow
-        # arguments.parameters — Argo renders every arguments.parameter as an
-        # editable field in the submit form, and 6 empty "image-<step>" boxes are
-        # confusing internal plumbing a user must never touch. Instead each step
-        # TEMPLATE declares an `image` input with valueFrom.configMapKeyRef into the
-        # {app}-pipeline-images ConfigMap (see build_step_template). Template inputs
-        # are NOT shown in the submit form, and Argo still resolves the image from
-        # the ConfigMap at run time — so patch-images keeps updating images WITHOUT
-        # a WFT re-render, exactly as before.
-
-        # ── Per-step compute-class DROPDOWN (whole-node, scale-to-zero) ──────
-        # The engineer picks ONE compute class per step from a dropdown of the pool's
-        # classes (each shows specs). The chosen class fully determines the step:
-        #   * which static scale-to-zero pool it runs on (nodeSelector = class name)
-        #   * whether it's a GPU step (class tier) -> adds nvidia.com/gpu + GPU toleration
-        #   * the step's resources -- WHOLE NODE (requests==limits == class.allocatable,
-        #     computed by the platform, sole-tenant Guaranteed QoS). The developer sets
-        #     NO cpu/mem/gpu numbers -- the platform sizes the whole machine.
-        # No ephemeral pools, no gcloud, no extra IAM: the GKE autoscaler brings the
-        # class's pool up 0->1 when the step's pod lands, and scales back to 0 after.
-        # Steps that ALWAYS need a GPU (used for the GPU-only enum + default below).
-        # QUANTIZATION_STEPS is (re)defined further down in this path too; define it
-        # here so the enum/default logic can reference it.
-        QUANTIZATION_STEPS = {'qat-finetune', 'model-quantization'}
-        _GPU_REQUIRED_STEPS = {'model-training'} | QUANTIZATION_STEPS
-
-        def _default_class_for(step):
-            want_gpu = step.get('compute', 'cpu') == 'gpu'
-            r = (step.get('resources') or {}).get('requests') or {}
-            if r.get('nvidia.com/gpu') not in (None, '', '0', 0):
-                want_gpu = True
-            # model-training + the quantization steps ALWAYS need a GPU (they may
-            # not declare it in kubeline because quantization is gated at submit),
-            # so force their default to a GPU class — matching the GPU-only enum.
-            if step.get('name') in _GPU_REQUIRED_STEPS:
-                want_gpu = True
-            if want_gpu and gpu_cls.get('name'):
-                return gpu_cls['name']
-            return cpu_cls.get('name') or (cpu_classes[0]['name'] if cpu_classes else '')
-
-        _class_enum = [c['name'] for c in all_classes if c.get('name')]
-        # DESIGN (team decision 2026-07-07): DYNAMIC with good DEFAULTS, not locked.
-        # Every step's {step}-class dropdown offers ALL classes — we do NOT restrict
-        # GPU-required steps to GPU-only, because we can't know what steps a user may
-        # add, and over-locking removes a legitimate option (Fiotakis: "keep it an
-        # option, dynamic with defaults"). Instead we STEER: model-training and the
-        # quantization steps DEFAULT to a GPU class (via _default_class_for), and the
-        # help text says which class to pick. A user who overrides to CPU on a
-        # GPU-needing step gets a clear failure — that's their explicit choice.
-        # Client-facing help: plain language + which class to pick.
-        _class_help = ('Available machines:\n'
-                       + '\n'.join('  - ' + _class_line(c) for c in all_classes)
-                       + '\n\nRule of thumb: pick a GPU class (e.g. gpu-t4) for '
-                         'model-training, qat-finetune and model-quantization; a '
-                         'CPU class (e.g. cpu-standard) is enough for '
-                         'config-validation, dataset-loading and model-registration. '
-                         'The default is already set correctly for this step.')
-
-        for step in steps:
-            sn = step['name']
-            gpu_required = sn in _GPU_REQUIRED_STEPS
-            help_extra = (' This step normally needs a GPU — the default is a GPU class.'
-                          if gpu_required else '')
-            p = {'name': f"{sn}-class", 'value': _default_class_for(step),
-                 'description': (f"Which machine the '{sn}' step runs on. "
-                                 f"Leave the default unless you need more/less power.{help_extra}\n\n"
-                                 + _class_help)}
-            # All steps offer the full class list (dynamic + defaults, not locked).
-            if _class_enum:
-                p['enum'] = _class_enum
-            args_params.append(p)
-
-        # Only genuine user-facing choices are workflow parameters (form fields):
-        #   registered-model-name — the MLflow model name (sensible default, editable)
-        #   promote-to — optional target stage the user may pick
-        # The platform endpoints/IDs (mlflow/lakefs endpoints, zitadel domain+project
-        # id, kubepool-name, lakefs-repo/-branch) are NOT parameters: they were 6+
-        # editable internal-plumbing boxes in the submit form. Their values are baked
-        # directly into the step env (literal render-time values from pipeline-context)
-        # by the env build above and by _rewrite_params_yaml — same runtime values,
-        # no form clutter. lakefs-branch specifically was DEAD: PARAMS_YAML already
-        # derives the branch from the picked dataset-ref, so the lakefs-branch box
-        # only showed a stale, contradictory value (dev while dataset-ref=main).
-        args_params += [
-            {'name': 'registered-model-name', 'value': f"{app_name}-model"},
-            {'name': 'promote-to', 'value': ''},
-        ]
-
-        # ── DAG: two variants per step, selected at submit time ─────────────
-        # Each step is emitted as TWO tasks — {step}-cpu and {step}-gpu — gated by
-        # a `when:` on the form's {step}-gpu param. Exactly one runs; the other is
-        # Skipped. A downstream step depends on BOTH variants of each of its
-        # dependencies with the Succeeded||Skipped gate, so it runs iff the variant
-        # that actually executed Succeeded (a real failure leaves that clause false
-        # → the dependent is Omitted), while the skipped sibling never blocks it.
-        # Argo can't conditionally drop the nvidia.com/gpu resource key from a single
-        # template, so two concrete templates are the robust Argo-native form.
-        def _gate(dep):
-            # "dep ran-or-skipped, for both variants" — true exactly when whichever
-            # variant ran reached Succeeded (the skipped one is always Skipped).
-            return f"({dep}-cpu.Succeeded || {dep}-cpu.Skipped) && ({dep}-gpu.Succeeded || {dep}-gpu.Skipped)"
-
-        # Steps that belong to the quantization sub-pipeline: they only make sense
-        # when the run actually asks for quantization (quantization-mode != none).
-        # Without this gate they run on EVERY pipeline — including the default
-        # quantization-mode=none — and a quantization-only failure (e.g. the QAT
-        # image's torchao stack) fails the whole run even though the user never
-        # requested quantization (live yolo/e2e 2026-07-02: qat-finetune ImportError
-        # on convert_pt2e blocked an otherwise-green train→register run on defaults).
-        # Detected by name so a pipeline without these steps is unaffected.
-        QUANTIZATION_STEPS = {'qat-finetune', 'model-quantization'}
-
-        # The GPU-class name set drives the cpu-vs-gpu variant selection: a step runs
-        # its gpu variant when its {step}-class is one of the pool's gpu-tier classes,
-        # else the cpu variant. Built as an Argo expr membership test over the chosen
-        # class param. Exactly one variant runs; the other is Skipped.
-        _gpu_names = [c['name'] for c in gpu_classes if c.get('name')]
-
-        def _is_gpu_expr(sn):
-            if not _gpu_names:
-                return "false"
-            return " || ".join(
-                "workflow.parameters['" + sn + "-class'] == '" + n + "'" for n in _gpu_names)
-
-        templates = []
-        dag_tasks = []
-        for step in steps:
-            sn = step['name']
-            deps = step.get('dependencies', []) or []
-            depends_expr = " && ".join(_gate(d) for d in deps) if deps else ""
-            inp_params = step.get('inputs', {}).get('parameters', []) if step.get('inputs') else []
-            is_quant_step = sn in QUANTIZATION_STEPS
-            gpu_expr = _is_gpu_expr(sn)
-            for variant in ('cpu', 'gpu'):
-                # gpu variant runs when the chosen class is a gpu class; cpu otherwise.
-                sel = gpu_expr if variant == 'gpu' else "!(" + gpu_expr + ")"
-                when = OB + "=" + sel + CB
-                if is_quant_step:
-                    # AND the compute-router gate with the per-step quantization-enable
-                    # gate: the variant runs only when it's the selected compute AND the
-                    # step's quant predicate holds (qat-finetune → == 'qat',
-                    # model-quantization → != 'none').
-                    when = OB + "=(" + sel + ") && " + _quant_gate_predicate(sn) + CB
-                task = {'name': f"{sn}-{variant}", 'template': f"{sn}-{variant}", 'when': when}
-                if depends_expr:
-                    task['depends'] = depends_expr
-                task_args = []
-                # Supply the resolved dataset-path-override to EVERY step (config-
-                # validation has no deps but still needs it). Task-argument values ARE
-                # evaluated by Argo, so the an Argo =expression ref->commit ternary resolves here
-                # and reaches the step via inputs.parameters.dataset-path-override.
-                if dataset_pathoverride_expr:
-                    task_args.append({'name': 'dataset-path-override', 'value': dataset_pathoverride_expr})
-                if inp_params:
-                    # An input wired `from: <dep>` resolves from whichever variant of that
-                    # dep ran. Select the source by the dep's OWN class-is-gpu test (the
-                    # two variants are mutually exclusive on it) — NOT by probing both
-                    # tasks' outputs (a Skipped task has no .outputs object, so referencing
-                    # the skipped sibling makes the whole Argo expr fail to resolve).
-                    for ip in inp_params:
-                        frm = ip.get('from')
-                        if not frm:
-                            continue
-                        frm_gpu = _is_gpu_expr(frm)
-                        expr = (OB + "=(" + frm_gpu + ") ? "
-                                f"tasks['{frm}-gpu'].outputs.parameters['{ip['name']}'] : "
-                                f"tasks['{frm}-cpu'].outputs.parameters['{ip['name']}']" + CB)
-                        task_args.append({'name': ip['name'], 'value': expr})
-                if task_args:
-                    task['arguments'] = {'parameters': task_args}
-                dag_tasks.append(task)
-        templates.append({'name': f"{app_name}-pipeline", 'dag': {'tasks': dag_tasks}})
-
-        def build_step_template(step, is_gpu):
-            sn = step['name']
-            # Quantization-class steps get a longer activeDeadlineSeconds (see below).
-            # QUANTIZATION_STEPS is module-scope; recompute locally since this helper
-            # is a separate function from the DAG-task loop.
-            is_quant_step = sn in QUANTIZATION_STEPS
-            # Placement is driven by the PER-STEP '{step}-class' dropdown (its
-            # nodeSelector/podSpecPatch below), NOT any global cpu/gpu-class param.
-            # The tier default (cpu vs gpu class) comes from the step's own gpu
-            # count; the user picks the exact class per step on the form.
-            cls = gpu_cls if is_gpu else cpu_cls
-            tol_key = cls.get('tolerationKey', 'platform.kubecore.io/ml-workload')
-            tol_val = cls.get('tolerationValue', '')
-            tol = {'key': tol_key, 'operator': 'Exists' if not tol_val else 'Equal', 'effect': 'NoSchedule'}
-            if tol_val:
-                tol['value'] = tol_val
-            step_tolerations = [tol]
-            if is_gpu:
-                # GKE auto-taints accelerator nodes with nvidia.com/gpu; without
-                # this toleration a gpu-tier step Pends forever on its own pool.
-                step_tolerations.append({'key': 'nvidia.com/gpu', 'operator': 'Exists', 'effect': 'NoSchedule'})
-
-            # container.resources MUST carry CONCRETE quantities — an Argo param template in
-            # a k8s resource field fails quantity validation and breaks the Argo API's
-            # ListWorkflowTemplates (the UI then shows NO templates at all). So the
-            # static defaults below (headroom-sized for the class) are the parsed value;
-            # the per-run submit-form override is applied via podSpecPatch (below), the
-            # only Argo mechanism that parameterizes non-string fields like resources.
-            sized_req, sized_lim = _sized_requests(cls, is_gpu)
-
-            container = {
-                # image from the step template's own `image` input (declared below
-                # with valueFrom.configMapKeyRef), NOT a workflow parameter — keeps
-                # the 6 image-<step> boxes out of the submit form.
-                'image': OB + 'inputs.parameters.image' + CB,
-                'resources': {'requests': sized_req, 'limits': sized_lim},
-            }
-            if step.get('command'):
-                container['command'] = step['command']
-            if step.get('args'):
-                container['args'] = step['args']
-
-            # Platform endpoints/IDs are BAKED as literal render-time values here,
-            # NOT referenced as workflow parameters — render-wft already knows them
-            # (from pipeline-context), and exposing them as workflow.parameters put 6
-            # editable internal-plumbing boxes (mlflow/lakefs endpoints, zitadel ids)
-            # in the submit form that a user must never touch. Baking removes them
-            # from the form entirely while keeping the exact same runtime values.
-            env_list = [
-                {'name': 'MLFLOW_TRACKING_URI', 'value': mlflow.get('trackingUri', '')},
-                {'name': 'LAKEFS_ENDPOINT', 'value': lakefs.get('endpoint', '')},
-                {'name': 'LAKEFS_ACCESS_KEY', 'valueFrom': {'secretKeyRef': {'name': lakefs.get('adminSecret', f"{project_name}-lakefs-admin"), 'key': 'accessKeyId'}}},
-                {'name': 'LAKEFS_SECRET_KEY', 'valueFrom': {'secretKeyRef': {'name': lakefs.get('adminSecret', f"{project_name}-lakefs-admin"), 'key': 'secretAccessKey'}}},
-                # MLflow auth = OIDC bearer JWT (no basic-auth). The {project}-mlflow-svc
-                # secret holds a Zitadel machine key (ZITADEL_MACHINE_KEY), mounted as a
-                # file below. The step image's `zitadel` RequestAuthProvider
-                # (MLFLOW_TRACKING_AUTH=zitadel) reads ZITADEL_MACHINE_KEY_FILE, mints a
-                # short-lived RS256 JWT via the JWT-profile grant, and refreshes per
-                # request — so a long training run never 401s mid-run. Replaces the old
-                # basic-auth MLFLOW_TRACKING_USERNAME/PASSWORD path (seeded svc-user in
-                # the plugin DB), which drifted and 401'd.
-                {'name': 'MLFLOW_TRACKING_AUTH', 'value': 'zitadel'},
-                {'name': 'ZITADEL_MACHINE_KEY_FILE', 'value': '/etc/mlflow-svc/ZITADEL_MACHINE_KEY'},
-                # ZITADEL_DOMAIN drives both the token endpoint and the JWT-profile
-                # assertion audience; baked from pipeline-context's mlflow.oidcDomain.
-                {'name': 'ZITADEL_DOMAIN', 'value': mlflow.get('oidcDomain', '')},
-                # ZITADEL_MLFLOW_PROJECT_ID adds the project-aud scope so the minted
-                # token is accepted by the MLflow OIDC app (fixes 401 "Invalid token
-                # payload"). Empty when MLflow OIDC is disabled. Baked from context.
-                {'name': 'ZITADEL_MLFLOW_PROJECT_ID', 'value': str(mlflow.get('oidcProjectId', ''))},
-            ]
-            # Inject platform-derived checkpoint location when present in context.yaml.
-            # checkpoints.bucket = lakeFS repository name; checkpoints.prefix = branch/path
-            # within that repo (lakeFS S3 gateway addressing: bucket=repo, prefix=branch/...).
-            # Only injected when the composition wrote the checkpoints block; absent on
-            # legacy deployments that pre-date Edit 1 — kubeline shims tolerate absence.
-            ckpt_bucket = checkpoints.get('bucket', '')
-            ckpt_prefix = checkpoints.get('prefix', '')
-            if ckpt_bucket:
-                env_list.append({'name': 'CHECKPOINT_BUCKET', 'value': ckpt_bucket})
-            if ckpt_prefix:
-                env_list.append({'name': 'CHECKPOINT_PREFIX', 'value': ckpt_prefix})
-            for e in (step.get('env') or []):
-                env_list.append(_rewrite_params_yaml(e, bool(dataset_pathoverride_expr)))
-            container['env'] = env_list
-
-            # Mount the {project}-mlflow-svc Zitadel machine key as a file so the
-            # step's `zitadel` MLflow auth provider can read ZITADEL_MACHINE_KEY_FILE.
-            # optional=True: the secret exists only when MLflow OIDC is enabled; steps
-            # that don't talk to MLflow simply never read it.
-            mlflow_svc_secret = mlflow.get('svcSecret', f"{project_name}-mlflow-svc")
-            container['volumeMounts'] = [
-                {'name': 'mlflow-svc', 'mountPath': '/etc/mlflow-svc', 'readOnly': True},
-                # /dev/shm — the k8s default is 64Mi, far too small for a torch
-                # DataLoader with workers>0: worker processes pass tensors to the
-                # main process through POSIX shared memory, and 64Mi exhausts
-                # instantly → "unable to allocate shared memory(shm) ... Resource
-                # temporarily unavailable (11)" spam and, worse, a WEDGED trainer
-                # (GPU 0%, no epochs; live yolo/e2e 2026-07-02: hung after MLflow
-                # experiment-create). A memory-backed emptyDir gives a real
-                # /dev/shm; sizeLimit caps it so it can't eat the whole node.
-                {'name': 'dshm', 'mountPath': '/dev/shm'},
-            ]
-            env_from = _connection_env_from(ctx, ml_env_name)
-            if env_from:
-                container['envFrom'] = env_from
-
-            tmpl = {
-                'name': f"{sn}-{'gpu' if is_gpu else 'cpu'}",
-                # `image` input resolved from the {app}-pipeline-images ConfigMap at
-                # run time (patch-images updates the CM, no WFT re-render needed).
-                # Template inputs are NOT rendered in the submit form, so this keeps
-                # the image plumbing out of the user's view.
-                'inputs': {'parameters': (
-                    [{'name': 'image',
-                      'valueFrom': {'configMapKeyRef': {'name': f"{app_name}-pipeline-images", 'key': sn}}}]
-                    # dataset-path-override input: the DAG task supplies its value as an
-                    # evaluated an Argo =expression ref->commit expression (only present with a
-                    # catalog). PARAMS_YAML reads inputs.parameters.dataset-path-override
-                    # (simple substitution), so the frozen-commit path resolves correctly —
-                    # unlike an env-embedded an Argo =expression which Argo would pass through raw.
-                    + ([{'name': 'dataset-path-override', 'default': ''}] if dataset_pathoverride_expr else [])
-                )},
-                'metadata': {
-                    'labels': {
-                        'platform.kubecore.io/project': project_name,
-                        'platform.kubecore.io/pipeline': pipeline_name,
-                        'platform.kubecore.io/step': sn,
-                        'platform.kubecore.io/compute-type': 'gpu' if is_gpu else 'cpu',
-                        # compute-class label + nodeSelector both come from the per-step
-                        # {step}-class DROPDOWN — the developer picks the class, the pod
-                        # lands on that static scale-to-zero pool (nodegroup-type == class
-                        # name), and the autoscaler brings a node up 0->1 for it.
-                        'platform.kubecore.io/compute-class': OB + "workflow.parameters." + sn + "-class" + CB,
-                    }
-                },
-                'nodeSelector': {'platform.kubecore.io/nodegroup-type': OB + "workflow.parameters." + sn + "-class" + CB},
-                'tolerations': step_tolerations,
-                'serviceAccountName': sa,
-                # retryStrategy: a step that hangs or dies (e.g. a transient S3/dataloader
-                # stall during validation, a flaky node) is retried instead of wedging the
-                # whole run forever. OnError retries on infra/non-zero-without-clean-exit;
-                # combined with activeDeadlineSeconds below a hung pod is killed + retried
-                # rather than blocking indefinitely (model-training has no built-in timeout).
-                'retryStrategy': {
-                    'limit': '2',
-                    'retryPolicy': 'OnError',
-                    # Do NOT retry OOMKilled (exit 137): re-running at the same memory
-                    # limit just OOMs again. OOM means "raise {step}-mem", a config fix,
-                    # not a transient error — fail fast so the user sees it. Genuine infra
-                    # errors (node lost, eviction, image-pull) still retry.
-                    'expression': 'lastRetry.exitCode != "137"',
-                    # No maxDuration: Argo counts it from the FIRST attempt's start, so a
-                    # 5m cap cancelled the retry of any step that ran past 5m — including
-                    # one killed at activeDeadlineSeconds below (kubecore-operator#1377).
-                    'backoff': {'duration': '30s', 'factor': '2'},
-                },
-                # activeDeadlineSeconds is a generous ceiling that only catches a genuine
-                # multi-hour wedge (a hung S3/dataloader stall, a stuck node) — NOT normal
-                # training. GPU training can legitimately run long, so 3h; cpu steps are
-                # quick (30m). A wedged pod is killed at the deadline and retryStrategy
-                # then re-runs it, instead of the run hanging forever.
-                # EXCEPTION: quantization-class steps (qat-finetune, model-quantization)
-                # run a legitimately long CPU export — PTQ INT8 = ONNX export +
-                # TF SavedModel + onnx2tf conversion + calibration — that blows past the
-                # 30m cpu ceiling (live gke-dev 2026-07-02: model-quantization killed at
-                # exactly 1800s mid-TFLite-conversion, "Max duration limit exceeded").
-                # Give them the 3h ceiling regardless of cpu/gpu.
-                'activeDeadlineSeconds': 10800 if (is_gpu or is_quant_step) else 1800,
-                'container': container,
-                'volumes': [
-                    {'name': 'mlflow-svc', 'secret': {'secretName': mlflow_svc_secret, 'optional': True}},
-                    # Memory-backed /dev/shm for torch DataLoader workers. Worker
-                    # procs pass tensors to the trainer through POSIX shared memory;
-                    # the k8s default 64Mi exhausts instantly (wedged trainer). This
-                    # emptyDir (medium:Memory) counts against the pod's memory LIMIT,
-                    # so it must be big enough for many workers on a heavy batch, yet
-                    # bounded so it can't starve the workload. On the whole-node
-                    # model the step owns the whole machine, so scale shm WITH the
-                    # node: ~10% of the class allocatable, floored 1Gi, capped 4Gi.
-                    # (T4 25Gi → 2Gi; a2 340Gi → 4Gi cap.) The whole-node memory
-                    # margin (WN_MEM_MARGIN_GI=3.5) already reserves room for this
-                    # shm + the sidecar + torch peak below allocatable.
-                    {'name': 'dshm', 'emptyDir': {'medium': 'Memory', 'sizeLimit': '%dGi' % _shm_gib(cls)}},
-                ],
-            }
-
-            # podSpecPatch sets the main container to the WHOLE-NODE resources of the
-            # class the developer picked in {step}-class — requests==limits==the class's
-            # platform-computed allocatable (sole-tenant Guaranteed QoS). The developer
-            # sets NO cpu/mem numbers; the platform sizes the whole machine. Because the
-            # class is a runtime param, an Argo ternary selects the right allocatable by
-            # matching {step}-class against each of this tier's class names. podSpecPatch
-            # is the only Argo mechanism that parameterizes non-string resource fields:
-            # Argo substitutes the expr THEN strategic-merge-patches the pod, so k8s sees
-            # concrete quantities. The container is named "main" in the rendered pod.
-            tier_classes = gpu_classes if is_gpu else cpu_classes
-            fallback = _whole_node_resources(cls)[0] if cls.get('allocatable') else {'cpu': '1', 'memory': '2Gi'}
-
-            def _wn_ternary(field):
-                expr = "'" + str(fallback.get(field, '1')) + "'"
-                for c in reversed(tier_classes):
-                    if not c.get('allocatable'):
-                        continue
-                    r, _ = _whole_node_resources(c)
-                    cond = "workflow.parameters['" + sn + "-class'] == '" + c['name'] + "'"
-                    expr = cond + " ? '" + str(r[field]) + "' : " + expr
-                return OB + "=" + expr + CB
-
-            cpu_e = _wn_ternary('cpu')
-            mem_e = _wn_ternary('memory')
-            gpu_line = []
-            if is_gpu:
-                gexpr = "'1'"
-                for c in reversed(gpu_classes):
-                    gc = str(((c.get('gpu') or c.get('guestAccelerator') or {}).get('count', 1)))
-                    cond = "workflow.parameters['" + sn + "-class'] == '" + c['name'] + "'"
-                    gexpr = cond + " ? '" + gc + "' : " + gexpr
-                gpu_e = OB + "=" + gexpr + CB
-                gpu_line = [f"      nvidia.com/gpu: \"{gpu_e}\""]
-            patch_lines = (
-                ["containers:", "- name: main", "  resources:", "    requests:",
-                 f"      cpu: \"{cpu_e}\"", f"      memory: \"{mem_e}\""] + gpu_line +
-                ["    limits:",
-                 f"      cpu: \"{cpu_e}\"", f"      memory: \"{mem_e}\""] + gpu_line
-            )
-            tmpl['podSpecPatch'] = "\n".join(patch_lines) + "\n"
-
-            inp = step.get('inputs', {}).get('parameters', []) if step.get('inputs') else []
-            if inp:
-                # APPEND the step's data inputs to the existing inputs (which already
-                # carry the `image` valueFrom input) — do NOT overwrite, or the image
-                # input is lost and the container image fails to resolve.
-                tmpl['inputs']['parameters'].extend({'name': p['name']} for p in inp)
-            out = step.get('outputs', {}).get('parameters', []) if step.get('outputs') else []
-            if out:
-                tmpl['outputs'] = {'parameters': [{'name': p['name'], 'valueFrom': {'path': p['path']}} for p in out]}
-
-            return tmpl
-
-        # Emit both variants for every step. The cpu variant pins the cpu class with
-        # no accelerator; the gpu variant pins the gpu class and requests {step}-gpu
-        # accelerators. The DAG's `when:` picks exactly one per run from the form.
-        for step in steps:
-            templates.append(build_step_template(step, is_gpu=False))
-            templates.append(build_step_template(step, is_gpu=True))
-
-        if hpc.get('enabled'):
-            provider = hpc.get('provider', 'none')
-            templates.append({
-                'name': 'hpc-burst',
-                'container': {
-                    'image': 'busybox:1.36.1',
-                    'command': ['sh', '-c'],
-                    'args': [f'echo "HPC burst placeholder, provider={provider} not yet wired"']
-                }
-            })
-
-        wft = {
-            'apiVersion': 'argoproj.io/v1alpha1',
-            'kind': 'WorkflowTemplate',
-            'metadata': {
-                'name': f"{app_name}-pipeline",
-                'namespace': ml_ns,
-                'annotations': {
-                    'platform.kubecore.io/cost-tracking': 'enabled',
-                    'platform.kubecore.io/pipeline': pipeline_name,
-                    'platform.kubecore.io/gpu-nodepool': f"{pipeline_name}-gpu",
-                    'platform.kubecore.io/cpu-nodepool': f"{pipeline_name}-cpu",
-                    'platform.kubecore.io/generated-by': 'ml-ci-build/render-wft',
-                    # Source-commit epoch for the monotonic anti-churn guard (see the
-                    # render-wft push block). Stamped here in the render itself so the
-                    # annotation is always present and correctly indented (the prior
-                    # sed-injection approach left it empty when yaml.dump reformatted).
-                    'platform.kubecore.io/rendered-from-commit-time': str(os.environ.get('SRC_COMMIT_TIME', '0')),
-                },
-                'labels': {
-                    'platform.kubecore.io/project': project_name,
-                    'platform.kubecore.io/app': app_name,
-                    'platform.kubecore.io/managed-by': 'kubecore-ci',
-                }
-            },
-            'spec': {
-                'serviceAccountName': sa,
-                'entrypoint': f"{app_name}-pipeline",
-                'arguments': {'parameters': args_params},
-                'templates': templates,
-            }
-        }
-
-        add_step_token(wft, ctx)
-
-        os.makedirs(os.path.dirname(wft_out), exist_ok=True)
-        with open(wft_out, 'w') as f:
-            yaml.dump(wft, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
-        print(f"render-wft: wrote {wft_out}")
-        PYEOF
-
-        KUBELINE_PATH="$KUBELINE_PATH" CONTEXT_PATH="$CONTEXT_PATH" WFT_OUT="$WFT_OUT" \
-          APP_NAME="$APP_NAME" PROJECT_NAME="$PROJECT_NAME" BRANCH="$BRANCH" \
-          SRC_COMMIT_TIME="$SRC_COMMIT_TIME" NODE_CLASS="$NODE_CLASS" \
-          python3 /tmp/render_wft.py
-
-        # .kubecore/dataset-config.yaml is no longer written here: the k8smlapp
-        # composition owns it in the app repo from creation on (one writer, no
-        # chore(dataset) commit re-triggering builds — charts#158).
-
-        cd /tmp/gitops
-
-        # ── Monotonic render guard (anti-churn) ──────────────────────────────
-        # Two ml-ci-build runs can race to render the WFT (e.g. a merge and a
-        # re-trigger). Without ordering, whichever pushes LAST wins — even if it
-        # rendered an OLDER commit — silently reverting a newer render's content
-        # (live gke-dev/yolo 2026-07-02: a stale render clobbered the dev-HEAD
-        # render that carried the lakefs_repo fix). Guard: the render stamps the WFT
-        # with the SOURCE commit's committer epoch (SRC_COMMIT_TIME, in the WFT
-        # annotations); refuse to overwrite a WFT rendered from a NEWER commit.
-        WFT_FILE="${GITOPS_WORKFLOWS_PATH}/workflow-template.yaml"
-        if [ -f "$WFT_FILE" ]; then
-          EXISTING_TIME=$(grep -oE 'rendered-from-commit-time: "?[0-9]+"?' "$WFT_FILE" | grep -oE '[0-9]+' | head -1)
-          EXISTING_TIME=${EXISTING_TIME:-0}
-          if [ "$SRC_COMMIT_TIME" -lt "$EXISTING_TIME" ]; then
-            echo "SKIP render push: this render's source commit (${SRC_COMMIT_TIME}) is OLDER than the WFT already in gitops (${EXISTING_TIME}). Refusing to clobber a newer render."
-            exit 0
-          fi
-        fi
-
-        # Stage the DISCOVERED path (kubeapps/{app}/{gitops-branch}/...), not a
-        # hardcoded workflows/{app}/{push-branch}/ — the old pathspec pointed at
-        # a file that never existed (wrong basePath AND wrong branch segment),
-        # so git add exited 128 after a perfectly good render. Live log,
-        # gke-dev/yolo 2026-06-13: "discovered: kubeapps/yolo-training/main" →
-        # "fatal: pathspec 'workflows/yolo-training/dev/...'".
-        git add "${WFT_FILE}"
-        if git diff --cached --quiet; then
-          echo "No WFT changes to commit"
-        else
-          git commit -m "ml-ci(${APP_NAME}): render WFT from kubeline.yaml v2 at ${IMAGE_TAG} (src-commit-time ${SRC_COMMIT_TIME})"
-          # Re-check after rebase in case a NEWER render landed while we worked.
-          git pull --rebase origin "${GITOPS_BRANCH}"
-          NOW_TIME=$(grep -oE 'rendered-from-commit-time: .?[0-9]+' "$WFT_FILE" | grep -oE '[0-9]+' | head -1)
-          if [ "${NOW_TIME:-0}" -gt "$SRC_COMMIT_TIME" ]; then
-            echo "SKIP push after rebase: a newer render (${NOW_TIME}) landed concurrently."
-            exit 0
-          fi
-          git push
-          echo "Pushed rendered WFT to ${ORG}/${GITOPS_REPO}@${GITOPS_BRANCH}"
-        fi
-      volumeMounts:
-      - name: workspace
-        mountPath: /workspace
-      - name: github-token
-        mountPath: /etc/github-token
-        readOnly: true
-
-  # ── HERA render path (credential-split) ──────────────────────────────────
+  # ── Render path (credential-split) ─────────────────────────────────────
   # Two steps sharing the workspace PVC. The trust boundary: `hera-render` runs
   # the developer's ARBITRARY `python pipeline.py` with NO GitHub token and NO
   # service-account token (automountServiceAccountToken:false); it only reads the
@@ -2852,23 +1113,52 @@ spec:
   # execute in a credentialed context (mirrors how kaniko runs untrusted
   # Dockerfiles). Artifacts pass via the workspace PVC (a rendered+enhanced WFT
   # exceeds Argo's ~256KB parameter cap; the PVC has no such limit).
+  # A failed render fails the group before hera-enhance-commit starts: nothing
+  # is committed, the live WorkflowTemplate stays as it is.
   - name: render-hera
     inputs:
       parameters:
       - name: changed_steps
+      # The engine of this build (detect-steps, PRD-HPC-1461 D-80): the whole JSON for the enhance
+      # step, the image and schema profile for the render.
+      - name: engine
+      - name: engine_image
+      - name: engine_profile
     steps:
     - - name: hera-render
         template: hera-render
+        arguments:
+          parameters:
+          - name: engine_image
+            value: "{{`{{inputs.parameters.engine_image}}`}}"
+          - name: engine_profile
+            value: "{{`{{inputs.parameters.engine_profile}}`}}"
     - - name: hera-enhance-commit
         template: hera-enhance-commit
+        arguments:
+          parameters:
+          - name: engine
+            value: "{{`{{inputs.parameters.engine}}`}}"
 
-  # STEP 1 (TOKENLESS): run the developer's pipeline.py -> raw WFT.
+  # STEP 1 (TOKENLESS): the app's pipeline.py rendered by the PLATFORM engine -> raw WFT
+  # (PRD-HPC-1461 D-80).
+  #   - the image is the engine release the context pins; its runner
+  #     (python -I -m kaos_engine.render) imports kubecore and every engine module from the engine;
+  #   - no `pip install -e .`: the app's pyproject dependencies are read as data and ONLY those the
+  #     engine does not already provide are installed, under the engine's own versions as constraints
+  #     (a conflicting pin fails the render, it never replaces an engine library);
   # automountServiceAccountToken:false keeps the MAIN container (untrusted client
   # code) token-free; executor.serviceAccountName still gives Argo's own executor
   # sidecar an SA token for the pod-patch it needs (required by Argo when
   # automount is off — the whole point of the split: executor yes, client no).
+  # The image is a parameter (engine_image, validated by engine.py as a pinned release);
+  # tests/tooling-images allow-lists exactly that one templated image.
   - name: hera-render
 {{ include "kubecore-ci-workflows.preemptionRetry" . | indent 4 }}
+    inputs:
+      parameters:
+      - name: engine_image
+      - name: engine_profile
     automountServiceAccountToken: false
     executor:
       # Locked-down executor SA (workflowtaskresults only, NO secret-reader) —
@@ -2879,23 +1169,28 @@ spec:
       runAsUser: 0
       runAsGroup: 0
     container:
-      image: {{ .Values.tooling.heraRenderImage | default "python:3.12.13-slim" }}
+      image: "{{`{{inputs.parameters.engine_image}}`}}"
       {{- include "kubecore-ci-workflows.resources" .Values.tooling.heraRenderResources | nindent 6 }}
       command: [sh, -c]
+      env:
+      - name: ENGINE_PROFILE
+        value: "{{`{{inputs.parameters.engine_profile}}`}}"
       args:
       - |
         set -e
         cd /workspace/repo
-        # Install the app's OWN pinned deps. `pip install -e .` uses the repo's
-        # pyproject.toml (PEP 621). The vendored kubecore/ package + hera + hydra
-        # resolve from there. This runs UNTRUSTED developer code + deps with NO
-        # credentials of any kind — the step has no token and no network egress
-        # to anything but PyPI (lock down with a NetworkPolicy in the chart values).
-        pip install --quiet -e . || pip install --quiet hera hydra-core omegaconf pyyaml
         mkdir -p /workspace/out
-        # Render pipeline.py -> raw WFT. pipeline.py writes to out/ relative to
-        # itself; run from repo root so `from kubecore.authoring import ...` works.
-        PYTHONPATH="/workspace/repo" python pipeline.py
+        rm -f out/raw-workflow-template.yaml /workspace/out/raw-workflow-template.yaml
+        echo "hera-render: rendering pipeline.py with the platform engine {{`{{inputs.parameters.engine_image}}`}} (profile ${ENGINE_PROFILE})"
+        # The app's pyproject dependencies the engine lacks (data only; the runner's own check).
+        python -I -c 'import sys; from pathlib import Path; from kaos_engine.render import extra_dependencies; sys.stdout.write("".join(d + "\n" for d in extra_dependencies(Path(sys.argv[1]))))' /workspace/repo > /tmp/extra-deps.txt
+        if [ -s /tmp/extra-deps.txt ]; then
+          echo "hera-render: installing the app dependencies the engine lacks (under the engine's versions):"
+          cat /tmp/extra-deps.txt
+          python -m pip freeze --exclude-editable > /tmp/engine-constraints.txt
+          python -m pip install --quiet -c /tmp/engine-constraints.txt -r /tmp/extra-deps.txt
+        fi
+        python -I -m kaos_engine.render pipeline.py --repo /workspace/repo --profile "${ENGINE_PROFILE}"
         # pipeline.py writes out/raw-workflow-template.yaml under the repo; move it
         # to the shared workspace location the enhance step reads.
         cp out/raw-workflow-template.yaml /workspace/out/raw-workflow-template.yaml
@@ -2909,7 +1204,9 @@ spec:
   - name: hera-enhance-commit
 {{ include "kubecore-ci-workflows.preemptionRetry" . | indent 4 }}
     inputs:
-      parameters: []
+      parameters:
+      # The engine JSON of detect-steps. Read through the env var below, never spliced into the script.
+      - name: engine
     securityContext:
       runAsUser: 0
       runAsGroup: 0
@@ -2917,6 +1214,9 @@ spec:
       image: {{ .Values.tooling.toolboxImage | default "alpine/k8s:1.36.4" }}
       {{- include "kubecore-ci-workflows.resources" .Values.tooling.enhanceResources | nindent 6 }}
       command: [sh, -c]
+      env:
+      - name: ENGINE_JSON
+        value: "{{`{{inputs.parameters.engine}}`}}"
       securityContext:
         runAsUser: 0
         runAsGroup: 0
@@ -2961,8 +1261,8 @@ spec:
             yaml.safe_dump(doc, sys.stdout, sort_keys=False)
         CTXEOF
 
-        # Platform enhancer, isolated from the app checkout: see
-        # kubecore-ci-workflows.platformEnhance (kubecore-operator#1161, #1375).
+        # Platform enhancer (the engine wheel), isolated from the app checkout: see
+        # kubecore-ci-workflows.platformEnhance (kubecore-operator#1161, #1375, D-80).
 {{ include "kubecore-ci-workflows.platformEnhance" . | indent 8 }}
 
         # DATASETS (PRD novelcore/kaos#1283 D-05): offer the project's datasets in
@@ -3057,7 +1357,7 @@ spec:
         IMAGES_FILE="${GITOPS_DIR}/pipeline-images.yaml"
         if [ -f "$IMAGES_FILE" ]; then
           CONTEXT_SHA=$(sha256sum "$CONTEXT_PATH" | cut -c1-64)
-          python3 - "$WFT_FILE" "$IMAGES_FILE" "$APP_NAME" "$CONTEXT_SHA" "{{ include "kubecore-ci-workflows.enhancerRef" . }}" /tmp/dataset-sha "$WFT_BYTES" <<'IMGEOF'
+          python3 - "$WFT_FILE" "$IMAGES_FILE" "$APP_NAME" "$CONTEXT_SHA" "$ENGINE_VERSION" /tmp/dataset-sha "$WFT_BYTES" <<'IMGEOF'
         import sys, yaml, re
         wft = yaml.safe_load(open(sys.argv[1]))
         images_doc = yaml.safe_load(open(sys.argv[2]))
@@ -3067,10 +1367,10 @@ spec:
         # with the live file and submits a render when the platform context
         # changed without a push (compute classes, ml environment selector…).
         context_sha = sys.argv[4]
-        # enhancer-ref (kubecore-operator#1199): the platform enhancer this render
-        # ran — the pin overlaid above. ml-ci-reconcile compares it with the
-        # chart's pin and re-renders when the pin moved without a push.
-        enhancer_ref = sys.argv[5]
+        # engine-version (PRD-HPC-1461 D-80): the platform engine this render ran.
+        # ml-ci-reconcile compares it with the context's engine.version and
+        # re-renders when the engine moved without a push (ENGINE DRIFT).
+        engine_version = sys.argv[5]
         # dataset-sha: digest of the `dataset` choices this render offered ("none": no such
         # parameter; missing file: the catalog was unreadable, keep the record). ml-ci-reconcile
         # compares it with the catalog and re-renders on DATASET DRIFT.
@@ -3095,15 +1395,15 @@ spec:
         # renamed step): otherwise the ConfigMap — and the image parameters the
         # submit form derives from it — keep stale entries forever
         # (kubecore-operator#1126, ml-dev-loop e2e "delete"/"rename").
-        removed = [k for k in list(data) if k not in ("last-built-sha", "context-sha", "enhancer-ref", "dataset-sha", "wft-bytes", "kaos-lib-package", "kaos-lib-compat") and k not in wanted]
+        removed = [k for k in list(data) if k not in ("last-built-sha", "context-sha", "engine-version", "engine-compose", "engine-last-error", "engine-attempt", "dataset-sha", "wft-bytes", "kaos-lib-package", "kaos-lib-compat") and k not in wanted]
         for k in removed:
             del data[k]
         context_moved = bool(context_sha) and data.get("context-sha") != context_sha
         if context_moved:
             data["context-sha"] = context_sha
-        enhancer_moved = bool(enhancer_ref) and data.get("enhancer-ref") != enhancer_ref
-        if enhancer_moved:
-            data["enhancer-ref"] = enhancer_ref
+        engine_moved = bool(engine_version) and data.get("engine-version") != engine_version
+        if engine_moved:
+            data["engine-version"] = engine_version
         # PRD-1124 D-07 (kubecore-operator#1124 AC-09): the images ConfigMap MUST
         # live in the SAME namespace the WFT renders into. The k8smlapp
         # composition seeds pipeline-images.yaml ONCE (create-only) with the ML
@@ -3126,9 +1426,9 @@ spec:
         bytes_moved = bool(wft_bytes) and data.get("wft-bytes") != wft_bytes
         if bytes_moved:
             data["wft-bytes"] = wft_bytes
-        if added or removed or moved or context_moved or enhancer_moved or dataset_moved or bytes_moved:
+        if added or removed or moved or context_moved or engine_moved or dataset_moved or bytes_moved:
             yaml.safe_dump(images_doc, open(sys.argv[2], "w"), sort_keys=False)
-            print(f"pipeline-images keys — added: {added} removed: {removed} moved: {moved} context-sha: {context_sha[:12] if context_moved else 'unchanged'} enhancer-ref: {enhancer_ref[:12] if enhancer_moved else 'unchanged'} dataset-sha: {dataset_sha[:12] if dataset_moved else 'unchanged'}")
+            print(f"pipeline-images keys — added: {added} removed: {removed} moved: {moved} context-sha: {context_sha[:12] if context_moved else 'unchanged'} engine-version: {engine_version if engine_moved else 'unchanged'} dataset-sha: {dataset_sha[:12] if dataset_moved else 'unchanged'}")
         else:
             print("pipeline-images already has exactly the image-<step> keys the WFT references")
         IMGEOF
@@ -3271,6 +1571,10 @@ spec:
         value: ""
       - name: kaos_lib_compat
         value: ""
+      # The engine version whose compose-and-validate image this build made ("" = none built): recorded
+      # as engine-compose.
+      - name: engine_compose
+        value: ""
     securityContext:
       runAsUser: 0
       runAsGroup: 0
@@ -3286,6 +1590,8 @@ spec:
         value: "{{`{{inputs.parameters.kaos_lib_record}}`}}"
       - name: KL_COMPAT
         value: "{{`{{inputs.parameters.kaos_lib_compat}}`}}"
+      - name: ENGINE_COMPOSE
+        value: "{{`{{inputs.parameters.engine_compose}}`}}"
       args:
       - |
         set -e
@@ -3385,7 +1691,10 @@ spec:
           }
           for KEY in $(yq e '.data | keys | .[]' "${IMAGES_PATH}"); do
             [ "${KEY}" = "last-built-sha" ] && continue
-            [ "${KEY}" = "enhancer-ref" ] && continue
+            [ "${KEY}" = "engine-version" ] && continue
+            [ "${KEY}" = "engine-compose" ] && continue
+            [ "${KEY}" = "engine-last-error" ] && continue
+            [ "${KEY}" = "engine-attempt" ] && continue
             [ "${KEY}" = "dataset-sha" ] && continue
             [ "${KEY}" = "wft-bytes" ] && continue
             [ "${KEY}" = "kaos-lib-package" ] && continue
@@ -3438,6 +1747,13 @@ spec:
         if [ -n "${KL_RECORD}" ]; then
           echo "Recording kaos-lib-package = ${KL_RECORD}, kaos-lib-compat = ${KL_COMPAT:-<none declared>}"
           yq e -i '.data."kaos-lib-package" = strenv(KL_RECORD) | .data."kaos-lib-compat" = strenv(KL_COMPAT)' "${IMAGES_PATH}"
+        fi
+
+        # engine-compose (PRD-HPC-1461 D-80): the engine version the compose-and-validate image was
+        # just built on. ml-ci-build rebuilds it when this differs from the context's engine.version.
+        if [ -n "${ENGINE_COMPOSE}" ]; then
+          echo "Recording engine-compose = ${ENGINE_COMPOSE}"
+          yq e -i '.data."engine-compose" = strenv(ENGINE_COMPOSE)' "${IMAGES_PATH}"
         fi
 
         git config user.name "KubeCore CI"
@@ -3734,6 +2050,114 @@ spec:
         mountPath: /etc/github-token
         readOnly: true
 
+  # engine-record (PRD-HPC-1461 D-80): what the platform engine did in THIS run, written into the app's
+  # pipeline-images in gitops (ArgoCD syncs it to {app}-pipeline-images). A run whose engine render,
+  # enhance or compose-image build failed records `engine-last-error` (one line, at most 200
+  # characters, taken from the failed pod's log) and `engine-attempt` (<engine version>@<epoch>, the
+  # attempt ml-ci-reconcile's one-attempt-per-hour guard reads). A run that rendered or built the compose
+  # image successfully clears both. A run that did neither leaves them as they are. The operator reads
+  # engine-last-error to show state `failed`. Reporting only: the caller continues on failure.
+  - name: engine-record
+{{ include "kubecore-ci-workflows.preemptionRetry" . | indent 4 }}
+    container:
+      image: {{ .Values.tooling.toolboxImage | default "alpine/k8s:1.36.4" }}
+      {{- include "kubecore-ci-workflows.resources" .Values.tooling.resources | nindent 6 }}
+      command: [sh, -c]
+      args:
+      - |
+        set -e
+        TOKEN=$(cat /etc/github-token/token)
+{{ include "kubecore-ci-workflows.gitAuth" . | indent 8 }}
+        ORG="{{ .Values.github.org }}"
+        GITOPS_REPO="{{`{{workflow.parameters.gitops_repository}}`}}"
+        GITOPS_BRANCH="{{`{{workflow.parameters.gitops_branch}}`}}"
+        APP_NAME="{{`{{workflow.parameters.app_name}}`}}"
+        WF="{{`{{workflow.name}}`}}"; NS="{{`{{workflow.namespace}}`}}"
+        PHASE="{{`{{workflow.status}}`}}"
+
+        # The engine stages, by the pod's node name: detect-steps (its engine check), hera-render,
+        # hera-enhance-commit and the compose-and-validate image build.
+        kubectl get pods -n "${NS}" -l "workflows.argoproj.io/workflow=${WF}" -o json > /tmp/pods.json 2>/dev/null || echo '{"items":[]}' > /tmp/pods.json
+        STAGES='[
+          {"stage":"engine check","re":"[.]detect-steps$"},
+          {"stage":"render","re":"[.]hera-render$"},
+          {"stage":"enhance","re":"[.]hera-enhance-commit$"},
+          {"stage":"compose image build","re":"build-push[(].*compose-and-validate"}]'
+        # "<stage>|<pod>|<exit code>" per engine pod that ran, in start order.
+        jq -r --argjson stages "$STAGES" '
+          [.items[] | . as $p | ($p.metadata.annotations["workflows.argoproj.io/node-name"] // "") as $n
+           | ($stages[] | . as $s | select($n | test($s.re)) | .stage) as $stage
+           | {stage: $stage, pod: $p.metadata.name, start: $p.status.startTime,
+              exit: ((($p.status.containerStatuses // []) | map(select(.name=="main")) | .[0].state.terminated.exitCode) // "")}]
+          | sort_by(.start) | .[] | "\(.stage)|\(.pod)|\(.exit)"' /tmp/pods.json > /tmp/engine-pods
+
+        ERROR=""
+        ESC=$(printf '\033')
+        while IFS='|' read -r STAGE POD CODE; do
+          [ -n "${CODE}" ] && [ "${CODE}" != 0 ] || continue
+          kubectl logs -n "${NS}" "${POD}" -c main --tail=200 2>/dev/null | sed "s/${ESC}\[[0-9;]*m//g" > /tmp/log.txt || true
+          if [ "${STAGE}" = "engine check" ]; then
+            LINE=$(grep 'engine: FATAL' /tmp/log.txt | tail -1)
+            [ -n "${LINE}" ] || continue
+          else
+            LINE=$(grep -iE 'fatal|error|exception|mismatch|failed|denied|cannot|unable' /tmp/log.txt | tail -1)
+            [ -n "${LINE}" ] || LINE=$(grep . /tmp/log.txt | tail -1)
+          fi
+          ERROR=$(printf '%s: %s' "${STAGE}" "${LINE}" | tr -d '\000-\037\177' | cut -c1-200)
+          break
+        done < /tmp/engine-pods
+        OK=$(awk -F'|' '$1 != "engine check" && $3 == "0" {n++} END {print n + 0}' /tmp/engine-pods)
+
+        # A pod that failed and was retried to success is not an error of the run.
+        [ "${PHASE}" = Succeeded ] && ERROR=""
+        if [ -z "${ERROR}" ] && [ "${PHASE}" != Succeeded ]; then
+          echo "engine-record: the run ended ${PHASE} outside the engine stages — nothing to record"
+          exit 0
+        fi
+        if [ -z "${ERROR}" ] && [ "${OK}" = 0 ]; then
+          echo "engine-record: no engine stage ran — leaving the record as it is"
+          exit 0
+        fi
+
+        git config --global user.name "KubeCore CI"
+        git config --global user.email "ci@kubecore.io"
+        git clone --depth=1 --branch "${GITOPS_BRANCH}" "https://github.com/${ORG}/${GITOPS_REPO}.git" /tmp/gitops
+        git_assert_no_token /tmp/gitops
+        cd /tmp/gitops
+        IMAGES_PATH=$(find . -path "*/${APP_NAME}/${GITOPS_BRANCH}/pipeline-images.yaml" | head -1)
+        CONTEXT_PATH=$(find . -path "*/${APP_NAME}/${GITOPS_BRANCH}/pipeline-context.yaml" | head -1)
+        [ -n "${IMAGES_PATH}" ] && [ -f "${IMAGES_PATH}" ] || { echo "engine-record: pipeline-images.yaml not found — nothing to record"; exit 0; }
+{{ include "kubecore-ci-workflows.engineScript" . | indent 8 }}
+        if [ -n "${ERROR}" ]; then
+          VERSION=$(python3 -I /tmp/engine.py version --context "${CONTEXT_PATH:-/dev/null}")
+          ENGINE_ERROR="${ERROR}" ENGINE_ATTEMPT="${VERSION:-unknown}@$(date +%s)" \
+            yq e -i '.data."engine-last-error" = strenv(ENGINE_ERROR) | .data."engine-attempt" = strenv(ENGINE_ATTEMPT)' "${IMAGES_PATH}"
+          echo "engine-record: ${ERROR}"
+          MESSAGE="record the engine error"
+        else
+          yq e -i 'del(.data."engine-last-error") | del(.data."engine-attempt")' "${IMAGES_PATH}"
+          echo "engine-record: the engine rendered/built successfully — clearing engine-last-error"
+          MESSAGE="clear the engine error"
+        fi
+        git add "${IMAGES_PATH}"
+        if git diff --cached --quiet; then
+          echo "engine-record: already recorded"
+          exit 0
+        fi
+        git commit -m "ml-ci(${APP_NAME}): ${MESSAGE}"
+        pushed=""
+        for attempt in 1 2 3 4 5; do
+          if git push 2>&1; then pushed=yes; break; fi
+          echo "engine-record: push rejected (attempt ${attempt}) — rebasing onto the latest ${GITOPS_BRANCH}"
+          sleep $((attempt * 3))
+          git pull --rebase origin "${GITOPS_BRANCH}" || { echo "engine-record: rebase failed"; break; }
+        done
+        [ -n "$pushed" ] || { echo "engine-record: could not push after 5 attempts"; exit 1; }
+      volumeMounts:
+      - name: github-token
+        mountPath: /etc/github-token
+        readOnly: true
+
   - name: exit-handler
     steps:
     - - name: post-failure-status
@@ -3751,6 +2175,10 @@ spec:
         # != Succeeded: an Error (executor/infra) must surface on GitHub too,
         # not only a Failed step — a silent pending is the #459 failure mode.
         when: "{{`{{workflow.status}}`}} != Succeeded"
+      - name: engine-record
+        template: engine-record
+        continueOn:
+          failed: true
     - - name: run-report
         template: report
         arguments:
