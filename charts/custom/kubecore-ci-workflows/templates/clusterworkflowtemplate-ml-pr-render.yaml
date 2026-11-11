@@ -210,7 +210,7 @@ spec:
         CONTEXT_PATH=$(find /tmp/gitops -path "*/${APP_NAME}/${GITOPS_BRANCH}/pipeline-context.yaml" | head -1)
         [ -n "$CONTEXT_PATH" ] && [ -f "$CONTEXT_PATH" ] || { echo "engine: FATAL: no pipeline-context in ${ORG}/${GITOPS_REPO}@${GITOPS_BRANCH}" >&2; exit 1; }
         python3 -I /tmp/engine.py context --context "$CONTEXT_PATH" --repo /workspace/repo > /tmp/engine.json \
-          || { echo "engine: FATAL: the pipeline context has no usable engine; failing the render" >&2; exit 1; }
+          || { echo "engine: FATAL: no usable engine or schema profile (the reason is above); failing the render" >&2; exit 1; }
         jq -j '.image' /tmp/engine.json > /tmp/engine_image
         jq -j '.profile' /tmp/engine.json > /tmp/engine_profile
         echo "engine: $(jq -r '.version' /tmp/engine.json) image $(cat /tmp/engine_image) profile $(cat /tmp/engine_profile)"

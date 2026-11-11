@@ -133,13 +133,92 @@ def test_the_derive_tree_is_parsed_never_executed(tmp_path):
     assert engine.profile_of(make_app(tmp_path, trap)) == "yolo"
 
 
-@pytest.mark.parametrize("derive_tree", [
-    "def broken(:\n",                       # not python
-    "# moved to kaos-lib\nfrom kaos.derive_tree import *\n",  # a stub without the dataclasses
-])
-def test_a_derive_tree_without_a_schema_falls_back_to_the_config(tmp_path, derive_tree):
-    assert engine.profile_of(make_app(tmp_path, derive_tree, quantization=True)) == "yolo"
-    assert engine.profile_of(make_app(tmp_path / "h", derive_tree, quantization=False)) == "hera"
+def test_a_derive_tree_without_a_schema_falls_back_to_the_config(tmp_path):
+    stub = "# moved to kaos-lib\nfrom kaos.derive_tree import *\n"  # parses, names no DataConfig
+    assert engine.profile_of(make_app(tmp_path, stub, quantization=True)) == "yolo"
+    assert engine.profile_of(make_app(tmp_path / "h", stub, quantization=False)) == "hera"
+
+
+# The derive_tree.py and data.yaml the profile is read from are the app's (untrusted, possibly a fork's PR
+# head). A file that is there but cannot be read safely or parsed fails the build (EXIT_PROFILE) with the
+# reason; it is never guessed around, never followed out of the checkout and never read without a bound.
+def test_a_derive_tree_that_is_not_python_fails_closed(tmp_path):
+    with pytest.raises(engine.EngineError) as exc:
+        engine.profile_of(make_app(tmp_path, "def broken(:\n"))
+    assert exc.value.code == engine.EXIT_PROFILE and "kubecore/derive_tree.py" in str(exc.value)
+
+
+# Deeply nested source makes CPython's parser raise MemoryError ("Parser stack overflowed") or
+# RecursionError ("during ast construction") instead of SyntaxError; where it does depends on the
+# Python version, so the parser is made to raise them here.
+@pytest.mark.parametrize("error", [MemoryError("Parser stack overflowed"), RecursionError("ast construction")])
+def test_a_derive_tree_too_deep_to_parse_fails_closed(tmp_path, monkeypatch, error):
+    repo = make_app(tmp_path, DT_HERA)
+
+    def deep(*args, **kwargs):
+        raise error
+    monkeypatch.setattr(engine.ast, "parse", deep)
+    with pytest.raises(engine.EngineError) as exc:
+        engine.profile_of(repo)
+    assert exc.value.code == engine.EXIT_PROFILE and type(error).__name__ in str(exc.value)
+
+
+def test_a_huge_derive_tree_is_refused_unread(tmp_path):
+    repo = make_app(tmp_path, "x = 1\n" * (engine.APP_FILE_MAX_BYTES // 6 + 1))
+    with pytest.raises(engine.EngineError, match="bytes") as exc:
+        engine.profile_of(repo)
+    assert exc.value.code == engine.EXIT_PROFILE
+
+
+@pytest.mark.parametrize("target", ["/dev/zero", "outside"])
+def test_a_symlinked_derive_tree_is_refused(tmp_path, target):
+    repo = make_app(tmp_path)
+    if target == "outside":
+        target = str(tmp_path / "outside.py")
+        (tmp_path / "outside.py").write_text(DT_HERA)
+    os.makedirs(os.path.join(repo, "kubecore"))
+    os.symlink(target, os.path.join(repo, "kubecore", "derive_tree.py"))
+    with pytest.raises(engine.EngineError, match="not a regular file") as exc:
+        engine.profile_of(repo)
+    assert exc.value.code == engine.EXIT_PROFILE
+
+
+def test_a_symlinked_kubecore_dir_is_refused(tmp_path):
+    repo = make_app(tmp_path)
+    (tmp_path / "elsewhere").mkdir()
+    (tmp_path / "elsewhere" / "derive_tree.py").write_text(DT_HERA)
+    os.symlink(str(tmp_path / "elsewhere"), os.path.join(repo, "kubecore"))
+    with pytest.raises(engine.EngineError, match="not a regular file"):
+        engine.profile_of(repo)
+
+
+def test_a_fifo_derive_tree_is_refused_not_waited_on(tmp_path):
+    repo = make_app(tmp_path)
+    os.makedirs(os.path.join(repo, "kubecore"))
+    os.mkfifo(os.path.join(repo, "kubecore", "derive_tree.py"))
+    with pytest.raises(engine.EngineError, match="not a regular file"):
+        engine.profile_of(repo)
+
+
+def test_a_symlinked_data_yaml_is_refused(tmp_path):
+    repo = make_app(tmp_path)
+    os.symlink("/dev/zero", os.path.join(repo, "config", "data.yaml"))
+    with pytest.raises(engine.EngineError, match="config/data.yaml"):
+        engine.profile_of(repo)
+
+
+def test_the_cli_names_the_reason_and_exits_with_the_profile_code(tmp_path, capsys):
+    repo = make_app(tmp_path, "def broken(:\n")
+    assert engine.main(["context", "--context", write_context(tmp_path, BLOCK), "--repo", repo]) == engine.EXIT_PROFILE
+    err = capsys.readouterr().err
+    assert err.startswith("engine: FATAL: kubecore/derive_tree.py is not Python") and "rather than guess" in err
+
+
+def test_a_profile_outside_the_engine_set_fails_closed(tmp_path, monkeypatch):
+    monkeypatch.setattr(engine, "profile_of", lambda repo: "yolo-v9")
+    with pytest.raises(engine.EngineError, match="yolo-v9") as exc:
+        engine.engine_of(write_context(tmp_path, BLOCK), str(tmp_path))
+    assert exc.value.code == engine.EXIT_PROFILE
 
 
 @pytest.mark.parametrize("data_yaml, profile", [

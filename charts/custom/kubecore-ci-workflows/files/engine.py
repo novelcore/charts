@@ -22,6 +22,7 @@ import hashlib
 import json
 import os
 import re
+import stat
 import sys
 import time
 import urllib.parse
@@ -33,6 +34,7 @@ import yaml
 EXIT_NO_ENGINE = 2    # the context names no usable engine
 EXIT_INTEGRITY = 3    # the wheel is not the one the context pins: refuse
 EXIT_UNAVAILABLE = 4  # the wheel could not be downloaded or read
+EXIT_PROFILE = 5      # the app's files do not name a schema profile this script can trust
 # The version is the operator build tag; it becomes a label value on the WorkflowTemplate and the
 # builds, so it must be one (no "+", no "/").
 VERSION_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$")
@@ -44,6 +46,12 @@ FETCH_ATTEMPTS = 3
 FETCH_PAUSE_SECONDS = 5
 WHEEL_MAX_BYTES = 32 * 1024 * 1024
 LOCAL_HOSTS = ("127.0.0.1", "localhost")
+# The engine's schema profiles (kaos_engine.render PROFILES). profile_of never returns anything else.
+PROFILES = ("hera", "yolo", "legacy-v1", "yolo-v1")
+# The app files the profile is read from are untrusted: a cap well above any template's (derive_tree.py
+# is at most 13 KB on every template state), so a huge or endless file is refused, not read. Parsing
+# 64 KiB of the densest Python costs ~80 MB, inside the 128Mi limit of the tooling step that runs this.
+APP_FILE_MAX_BYTES = 64 * 1024
 
 
 class EngineError(Exception):
@@ -71,8 +79,8 @@ def load_context(path):
 
 
 # MIGRATION-REMOVE(after=every ML app on prod is recreated from a template without kubecore/ (PRD-HPC-1461 D-80),
-# issue=novelcore/kubecore-operator#1830): _dataclass_fields, vendored_schema_profile, _config_data_has_ref and
-# their use in profile_of. They keep apps that still carry the vendored kubecore/ rendering after the train.
+# issue=novelcore/kubecore-operator#1830): _dataclass_fields, _read_app_file, vendored_schema_profile,
+# _config_data_has_ref, APP_FILE_MAX_BYTES, EXIT_PROFILE and their use in profile_of. They keep apps that still carry the vendored kubecore/ rendering after the train.
 def _dataclass_fields(tree, name):
     """{field: default node} of the first `class <name>` in a parsed module, None when there is none."""
     for node in ast.walk(tree):
@@ -80,6 +88,35 @@ def _dataclass_fields(tree, name):
             return {st.target.id: st.value for st in node.body
                     if isinstance(st, ast.AnnAssign) and isinstance(st.target, ast.Name)}
     return None
+
+
+def _read_app_file(repo, rel):
+    """The text of <repo>/<rel>, None when there is no such file; raises EngineError(EXIT_PROFILE) when
+    it is there but not something to read as data: a symlink, not a regular file (a FIFO, a device),
+    outside the checkout, larger than APP_FILE_MAX_BYTES or not UTF-8."""
+    path = os.path.join(repo, rel)
+    try:
+        st = os.lstat(path)
+    except FileNotFoundError:
+        return None
+    except OSError as exc:
+        raise EngineError(f"{rel}: cannot stat ({exc.strerror})", EXIT_PROFILE) from exc
+    root = os.path.realpath(repo)
+    if stat.S_ISLNK(st.st_mode) or not stat.S_ISREG(st.st_mode) \
+            or not os.path.realpath(path).startswith(root + os.sep):
+        raise EngineError(f"{rel} is not a regular file in the checkout (a symlink, a device or outside it); "
+                          "refusing to read it", EXIT_PROFILE)
+    if st.st_size > APP_FILE_MAX_BYTES:
+        raise EngineError(f"{rel} is {st.st_size} bytes, more than {APP_FILE_MAX_BYTES}; refusing to read it",
+                          EXIT_PROFILE)
+    try:
+        with open(path, "rb") as f:
+            raw = f.read(APP_FILE_MAX_BYTES + 1)
+        if len(raw) > APP_FILE_MAX_BYTES:
+            raise EngineError(f"{rel} is more than {APP_FILE_MAX_BYTES} bytes; refusing to read it", EXIT_PROFILE)
+        return raw.decode("utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        raise EngineError(f"{rel} cannot be read as UTF-8 text ({type(exc).__name__})", EXIT_PROFILE) from exc
 
 
 def vendored_schema_profile(repo):
@@ -93,14 +130,18 @@ def vendored_schema_profile(repo):
       no ref, QuantizationConfig.output_prefix    yolo-v1
       no ref, no output_prefix                    yolo
     The file is parsed (ast), never imported or executed. An app without the file, or whose file has no
-    DataConfig (a later template that dropped the vendored copy), returns None.
+    DataConfig (a later template that dropped the vendored copy), returns None. A file that is there but
+    cannot be read safely or parsed is NOT guessed around: EngineError(EXIT_PROFILE), the build fails.
     """
-    path = os.path.join(repo, "kubecore", "derive_tree.py")
-    try:
-        with open(path, encoding="utf-8") as f:
-            tree = ast.parse(f.read(), filename=path)
-    except (OSError, SyntaxError, ValueError, UnicodeDecodeError):
+    rel = os.path.join("kubecore", "derive_tree.py")
+    text = _read_app_file(repo, rel)
+    if text is None:
         return None
+    try:
+        tree = ast.parse(text, filename=rel)
+    except (SyntaxError, ValueError, RecursionError, MemoryError) as exc:
+        raise EngineError(f"{rel} is not Python this script can parse ({type(exc).__name__}); it names the schema "
+                          "profile the engine renders with, so the build fails rather than guess one", EXIT_PROFILE) from exc
     data = _dataclass_fields(tree, "DataConfig")
     if data is None:
         return None
@@ -110,12 +151,14 @@ def vendored_schema_profile(repo):
     return "yolo-v1" if "output_prefix" in quant else "yolo"
 
 
-def _config_data_has_ref(config):
+def _config_data_has_ref(repo):
     """True when config/data.yaml sets data.ref (a key the `yolo` schema rejects)."""
+    text = _read_app_file(repo, os.path.join("config", "data.yaml"))
+    if text is None:
+        return False
     try:
-        with open(os.path.join(config, "data.yaml")) as f:
-            doc = yaml.safe_load(f) or {}
-    except (OSError, yaml.YAMLError):
+        doc = yaml.safe_load(text) or {}
+    except (yaml.YAMLError, RecursionError):
         return False
     section = doc.get("data", doc) if isinstance(doc, dict) else None
     return isinstance(section, dict) and "ref" in section
@@ -135,7 +178,7 @@ def profile_of(repo):
         return vendored
     config = os.path.join(repo, "config")
     if os.path.isfile(os.path.join(config, "quantization.yaml")) or os.path.isdir(os.path.join(config, "quantization")):
-        return "hera" if _config_data_has_ref(config) else "yolo"
+        return "hera" if _config_data_has_ref(repo) else "yolo"
     return "hera"
 
 
@@ -152,7 +195,10 @@ def engine_of(ctx_path, repo):
         raise EngineError(f"engine.version {version!r} / engine.image {image!r} are not a pinned release", EXIT_NO_ENGINE)
     if not wheel or not SHA256_RE.match(sha):
         raise EngineError("engine.wheel / engine.wheelSha256 are missing or not a sha256 hex digest", EXIT_NO_ENGINE)
-    return {"version": version, "image": image, "wheel": wheel, "wheel_sha256": sha, "profile": profile_of(repo)}
+    profile = profile_of(repo)
+    if profile not in PROFILES:
+        raise EngineError(f"schema profile {profile!r} is not one of {', '.join(PROFILES)}", EXIT_PROFILE)
+    return {"version": version, "image": image, "wheel": wheel, "wheel_sha256": sha, "profile": profile}
 
 
 # ---------------------------------------------------------------- the engine wheel

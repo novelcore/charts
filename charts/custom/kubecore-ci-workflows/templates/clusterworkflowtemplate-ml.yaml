@@ -654,7 +654,7 @@ spec:
 {{ include "kubecore-ci-workflows.engineScript" . | indent 8 }}
         [ -n "$KL_CTX" ] || { echo "engine: FATAL: no pipeline-context in the gitops repo; failing the build, the live WorkflowTemplate stays as it is" >&2; exit 1; }
         python3 -I /tmp/engine.py context --context "$KL_CTX" --repo /workspace/repo > /tmp/engine.json \
-          || { echo "engine: FATAL: the pipeline context has no usable engine; failing the build, the live WorkflowTemplate stays as it is" >&2; exit 1; }
+          || { echo "engine: FATAL: no usable engine or schema profile (the reason is above); failing the build, the live WorkflowTemplate stays as it is" >&2; exit 1; }
         jq -j '.version' /tmp/engine.json > /tmp/engine_version
         jq -j '.image' /tmp/engine.json > /tmp/engine_image
         jq -j '.profile' /tmp/engine.json > /tmp/engine_profile
