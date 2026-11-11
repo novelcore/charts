@@ -17,6 +17,7 @@ Standard library + PyYAML only (the toolbox image has both). Every input from th
 files are looked up, never imported or executed. Run as `python3 -I`.
 """
 import argparse
+import ast
 import hashlib
 import json
 import os
@@ -69,11 +70,69 @@ def load_context(path):
         return {}
 
 
+def _dataclass_fields(tree, name):
+    """{field: default node} of the first `class <name>` in a parsed module, None when there is none."""
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ClassDef) and node.name == name:
+            return {st.target.id: st.value for st in node.body
+                    if isinstance(st, ast.AnnAssign) and isinstance(st.target, ast.Name)}
+    return None
+
+
+def vendored_schema_profile(repo):
+    """The schema profile of the app's vendored kubecore/derive_tree.py, None when it names none.
+
+    The engine's four profiles are exactly the structured-config schemas the templates' derive_tree.py
+    has had (kaos-hpc-operator engine/README.md "Schema profiles"), and the app's config/ was written
+    against its own copy, so its DataConfig / QuantizationConfig fields say which one it needs:
+      DataConfig.ref + .version                   legacy-v1  (both templates 2026-07-14 .. 2026-10-19)
+      DataConfig.ref                              hera       (hera since 10-19, and yolo `main` since 10-19)
+      no ref, QuantizationConfig.output_prefix    yolo-v1
+      no ref, no output_prefix                    yolo
+    The file is parsed (ast), never imported or executed. An app without the file, or whose file has no
+    DataConfig (a later template that dropped the vendored copy), returns None.
+    """
+    path = os.path.join(repo, "kubecore", "derive_tree.py")
+    try:
+        with open(path, encoding="utf-8") as f:
+            tree = ast.parse(f.read(), filename=path)
+    except (OSError, SyntaxError, ValueError, UnicodeDecodeError):
+        return None
+    data = _dataclass_fields(tree, "DataConfig")
+    if data is None:
+        return None
+    if "ref" in data:
+        return "legacy-v1" if "version" in data else "hera"
+    quant = _dataclass_fields(tree, "QuantizationConfig") or {}
+    return "yolo-v1" if "output_prefix" in quant else "yolo"
+
+
+def _config_data_has_ref(config):
+    """True when config/data.yaml sets data.ref (a key the `yolo` schema rejects)."""
+    try:
+        with open(os.path.join(config, "data.yaml")) as f:
+            doc = yaml.safe_load(f) or {}
+    except (OSError, yaml.YAMLError):
+        return False
+    section = doc.get("data", doc) if isinstance(doc, dict) else None
+    return isinstance(section, dict) and "ref" in section
+
+
 def profile_of(repo):
-    """The schema profile: `yolo` when the app's config/ has a quantization section, else `hera`."""
+    """The schema profile the engine renders and composes the app with.
+
+    First the app's vendored kubecore/derive_tree.py (vendored_schema_profile). Without one: `yolo`
+    when config/ has a quantization section, else `hera`; a quantization app whose config/data.yaml
+    still sets data.ref gets `hera` (the only current profile with DataConfig.ref). Before 0.13.3 only
+    the fallback existed and every yolo app of the template's `main` (DataConfig.ref) failed to render
+    with "Key 'ref' not in 'DataConfig'" (kubecore-operator#1830).
+    """
+    vendored = vendored_schema_profile(repo)
+    if vendored:
+        return vendored
     config = os.path.join(repo, "config")
     if os.path.isfile(os.path.join(config, "quantization.yaml")) or os.path.isdir(os.path.join(config, "quantization")):
-        return "yolo"
+        return "hera" if _config_data_has_ref(config) else "yolo"
     return "hera"
 
 

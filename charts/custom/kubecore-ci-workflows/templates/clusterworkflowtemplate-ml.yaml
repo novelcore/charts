@@ -648,8 +648,8 @@ spec:
 
         # ENGINE (PRD-HPC-1461 D-80): the platform pipeline engine is the only way to render, enhance and
         # compose an app. The operator writes engine: {version, image, wheel, wheelSha256} into the gitops
-        # pipeline-context; engine.py validates it and picks the schema profile (yolo when the app's
-        # config/ has a quantization section, else hera). It reads the checkout as DATA (python3 -I).
+        # pipeline-context; engine.py validates it and picks the schema profile (the schema of the app's
+        # vendored kubecore/derive_tree.py, else yolo/hera by config/). It reads the checkout as DATA (python3 -I).
         # A context with no usable engine FAILS the build: the live WorkflowTemplate stays as it is.
 {{ include "kubecore-ci-workflows.engineScript" . | indent 8 }}
         [ -n "$KL_CTX" ] || { echo "engine: FATAL: no pipeline-context in the gitops repo; failing the build, the live WorkflowTemplate stays as it is" >&2; exit 1; }

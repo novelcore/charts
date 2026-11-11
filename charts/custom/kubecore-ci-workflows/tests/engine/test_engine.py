@@ -80,6 +80,82 @@ def test_no_quantization_means_hera_whatever_the_app_calls_itself(tmp_path):
     assert engine.profile_of(str(repo)) == "hera"
 
 
+# The four structured-config schemas the templates' vendored kubecore/derive_tree.py has had, cut down
+# to the two dataclasses the engine profiles differ in (kaos-hpc-operator engine/README.md).
+DT_HEAD = ("from dataclasses import dataclass\nfrom enum import Enum\n\n"
+           "class DataSource(Enum):\n    lakefs = 'lakefs'\n\n")
+DT_LEGACY_V1 = DT_HEAD + ("@dataclass\nclass DataConfig:\n    ref: str = 'main'\n    source: DataSource = DataSource.lakefs\n"
+                          "    version: str = ''\n    seed: int = 42\n\n"
+                          "@dataclass\nclass QuantizationConfig:\n    image_size: int = 640\n"
+                          "    output_prefix: str = 'quantization'\n")
+DT_HERA = DT_HEAD + ("@dataclass\nclass DataConfig:\n    ref: str = 'main'\n    source: DataSource = DataSource.lakefs\n"
+                     "    seed: int = 42\n\n"
+                     "@dataclass\nclass QuantizationConfig:\n    image_size: int = 640\n    output_prefix: str = ''\n")
+DT_YOLO_V1 = DT_HEAD + ("@dataclass\nclass DataConfig:\n    source: DataSource = DataSource.lakefs\n    seed: int = 42\n\n"
+                        "@dataclass\nclass QuantizationConfig:\n    image_size: int = 640\n    output_prefix: str = ''\n")
+DT_YOLO = DT_HEAD + ("@dataclass\nclass DataConfig:\n    source: DataSource = DataSource.lakefs\n    seed: int = 42\n\n"
+                     "@dataclass\nclass QuantizationConfig:\n    image_size: int = 640\n")
+
+
+def make_app(tmp_path, derive_tree=None, quantization=True, data_yaml=None):
+    repo = tmp_path / "repo"
+    (repo / "config").mkdir(parents=True)
+    if quantization:
+        (repo / "config" / "quantization.yaml").write_text("quantization:\n  mode: none\n")
+    if data_yaml is not None:
+        (repo / "config" / "data.yaml").write_text(data_yaml)
+    if derive_tree is not None:
+        (repo / "kubecore").mkdir()
+        (repo / "kubecore" / "derive_tree.py").write_text(derive_tree)
+    return str(repo)
+
+
+@pytest.mark.parametrize("derive_tree, profile", [
+    (DT_LEGACY_V1, "legacy-v1"),
+    (DT_HERA, "hera"),
+    (DT_YOLO_V1, "yolo-v1"),
+    (DT_YOLO, "yolo"),
+])
+def test_the_vendored_derive_tree_names_the_profile(tmp_path, derive_tree, profile):
+    assert engine.profile_of(make_app(tmp_path, derive_tree)) == profile
+
+
+def test_a_yolo_app_of_the_template_main_renders_with_hera(tmp_path):
+    # kubecore-operator#1830: yolo-pipelines-template `main` (derive_tree blob c3c4e36, since 2026-10-19) has a
+    # quantization section AND DataConfig.ref; the `yolo` schema has no ref, so every such app failed to
+    # render with "Key 'ref' not in 'DataConfig'". Its schema is the hera profile.
+    repo = make_app(tmp_path, DT_HERA, quantization=True, data_yaml='data:\n  ref: "main"\n  seed: 42\n')
+    assert engine.profile_of(repo) == "hera"
+
+
+def test_the_derive_tree_is_parsed_never_executed(tmp_path):
+    trap = "raise SystemExit('executed')\n" + DT_YOLO
+    assert engine.profile_of(make_app(tmp_path, trap)) == "yolo"
+
+
+@pytest.mark.parametrize("derive_tree", [
+    "def broken(:\n",                       # not python
+    "# moved to kaos-lib\nfrom kaos.derive_tree import *\n",  # a stub without the dataclasses
+])
+def test_a_derive_tree_without_a_schema_falls_back_to_the_config(tmp_path, derive_tree):
+    assert engine.profile_of(make_app(tmp_path, derive_tree, quantization=True)) == "yolo"
+    assert engine.profile_of(make_app(tmp_path / "h", derive_tree, quantization=False)) == "hera"
+
+
+@pytest.mark.parametrize("data_yaml, profile", [
+    ('data:\n  ref: "main"\n', "hera"),      # the yolo schema would reject data.ref
+    ('data:\n  source: "lakefs"\n', "yolo"),
+    ("not: [valid\n", "yolo"),
+])
+def test_without_a_vendored_schema_a_data_ref_means_hera(tmp_path, data_yaml, profile):
+    assert engine.profile_of(make_app(tmp_path, None, quantization=True, data_yaml=data_yaml)) == profile
+
+
+def test_the_context_carries_the_vendored_profile(tmp_path):
+    repo = make_app(tmp_path, DT_LEGACY_V1)
+    assert engine.engine_of(write_context(tmp_path, BLOCK), repo)["profile"] == "legacy-v1"
+
+
 @pytest.mark.parametrize("block", [
     None,
     "not a dict",
