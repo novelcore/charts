@@ -18,6 +18,7 @@ import datetime
 import json
 import os
 import re
+import stat
 import sys
 import urllib.error
 import urllib.parse
@@ -69,6 +70,15 @@ NONE = "none"  # pipeline-images kaos-lib-package: no step Dockerfile declares A
 BUMP_PREFIX = "kaos-lib/bump-"
 COMPAT_PATH = ".kaos/compat.yaml"
 COMPAT_KEY = "kaos-lib"
+# The checkout files read here (.kaos/compat.yaml, each step's Dockerfile) are the app's, untrusted:
+# a cap far above any real one (a template's step Dockerfile is well under 2 KB), so a huge or
+# endless file (a symlink to /dev/zero) is refused, not read. Same rule as engine.py _read_app_file.
+APP_FILE_MAX_BYTES = 64 * 1024
+EXIT_REFUSED = 5  # decide: a checkout file is there but not something to read as data
+
+
+class CheckoutFileError(Exception):
+    """A checkout file that is there but must not be read: the decision fails with this reason."""
 
 
 # ---------------------------------------------------------------- inputs
@@ -95,27 +105,89 @@ def kaos_lib(ctx):
     return v if isinstance(v, dict) else {}
 
 
-def read_compat(repo_dir):
-    """The app's declared range (.kaos/compat.yaml, key kaos-lib); "" when none is declared."""
+def read_checkout_file(repo_dir, rel):
+    """The text of <repo_dir>/<rel>, None when there is no such file. Raises CheckoutFileError when it
+    is there but not something to read as data: a symlink, not a regular file (a FIFO, a device),
+    resolving outside the checkout, larger than APP_FILE_MAX_BYTES or not UTF-8.
+
+    An absolute <rel> is a chart-owned file (the compose Dockerfile under /tmp), not the app's: it is
+    read as is, still a regular file within the bound.
+    """
+    path = os.path.join(repo_dir, rel)
     try:
-        with open(os.path.join(repo_dir, COMPAT_PATH)) as f:
-            doc = yaml.safe_load(f) or {}
-    except (OSError, yaml.YAMLError):
+        st = os.lstat(path)
+    except (FileNotFoundError, NotADirectoryError):  # no such file (or a component is not a directory)
+        return None
+    except OSError as exc:
+        raise CheckoutFileError(f"{rel}: cannot stat ({exc.strerror})") from exc
+    inside = os.path.isabs(rel) or os.path.realpath(path).startswith(os.path.realpath(repo_dir) + os.sep)
+    if stat.S_ISLNK(st.st_mode) or not stat.S_ISREG(st.st_mode) or not inside:
+        raise CheckoutFileError(f"{rel} is not a regular file in the checkout (a symlink, a device or outside it); "
+                                "refusing to read it")
+    if st.st_size > APP_FILE_MAX_BYTES:
+        raise CheckoutFileError(f"{rel} is {st.st_size} bytes, more than {APP_FILE_MAX_BYTES}; refusing to read it")
+    # Defence in depth against a swap between the lstat and the open: never follow a final symlink,
+    # never block on a FIFO, and check what was actually opened before reading it.
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except OSError as exc:
+        raise CheckoutFileError(f"{rel} cannot be opened as a regular file ({exc.strerror}); refusing to read it") from exc
+    try:
+        fst = os.fstat(fd)
+        if not stat.S_ISREG(fst.st_mode):
+            raise CheckoutFileError(f"{rel} is not a regular file in the checkout (a symlink, a device or outside it); "
+                                    "refusing to read it")
+        chunks, size = [], 0
+        while size <= APP_FILE_MAX_BYTES:
+            chunk = os.read(fd, APP_FILE_MAX_BYTES + 1 - size)
+            if not chunk:
+                break
+            chunks.append(chunk)
+            size += len(chunk)
+        raw = b"".join(chunks)
+    except OSError as exc:
+        raise CheckoutFileError(f"{rel} cannot be read ({exc.strerror})") from exc
+    finally:
+        os.close(fd)
+    if len(raw) > APP_FILE_MAX_BYTES:
+        raise CheckoutFileError(f"{rel} is more than {APP_FILE_MAX_BYTES} bytes; refusing to read it")
+    try:
+        return raw.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise CheckoutFileError(f"{rel} is not UTF-8 text; refusing to read it") from exc
+
+
+def read_compat(repo_dir):
+    """The app's declared range (.kaos/compat.yaml, key kaos-lib); "" when none is declared (no file,
+    a file that is not YAML, or no/empty kaos-lib key). A compat.yaml that cannot be read safely, or
+    whose kaos-lib value is not a scalar (a string or a number), raises CheckoutFileError."""
+    text = read_checkout_file(repo_dir, COMPAT_PATH)
+    if text is None:
+        return ""
+    try:
+        doc = yaml.safe_load(text) or {}
+    except (yaml.YAMLError, RecursionError):
         return ""
     val = doc.get(COMPAT_KEY) if isinstance(doc, dict) else None
-    return str(val).strip() if val is not None else ""
+    if val is None:
+        return ""
+    # Only a scalar is ever turned into text: str() of a list or mapping built from YAML aliases
+    # (a few hundred bytes) expands to gigabytes. A bool or a date is no specifier either.
+    if isinstance(val, bool) or not isinstance(val, (str, int, float)):
+        raise CheckoutFileError(f"{COMPAT_PATH}: {COMPAT_KEY} is a {type(val).__name__}, not a version "
+                                "specifier string; refusing to use it")
+    return str(val).strip()
 
 
 def managed(repo_dir, step_paths):
-    """Step paths whose Dockerfile declares ARG KAOS_LIB_PACKAGE (the steps the platform can move)."""
+    """Step paths whose Dockerfile declares ARG KAOS_LIB_PACKAGE (the steps the platform can move).
+    A step without a Dockerfile is not managed; one whose Dockerfile cannot be read safely raises
+    CheckoutFileError."""
     out = []
     for p in step_paths:
-        try:
-            with open(os.path.join(repo_dir, p, "Dockerfile")) as f:
-                if ARG_RE.search(f.read()):
-                    out.append(p)
-        except OSError:
-            pass
+        text = read_checkout_file(repo_dir, os.path.join(p, "Dockerfile"))
+        if text is not None and ARG_RE.search(text):
+            out.append(p)
     return out
 
 
@@ -483,7 +555,13 @@ def main(argv=None):
     if args.cmd == "decide":
         with open(args.steps) as f:
             steps = [ln.strip() for ln in f if ln.strip()]
-        out = decide(load_context(args.context), args.recorded.strip(), read_compat(args.repo), managed(args.repo, steps))
+        try:
+            compat, managed_paths = read_compat(args.repo), managed(args.repo, steps)
+        except CheckoutFileError as exc:
+            # The step's existing failure path: kaos-lib left as it is (no spec, no record written).
+            print(f"kaos-lib: REFUSED: {exc}", file=sys.stderr)
+            return EXIT_REFUSED
+        out = decide(load_context(args.context), args.recorded.strip(), compat, managed_paths)
         json.dump(out, sys.stdout)
     elif args.cmd == "context":
         print(str(kaos_lib(load_context(args.context)).get("spec") or "").strip())
