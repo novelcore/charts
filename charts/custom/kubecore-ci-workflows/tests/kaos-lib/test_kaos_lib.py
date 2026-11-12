@@ -8,7 +8,10 @@ import datetime
 import http.server
 import importlib.util
 import json
+import os
 import re
+import subprocess
+import sys
 import threading
 import urllib.parse
 from pathlib import Path
@@ -120,6 +123,152 @@ def test_the_cli_prints_the_decision(tmp_path, capsys):
 def test_context_prints_the_delivered_spec(tmp_path, capsys):
     kl.main(["context", "--context", str(ctx_file(tmp_path, {"spec": LIB, "version": "git-bbbbbbbbbbbb"}))])
     assert capsys.readouterr().out.strip() == LIB
+
+
+# ---------------------------------------------------------------- checkout reads (kubecore-operator issue 1833)
+# .kaos/compat.yaml and the step Dockerfiles are the app's (untrusted), read in detect-steps, which
+# holds the git token. A file that is there but is a symlink, not a regular file, outside the
+# checkout, over the bound or not UTF-8 is refused with the reason, never followed or read unbounded.
+
+SCRIPT = HERE.parents[1] / "files" / "kaos-lib.py"
+
+
+def steps_file(tmp_path, *paths):
+    f = tmp_path / "steps.txt"
+    f.write_text("".join(p + "\n" for p in paths))
+    return f
+
+
+def test_a_regular_compat_and_dockerfile_are_read(tmp_path):
+    repo = app_repo(tmp_path)
+    assert kl.read_compat(repo) == ">=0.2,<0.3"
+    assert kl.managed(repo, ["steps/a", "steps/b"]) == ["steps/a"]
+
+
+def test_a_missing_compat_is_no_range(tmp_path):
+    repo = app_repo(tmp_path, compat=None)
+    assert kl.read_compat(repo) == ""
+    (repo / ".kaos").write_text("not a directory\n")  # a `.kaos` file: still no compat.yaml
+    assert kl.read_compat(repo) == ""
+
+
+def test_a_compat_that_is_not_yaml_is_no_range(tmp_path):
+    repo = app_repo(tmp_path)
+    (repo / ".kaos" / "compat.yaml").write_text("kaos-lib: [unclosed\n")
+    assert kl.read_compat(repo) == ""
+
+
+def test_a_missing_dockerfile_is_no_managed_step(tmp_path):
+    repo = app_repo(tmp_path)
+    assert kl.managed(repo, ["steps/a", "steps/gone"]) == ["steps/a"]
+
+
+@pytest.mark.parametrize("target", ["/dev/zero", "outside"])
+def test_a_symlinked_compat_is_refused(tmp_path, target):
+    repo = app_repo(tmp_path, compat=None)
+    if target == "outside":
+        target = str(tmp_path / "outside.yaml")
+        (tmp_path / "outside.yaml").write_text('kaos-lib: ">=0.2"\n')
+    (repo / ".kaos").mkdir()
+    os.symlink(target, repo / ".kaos" / "compat.yaml")
+    with pytest.raises(kl.CheckoutFileError, match="not a regular file"):
+        kl.read_compat(repo)
+
+
+@pytest.mark.parametrize("target", ["/dev/zero", "outside"])
+def test_a_symlinked_dockerfile_is_refused(tmp_path, target):
+    repo = app_repo(tmp_path)
+    if target == "outside":
+        target = str(tmp_path / "Dockerfile.outside")
+        (tmp_path / "Dockerfile.outside").write_text(f'ARG KAOS_LIB_PACKAGE="{GIT}"\n')
+    os.remove(repo / "steps" / "b" / "Dockerfile")
+    os.symlink(target, repo / "steps" / "b" / "Dockerfile")
+    with pytest.raises(kl.CheckoutFileError, match="steps/b/Dockerfile"):
+        kl.managed(repo, ["steps/a", "steps/b"])
+
+
+def test_a_step_dir_symlinked_out_of_the_checkout_is_refused(tmp_path):
+    repo = app_repo(tmp_path)
+    (tmp_path / "elsewhere").mkdir()
+    (tmp_path / "elsewhere" / "Dockerfile").write_text(f'ARG KAOS_LIB_PACKAGE="{GIT}"\n')
+    os.symlink(tmp_path / "elsewhere", repo / "steps" / "c")
+    with pytest.raises(kl.CheckoutFileError, match="not a regular file in the checkout"):
+        kl.managed(repo, ["steps/c"])
+
+
+def test_a_step_dir_symlinked_inside_the_checkout_is_read(tmp_path):
+    repo = app_repo(tmp_path)
+    os.symlink(repo / "steps" / "a", repo / "steps" / "c")
+    assert kl.managed(repo, ["steps/c"]) == ["steps/c"]
+
+
+def test_a_fifo_dockerfile_is_refused_not_waited_on(tmp_path):
+    repo = app_repo(tmp_path)
+    os.remove(repo / "steps" / "b" / "Dockerfile")
+    os.mkfifo(repo / "steps" / "b" / "Dockerfile")
+    with pytest.raises(kl.CheckoutFileError, match="not a regular file"):
+        kl.managed(repo, ["steps/b"])
+
+
+def test_an_oversized_compat_is_refused_unread(tmp_path):
+    repo = app_repo(tmp_path)
+    (repo / ".kaos" / "compat.yaml").write_text("# x\n" * (kl.APP_FILE_MAX_BYTES // 4 + 1))
+    with pytest.raises(kl.CheckoutFileError, match="bytes"):
+        kl.read_compat(repo)
+
+
+def test_an_oversized_dockerfile_is_refused_unread(tmp_path):
+    repo = app_repo(tmp_path)
+    (repo / "steps" / "a" / "Dockerfile").write_text("RUN true\n" * (kl.APP_FILE_MAX_BYTES // 9 + 1))
+    with pytest.raises(kl.CheckoutFileError, match="bytes"):
+        kl.managed(repo, ["steps/a"])
+
+
+def test_a_dockerfile_at_the_bound_is_read(tmp_path):
+    repo = app_repo(tmp_path)
+    body = f'ARG KAOS_LIB_PACKAGE="{GIT}"\n'
+    (repo / "steps" / "a" / "Dockerfile").write_text(body + "#" * (kl.APP_FILE_MAX_BYTES - len(body)))
+    assert kl.managed(repo, ["steps/a"]) == ["steps/a"]
+
+
+def test_a_dockerfile_that_is_not_utf8_is_refused(tmp_path):
+    repo = app_repo(tmp_path)
+    (repo / "steps" / "a" / "Dockerfile").write_bytes(b"FROM x\n\xff\xfe\n")
+    with pytest.raises(kl.CheckoutFileError, match="UTF-8"):
+        kl.managed(repo, ["steps/a"])
+
+
+def test_the_chart_owned_compose_dockerfile_outside_the_checkout_is_read(tmp_path):
+    # detect-steps appends /tmp/compose-ctx (absolute, the chart's own Dockerfile) to the step paths.
+    repo = app_repo(tmp_path)
+    compose = tmp_path / "compose-ctx"
+    compose.mkdir()
+    (compose / "Dockerfile").write_text(f'FROM engine\nARG KAOS_LIB_PACKAGE="{GIT}"\n')
+    assert kl.managed(repo, ["steps/a", str(compose)]) == ["steps/a", str(compose)]
+
+
+def test_the_cli_refuses_with_the_reason_and_writes_no_decision(tmp_path, capsys):
+    repo = app_repo(tmp_path, compat=None)
+    (repo / ".kaos").mkdir()
+    os.symlink("/dev/zero", repo / ".kaos" / "compat.yaml")
+    rc = kl.main(["decide", "--context", str(ctx_file(tmp_path, {"spec": GIT})), "--repo", str(repo),
+                  "--steps", str(steps_file(tmp_path, "steps/a"))])
+    out, err = capsys.readouterr()
+    assert rc == kl.EXIT_REFUSED and out == ""
+    assert err.startswith("kaos-lib: REFUSED: .kaos/compat.yaml is not a regular file")
+
+
+@pytest.mark.parametrize("victim", [".kaos/compat.yaml", "steps/a/Dockerfile"])
+def test_the_cli_does_not_hang_on_dev_zero(tmp_path, victim):
+    # A subprocess with a deadline: before the fix this read /dev/zero until OOM or the step deadline.
+    repo = app_repo(tmp_path)
+    os.remove(repo / victim)
+    os.symlink("/dev/zero", repo / victim)
+    proc = subprocess.run([sys.executable, "-I", str(SCRIPT), "decide", "--context", str(ctx_file(tmp_path, {"spec": GIT})),
+                           "--repo", str(repo), "--steps", str(steps_file(tmp_path, "steps/a", "steps/b"))],
+                          capture_output=True, text=True, timeout=30)
+    assert proc.returncode == kl.EXIT_REFUSED and proc.stdout == ""
+    assert f"kaos-lib: REFUSED: {victim} is not a regular file" in proc.stderr
 
 
 # ---------------------------------------------------------------- versions
