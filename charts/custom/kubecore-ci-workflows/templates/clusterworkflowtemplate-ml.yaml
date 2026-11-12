@@ -2051,11 +2051,11 @@ spec:
         readOnly: true
 
   # engine-record (PRD-HPC-1461 D-80): what the platform engine did in THIS run, written into the app's
-  # pipeline-images in gitops (ArgoCD syncs it to {app}-pipeline-images). A run whose engine render,
-  # enhance or compose-image build failed records `engine-last-error` (one line, at most 200
+  # pipeline-images in gitops (ArgoCD syncs it to {app}-pipeline-images). A run whose engine check,
+  # render, enhance or compose-image build failed records `engine-last-error` (one line, at most 200
   # characters, taken from the failed pod's log) and `engine-attempt` (<engine version>@<epoch>, the
-  # attempt ml-ci-reconcile's one-attempt-per-hour guard reads). A run that rendered or built the compose
-  # image successfully clears both. A run that did neither leaves them as they are. The operator reads
+  # attempt ml-ci-reconcile's one-attempt-per-hour guard reads). A run that Succeeded and rendered,
+  # enhanced or built the compose image clears both. Any other run leaves them as they are. The operator reads
   # engine-last-error to show state `failed`. Reporting only: the caller continues on failure.
   - name: engine-record
 {{ include "kubecore-ci-workflows.preemptionRetry" . | indent 4 }}
@@ -2075,20 +2075,27 @@ spec:
         WF="{{`{{workflow.name}}`}}"; NS="{{`{{workflow.namespace}}`}}"
         PHASE="{{`{{workflow.status}}`}}"
 
-        # The engine stages, by the pod's node name: detect-steps (its engine check), hera-render,
-        # hera-enhance-commit and the compose-and-validate image build.
+        # The engine stages, by the pod's node name: detect-steps (its engine check; ml-ci-build runs it
+        # first as step probe-detect, then again inside the run), hera-render, hera-enhance-commit and the
+        # compose-and-validate image build. These steps retry a lost pod, so Argo names each attempt's
+        # pod `<node>(N)` (`...hera-render(0)`, `(1)`) under a Retry node: the patterns accept that
+        # suffix (kubecore-operator issue 1832).
         kubectl get pods -n "${NS}" -l "workflows.argoproj.io/workflow=${WF}" -o json > /tmp/pods.json 2>/dev/null || echo '{"items":[]}' > /tmp/pods.json
         STAGES='[
-          {"stage":"engine check","re":"[.]detect-steps$"},
-          {"stage":"render","re":"[.]hera-render$"},
-          {"stage":"enhance","re":"[.]hera-enhance-commit$"},
+          {"stage":"engine check","re":"[.](probe-detect|detect-steps)([(][0-9]+[)])?$"},
+          {"stage":"render","re":"[.]hera-render([(][0-9]+[)])?$"},
+          {"stage":"enhance","re":"[.]hera-enhance-commit([(][0-9]+[)])?$"},
           {"stage":"compose image build","re":"build-push[(].*compose-and-validate"}]'
-        # "<stage>|<pod>|<exit code>" per engine pod that ran, in start order.
+        # "<stage>|<pod>|<exit code>" per engine step that ran, in start order. Only the LAST attempt of
+        # each step counts (the node name without its retry suffix, the highest N): an attempt that was
+        # lost and retried to success is not an error, and a step whose last attempt failed is.
         jq -r --argjson stages "$STAGES" '
           [.items[] | . as $p | ($p.metadata.annotations["workflows.argoproj.io/node-name"] // "") as $n
            | ($stages[] | . as $s | select($n | test($s.re)) | .stage) as $stage
-           | {stage: $stage, pod: $p.metadata.name, start: $p.status.startTime,
+           | {stage: $stage, node: ($n | sub("[(][0-9]+[)]$"; "")), pod: $p.metadata.name, start: $p.status.startTime,
+              retry: ([$n | capture("[(](?<n>[0-9]+)[)]$") | .n | tonumber] | first // -1),
               exit: ((($p.status.containerStatuses // []) | map(select(.name=="main")) | .[0].state.terminated.exitCode) // "")}]
+          | group_by(.node) | map(sort_by(.retry, .start) | last)
           | sort_by(.start) | .[] | "\(.stage)|\(.pod)|\(.exit)"' /tmp/pods.json > /tmp/engine-pods
 
         ERROR=""
@@ -2108,7 +2115,7 @@ spec:
         done < /tmp/engine-pods
         OK=$(awk -F'|' '$1 != "engine check" && $3 == "0" {n++} END {print n + 0}' /tmp/engine-pods)
 
-        # A pod that failed and was retried to success is not an error of the run.
+        # A run that Succeeded has no engine error (belt and braces next to the last-attempt rule).
         [ "${PHASE}" = Succeeded ] && ERROR=""
         if [ -z "${ERROR}" ] && [ "${PHASE}" != Succeeded ]; then
           echo "engine-record: the run ended ${PHASE} outside the engine stages — nothing to record"
