@@ -138,6 +138,25 @@ The fixtures of `tests/connections` are two chart-owned apps on the contract (`f
 
 **Moving the pins (the cutover).** The chart, the operator's pin of it, the engine pin and the platform's kaos-lib value move together, in a freeze: kaos-lib 0.5 delivered first, then the operator release that pins this chart and the engine on the contract. `pipelineLint.*` must name a kaos-lib 0.5 wheel (rule set 2.0.0) from the same moment: the 0.4 linter reports the new keywords as errors.
 
+## What a Dockerfile can read while its image builds (PRD novelcore/kaos#1911, chart 0.14.1)
+
+`build-push` runs the developer's Dockerfile in kaniko, in the pod's main container, so everything that container mounts and every credential the pod can reach is readable by tenant `RUN` steps. How the pod authenticates to the registry:
+
+| Registry | How kaniko pushes | What a `RUN` step can read |
+|---|---|---|
+| Artifact Registry (every GCP pool) | the pod runs as `ci-build-sa`, bound by Workload Identity to the organisation's CI Google account; kaniko's `gcr` credential helper (`DOCKER_CONFIG=/kaniko/.docker-gar`) exchanges that identity at the metadata endpoint | the same token, from the metadata endpoint: it can push to the organisation's repository under any app's name, for about an hour |
+| in-cluster Zot | basic auth written by the `docker-config` init container into `/kaniko/.docker/config.json` | that file (kaniko keeps `/kaniko` out of the image filesystem it builds on, so it is readable) |
+
+Fixed in this chart: the main container no longer mounts `registry-auth` (the password was only ever read by the init container; the mount gave `RUN` steps a second copy). `tests/build-isolation/run.sh` asserts the container mounts the workspace and the docker config only, and no token.
+
+**Not fixed in the chart, and why.** A pod cannot hold a credential its Dockerfile steps cannot read: kaniko and the `RUN` steps share the pod's network namespace and identity. The options, checked against the cluster:
+
+- *A NetworkPolicy denying `169.254.169.254` to build pods* is enforced (the pools run GKE Dataplane V2, which enforces egress policies on the metadata address), and it stops the push: the `gcr` helper reads the same endpoint. It only works together with a credential that is not ambient.
+- *`--no-push --tar-path`, then a push step that runs no developer code* closes the hole, and needs a build pod with no Google identity (a service account without the Workload Identity binding, plus the policy above), a second pod that holds the identity and pushes, and a way to carry the tarball between them (a multi-GiB image: a volume or an object-store artifact). kaniko's layer cache is pushed and pulled with the same credential, so it must move to the push side or be given up; giving it up turns the cached seconds into the ~50 minute cold builds the cache exists to avoid.
+- *A short-lived push credential handed to kaniko as a file* limits the window, not the reach: Artifact Registry has one repository per organisation, and a downscoped token cannot be narrowed to one app's package names.
+
+The proposal that closes it, which needs the pool's identity setup (outside this chart): one Artifact Registry repository per app (or an IAM condition on the package path, to be verified), one Google account per app with writer on that repository only, and `ci-build-sa` replaced for builds by that account. Then the ambient token reaches only the app's own images, which the app may write anyway, and the policy above is unnecessary.
+
 ## Tests
 
 ```bash
@@ -147,4 +166,5 @@ bash charts/custom/kubecore-ci-workflows/tests/reconcile-trigger/run.sh         
 bash charts/custom/kubecore-ci-workflows/tests/sync-wait/kind/run.sh [outdir]    # real Argo v4.0.6 in kind (needs docker, kind)
 bash charts/custom/kubecore-ci-workflows/tests/build-pacing/run.sh               # pacing render guards
 bash charts/custom/kubecore-ci-workflows/tests/build-pacing/kind/run.sh [outdir] # real Argo: cap, render-only, mutex
+bash charts/custom/kubecore-ci-workflows/tests/build-isolation/run.sh            # what the build container mounts
 ```

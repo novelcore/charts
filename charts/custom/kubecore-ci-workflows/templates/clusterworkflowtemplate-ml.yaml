@@ -1113,9 +1113,8 @@ spec:
         mountPath: /workspace
       - name: kaniko-config
         mountPath: /kaniko/.docker
-      - name: registry-auth
-        mountPath: /etc/registry-auth
-        readOnly: true
+      # No registry-auth mount: the Dockerfile's RUN steps execute in this container, and the
+      # registry password is only needed by the docker-config init container above.
 
   # ── Render path (credential-split) ─────────────────────────────────────
   # Two steps sharing the workspace PVC. The trust boundary: `hera-render` runs
