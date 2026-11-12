@@ -21,15 +21,28 @@ def read_catalog(endpoint, token_path):
     return json.load(urllib.request.urlopen(req, timeout=20)).get("datasets") or []
 
 
+def _ref(d):
+    """The name a reference uses: a shared dataset is `<owner>/<dataset>` (PRD novelcore/kaos#1533 F-23)."""
+    name, owner = d.get("name", ""), d.get("owner")
+    return f"{owner}/{name}" if owner and "/" not in name else name
+
+
 def _ordered(datasets):
-    return sorted(datasets, key=lambda d: (not d.get("default"), d.get("name", "")))
+    """The project's own datasets first, the default first, then by name; then the shared ones grouped by
+    owner (owners in catalog order, catalog order within an owner)."""
+    own = sorted((d for d in datasets if not d.get("owner")), key=lambda d: (not d.get("default"), d.get("name", "")))
+    shared = [d for d in datasets if d.get("owner")]
+    owners = list(dict.fromkeys(d["owner"] for d in shared))
+    return own + [d for o in owners for d in shared if d["owner"] == o]
 
 
 def choices(datasets):
-    """<dataset>@<version> newest first, then <dataset>@latest, per dataset; the default dataset first."""
+    """<dataset>@<version> newest first, then <dataset>@latest, per dataset; the default dataset first, the
+    shared datasets (<owner>/<dataset>) after the project's own."""
     out = []
     for d in _ordered(datasets):
-        out += [f"{d['name']}@{v['tag']}" for v in d.get("versions") or []] + [f"{d['name']}@latest"]
+        ref = _ref(d)
+        out += [f"{ref}@{v['tag']}" for v in d.get("versions") or []] + [f"{ref}@latest"]
     return out
 
 
@@ -43,12 +56,15 @@ def fill(wft, names, datasets):
 
     The default stays what the app's config says when the catalog offers it (`latest` included: it is
     resolved to a commit when the run starts). A default the catalog does not offer becomes the latest of
-    the same dataset, or of the project's default dataset when that dataset does not exist. A field the
+    the same dataset, or of the project's own default dataset when that dataset does not exist. A shared
+    dataset is only ever kept, never picked as a fallback; a project with no dataset of its own leaves the
+    value as it is. A field the
     form does not have is an error: the engine gives every input a field of its own name.
     """
     offered = choices(datasets)
     ordered = _ordered(datasets)
-    known = {d["name"] for d in ordered}
+    known = {_ref(d) for d in ordered}
+    own = [d for d in ordered if not d.get("owner")]
     params = {p.get("name"): p for p in (wft["spec"].get("arguments") or {}).get("parameters") or []}
     filled = {}
     for name in names:
@@ -58,13 +74,16 @@ def fill(wft, names, datasets):
         param["enum"] = list(offered)
         if param.get("value") not in offered:
             dataset = str(param.get("value") or "").split("@", 1)[0]
-            param["value"] = f"{dataset if dataset in known else ordered[0]['name']}@latest"
+            fallback = dataset if dataset in known else (own[0]["name"] if own else "")
+            if fallback:
+                param["value"] = f"{fallback}@latest"
         filled[name] = param["value"]
     return filled
 
 
 def digest(offered):
-    """sha256 of the sorted choices: what a pipeline was rendered with."""
+    """sha256 of the sorted choices: what a pipeline was rendered with. The choices include the shared
+    datasets, so a share or unshare moves it and re-renders."""
     return hashlib.sha256("\n".join(sorted(offered)).encode()).hexdigest()
 
 
