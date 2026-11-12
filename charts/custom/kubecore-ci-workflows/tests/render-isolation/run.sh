@@ -32,7 +32,8 @@ j() { yq -o=json -I=0 "${R} | $1" "$T/default.yaml"; }
 # ── the pod ──────────────────────────────────────────────────────────────
 check "no Kubernetes token in the pod" "false" "$(q '.automountServiceAccountToken')"
 check "the pod runs as a non-root user" "true" "$(q '.securityContext.runAsNonRoot')"
-check "the pod's user is not root" "true" "$(q '.securityContext.runAsUser > 0')"
+uid=$(q '.securityContext.runAsUser')   # compared in the shell: `>` in a yq expression needs a newer yq than CI has
+check "the pod's user is not root" "true" "$([ "${uid:-0}" -gt 0 ] 2>/dev/null && echo true || echo false)"
 check "the workspace is group-writable for that user (fsGroup)" "$(q '.securityContext.runAsUser')" "$(q '.securityContext.fsGroup')"
 check "the default seccomp profile" "RuntimeDefault" "$(q '.securityContext.seccompProfile.type')"
 check "read-only root filesystem" "true" "$(q '.container.securityContext.readOnlyRootFilesystem')"
