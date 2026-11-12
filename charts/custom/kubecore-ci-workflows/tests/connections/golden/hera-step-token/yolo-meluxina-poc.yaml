@@ -27,10 +27,7 @@ spec:
       - train/callbacks={{workflow.parameters.train-callbacks}}
       - train/optimizer={{workflow.parameters.train-optimizer}}
       - train/qat={{workflow.parameters.train-qat}}
-      - summary.label={{workflow.parameters.summary-label}}
-      - data.ref={{workflow.parameters.data-ref}}
       - data.source={{workflow.parameters.data-source}}
-      - data.version={{workflow.parameters.data-version}}
       - data.path_override={{workflow.parameters.data-path_override}}
       - data.sample_size={{workflow.parameters.data-sample_size}}
       - data.seed={{workflow.parameters.data-seed}}
@@ -40,9 +37,10 @@ spec:
       - quantization.calibration_seed={{workflow.parameters.quantization-calibration_seed}}
       - quantization.parity_frames={{workflow.parameters.quantization-parity_frames}}
       - quantization.parity_max_abs_error={{workflow.parameters.quantization-parity_max_abs_error}}
-      - quantization.output_prefix={{workflow.parameters.quantization-output_prefix}}
       - experiment.name={{workflow.parameters.experiment-name}}
       - experiment.description={{workflow.parameters.experiment-description}}
+      - dataset={{workflow.parameters.dataset}}
+      - calibration={{workflow.parameters.calibration}}
       - model.variant={{workflow.parameters.model-variant}}
       - model.pretrained_weights={{workflow.parameters.model-pretrained_weights}}
       - train.epochs={{workflow.parameters.train-epochs}}
@@ -99,8 +97,7 @@ spec:
       - logging.level={{workflow.parameters.logging-level}}
       - logging.log_artifacts={{workflow.parameters.logging-log_artifacts}}
       - --render-defaults
-      - '{"image_processing":"mosaic_default","model":"yolov8n","train/callbacks":"early_stopping","train/optimizer":"sgd","train/qat":"default_qat","summary.label":"\ud83d\udcca
-        Data summary","data.ref":"main","data.source":"lakefs","data.version":"","data.path_override":"","data.sample_size":"","data.seed":"42","quantization.mode":"none","quantization.image_size":"640","quantization.calibration_frames":"512","quantization.calibration_seed":"42","quantization.parity_frames":"100","quantization.parity_max_abs_error":"0.05","quantization.output_prefix":"main/quantization","experiment.name":"object-pose-v1-yolov8n","experiment.description":"","model.variant":"yolov8n-pose.pt","model.pretrained_weights":"","train.epochs":"100","train.batch_size":"16","train.image_size":"640","train.cos_lr":"true","train.lrf":"0.01","train.warmup_epochs":"3.0","train.warmup_momentum":"0.8","train.dropout":"0.0","train.label_smoothing":"0.0","train.nbs":"64","train.freeze":"","train.amp":"true","train.close_mosaic":"10","train.seed":"0","train.deterministic":"true","train.loss.pose":"12.0","train.loss.kobj":"2.0","train.loss.box":"7.5","train.loss.cls":"0.5","train.loss.dfl":"1.5","train.checkpointing.interval_epochs":"10","train.checkpointing.storage_path":"","train.checkpointing.resume_from":"","train.export.enabled":"false","train.export.formats":"engine","train.export.precisions":"fp16","train.optimizer.name":"SGD","train.optimizer.lr":"0.01","train.optimizer.momentum":"0.937","train.optimizer.weight_decay":"0.0005","train.callbacks.early_stopping_enabled":"true","train.callbacks.patience":"50","train.qat.epochs":"10","train.qat.lr":"0.0001","image_processing.hsv_h":"0.015","image_processing.hsv_s":"0.7","image_processing.hsv_v":"0.4","image_processing.degrees":"0.0","image_processing.translate":"0.1","image_processing.scale":"0.5","image_processing.shear":"0.0","image_processing.perspective":"0.0","image_processing.flipud":"0.0","image_processing.fliplr":"0.0","image_processing.mosaic":"1.0","image_processing.mixup":"0.0","image_processing.copy_paste":"0.0","image_processing.erasing":"0.4","image_processing.bgr":"0.0","registration.registered_model_name":"","registration.promote_to":"","logging.level":"INFO","logging.log_artifacts":"true"}'
+      - '{"image_processing":"mosaic_default","model":"yolov8n","train/callbacks":"early_stopping","train/optimizer":"sgd","train/qat":"default_qat","data.source":"lakefs","data.path_override":"","data.sample_size":"","data.seed":"42","quantization.mode":"none","quantization.image_size":"640","quantization.calibration_frames":"512","quantization.calibration_seed":"42","quantization.parity_frames":"100","quantization.parity_max_abs_error":"0.05","experiment.name":"object-pose-v1-yolov8n","experiment.description":"","dataset":"dataset-default@latest","calibration":"dataset-default@latest","model.variant":"yolov8n-pose.pt","model.pretrained_weights":"","train.epochs":"100","train.batch_size":"16","train.image_size":"640","train.cos_lr":"true","train.lrf":"0.01","train.warmup_epochs":"3.0","train.warmup_momentum":"0.8","train.dropout":"0.0","train.label_smoothing":"0.0","train.nbs":"64","train.freeze":"","train.amp":"true","train.close_mosaic":"10","train.seed":"0","train.deterministic":"true","train.loss.pose":"12.0","train.loss.kobj":"2.0","train.loss.box":"7.5","train.loss.cls":"0.5","train.loss.dfl":"1.5","train.checkpointing.interval_epochs":"10","train.checkpointing.storage_path":"","train.checkpointing.resume_from":"","train.export.enabled":"false","train.export.formats":"engine","train.export.precisions":"fp16","train.optimizer.name":"SGD","train.optimizer.lr":"0.01","train.optimizer.momentum":"0.937","train.optimizer.weight_decay":"0.0005","train.callbacks.early_stopping_enabled":"true","train.callbacks.patience":"50","train.qat.epochs":"10","train.qat.lr":"0.0001","image_processing.hsv_h":"0.015","image_processing.hsv_s":"0.7","image_processing.hsv_v":"0.4","image_processing.degrees":"0.0","image_processing.translate":"0.1","image_processing.scale":"0.5","image_processing.shear":"0.0","image_processing.perspective":"0.0","image_processing.flipud":"0.0","image_processing.fliplr":"0.0","image_processing.mosaic":"1.0","image_processing.mixup":"0.0","image_processing.copy_paste":"0.0","image_processing.erasing":"0.4","image_processing.bgr":"0.0","registration.registered_model_name":"","registration.promote_to":"","logging.level":"INFO","logging.log_artifacts":"true"}'
       - --advanced
       - '{{workflow.parameters.config}}'
       - --require=data
@@ -110,14 +107,26 @@ spec:
       - --require=model
       - --require=quantization
       - --require=registration
-      - --require=summary
       - --require=train
       - --output
       - /work/params.yaml
+      - --run
+      - '{{workflow.name}}'
+      - --steps
+      - '[{"name":"config-validation","kind":"control","reads":["data","model","train"],"inputs":[],"needs":[],"produces":[]},{"name":"prepare-data","kind":"transform","reads":["data"],"inputs":["dataset"],"needs":["config-validation"],"produces":[{"name":"prepared","type":"dataset"}]},{"name":"model-training","kind":"train","reads":["experiment","data","model","train","image_processing","logging"],"inputs":[],"needs":["prepare-data"],"produces":[{"name":"checkpoints","type":"model"}]},{"name":"qat-finetune","kind":"train","reads":["experiment","train","quantization"],"inputs":[],"needs":["model-training"],"produces":[{"name":"qat","type":"model"}]},{"name":"model-quantization","kind":"transform","reads":["experiment","quantization"],"inputs":["calibration"],"needs":["model-training","qat-finetune"],"produces":[{"name":"quantized","type":"artifact"}]},{"name":"model-registration","kind":"publish","reads":["data","model","registration"],"inputs":[],"needs":["model-training","model-quantization"],"produces":[]}]'
+      - --context-dir
+      - /work/context
+      - --ledger-output
+      - /work/kaos-ledger.json
+      - --app
+      - yolo-meluxina-poc
+      - --project
+      - data-room
       command:
       - python
+      - -I
       - -m
-      - kubecore.compose
+      - kaos_engine.compose
       env:
       - name: MLFLOW_TRACKING_URI
         value: http://mlflow.internal.invalid
@@ -141,16 +150,10 @@ spec:
           secretKeyRef:
             name: PLACEHOLDER-lakefs-admin
             key: secretAccessKey
-      - name: CHECKPOINT_BUCKET
-        value: outputs-yolo-meluxina-poc
-      - name: CHECKPOINT_PREFIX
-        value: main/checkpoints
-      - name: KUBECORE_RUN_ID
-        value: '{{workflow.name}}'
-      - name: KUBECORE_WORKFLOW_NAME
-        value: '{{workflow.name}}'
       - name: KAOS_CHECKPOINT_DIR
         value: /kaos/checkpoint
+      - name: KAOS_STEP_IMAGES
+        value: '{"config-validation":"{{workflow.parameters.image-config-validation}}","model-quantization":"{{workflow.parameters.image-model-quantization}}","model-registration":"{{workflow.parameters.image-model-registration}}","model-training":"{{workflow.parameters.image-model-training}}","prepare-data":"{{workflow.parameters.image-prepare-data}}","qat-finetune":"{{workflow.parameters.image-qat-finetune}}"}'
       - name: KAOS_LAKE_TOKEN_FILE
         value: /var/run/secrets/kaos-lake/token
       resources:
@@ -172,11 +175,33 @@ spec:
       - name: kaos-lake-token
         mountPath: /var/run/secrets/kaos-lake
         readOnly: true
+    metadata:
+      labels:
+        platform.kubecore.io/step: compose-and-validate
+        platform.kubecore.io/step-kind: control
     outputs:
       parameters:
-      - name: params
+      - name: kaos-ledger
         valueFrom:
-          path: /work/params.yaml
+          path: /work/kaos-ledger.json
+      - name: kaos-context-config-validation
+        valueFrom:
+          path: /work/context/config-validation.json
+      - name: kaos-context-prepare-data
+        valueFrom:
+          path: /work/context/prepare-data.json
+      - name: kaos-context-model-training
+        valueFrom:
+          path: /work/context/model-training.json
+      - name: kaos-context-qat-finetune
+        valueFrom:
+          path: /work/context/qat-finetune.json
+      - name: kaos-context-model-quantization
+        valueFrom:
+          path: /work/context/model-quantization.json
+      - name: kaos-context-model-registration
+        valueFrom:
+          path: /work/context/model-registration.json
     podSpecPatch: "containers:\n- name: main\n  resources:\n    requests:\n      cpu:\
       \ \"{{workflow.parameters.compose-and-validate-cpu}}\"\n      memory: \"{{workflow.parameters.compose-and-validate-mem}}\"\
       \n      ephemeral-storage: \"{{workflow.parameters.compose-and-validate-disk}}\"\
@@ -231,14 +256,13 @@ spec:
   - name: config-validation
     container:
       image: '{{workflow.parameters.image-config-validation}}'
-      args:
-      - --params
-      - '{{inputs.parameters.params}}'
       command:
       - python
       - -m
       - app.entry
       env:
+      - name: KAOS_STEP_CONTEXT
+        value: '{{inputs.parameters.kaos-context}}'
       - name: MLFLOW_TRACKING_URI
         value: http://mlflow.internal.invalid
       - name: MLFLOW_TRACKING_AUTH
@@ -261,14 +285,6 @@ spec:
           secretKeyRef:
             name: PLACEHOLDER-lakefs-admin
             key: secretAccessKey
-      - name: CHECKPOINT_BUCKET
-        value: outputs-yolo-meluxina-poc
-      - name: CHECKPOINT_PREFIX
-        value: main/checkpoints
-      - name: KUBECORE_RUN_ID
-        value: '{{workflow.name}}'
-      - name: KUBECORE_WORKFLOW_NAME
-        value: '{{workflow.name}}'
       - name: KAOS_CHECKPOINT_DIR
         value: /kaos/checkpoint
       - name: KAOS_LAKE_TOKEN_FILE
@@ -294,7 +310,17 @@ spec:
         readOnly: true
     inputs:
       parameters:
-      - name: params
+      - name: kaos-context
+    metadata:
+      labels:
+        platform.kubecore.io/step: config-validation
+        platform.kubecore.io/step-kind: control
+    outputs:
+      parameters:
+      - name: kaos-result
+        valueFrom:
+          default: '{"version":1,"status":"absent"}'
+          path: /work/output/kaos-result.json
     podSpecPatch: "containers:\n- name: main\n  resources:\n    requests:\n      cpu:\
       \ \"{{workflow.parameters.config-validation-cpu}}\"\n      memory: \"{{workflow.parameters.config-validation-mem}}\"\
       \n      ephemeral-storage: \"{{workflow.parameters.config-validation-disk}}\"\
@@ -346,17 +372,16 @@ spec:
         duration: 30s
         factor: '2'
         maxDuration: 10m
-  - name: dataset-loading
+  - name: prepare-data
     container:
-      image: '{{workflow.parameters.image-dataset-loading}}'
-      args:
-      - --params
-      - '{{inputs.parameters.params}}'
+      image: '{{workflow.parameters.image-prepare-data}}'
       command:
       - python
       - -m
       - app.entry
       env:
+      - name: KAOS_STEP_CONTEXT
+        value: '{{inputs.parameters.kaos-context}}'
       - name: MLFLOW_TRACKING_URI
         value: http://mlflow.internal.invalid
       - name: MLFLOW_TRACKING_AUTH
@@ -379,14 +404,6 @@ spec:
           secretKeyRef:
             name: PLACEHOLDER-lakefs-admin
             key: secretAccessKey
-      - name: CHECKPOINT_BUCKET
-        value: outputs-yolo-meluxina-poc
-      - name: CHECKPOINT_PREFIX
-        value: main/checkpoints
-      - name: KUBECORE_RUN_ID
-        value: '{{workflow.name}}'
-      - name: KUBECORE_WORKFLOW_NAME
-        value: '{{workflow.name}}'
       - name: KAOS_CHECKPOINT_DIR
         value: /kaos/checkpoint
       - name: KAOS_LAKE_TOKEN_FILE
@@ -412,150 +429,24 @@ spec:
         readOnly: true
     inputs:
       parameters:
-      - name: params
+      - name: kaos-context
+    metadata:
+      labels:
+        platform.kubecore.io/step: prepare-data
+        platform.kubecore.io/step-kind: transform
     outputs:
       parameters:
-      - name: data-yaml
+      - name: kaos-result
         valueFrom:
-          default: '{}'
-          path: /work/output/data-yaml.json
-      - name: manifest-summary
-        valueFrom:
-          default: '{}'
-          path: /work/output/manifest-summary.json
+          default: '{"version":1,"status":"absent"}'
+          path: /work/output/kaos-result.json
     podSpecPatch: "containers:\n- name: main\n  resources:\n    requests:\n      cpu:\
-      \ \"{{workflow.parameters.dataset-loading-cpu}}\"\n      memory: \"{{workflow.parameters.dataset-loading-mem}}\"\
-      \n      ephemeral-storage: \"{{workflow.parameters.dataset-loading-disk}}\"\n\
-      \    limits:\n      cpu: \"{{workflow.parameters.dataset-loading-cpu}}\"\n \
-      \     memory: \"{{workflow.parameters.dataset-loading-mem}}\"\n"
+      \ \"{{workflow.parameters.prepare-data-cpu}}\"\n      memory: \"{{workflow.parameters.prepare-data-mem}}\"\
+      \n      ephemeral-storage: \"{{workflow.parameters.prepare-data-disk}}\"\n \
+      \   limits:\n      cpu: \"{{workflow.parameters.prepare-data-cpu}}\"\n     \
+      \ memory: \"{{workflow.parameters.prepare-data-mem}}\"\n"
     nodeSelector:
-      platform.kubecore.io/nodegroup-type: '{{workflow.parameters.dataset-loading-class}}'
-      platform.kubecore.io/environment: runtime
-      platform.kubecore.io/project: data-room
-    activeDeadlineSeconds: 1800
-    tolerations:
-    - key: platform.kubecore.io/ml-workload
-      operator: Equal
-      value: cpu
-      effect: NoSchedule
-    - key: platform.kubecore.io/ml-workload
-      operator: Equal
-      value: gpu
-      effect: NoSchedule
-    - key: platform.kubecore.io/kubenv
-      operator: Equal
-      value: runtime
-      effect: NoSchedule
-    volumes:
-    - name: mlflow-svc
-      secret:
-        secretName: PLACEHOLDER-mlflow-svc
-    - name: dshm
-      emptyDir:
-        medium: Memory
-        sizeLimit: 1Gi
-    - name: kaos-checkpoint
-      emptyDir: {}
-    - name: kaos-lake-token
-      projected:
-        sources:
-        - serviceAccountToken:
-            audience: kaos-lake
-            expirationSeconds: 3600
-            path: token
-    retryStrategy:
-      limit: '2'
-      retryPolicy: Always
-      expression: (lastRetry.status == 'Error' or lastRetry.message matches '.*(imminent
-        node shutdown|node is shutting down|node is draining|The node was low on resource|The
-        node had condition|Pod was rejected|Evicted|evicted|pod deleted|Pod was deleted).*')
-        and not (lastRetry.message startsWith 'KaosIdle')
-      backoff:
-        duration: 30s
-        factor: '2'
-        maxDuration: 10m
-  - name: data-summary
-    container:
-      image: '{{workflow.parameters.image-data-summary}}'
-      args:
-      - --params
-      - '{{inputs.parameters.params}}'
-      - --data-yaml
-      - '{{inputs.parameters.data-yaml}}'
-      - --manifest-summary
-      - '{{inputs.parameters.manifest-summary}}'
-      command:
-      - python
-      - -m
-      - app.entry
-      env:
-      - name: MLFLOW_TRACKING_URI
-        value: http://mlflow.internal.invalid
-      - name: MLFLOW_TRACKING_AUTH
-        value: zitadel
-      - name: ZITADEL_DOMAIN
-        value: oidc.internal.invalid
-      - name: ZITADEL_MLFLOW_PROJECT_ID
-        value: PLACEHOLDER-oidc-project-id
-      - name: ZITADEL_MACHINE_KEY_FILE
-        value: /etc/mlflow-svc/ZITADEL_MACHINE_KEY
-      - name: LAKEFS_ENDPOINT
-        value: http://lakefs.internal.invalid
-      - name: LAKEFS_ACCESS_KEY
-        valueFrom:
-          secretKeyRef:
-            name: PLACEHOLDER-lakefs-admin
-            key: accessKeyId
-      - name: LAKEFS_SECRET_KEY
-        valueFrom:
-          secretKeyRef:
-            name: PLACEHOLDER-lakefs-admin
-            key: secretAccessKey
-      - name: CHECKPOINT_BUCKET
-        value: outputs-yolo-meluxina-poc
-      - name: CHECKPOINT_PREFIX
-        value: main/checkpoints
-      - name: KUBECORE_RUN_ID
-        value: '{{workflow.name}}'
-      - name: KUBECORE_WORKFLOW_NAME
-        value: '{{workflow.name}}'
-      - name: KAOS_CHECKPOINT_DIR
-        value: /kaos/checkpoint
-      - name: KAOS_LAKE_TOKEN_FILE
-        value: /var/run/secrets/kaos-lake/token
-      resources:
-        requests:
-          cpu: '7'
-          memory: 27Gi
-          ephemeral-storage: 10Gi
-        limits:
-          cpu: '7'
-          memory: 27Gi
-      volumeMounts:
-      - name: mlflow-svc
-        mountPath: /etc/mlflow-svc
-        readOnly: true
-      - name: dshm
-        mountPath: /dev/shm
-      - name: kaos-checkpoint
-        mountPath: /kaos/checkpoint
-      - name: kaos-lake-token
-        mountPath: /var/run/secrets/kaos-lake
-        readOnly: true
-    inputs:
-      parameters:
-      - name: params
-      - name: data-yaml
-        default: '{}'
-      - name: manifest-summary
-        default: '{}'
-    podSpecPatch: "containers:\n- name: main\n  resources:\n    requests:\n      cpu:\
-      \ \"{{workflow.parameters.data-summary-cpu}}\"\n      memory: \"{{workflow.parameters.data-summary-mem}}\"\
-      \n      ephemeral-storage: \"{{workflow.parameters.data-summary-disk}}\"\n \
-      \   limits:\n      cpu: \"{{workflow.parameters.data-summary-cpu}}\"\n     \
-      \ memory: \"{{workflow.parameters.data-summary-mem}}\"\n"
-    nodeSelector:
-      platform.kubecore.io/nodegroup-type: '{{workflow.parameters.data-summary-class}}'
+      platform.kubecore.io/nodegroup-type: '{{workflow.parameters.prepare-data-class}}'
       platform.kubecore.io/environment: runtime
       platform.kubecore.io/project: data-room
     activeDeadlineSeconds: 1800
@@ -603,13 +494,6 @@ spec:
   - name: model-training
     container:
       image: '{{workflow.parameters.image-model-training}}'
-      args:
-      - --params
-      - '{{inputs.parameters.params}}'
-      - --data-yaml
-      - '{{inputs.parameters.data-yaml}}'
-      - --manifest-summary
-      - '{{inputs.parameters.manifest-summary}}'
       command:
       - sh
       - -c
@@ -629,15 +513,9 @@ spec:
       - python
       - -m
       - app.entry
-      resources:
-        limits:
-          cpu: '7'
-          memory: 25Gi
-        requests:
-          cpu: '7'
-          memory: 25Gi
-          ephemeral-storage: 10Gi
       env:
+      - name: KAOS_STEP_CONTEXT
+        value: '{{inputs.parameters.kaos-context}}'
       - name: MLFLOW_TRACKING_URI
         value: http://mlflow.internal.invalid
       - name: MLFLOW_TRACKING_AUTH
@@ -660,18 +538,18 @@ spec:
           secretKeyRef:
             name: PLACEHOLDER-lakefs-admin
             key: secretAccessKey
-      - name: CHECKPOINT_BUCKET
-        value: outputs-yolo-meluxina-poc
-      - name: CHECKPOINT_PREFIX
-        value: main/checkpoints
-      - name: KUBECORE_RUN_ID
-        value: '{{workflow.name}}'
-      - name: KUBECORE_WORKFLOW_NAME
-        value: '{{workflow.name}}'
       - name: KAOS_CHECKPOINT_DIR
         value: /kaos/checkpoint
       - name: KAOS_LAKE_TOKEN_FILE
         value: /var/run/secrets/kaos-lake/token
+      resources:
+        limits:
+          cpu: '7'
+          memory: 25Gi
+        requests:
+          cpu: '7'
+          memory: 25Gi
+          ephemeral-storage: 10Gi
       volumeMounts:
       - name: mlflow-svc
         mountPath: /etc/mlflow-svc
@@ -685,22 +563,21 @@ spec:
         readOnly: true
     inputs:
       parameters:
-      - name: params
-      - name: data-yaml
-        default: '{}'
-      - name: manifest-summary
-        default: '{}'
+      - name: kaos-context
       - name: gpus
         default: '1'
     metadata:
       annotations:
         platform.kubecore.io/hpc: 12h
+      labels:
+        platform.kubecore.io/step: model-training
+        platform.kubecore.io/step-kind: train
     outputs:
       parameters:
-      - name: training-result
+      - name: kaos-result
         valueFrom:
-          default: '{}'
-          path: /work/output/training-result.json
+          default: '{"version":1,"status":"absent"}'
+          path: /work/output/kaos-result.json
     podSpecPatch: "containers:\n- name: main\n  resources:\n    limits:\n      cpu:\
       \ '{{workflow.parameters.model-training-cpu}}'\n      memory: '{{workflow.parameters.model-training-mem}}'\n\
       \      nvidia.com/gpu: '{{inputs.parameters.gpus}}'\n    requests:\n      cpu:\
@@ -759,11 +636,6 @@ spec:
   - name: qat-finetune
     container:
       image: '{{workflow.parameters.image-qat-finetune}}'
-      args:
-      - --params
-      - '{{inputs.parameters.params}}'
-      - --training-result
-      - '{{inputs.parameters.training-result}}'
       command:
       - sh
       - -c
@@ -783,15 +655,9 @@ spec:
       - python
       - -m
       - app.entry
-      resources:
-        limits:
-          cpu: '7'
-          memory: 25Gi
-        requests:
-          ephemeral-storage: 20Gi
-          cpu: '7'
-          memory: 25Gi
       env:
+      - name: KAOS_STEP_CONTEXT
+        value: '{{inputs.parameters.kaos-context}}'
       - name: MLFLOW_TRACKING_URI
         value: http://mlflow.internal.invalid
       - name: MLFLOW_TRACKING_AUTH
@@ -814,18 +680,18 @@ spec:
           secretKeyRef:
             name: PLACEHOLDER-lakefs-admin
             key: secretAccessKey
-      - name: CHECKPOINT_BUCKET
-        value: outputs-yolo-meluxina-poc
-      - name: CHECKPOINT_PREFIX
-        value: main/checkpoints
-      - name: KUBECORE_RUN_ID
-        value: '{{workflow.name}}'
-      - name: KUBECORE_WORKFLOW_NAME
-        value: '{{workflow.name}}'
       - name: KAOS_CHECKPOINT_DIR
         value: /kaos/checkpoint
       - name: KAOS_LAKE_TOKEN_FILE
         value: /var/run/secrets/kaos-lake/token
+      resources:
+        limits:
+          cpu: '7'
+          memory: 25Gi
+        requests:
+          ephemeral-storage: 20Gi
+          cpu: '7'
+          memory: 25Gi
       volumeMounts:
       - name: mlflow-svc
         mountPath: /etc/mlflow-svc
@@ -839,17 +705,19 @@ spec:
         readOnly: true
     inputs:
       parameters:
-      - name: params
-      - name: training-result
-        default: '{}'
+      - name: kaos-context
       - name: gpus
         default: '1'
+    metadata:
+      labels:
+        platform.kubecore.io/step: qat-finetune
+        platform.kubecore.io/step-kind: train
     outputs:
       parameters:
-      - name: qat-result
+      - name: kaos-result
         valueFrom:
-          default: '{}'
-          path: /work/output/qat-result.json
+          default: '{"version":1,"status":"absent"}'
+          path: /work/output/kaos-result.json
     podSpecPatch: "containers:\n- name: main\n  resources:\n    limits:\n      cpu:\
       \ '{{workflow.parameters.qat-finetune-cpu}}'\n      memory: '{{workflow.parameters.qat-finetune-mem}}'\n\
       \      nvidia.com/gpu: '{{inputs.parameters.gpus}}'\n    requests:\n      cpu:\
@@ -908,18 +776,13 @@ spec:
   - name: model-quantization
     container:
       image: '{{workflow.parameters.image-model-quantization}}'
-      args:
-      - --params
-      - '{{inputs.parameters.params}}'
-      - --training-result
-      - '{{inputs.parameters.training-result}}'
-      - --qat-result
-      - '{{inputs.parameters.qat-result}}'
       command:
       - python
       - -m
       - app.entry
       env:
+      - name: KAOS_STEP_CONTEXT
+        value: '{{inputs.parameters.kaos-context}}'
       - name: MLFLOW_TRACKING_URI
         value: http://mlflow.internal.invalid
       - name: MLFLOW_TRACKING_AUTH
@@ -942,14 +805,6 @@ spec:
           secretKeyRef:
             name: PLACEHOLDER-lakefs-admin
             key: secretAccessKey
-      - name: CHECKPOINT_BUCKET
-        value: outputs-yolo-meluxina-poc
-      - name: CHECKPOINT_PREFIX
-        value: main/checkpoints
-      - name: KUBECORE_RUN_ID
-        value: '{{workflow.name}}'
-      - name: KUBECORE_WORKFLOW_NAME
-        value: '{{workflow.name}}'
       - name: KAOS_CHECKPOINT_DIR
         value: /kaos/checkpoint
       - name: KAOS_LAKE_TOKEN_FILE
@@ -975,17 +830,17 @@ spec:
         readOnly: true
     inputs:
       parameters:
-      - name: params
-      - name: training-result
-        default: '{}'
-      - name: qat-result
-        default: '{}'
+      - name: kaos-context
+    metadata:
+      labels:
+        platform.kubecore.io/step: model-quantization
+        platform.kubecore.io/step-kind: transform
     outputs:
       parameters:
-      - name: quantization-result
+      - name: kaos-result
         valueFrom:
-          default: '{}'
-          path: /work/output/quantization-result.json
+          default: '{"version":1,"status":"absent"}'
+          path: /work/output/kaos-result.json
     podSpecPatch: "containers:\n- name: main\n  resources:\n    requests:\n      cpu:\
       \ \"{{workflow.parameters.model-quantization-cpu}}\"\n      memory: \"{{workflow.parameters.model-quantization-mem}}\"\
       \n      ephemeral-storage: \"{{workflow.parameters.model-quantization-disk}}\"\
@@ -1040,18 +895,13 @@ spec:
   - name: model-registration
     container:
       image: '{{workflow.parameters.image-model-registration}}'
-      args:
-      - --params
-      - '{{inputs.parameters.params}}'
-      - --training-result
-      - '{{inputs.parameters.training-result}}'
-      - --quantization-result
-      - '{{inputs.parameters.quantization-result}}'
       command:
       - python
       - -m
       - app.entry
       env:
+      - name: KAOS_STEP_CONTEXT
+        value: '{{inputs.parameters.kaos-context}}'
       - name: MLFLOW_TRACKING_URI
         value: http://mlflow.internal.invalid
       - name: MLFLOW_TRACKING_AUTH
@@ -1074,14 +924,6 @@ spec:
           secretKeyRef:
             name: PLACEHOLDER-lakefs-admin
             key: secretAccessKey
-      - name: CHECKPOINT_BUCKET
-        value: outputs-yolo-meluxina-poc
-      - name: CHECKPOINT_PREFIX
-        value: main/checkpoints
-      - name: KUBECORE_RUN_ID
-        value: '{{workflow.name}}'
-      - name: KUBECORE_WORKFLOW_NAME
-        value: '{{workflow.name}}'
       - name: KAOS_CHECKPOINT_DIR
         value: /kaos/checkpoint
       - name: KAOS_LAKE_TOKEN_FILE
@@ -1107,17 +949,17 @@ spec:
         readOnly: true
     inputs:
       parameters:
-      - name: params
-      - name: training-result
-        default: '{}'
-      - name: quantization-result
-        default: '{}'
+      - name: kaos-context
+    metadata:
+      labels:
+        platform.kubecore.io/step: model-registration
+        platform.kubecore.io/step-kind: publish
     outputs:
       parameters:
-      - name: registration-result
+      - name: kaos-result
         valueFrom:
-          default: '{}'
-          path: /work/output/registration-result.json
+          default: '{"version":1,"status":"absent"}'
+          path: /work/output/kaos-result.json
     podSpecPatch: "containers:\n- name: main\n  resources:\n    requests:\n      cpu:\
       \ \"{{workflow.parameters.model-registration-cpu}}\"\n      memory: \"{{workflow.parameters.model-registration-mem}}\"\
       \n      ephemeral-storage: \"{{workflow.parameters.model-registration-disk}}\"\
@@ -1174,140 +1016,38 @@ spec:
       tasks:
       - name: compose-and-validate
         template: compose-and-validate
-        when: '{{=!hasPrefix(workflow.parameters[''compose-and-validate-class''],
-          ''meluxina-'')}}'
-      - name: compose-and-validate-meluxina
-        template: hpc-follower
-        when: '{{=hasPrefix(workflow.parameters[''compose-and-validate-class''], ''meluxina-'')}}'
-        arguments:
-          parameters:
-          - name: step-name
-            value: compose-and-validate
-          - name: image
-            value: '{{workflow.parameters.image-compose-and-validate}}'
-          - name: step-command
-            value: '["python", "-m", "kubecore.compose", "platform.lakefs.repository=PLACEHOLDER-repo",
-              "platform.lakefs.endpoint=http://lakefs.internal.invalid", "platform.mlflow.tracking_uri=http://mlflow.internal.invalid",
-              "platform.checkpoints.bucket=outputs-yolo-meluxina-poc", "platform.checkpoints.prefix=main/checkpoints",
-              {{=toJson(''image_processing='' + workflow.parameters.image_processing)}},
-              {{=toJson(''model='' + workflow.parameters.model)}}, {{=toJson(''train/callbacks=''
-              + workflow.parameters[''train-callbacks''])}}, {{=toJson(''train/optimizer=''
-              + workflow.parameters[''train-optimizer''])}}, {{=toJson(''train/qat=''
-              + workflow.parameters[''train-qat''])}}, {{=toJson(''summary.label=''
-              + workflow.parameters[''summary-label''])}}, {{=toJson(''data.ref=''
-              + workflow.parameters[''data-ref''])}}, {{=toJson(''data.source='' +
-              workflow.parameters[''data-source''])}}, {{=toJson(''data.version=''
-              + workflow.parameters[''data-version''])}}, {{=toJson(''data.path_override=''
-              + workflow.parameters[''data-path_override''])}}, {{=toJson(''data.sample_size=''
-              + workflow.parameters[''data-sample_size''])}}, {{=toJson(''data.seed=''
-              + workflow.parameters[''data-seed''])}}, {{=toJson(''quantization.mode=''
-              + workflow.parameters[''quantization-mode''])}}, {{=toJson(''quantization.image_size=''
-              + workflow.parameters[''quantization-image_size''])}}, {{=toJson(''quantization.calibration_frames=''
-              + workflow.parameters[''quantization-calibration_frames''])}}, {{=toJson(''quantization.calibration_seed=''
-              + workflow.parameters[''quantization-calibration_seed''])}}, {{=toJson(''quantization.parity_frames=''
-              + workflow.parameters[''quantization-parity_frames''])}}, {{=toJson(''quantization.parity_max_abs_error=''
-              + workflow.parameters[''quantization-parity_max_abs_error''])}}, {{=toJson(''quantization.output_prefix=''
-              + workflow.parameters[''quantization-output_prefix''])}}, {{=toJson(''experiment.name=''
-              + workflow.parameters[''experiment-name''])}}, {{=toJson(''experiment.description=''
-              + workflow.parameters[''experiment-description''])}}, {{=toJson(''model.variant=''
-              + workflow.parameters[''model-variant''])}}, {{=toJson(''model.pretrained_weights=''
-              + workflow.parameters[''model-pretrained_weights''])}}, {{=toJson(''train.epochs=''
-              + workflow.parameters[''train-epochs''])}}, {{=toJson(''train.batch_size=''
-              + workflow.parameters[''train-batch_size''])}}, {{=toJson(''train.image_size=''
-              + workflow.parameters[''train-image_size''])}}, {{=toJson(''train.cos_lr=''
-              + workflow.parameters[''train-cos_lr''])}}, {{=toJson(''train.lrf=''
-              + workflow.parameters[''train-lrf''])}}, {{=toJson(''train.warmup_epochs=''
-              + workflow.parameters[''train-warmup_epochs''])}}, {{=toJson(''train.warmup_momentum=''
-              + workflow.parameters[''train-warmup_momentum''])}}, {{=toJson(''train.dropout=''
-              + workflow.parameters[''train-dropout''])}}, {{=toJson(''train.label_smoothing=''
-              + workflow.parameters[''train-label_smoothing''])}}, {{=toJson(''train.nbs=''
-              + workflow.parameters[''train-nbs''])}}, {{=toJson(''train.freeze=''
-              + workflow.parameters[''train-freeze''])}}, {{=toJson(''train.amp=''
-              + workflow.parameters[''train-amp''])}}, {{=toJson(''train.close_mosaic=''
-              + workflow.parameters[''train-close_mosaic''])}}, {{=toJson(''train.seed=''
-              + workflow.parameters[''train-seed''])}}, {{=toJson(''train.deterministic=''
-              + workflow.parameters[''train-deterministic''])}}, {{=toJson(''train.loss.pose=''
-              + workflow.parameters[''train-loss-pose''])}}, {{=toJson(''train.loss.kobj=''
-              + workflow.parameters[''train-loss-kobj''])}}, {{=toJson(''train.loss.box=''
-              + workflow.parameters[''train-loss-box''])}}, {{=toJson(''train.loss.cls=''
-              + workflow.parameters[''train-loss-cls''])}}, {{=toJson(''train.loss.dfl=''
-              + workflow.parameters[''train-loss-dfl''])}}, {{=toJson(''train.checkpointing.interval_epochs=''
-              + workflow.parameters[''train-checkpointing-interval_epochs''])}}, {{=toJson(''train.checkpointing.storage_path=''
-              + workflow.parameters[''train-checkpointing-storage_path''])}}, {{=toJson(''train.checkpointing.resume_from=''
-              + workflow.parameters[''train-checkpointing-resume_from''])}}, {{=toJson(''train.export.enabled=''
-              + workflow.parameters[''train-export-enabled''])}}, {{=toJson(''train.export.formats=''
-              + workflow.parameters[''train-export-formats''])}}, {{=toJson(''train.export.precisions=''
-              + workflow.parameters[''train-export-precisions''])}}, {{=toJson(''train.optimizer.name=''
-              + workflow.parameters[''train-optimizer-name''])}}, {{=toJson(''train.optimizer.lr=''
-              + workflow.parameters[''train-optimizer-lr''])}}, {{=toJson(''train.optimizer.momentum=''
-              + workflow.parameters[''train-optimizer-momentum''])}}, {{=toJson(''train.optimizer.weight_decay=''
-              + workflow.parameters[''train-optimizer-weight_decay''])}}, {{=toJson(''train.callbacks.early_stopping_enabled=''
-              + workflow.parameters[''train-callbacks-early_stopping_enabled''])}},
-              {{=toJson(''train.callbacks.patience='' + workflow.parameters[''train-callbacks-patience''])}},
-              {{=toJson(''train.qat.epochs='' + workflow.parameters[''train-qat-epochs''])}},
-              {{=toJson(''train.qat.lr='' + workflow.parameters[''train-qat-lr''])}},
-              {{=toJson(''image_processing.hsv_h='' + workflow.parameters[''image_processing-hsv_h''])}},
-              {{=toJson(''image_processing.hsv_s='' + workflow.parameters[''image_processing-hsv_s''])}},
-              {{=toJson(''image_processing.hsv_v='' + workflow.parameters[''image_processing-hsv_v''])}},
-              {{=toJson(''image_processing.degrees='' + workflow.parameters[''image_processing-degrees''])}},
-              {{=toJson(''image_processing.translate='' + workflow.parameters[''image_processing-translate''])}},
-              {{=toJson(''image_processing.scale='' + workflow.parameters[''image_processing-scale''])}},
-              {{=toJson(''image_processing.shear='' + workflow.parameters[''image_processing-shear''])}},
-              {{=toJson(''image_processing.perspective='' + workflow.parameters[''image_processing-perspective''])}},
-              {{=toJson(''image_processing.flipud='' + workflow.parameters[''image_processing-flipud''])}},
-              {{=toJson(''image_processing.fliplr='' + workflow.parameters[''image_processing-fliplr''])}},
-              {{=toJson(''image_processing.mosaic='' + workflow.parameters[''image_processing-mosaic''])}},
-              {{=toJson(''image_processing.mixup='' + workflow.parameters[''image_processing-mixup''])}},
-              {{=toJson(''image_processing.copy_paste='' + workflow.parameters[''image_processing-copy_paste''])}},
-              {{=toJson(''image_processing.erasing='' + workflow.parameters[''image_processing-erasing''])}},
-              {{=toJson(''image_processing.bgr='' + workflow.parameters[''image_processing-bgr''])}},
-              {{=toJson(''registration.registered_model_name='' + workflow.parameters[''registration-registered_model_name''])}},
-              {{=toJson(''registration.promote_to='' + workflow.parameters[''registration-promote_to''])}},
-              {{=toJson(''logging.level='' + workflow.parameters[''logging-level''])}},
-              {{=toJson(''logging.log_artifacts='' + workflow.parameters[''logging-log_artifacts''])}},
-              "--render-defaults", "{\"image_processing\":\"mosaic_default\",\"model\":\"yolov8n\",\"train/callbacks\":\"early_stopping\",\"train/optimizer\":\"sgd\",\"train/qat\":\"default_qat\",\"summary.label\":\"\\ud83d\\udcca
-              Data summary\",\"data.ref\":\"main\",\"data.source\":\"lakefs\",\"data.version\":\"\",\"data.path_override\":\"\",\"data.sample_size\":\"\",\"data.seed\":\"42\",\"quantization.mode\":\"none\",\"quantization.image_size\":\"640\",\"quantization.calibration_frames\":\"512\",\"quantization.calibration_seed\":\"42\",\"quantization.parity_frames\":\"100\",\"quantization.parity_max_abs_error\":\"0.05\",\"quantization.output_prefix\":\"main/quantization\",\"experiment.name\":\"object-pose-v1-yolov8n\",\"experiment.description\":\"\",\"model.variant\":\"yolov8n-pose.pt\",\"model.pretrained_weights\":\"\",\"train.epochs\":\"100\",\"train.batch_size\":\"16\",\"train.image_size\":\"640\",\"train.cos_lr\":\"true\",\"train.lrf\":\"0.01\",\"train.warmup_epochs\":\"3.0\",\"train.warmup_momentum\":\"0.8\",\"train.dropout\":\"0.0\",\"train.label_smoothing\":\"0.0\",\"train.nbs\":\"64\",\"train.freeze\":\"\",\"train.amp\":\"true\",\"train.close_mosaic\":\"10\",\"train.seed\":\"0\",\"train.deterministic\":\"true\",\"train.loss.pose\":\"12.0\",\"train.loss.kobj\":\"2.0\",\"train.loss.box\":\"7.5\",\"train.loss.cls\":\"0.5\",\"train.loss.dfl\":\"1.5\",\"train.checkpointing.interval_epochs\":\"10\",\"train.checkpointing.storage_path\":\"\",\"train.checkpointing.resume_from\":\"\",\"train.export.enabled\":\"false\",\"train.export.formats\":\"engine\",\"train.export.precisions\":\"fp16\",\"train.optimizer.name\":\"SGD\",\"train.optimizer.lr\":\"0.01\",\"train.optimizer.momentum\":\"0.937\",\"train.optimizer.weight_decay\":\"0.0005\",\"train.callbacks.early_stopping_enabled\":\"true\",\"train.callbacks.patience\":\"50\",\"train.qat.epochs\":\"10\",\"train.qat.lr\":\"0.0001\",\"image_processing.hsv_h\":\"0.015\",\"image_processing.hsv_s\":\"0.7\",\"image_processing.hsv_v\":\"0.4\",\"image_processing.degrees\":\"0.0\",\"image_processing.translate\":\"0.1\",\"image_processing.scale\":\"0.5\",\"image_processing.shear\":\"0.0\",\"image_processing.perspective\":\"0.0\",\"image_processing.flipud\":\"0.0\",\"image_processing.fliplr\":\"0.0\",\"image_processing.mosaic\":\"1.0\",\"image_processing.mixup\":\"0.0\",\"image_processing.copy_paste\":\"0.0\",\"image_processing.erasing\":\"0.4\",\"image_processing.bgr\":\"0.0\",\"registration.registered_model_name\":\"\",\"registration.promote_to\":\"\",\"logging.level\":\"INFO\",\"logging.log_artifacts\":\"true\"}",
-              "--advanced", {{=toJson(workflow.parameters.config)}}, "--require=data",
-              "--require=experiment", "--require=image_processing", "--require=logging",
-              "--require=model", "--require=quantization", "--require=registration",
-              "--require=summary", "--require=train", "--output", "/work/params.yaml"]'
-          - name: time-limit
-            value: '240'
-          - name: deadline-seconds
-            value: '259200'
-          - name: resumable-lead
-            value: '0'
-          - name: resumable
-            value: auto
-          - name: idle-timeout
-            value: ''
-          - name: step-outputs
-            value: params
-          - name: hpc-class
-            value: '{{workflow.parameters.compose-and-validate-class}}'
       - name: config-validation
-        depends: ((compose-and-validate.Succeeded || compose-and-validate.Skipped)
-          && (compose-and-validate-meluxina.Succeeded || compose-and-validate-meluxina.Skipped))
+        depends: compose-and-validate
         template: config-validation
         arguments:
           parameters:
-          - name: params
-            value: '{{=tasks[''compose-and-validate''].status == ''Skipped'' ? tasks[''compose-and-validate-meluxina''].outputs.parameters[''params'']
-              : tasks[''compose-and-validate''].outputs.parameters[''params'']}}'
-        when: '{{=!hasPrefix(workflow.parameters[''config-validation-class''], ''meluxina-'')}}'
-      - name: config-validation-meluxina
+          - name: kaos-context
+            value: '{{=sprig.trimSuffix("}", tasks["compose-and-validate"].outputs.parameters["kaos-context-config-validation"])
+              + ",\"upstream\":{" + "}" + "}"}}'
+      - name: prepare-data
+        depends: compose-and-validate && config-validation
+        template: prepare-data
+        arguments:
+          parameters:
+          - name: kaos-context
+            value: '{{=sprig.trimSuffix("}", tasks["compose-and-validate"].outputs.parameters["kaos-context-prepare-data"])
+              + ",\"upstream\":{\"config-validation\":" + sprig.default("{\"version\":1,\"status\":\"absent\"}",
+              tasks["config-validation"].outputs.parameters["kaos-result"]) + "}"
+              + "}"}}'
+        when: '{{=!hasPrefix(workflow.parameters[''prepare-data-class''], ''meluxina-'')}}'
+      - name: prepare-data-hpc
         template: hpc-follower
-        when: '{{=hasPrefix(workflow.parameters[''config-validation-class''], ''meluxina-'')}}'
+        when: '{{=hasPrefix(workflow.parameters[''prepare-data-class''], ''meluxina-'')}}'
         arguments:
           parameters:
           - name: step-name
-            value: config-validation
+            value: prepare-data
           - name: image
-            value: '{{workflow.parameters.image-config-validation}}'
+            value: '{{workflow.parameters.image-prepare-data}}'
           - name: step-command
-            value: '["python", "-m", "app.entry", "--params", {{=toJson(tasks[''compose-and-validate''].status
-              == ''Skipped'' ? tasks[''compose-and-validate-meluxina''].outputs.parameters[''params'']
-              : tasks[''compose-and-validate''].outputs.parameters[''params''])}}]'
+            value: '["python","-m","app.entry"]'
+          - name: step-kind
+            value: transform
           - name: time-limit
             value: '240'
           - name: deadline-seconds
@@ -1318,131 +1058,30 @@ spec:
             value: auto
           - name: idle-timeout
             value: ''
-          - name: step-outputs
-            value: ''
           - name: hpc-class
-            value: '{{workflow.parameters.config-validation-class}}'
-        depends: ((compose-and-validate.Succeeded || compose-and-validate.Skipped)
-          && (compose-and-validate-meluxina.Succeeded || compose-and-validate-meluxina.Skipped))
-      - name: dataset-loading
-        depends: ((compose-and-validate.Succeeded || compose-and-validate.Skipped)
-          && (compose-and-validate-meluxina.Succeeded || compose-and-validate-meluxina.Skipped))
-          && ((config-validation.Succeeded || config-validation.Skipped) && (config-validation-meluxina.Succeeded
-          || config-validation-meluxina.Skipped))
-        template: dataset-loading
-        arguments:
-          parameters:
-          - name: params
-            value: '{{=tasks[''compose-and-validate''].status == ''Skipped'' ? tasks[''compose-and-validate-meluxina''].outputs.parameters[''params'']
-              : tasks[''compose-and-validate''].outputs.parameters[''params'']}}'
-        when: '{{=!hasPrefix(workflow.parameters[''dataset-loading-class''], ''meluxina-'')}}'
-      - name: dataset-loading-meluxina
-        template: hpc-follower
-        when: '{{=hasPrefix(workflow.parameters[''dataset-loading-class''], ''meluxina-'')}}'
-        arguments:
-          parameters:
-          - name: step-name
-            value: dataset-loading
-          - name: image
-            value: '{{workflow.parameters.image-dataset-loading}}'
-          - name: step-command
-            value: '["python", "-m", "app.entry", "--params", {{=toJson(tasks[''compose-and-validate''].status
-              == ''Skipped'' ? tasks[''compose-and-validate-meluxina''].outputs.parameters[''params'']
-              : tasks[''compose-and-validate''].outputs.parameters[''params''])}}]'
-          - name: time-limit
-            value: '240'
-          - name: deadline-seconds
-            value: '259200'
-          - name: resumable-lead
-            value: '0'
-          - name: resumable
-            value: auto
-          - name: idle-timeout
-            value: ''
-          - name: step-outputs
-            value: data-yaml,manifest-summary
-          - name: hpc-class
-            value: '{{workflow.parameters.dataset-loading-class}}'
-        depends: ((compose-and-validate.Succeeded || compose-and-validate.Skipped)
-          && (compose-and-validate-meluxina.Succeeded || compose-and-validate-meluxina.Skipped))
-          && ((config-validation.Succeeded || config-validation.Skipped) && (config-validation-meluxina.Succeeded
-          || config-validation-meluxina.Skipped))
-      - name: data-summary
-        depends: ((compose-and-validate.Succeeded || compose-and-validate.Skipped)
-          && (compose-and-validate-meluxina.Succeeded || compose-and-validate-meluxina.Skipped))
-          && ((dataset-loading.Succeeded || dataset-loading.Skipped) && (dataset-loading-meluxina.Succeeded
-          || dataset-loading-meluxina.Skipped))
-        template: data-summary
-        arguments:
-          parameters:
-          - name: params
-            value: '{{=tasks[''compose-and-validate''].status == ''Skipped'' ? tasks[''compose-and-validate-meluxina''].outputs.parameters[''params'']
-              : tasks[''compose-and-validate''].outputs.parameters[''params'']}}'
-          - name: data-yaml
-            value: '{{=tasks[''dataset-loading''].status == ''Skipped'' ? tasks[''dataset-loading-meluxina''].outputs.parameters[''data-yaml'']
-              : tasks[''dataset-loading''].outputs.parameters[''data-yaml'']}}'
-          - name: manifest-summary
-            value: '{{=tasks[''dataset-loading''].status == ''Skipped'' ? tasks[''dataset-loading-meluxina''].outputs.parameters[''manifest-summary'']
-              : tasks[''dataset-loading''].outputs.parameters[''manifest-summary'']}}'
-        when: '{{=!hasPrefix(workflow.parameters[''data-summary-class''], ''meluxina-'')}}'
-      - name: data-summary-meluxina
-        template: hpc-follower
-        when: '{{=hasPrefix(workflow.parameters[''data-summary-class''], ''meluxina-'')}}'
-        arguments:
-          parameters:
-          - name: step-name
-            value: data-summary
-          - name: image
-            value: '{{workflow.parameters.image-data-summary}}'
-          - name: step-command
-            value: '["python", "-m", "app.entry", "--params", {{=toJson(tasks[''compose-and-validate''].status
-              == ''Skipped'' ? tasks[''compose-and-validate-meluxina''].outputs.parameters[''params'']
-              : tasks[''compose-and-validate''].outputs.parameters[''params''])}},
-              "--data-yaml", {{=toJson(tasks[''dataset-loading''].status == ''Skipped''
-              ? tasks[''dataset-loading-meluxina''].outputs.parameters[''data-yaml'']
-              : tasks[''dataset-loading''].outputs.parameters[''data-yaml''])}}, "--manifest-summary",
-              {{=toJson(tasks[''dataset-loading''].status == ''Skipped'' ? tasks[''dataset-loading-meluxina''].outputs.parameters[''manifest-summary'']
-              : tasks[''dataset-loading''].outputs.parameters[''manifest-summary''])}}]'
-          - name: time-limit
-            value: '240'
-          - name: deadline-seconds
-            value: '259200'
-          - name: resumable-lead
-            value: '0'
-          - name: resumable
-            value: auto
-          - name: idle-timeout
-            value: ''
-          - name: step-outputs
-            value: ''
-          - name: hpc-class
-            value: '{{workflow.parameters.data-summary-class}}'
-        depends: ((compose-and-validate.Succeeded || compose-and-validate.Skipped)
-          && (compose-and-validate-meluxina.Succeeded || compose-and-validate-meluxina.Skipped))
-          && ((dataset-loading.Succeeded || dataset-loading.Skipped) && (dataset-loading-meluxina.Succeeded
-          || dataset-loading-meluxina.Skipped))
+            value: '{{workflow.parameters.prepare-data-class}}'
+          - name: kaos-context
+            value: '{{=sprig.trimSuffix("}", tasks["compose-and-validate"].outputs.parameters["kaos-context-prepare-data"])
+              + ",\"upstream\":{\"config-validation\":" + sprig.default("{\"version\":1,\"status\":\"absent\"}",
+              tasks["config-validation"].outputs.parameters["kaos-result"]) + "}"
+              + "}"}}'
+        depends: compose-and-validate && config-validation
       - name: model-training
-        depends: ((compose-and-validate.Succeeded || compose-and-validate.Skipped)
-          && (compose-and-validate-meluxina.Succeeded || compose-and-validate-meluxina.Skipped))
-          && ((dataset-loading.Succeeded || dataset-loading.Skipped) && (dataset-loading-meluxina.Succeeded
-          || dataset-loading-meluxina.Skipped))
+        depends: compose-and-validate && ((prepare-data.Succeeded || prepare-data.Skipped)
+          && (prepare-data-hpc.Succeeded || prepare-data-hpc.Skipped))
         template: model-training
         arguments:
           parameters:
-          - name: params
-            value: '{{=tasks[''compose-and-validate''].status == ''Skipped'' ? tasks[''compose-and-validate-meluxina''].outputs.parameters[''params'']
-              : tasks[''compose-and-validate''].outputs.parameters[''params'']}}'
-          - name: data-yaml
-            value: '{{=tasks[''dataset-loading''].status == ''Skipped'' ? tasks[''dataset-loading-meluxina''].outputs.parameters[''data-yaml'']
-              : tasks[''dataset-loading''].outputs.parameters[''data-yaml'']}}'
-          - name: manifest-summary
-            value: '{{=tasks[''dataset-loading''].status == ''Skipped'' ? tasks[''dataset-loading-meluxina''].outputs.parameters[''manifest-summary'']
-              : tasks[''dataset-loading''].outputs.parameters[''manifest-summary'']}}'
+          - name: kaos-context
+            value: '{{=sprig.trimSuffix("}", tasks["compose-and-validate"].outputs.parameters["kaos-context-model-training"])
+              + ",\"upstream\":{\"prepare-data\":" + sprig.default(sprig.default("{\"version\":1,\"status\":\"absent\"}",
+              tasks["prepare-data-hpc"].outputs.parameters["kaos-result"]), tasks["prepare-data"].outputs.parameters["kaos-result"])
+              + "}" + "}"}}'
           - name: gpus
             value: '{{=workflow.parameters[''model-training-class''] in [''gpu-t4'']
               ? ''1'' : ''0''}}'
         when: '{{=!hasPrefix(workflow.parameters[''model-training-class''], ''meluxina-'')}}'
-      - name: model-training-meluxina
+      - name: model-training-hpc
         template: hpc-follower
         when: '{{=hasPrefix(workflow.parameters[''model-training-class''], ''meluxina-'')}}'
         arguments:
@@ -1452,14 +1091,9 @@ spec:
           - name: image
             value: '{{workflow.parameters.image-model-training}}'
           - name: step-command
-            value: '["python", "-m", "app.entry", "--params", {{=toJson(tasks[''compose-and-validate''].status
-              == ''Skipped'' ? tasks[''compose-and-validate-meluxina''].outputs.parameters[''params'']
-              : tasks[''compose-and-validate''].outputs.parameters[''params''])}},
-              "--data-yaml", {{=toJson(tasks[''dataset-loading''].status == ''Skipped''
-              ? tasks[''dataset-loading-meluxina''].outputs.parameters[''data-yaml'']
-              : tasks[''dataset-loading''].outputs.parameters[''data-yaml''])}}, "--manifest-summary",
-              {{=toJson(tasks[''dataset-loading''].status == ''Skipped'' ? tasks[''dataset-loading-meluxina''].outputs.parameters[''manifest-summary'']
-              : tasks[''dataset-loading''].outputs.parameters[''manifest-summary''])}}]'
+            value: '["python","-m","app.entry"]'
+          - name: step-kind
+            value: train
           - name: time-limit
             value: '720'
           - name: deadline-seconds
@@ -1470,34 +1104,32 @@ spec:
             value: auto
           - name: idle-timeout
             value: ''
-          - name: step-outputs
-            value: training-result
           - name: hpc-class
             value: '{{workflow.parameters.model-training-class}}'
-        depends: ((compose-and-validate.Succeeded || compose-and-validate.Skipped)
-          && (compose-and-validate-meluxina.Succeeded || compose-and-validate-meluxina.Skipped))
-          && ((dataset-loading.Succeeded || dataset-loading.Skipped) && (dataset-loading-meluxina.Succeeded
-          || dataset-loading-meluxina.Skipped))
+          - name: kaos-context
+            value: '{{=sprig.trimSuffix("}", tasks["compose-and-validate"].outputs.parameters["kaos-context-model-training"])
+              + ",\"upstream\":{\"prepare-data\":" + sprig.default(sprig.default("{\"version\":1,\"status\":\"absent\"}",
+              tasks["prepare-data-hpc"].outputs.parameters["kaos-result"]), tasks["prepare-data"].outputs.parameters["kaos-result"])
+              + "}" + "}"}}'
+        depends: compose-and-validate && ((prepare-data.Succeeded || prepare-data.Skipped)
+          && (prepare-data-hpc.Succeeded || prepare-data-hpc.Skipped))
       - name: qat-finetune
-        depends: ((compose-and-validate.Succeeded || compose-and-validate.Skipped)
-          && (compose-and-validate-meluxina.Succeeded || compose-and-validate-meluxina.Skipped))
-          && ((model-training.Succeeded || model-training.Skipped) && (model-training-meluxina.Succeeded
-          || model-training-meluxina.Skipped))
+        depends: compose-and-validate && ((model-training.Succeeded || model-training.Skipped)
+          && (model-training-hpc.Succeeded || model-training-hpc.Skipped))
         template: qat-finetune
         when: '{{=(workflow.parameters[''quantization-mode''] == ''qat'') && !hasPrefix(workflow.parameters[''qat-finetune-class''],
           ''meluxina-'')}}'
         arguments:
           parameters:
-          - name: params
-            value: '{{=tasks[''compose-and-validate''].status == ''Skipped'' ? tasks[''compose-and-validate-meluxina''].outputs.parameters[''params'']
-              : tasks[''compose-and-validate''].outputs.parameters[''params'']}}'
-          - name: training-result
-            value: '{{=tasks[''model-training''].status == ''Skipped'' ? tasks[''model-training-meluxina''].outputs.parameters[''training-result'']
-              : tasks[''model-training''].outputs.parameters[''training-result'']}}'
+          - name: kaos-context
+            value: '{{=sprig.trimSuffix("}", tasks["compose-and-validate"].outputs.parameters["kaos-context-qat-finetune"])
+              + ",\"upstream\":{\"model-training\":" + sprig.default(sprig.default("{\"version\":1,\"status\":\"absent\"}",
+              tasks["model-training-hpc"].outputs.parameters["kaos-result"]), tasks["model-training"].outputs.parameters["kaos-result"])
+              + "}" + "}"}}'
           - name: gpus
             value: '{{=workflow.parameters[''qat-finetune-class''] in [''gpu-t4'']
               ? ''1'' : ''0''}}'
-      - name: qat-finetune-meluxina
+      - name: qat-finetune-hpc
         template: hpc-follower
         when: '{{=(workflow.parameters[''quantization-mode''] == ''qat'') && hasPrefix(workflow.parameters[''qat-finetune-class''],
           ''meluxina-'')}}'
@@ -1508,12 +1140,9 @@ spec:
           - name: image
             value: '{{workflow.parameters.image-qat-finetune}}'
           - name: step-command
-            value: '["python", "-m", "app.entry", "--params", {{=toJson(tasks[''compose-and-validate''].status
-              == ''Skipped'' ? tasks[''compose-and-validate-meluxina''].outputs.parameters[''params'']
-              : tasks[''compose-and-validate''].outputs.parameters[''params''])}},
-              "--training-result", {{=toJson(tasks[''model-training''].status == ''Skipped''
-              ? tasks[''model-training-meluxina''].outputs.parameters[''training-result'']
-              : tasks[''model-training''].outputs.parameters[''training-result''])}}]'
+            value: '["python","-m","app.entry"]'
+          - name: step-kind
+            value: train
           - name: time-limit
             value: '240'
           - name: deadline-seconds
@@ -1524,36 +1153,33 @@ spec:
             value: auto
           - name: idle-timeout
             value: ''
-          - name: step-outputs
-            value: qat-result
           - name: hpc-class
             value: '{{workflow.parameters.qat-finetune-class}}'
-        depends: ((compose-and-validate.Succeeded || compose-and-validate.Skipped)
-          && (compose-and-validate-meluxina.Succeeded || compose-and-validate-meluxina.Skipped))
-          && ((model-training.Succeeded || model-training.Skipped) && (model-training-meluxina.Succeeded
-          || model-training-meluxina.Skipped))
+          - name: kaos-context
+            value: '{{=sprig.trimSuffix("}", tasks["compose-and-validate"].outputs.parameters["kaos-context-qat-finetune"])
+              + ",\"upstream\":{\"model-training\":" + sprig.default(sprig.default("{\"version\":1,\"status\":\"absent\"}",
+              tasks["model-training-hpc"].outputs.parameters["kaos-result"]), tasks["model-training"].outputs.parameters["kaos-result"])
+              + "}" + "}"}}'
+        depends: compose-and-validate && ((model-training.Succeeded || model-training.Skipped)
+          && (model-training-hpc.Succeeded || model-training-hpc.Skipped))
       - name: model-quantization
-        depends: ((compose-and-validate.Succeeded || compose-and-validate.Skipped)
-          && (compose-and-validate-meluxina.Succeeded || compose-and-validate-meluxina.Skipped))
-          && ((model-training.Succeeded || model-training.Skipped) && (model-training-meluxina.Succeeded
-          || model-training-meluxina.Skipped)) && ((qat-finetune.Succeeded || qat-finetune-meluxina.Succeeded)
-          || (qat-finetune.Skipped && qat-finetune-meluxina.Skipped) || (qat-finetune.Omitted
-          && qat-finetune-meluxina.Omitted))
+        depends: compose-and-validate && ((model-training.Succeeded || model-training.Skipped)
+          && (model-training-hpc.Succeeded || model-training-hpc.Skipped)) && ((qat-finetune.Succeeded
+          || qat-finetune-hpc.Succeeded) || (qat-finetune.Skipped && qat-finetune-hpc.Skipped)
+          || (qat-finetune.Omitted && qat-finetune-hpc.Omitted))
         template: model-quantization
         when: '{{=(workflow.parameters[''quantization-mode''] != ''none'') && !hasPrefix(workflow.parameters[''model-quantization-class''],
           ''meluxina-'')}}'
         arguments:
           parameters:
-          - name: params
-            value: '{{=tasks[''compose-and-validate''].status == ''Skipped'' ? tasks[''compose-and-validate-meluxina''].outputs.parameters[''params'']
-              : tasks[''compose-and-validate''].outputs.parameters[''params'']}}'
-          - name: training-result
-            value: '{{=tasks[''model-training''].status == ''Skipped'' ? tasks[''model-training-meluxina''].outputs.parameters[''training-result'']
-              : tasks[''model-training''].outputs.parameters[''training-result'']}}'
-          - name: qat-result
-            value: '{{=tasks[''qat-finetune''].status == ''Skipped'' ? tasks[''qat-finetune-meluxina''].outputs.parameters[''qat-result'']
-              : tasks[''qat-finetune''].outputs.parameters[''qat-result'']}}'
-      - name: model-quantization-meluxina
+          - name: kaos-context
+            value: '{{=sprig.trimSuffix("}", tasks["compose-and-validate"].outputs.parameters["kaos-context-model-quantization"])
+              + ",\"upstream\":{\"model-training\":" + sprig.default(sprig.default("{\"version\":1,\"status\":\"absent\"}",
+              tasks["model-training-hpc"].outputs.parameters["kaos-result"]), tasks["model-training"].outputs.parameters["kaos-result"])
+              + ",\"qat-finetune\":" + sprig.default(sprig.default("{\"version\":1,\"status\":\"absent\"}",
+              tasks["qat-finetune-hpc"].outputs.parameters["kaos-result"]), tasks["qat-finetune"].outputs.parameters["kaos-result"])
+              + "}" + "}"}}'
+      - name: model-quantization-hpc
         template: hpc-follower
         when: '{{=(workflow.parameters[''quantization-mode''] != ''none'') && hasPrefix(workflow.parameters[''model-quantization-class''],
           ''meluxina-'')}}'
@@ -1564,15 +1190,9 @@ spec:
           - name: image
             value: '{{workflow.parameters.image-model-quantization}}'
           - name: step-command
-            value: '["python", "-m", "app.entry", "--params", {{=toJson(tasks[''compose-and-validate''].status
-              == ''Skipped'' ? tasks[''compose-and-validate-meluxina''].outputs.parameters[''params'']
-              : tasks[''compose-and-validate''].outputs.parameters[''params''])}},
-              "--training-result", {{=toJson(tasks[''model-training''].status == ''Skipped''
-              ? tasks[''model-training-meluxina''].outputs.parameters[''training-result'']
-              : tasks[''model-training''].outputs.parameters[''training-result''])}},
-              "--qat-result", {{=toJson(tasks[''qat-finetune''].status == ''Skipped''
-              ? tasks[''qat-finetune-meluxina''].outputs.parameters[''qat-result'']
-              : tasks[''qat-finetune''].outputs.parameters[''qat-result''])}}]'
+            value: '["python","-m","app.entry"]'
+          - name: step-kind
+            value: transform
           - name: time-limit
             value: '240'
           - name: deadline-seconds
@@ -1583,85 +1203,44 @@ spec:
             value: auto
           - name: idle-timeout
             value: ''
-          - name: step-outputs
-            value: quantization-result
           - name: hpc-class
             value: '{{workflow.parameters.model-quantization-class}}'
-        depends: ((compose-and-validate.Succeeded || compose-and-validate.Skipped)
-          && (compose-and-validate-meluxina.Succeeded || compose-and-validate-meluxina.Skipped))
-          && ((model-training.Succeeded || model-training.Skipped) && (model-training-meluxina.Succeeded
-          || model-training-meluxina.Skipped)) && ((qat-finetune.Succeeded || qat-finetune-meluxina.Succeeded)
-          || (qat-finetune.Skipped && qat-finetune-meluxina.Skipped) || (qat-finetune.Omitted
-          && qat-finetune-meluxina.Omitted))
+          - name: kaos-context
+            value: '{{=sprig.trimSuffix("}", tasks["compose-and-validate"].outputs.parameters["kaos-context-model-quantization"])
+              + ",\"upstream\":{\"model-training\":" + sprig.default(sprig.default("{\"version\":1,\"status\":\"absent\"}",
+              tasks["model-training-hpc"].outputs.parameters["kaos-result"]), tasks["model-training"].outputs.parameters["kaos-result"])
+              + ",\"qat-finetune\":" + sprig.default(sprig.default("{\"version\":1,\"status\":\"absent\"}",
+              tasks["qat-finetune-hpc"].outputs.parameters["kaos-result"]), tasks["qat-finetune"].outputs.parameters["kaos-result"])
+              + "}" + "}"}}'
+        depends: compose-and-validate && ((model-training.Succeeded || model-training.Skipped)
+          && (model-training-hpc.Succeeded || model-training-hpc.Skipped)) && ((qat-finetune.Succeeded
+          || qat-finetune-hpc.Succeeded) || (qat-finetune.Skipped && qat-finetune-hpc.Skipped)
+          || (qat-finetune.Omitted && qat-finetune-hpc.Omitted))
       - name: model-registration
-        depends: ((compose-and-validate.Succeeded || compose-and-validate.Skipped)
-          && (compose-and-validate-meluxina.Succeeded || compose-and-validate-meluxina.Skipped))
-          && ((model-training.Succeeded || model-training.Skipped) && (model-training-meluxina.Succeeded
-          || model-training-meluxina.Skipped)) && ((model-quantization.Succeeded ||
-          model-quantization-meluxina.Succeeded) || (model-quantization.Skipped &&
-          model-quantization-meluxina.Skipped) || (model-quantization.Omitted && model-quantization-meluxina.Omitted))
+        depends: compose-and-validate && ((model-training.Succeeded || model-training.Skipped)
+          && (model-training-hpc.Succeeded || model-training-hpc.Skipped)) && ((model-quantization.Succeeded
+          || model-quantization-hpc.Succeeded) || (model-quantization.Skipped && model-quantization-hpc.Skipped)
+          || (model-quantization.Omitted && model-quantization-hpc.Omitted))
         template: model-registration
         arguments:
           parameters:
-          - name: params
-            value: '{{=tasks[''compose-and-validate''].status == ''Skipped'' ? tasks[''compose-and-validate-meluxina''].outputs.parameters[''params'']
-              : tasks[''compose-and-validate''].outputs.parameters[''params'']}}'
-          - name: training-result
-            value: '{{=tasks[''model-training''].status == ''Skipped'' ? tasks[''model-training-meluxina''].outputs.parameters[''training-result'']
-              : tasks[''model-training''].outputs.parameters[''training-result'']}}'
-          - name: quantization-result
-            value: '{{=tasks[''model-quantization''].status == ''Skipped'' ? tasks[''model-quantization-meluxina''].outputs.parameters[''quantization-result'']
-              : tasks[''model-quantization''].outputs.parameters[''quantization-result'']}}'
-        when: '{{=!hasPrefix(workflow.parameters[''model-registration-class''], ''meluxina-'')}}'
-      - name: model-registration-meluxina
-        template: hpc-follower
-        when: '{{=hasPrefix(workflow.parameters[''model-registration-class''], ''meluxina-'')}}'
-        arguments:
-          parameters:
-          - name: step-name
-            value: model-registration
-          - name: image
-            value: '{{workflow.parameters.image-model-registration}}'
-          - name: step-command
-            value: '["python", "-m", "app.entry", "--params", {{=toJson(tasks[''compose-and-validate''].status
-              == ''Skipped'' ? tasks[''compose-and-validate-meluxina''].outputs.parameters[''params'']
-              : tasks[''compose-and-validate''].outputs.parameters[''params''])}},
-              "--training-result", {{=toJson(tasks[''model-training''].status == ''Skipped''
-              ? tasks[''model-training-meluxina''].outputs.parameters[''training-result'']
-              : tasks[''model-training''].outputs.parameters[''training-result''])}},
-              "--quantization-result", {{=toJson(tasks[''model-quantization''].status
-              == ''Skipped'' ? tasks[''model-quantization-meluxina''].outputs.parameters[''quantization-result'']
-              : tasks[''model-quantization''].outputs.parameters[''quantization-result''])}}]'
-          - name: time-limit
-            value: '240'
-          - name: deadline-seconds
-            value: '259200'
-          - name: resumable-lead
-            value: '0'
-          - name: resumable
-            value: auto
-          - name: idle-timeout
-            value: ''
-          - name: step-outputs
-            value: registration-result
-          - name: hpc-class
-            value: '{{workflow.parameters.model-registration-class}}'
-        depends: ((compose-and-validate.Succeeded || compose-and-validate.Skipped)
-          && (compose-and-validate-meluxina.Succeeded || compose-and-validate-meluxina.Skipped))
-          && ((model-training.Succeeded || model-training.Skipped) && (model-training-meluxina.Succeeded
-          || model-training-meluxina.Skipped)) && ((model-quantization.Succeeded ||
-          model-quantization-meluxina.Succeeded) || (model-quantization.Skipped &&
-          model-quantization-meluxina.Skipped) || (model-quantization.Omitted && model-quantization-meluxina.Omitted))
+          - name: kaos-context
+            value: '{{=sprig.trimSuffix("}", tasks["compose-and-validate"].outputs.parameters["kaos-context-model-registration"])
+              + ",\"upstream\":{\"model-training\":" + sprig.default(sprig.default("{\"version\":1,\"status\":\"absent\"}",
+              tasks["model-training-hpc"].outputs.parameters["kaos-result"]), tasks["model-training"].outputs.parameters["kaos-result"])
+              + ",\"model-quantization\":" + sprig.default(sprig.default("{\"version\":1,\"status\":\"absent\"}",
+              tasks["model-quantization-hpc"].outputs.parameters["kaos-result"]),
+              tasks["model-quantization"].outputs.parameters["kaos-result"]) + "}"
+              + "}"}}'
   - name: hpc-follower
     inputs:
       parameters:
       - name: step-name
       - name: image
       - name: step-command
+      - name: step-kind
       - name: time-limit
       - name: deadline-seconds
-      - name: step-outputs
-        value: ''
       - name: hpc-class
       - name: resumable-lead
         value: '0'
@@ -1669,43 +1248,20 @@ spec:
         value: auto
       - name: idle-timeout
         value: ''
+      - name: kaos-context
     metadata:
       labels:
         platform.kubecore.io/compute-type: hpc
         platform.kubecore.io/hpc-class: '{{inputs.parameters.hpc-class}}'
+        platform.kubecore.io/step-kind: '{{inputs.parameters.step-kind}}'
     outputs:
       parameters:
       - name: slurm-job-id
         valueFrom:
           path: /tmp/slurm-job-id
-      - name: data-yaml
+      - name: kaos-result
         valueFrom:
-          path: /tmp/outputs/data-yaml.json
-          default: '{}'
-      - name: manifest-summary
-        valueFrom:
-          path: /tmp/outputs/manifest-summary.json
-          default: '{}'
-      - name: params
-        valueFrom:
-          path: /tmp/outputs/params.json
-          default: '{}'
-      - name: qat-result
-        valueFrom:
-          path: /tmp/outputs/qat-result.json
-          default: '{}'
-      - name: quantization-result
-        valueFrom:
-          path: /tmp/outputs/quantization-result.json
-          default: '{}'
-      - name: registration-result
-        valueFrom:
-          path: /tmp/outputs/registration-result.json
-          default: '{}'
-      - name: training-result
-        valueFrom:
-          path: /tmp/outputs/training-result.json
-          default: '{}'
+          path: /tmp/outputs/kaos-result.json
     container:
       image: python:3.12-alpine
       command:
@@ -1743,15 +1299,14 @@ spec:
         \ — n1-standard-8 + 1x nvidia-tesla-t4\nMELUXINA (HPC): pick a meluxina-*\
         \ class in any {step}-class dropdown and that step runs as a Slurm job on\
         \ MeluXina (account PLACEHOLDER-account) — queue time applies; the pipeline\
-        \ waits, stages the dataset in and the step's outputs back; hpc_time_limit\
-        \ in pipeline.py caps the job. Classes:\n  - meluxina-gpu (gpu) — partition\
-        \ gpu, 4 GPUs, 128 cores, 512 GiB — 4x A100-40GB, 2x EPYC 7452, 512 GB\n \
-        \ - meluxina-cpu (cpu) — partition cpu, 128 cores, 512 GiB — 2x EPYC 7452,\
-        \ 128 cores, 512 GB\n  - meluxina-largemem (cpu) — partition largemem, 128\
-        \ cores, 4096 GiB — 4 TB\nSTEPS: compose-and-validate -> config-validation\
-        \ -> dataset-loading -> data-summary -> model-training -> qat-finetune ->\
-        \ model-quantization -> model-registration\n(This field is informational —\
-        \ leave it unchanged.)"
+        \ waits, stages the dataset in and the step's result back; walltime= in pipeline.py\
+        \ caps the job. Classes:\n  - meluxina-gpu (gpu) — partition gpu, 4 GPUs,\
+        \ 128 cores, 512 GiB — 4x A100-40GB, 2x EPYC 7452, 512 GB\n  - meluxina-cpu\
+        \ (cpu) — partition cpu, 128 cores, 512 GiB — 2x EPYC 7452, 128 cores, 512\
+        \ GB\n  - meluxina-largemem (cpu) — partition largemem, 128 cores, 4096 GiB\
+        \ — 4 TB\nSTEPS: compose-and-validate -> config-validation -> prepare-data\
+        \ -> model-training -> qat-finetune -> model-quantization -> model-registration\n\
+        (This field is informational — leave it unchanged.)"
       description: 'Read-only: live pool compute classes + how to fill this form.
         Leave unchanged.'
     - name: image_processing
@@ -1792,21 +1347,12 @@ spec:
       enum:
       - default_qat
       - no_qat
-    - name: summary-label
-      description: 'Config: summary.label'
-      value: 📊 Data summary
-    - name: data-ref
-      description: 'Config: data.ref'
-      value: main
     - name: data-source
       description: 'Config: data.source'
       value: lakefs
       enum:
       - lakefs
       - s3
-    - name: data-version
-      description: 'Config: data.version'
-      value: ''
     - name: data-path_override
       description: 'Config: data.path_override'
       value: ''
@@ -1838,15 +1384,18 @@ spec:
     - name: quantization-parity_max_abs_error
       description: 'Config: quantization.parity_max_abs_error'
       value: '0.05'
-    - name: quantization-output_prefix
-      description: 'Config: quantization.output_prefix'
-      value: main/quantization
     - name: experiment-name
       description: 'Config: experiment.name'
       value: object-pose-v1-yolov8n
     - name: experiment-description
       description: 'Config: experiment.description'
       value: ''
+    - name: dataset
+      description: 'Config: dataset'
+      value: dataset-default@latest
+    - name: calibration
+      description: 'Config: calibration'
+      value: dataset-default@latest
     - name: model-variant
       description: 'Config: model.variant'
       value: yolov8n-pose.pt
@@ -2033,16 +1582,11 @@ spec:
         configMapKeyRef:
           name: yolo-meluxina-poc-pipeline-images
           key: config-validation
-    - name: image-dataset-loading
+    - name: image-prepare-data
       valueFrom:
         configMapKeyRef:
           name: yolo-meluxina-poc-pipeline-images
-          key: dataset-loading
-    - name: image-data-summary
-      valueFrom:
-        configMapKeyRef:
-          name: yolo-meluxina-poc-pipeline-images
-          key: data-summary
+          key: prepare-data
     - name: image-model-training
       valueFrom:
         configMapKeyRef:
@@ -2069,12 +1613,8 @@ spec:
       - cpu-standard
       - kubecorecpu
       - gpu-t4
-      - meluxina-gpu
-      - meluxina-cpu
-      - meluxina-largemem
       description: Compute class for the 'compose-and-validate' step (the KubePool's
-        class catalog; default = its cpu tier; meluxina-* classes run the step as
-        a Slurm job on MeluXina — queue time applies, see pipeline-info).
+        class catalog; default = its cpu tier).
     - name: compose-and-validate-cpu
       value: '7'
       description: Per-run resource override for step 'compose-and-validate'.
@@ -2090,12 +1630,8 @@ spec:
       - cpu-standard
       - kubecorecpu
       - gpu-t4
-      - meluxina-gpu
-      - meluxina-cpu
-      - meluxina-largemem
       description: Compute class for the 'config-validation' step (the KubePool's
-        class catalog; default = its cpu tier; meluxina-* classes run the step as
-        a Slurm job on MeluXina — queue time applies, see pipeline-info).
+        class catalog; default = its cpu tier).
     - name: config-validation-cpu
       value: '7'
       description: Per-run resource override for step 'config-validation'.
@@ -2105,7 +1641,7 @@ spec:
     - name: config-validation-disk
       value: 10Gi
       description: Per-run resource override for step 'config-validation'.
-    - name: dataset-loading-class
+    - name: prepare-data-class
       value: cpu-standard
       enum:
       - cpu-standard
@@ -2114,39 +1650,18 @@ spec:
       - meluxina-gpu
       - meluxina-cpu
       - meluxina-largemem
-      description: Compute class for the 'dataset-loading' step (the KubePool's class
+      description: Compute class for the 'prepare-data' step (the KubePool's class
         catalog; default = its cpu tier; meluxina-* classes run the step as a Slurm
         job on MeluXina — queue time applies, see pipeline-info).
-    - name: dataset-loading-cpu
+    - name: prepare-data-cpu
       value: '7'
-      description: Per-run resource override for step 'dataset-loading'.
-    - name: dataset-loading-mem
+      description: Per-run resource override for step 'prepare-data'.
+    - name: prepare-data-mem
       value: 27Gi
-      description: Per-run resource override for step 'dataset-loading'.
-    - name: dataset-loading-disk
+      description: Per-run resource override for step 'prepare-data'.
+    - name: prepare-data-disk
       value: 10Gi
-      description: Per-run resource override for step 'dataset-loading'.
-    - name: data-summary-class
-      value: cpu-standard
-      enum:
-      - cpu-standard
-      - kubecorecpu
-      - gpu-t4
-      - meluxina-gpu
-      - meluxina-cpu
-      - meluxina-largemem
-      description: Compute class for the 'data-summary' step (the KubePool's class
-        catalog; default = its cpu tier; meluxina-* classes run the step as a Slurm
-        job on MeluXina — queue time applies, see pipeline-info).
-    - name: data-summary-cpu
-      value: '7'
-      description: Per-run resource override for step 'data-summary'.
-    - name: data-summary-mem
-      value: 27Gi
-      description: Per-run resource override for step 'data-summary'.
-    - name: data-summary-disk
-      value: 10Gi
-      description: Per-run resource override for step 'data-summary'.
+      description: Per-run resource override for step 'prepare-data'.
     - name: model-training-class
       value: gpu-t4
       enum:
@@ -2216,12 +1731,8 @@ spec:
       - cpu-standard
       - kubecorecpu
       - gpu-t4
-      - meluxina-gpu
-      - meluxina-cpu
-      - meluxina-largemem
       description: Compute class for the 'model-registration' step (the KubePool's
-        class catalog; default = its cpu tier; meluxina-* classes run the step as
-        a Slurm job on MeluXina — queue time applies, see pipeline-info).
+        class catalog; default = its cpu tier).
     - name: model-registration-cpu
       value: '7'
       description: Per-run resource override for step 'model-registration'.

@@ -2,7 +2,8 @@
 ml-ci-dataset-release — a dataset changed; re-render the project's ML pipelines
 (PRD novelcore/kaos#1283 D-05).
 
-A pipeline's `dataset` dropdown (<repo>@vN, <repo>@latest) is rendered from
+A pipeline's dataset pickers (the form field of every name a step declares in
+inputs=; <repo>@<version>, <repo>@latest) are filled from
 kaos-lake's catalog by ml-ci-build's hera-enhance-commit, at render time only.
 Nothing re-rendered it when a version was released, so a new dataset-x@v2
 appeared only after the next commit. kaos-lake now creates ONE Workflow of this

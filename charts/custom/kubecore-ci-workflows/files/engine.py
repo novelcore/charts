@@ -12,6 +12,12 @@ operator writes `engine: {version, image, wheel, wheelSha256}` into the app's gi
   fetch    download the engine wheel, verify its sha256 and unzip it (never pip). A wheel that does not
            download or whose sha256 differs fails closed.
   stamp    mark a rendered WorkflowTemplate with the engine that produced it.
+  steps    the step table of a rendered WorkflowTemplate (PRD novelcore/kaos#1911): what each step reads and
+           produces, as the engine wrote it on the compose step. A render without one is not from an engine
+           on the step contract and fails closed.
+  attempt  the `engine-attempt` record of a failed run; for an app refused for the step contract it also
+           names the commit and the kaos-lib delivered.
+  refused  ml-ci-reconcile: exit 0 when that record is a refusal of exactly this engine, commit and kaos-lib.
 
 Standard library + PyYAML only (the toolbox image has both). Every input from the app checkout is DATA:
 files are looked up, never imported or executed. Run as `python3 -I`.
@@ -32,6 +38,9 @@ import yaml
 EXIT_NO_ENGINE = 2    # the context names no usable engine
 EXIT_INTEGRITY = 3    # the wheel is not the one the context pins: refuse
 EXIT_UNAVAILABLE = 4  # the wheel could not be downloaded or read
+EXIT_NO_CONTRACT = 5  # the render carries no step table: the engine is not on the step contract
+COMPOSE_STEP = "compose-and-validate"
+COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
 # The version is the operator build tag; it becomes a label value on the WorkflowTemplate and the
 # builds, so it must be one (no "+", no "/").
 VERSION_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$")
@@ -177,6 +186,64 @@ def stamp(wft_path, version):
         yaml.dump(wft, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
 
 
+# ---------------------------------------------------------------- the step table
+
+def step_table(wft_path):
+    """The step table of a rendered WorkflowTemplate: the compose step's argument after `--steps`, one
+    object per step in pipeline order (name, kind, reads, inputs, needs, produces). It is the place to
+    read what a pipeline declares without running pipeline.py again."""
+    problem = "the compose step has no --steps argument"
+    try:
+        with open(wft_path) as f:
+            templates = (yaml.safe_load(f) or {})["spec"]["templates"]
+        args = next(t for t in templates if t.get("name") == COMPOSE_STEP)["container"]["args"]
+        table = json.loads(args[args.index("--steps") + 1])
+        if isinstance(table, list) and all(
+                isinstance(s, dict) and isinstance(s.get("name"), str) and isinstance(s.get("inputs"), list)
+                and all(isinstance(n, str) for n in s["inputs"]) for s in table):
+            return table
+        problem = "its step table is not a list of steps with a name and inputs"
+    except (OSError, yaml.YAMLError, KeyError, TypeError, IndexError, StopIteration, ValueError) as exc:
+        problem = f"{problem} ({type(exc).__name__})"
+    raise EngineError(f"the rendered pipeline carries no step table: {problem}. The pipeline engine this "
+                      "context pins is not on the step contract; nothing is committed", EXIT_NO_CONTRACT)
+
+
+# ---------------------------------------------------------------- engine-attempt
+
+def _kaos_lib_key(ctx):
+    lib = ctx.get("kaosLib")
+    spec = str((lib if isinstance(lib, dict) else {}).get("spec") or "").strip()
+    return hashlib.sha256(spec.encode()).hexdigest()[:12]
+
+
+def _version(ctx):
+    block = ctx.get("engine")
+    return str(block.get("version") or "") if isinstance(block, dict) else ""
+
+
+def attempt(ctx_path, now=None, refused_commit=""):
+    """The `engine-attempt` record of a run that failed in the engine: `<engine version>@<epoch>`, read by
+    ml-ci-reconcile's one-attempt-per-hour guard. An app refused for the step contract (it must change,
+    trying again cannot help) records `<engine version>@<epoch>@<commit>@<kaos-lib>`: the commit that was
+    refused and the first 12 hex of the sha256 of the kaos-lib spec the context delivered."""
+    ctx = load_context(ctx_path)
+    value = f"{_version(ctx) or 'unknown'}@{int(time.time() if now is None else now)}"
+    if refused_commit:
+        value += f"@{refused_commit}@{_kaos_lib_key(ctx)}"
+    return value
+
+
+def refused(value, ctx_path, commit):
+    """True when value records a refusal of exactly this context's engine and kaos-lib and this commit:
+    nothing a new attempt reads has changed. Anything else, an unreadable context included, is False."""
+    parts = str(value).split("@")
+    ctx = load_context(ctx_path)
+    version = _version(ctx)
+    return (len(parts) == 4 and bool(version) and parts[0] == version and bool(COMMIT_RE.match(parts[2]))
+            and parts[2] == commit and parts[3] == _kaos_lib_key(ctx))
+
+
 # ---------------------------------------------------------------- command line
 
 def main(argv=None):
@@ -194,15 +261,29 @@ def main(argv=None):
     s = sub.add_parser("stamp")
     s.add_argument("--wft", required=True)
     s.add_argument("--version", required=True)
+    t = sub.add_parser("steps")
+    t.add_argument("--wft", required=True)
+    a = sub.add_parser("attempt")
+    a.add_argument("--context", required=True)
+    a.add_argument("--refused-commit", default="")
+    r = sub.add_parser("refused")
+    r.add_argument("--context", required=True)
+    r.add_argument("--commit", required=True)
+    r.add_argument("--attempt", required=True)
     args = parser.parse_args(argv)
     try:
         if args.cmd == "context":
             print(json.dumps(engine_of(args.context, args.repo), sort_keys=True))
         elif args.cmd == "version":
-            block = load_context(args.context).get("engine")
-            print(str(block.get("version") or "") if isinstance(block, dict) else "")
+            print(_version(load_context(args.context)))
         elif args.cmd == "fetch":
             print(fetch_wheel(args.wheel, args.sha256, args.dest))
+        elif args.cmd == "steps":
+            print(json.dumps(step_table(args.wft), separators=(",", ":")))
+        elif args.cmd == "attempt":
+            print(attempt(args.context, refused_commit=args.refused_commit))
+        elif args.cmd == "refused":
+            return 0 if refused(args.attempt, args.context, args.commit) else 1
         else:
             stamp(args.wft, args.version)
     except EngineError as exc:

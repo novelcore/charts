@@ -172,11 +172,14 @@ sha256 and unzipped OUTSIDE the workspace (no pip, nothing of the app's on sys.p
 developer-controlled and hera-render just ran untrusted pipeline.py against it). A wheel that does not
 download or whose sha256 differs FAILS the step: enhancing with unknown code is not an option. The WFT is
 then stamped with the engine version (annotation, and the `platform.kubecore.io/engine` run label).
+Last, the step table the engine wrote on the compose step (PRD novelcore/kaos#1911: what every step reads
+and produces) is read into /tmp/steps.json. A render without one is not from an engine on the step
+contract: the step fails and nothing is committed (`engine.py steps`, exit 5).
 
 Caller: ENGINE_JSON set (the `engine.py context` JSON of detect-steps/detect-engine, an immutable Argo
 parameter), PyYAML installed, /tmp/context.yaml written, the raw WFT at
-/workspace/out/raw-workflow-template.yaml. Writes /workspace/out/workflow-template.yaml and sets
-ENGINE_VERSION.
+/workspace/out/raw-workflow-template.yaml. Writes /workspace/out/workflow-template.yaml and
+/tmp/steps.json, and sets ENGINE_VERSION.
 */}}
 {{- define "kubecore-ci-workflows.platformEnhance" -}}
 {{ include "kubecore-ci-workflows.engineScript" . }}
@@ -202,6 +205,7 @@ if add_step_token(wft, ctx):
     yaml.dump(wft, open(wft_path, "w"), default_flow_style=False, allow_unicode=True, sort_keys=False)
 STEPTOKEOF
 python3 -I /tmp/engine.py stamp --wft /workspace/out/workflow-template.yaml --version "${ENGINE_VERSION}"
+python3 -I /tmp/engine.py steps --wft /workspace/out/workflow-template.yaml > /tmp/steps.json
 {{- end }}
 
 {{/*
@@ -229,6 +233,54 @@ if size > limit:
     print("Biggest templates: " + ", ".join(f"{n} {b / 1024:.1f} KiB" for b, n in per[:5]))
     print("Fix: split the pipeline into smaller ones, or remove steps; platform-injected per-step blocks are already shared.")
     sys.exit(1)
+{{- end }}
+
+{{/*
+The page of the kaos-lib guide that says how an app moves to the step contract of kaos-lib 0.5
+(PRD novelcore/kaos#1911). Client-facing: it is what a refused build links.
+*/}}
+{{- define "kubecore-ci-workflows.migrationGuideUrl" -}}
+{{ trimSuffix "/" .Values.kaosLib.guideUrl }}/migrate-to-0.5.html
+{{- end }}
+
+{{/*
+The commit status of a build that was refused because the app has not moved to the step contract
+(PRD novelcore/kaos#1911 AC-01). GitHub cuts a description at 140 characters: tests/step-contract checks it fits.
+*/}}
+{{- define "kubecore-ci-workflows.notMigratedStatus" -}}
+Not built: this app must move to kaos-lib 0.5. Guide: {{ include "kubecore-ci-workflows.migrationGuideUrl" . }}
+{{- end }}
+
+{{/*
+not_migrated MESSAGE (PRD novelcore/kaos#1911 AC-01, T-05): this app is still on the step contract of
+kaos-lib 0.4 and the caller is about to fail. Nothing was committed and nothing is built; this only
+leaves what the app's engineer reads, for the steps that report:
+  /workspace/not-migrated      one line, what to change (the exit handler turns it into the commit status,
+                               the `engine-last-error` record and the one-attempt record)
+  /workspace/report-extra.md   the "What to change" section of the report comment (the report template
+                               appends that file)
+and one `kaos-ci: NOT MIGRATED:` line in the step's log. The message is data: control characters and
+backticks are dropped and it is cut at 600 characters. It names no platform internals.
+Caller: /workspace mounted and writable; POSIX sh.
+*/}}
+{{- define "kubecore-ci-workflows.notMigrated" -}}
+not_migrated() {
+  _nm=$(printf '%s' "$1" | tr '\n\r\t' '   ' | tr -d '\000-\037\177`' | cut -c1-600)
+  printf '%s\n' "${_nm}" > /workspace/not-migrated
+  {
+    echo "#### What to change"
+    echo ""
+    echo "This app is written for kaos-lib 0.4. Pipelines now use the step API of kaos-lib 0.5, and every app changes once. It was not built: the pipeline you could run before this commit is still the one that runs."
+    echo ""
+    echo '```'
+    echo "${_nm}"
+    echo '```'
+    echo ""
+    echo "The guide has every change, and \`kaosctl lint --fix\` makes the first ones: {{ include "kubecore-ci-workflows.migrationGuideUrl" . }}"
+    echo ""
+  } > /workspace/report-extra.md
+  echo "kaos-ci: NOT MIGRATED: ${_nm}" >&2
+}
 {{- end }}
 
 {{/*
@@ -785,7 +837,8 @@ KAOSLIBEOF
 {{- end }}
 
 {{/*
-The dataset dropdown's choices and their digest (PRD novelcore/kaos#1283 D-05), shared by the
+The dataset pickers' choices, their digest and the fill of every input's form field (PRD
+novelcore/kaos#1283 D-05, PRD novelcore/kaos#1911 D-15), shared by the
 render (hera-enhance-commit) and the drift check (ml-ci-reconcile): one definition, so the digest
 a render records is the digest the check compares. Tested in tests/dataset-choices.
 Caller: python3 (tooling.toolboxImage / tooling.kubectlImage).

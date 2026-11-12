@@ -418,6 +418,8 @@ expect_eq "$REQUIRED" "app project_name version spec" "kaos-lib-bump-pr: app, pr
 BUMP=$(src kaos-lib-bump-pr bump)
 expect_not "$BUMP" "{{workflow.parameters" "kaos-lib-bump-pr: parameters reach the script as env vars only"
 expect_has "$BUMP" "kaos-lib.py bump" "kaos-lib-bump-pr: runs the tested bump"
+expect_has "$BUMP" '--guide-url "https://storage.googleapis.com/kaos-dev-511509-kaos-lib/docs"' "kaos-lib-bump-pr: the bump is given the kaos-lib guide (the migration page across 0.5, the support window in a new compat file)"
+expect_eq "$(grep -c 'docs/kaos-lib-versions.md' "$RENDERED")" "0" "kaos-lib-bump-pr: nothing points at the page the templates no longer have"
 
 echo "kaos-lib: ${PASSED} passed, ${FAILED} failed"
 exit "$FAILED"

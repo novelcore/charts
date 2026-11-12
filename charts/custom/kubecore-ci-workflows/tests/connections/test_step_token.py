@@ -81,6 +81,9 @@ def _assert_token(t):
 def test_hera_post_pass_token_golden(name):
     ctx = _with_audience(yaml.safe_load(open(FIXTURES[name].context)))
     out = _run_post_pass(golden_text("hera", name), ctx)
+    if os.environ.get("UPDATE_GOLDEN"):  # after an engine change: rewrite, then read the diff
+        with open(_golden_path("hera-step-token", name), "w") as f:
+            f.write(out)
     with open(_golden_path("hera-step-token", name)) as f:
         assert out == f.read()
     steps = _steps(yaml.safe_load(out), ctx["serviceAccountName"])

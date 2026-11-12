@@ -84,9 +84,9 @@ The platform pipeline engine is the ONLY way this chart renders, enhances and co
 
 The compose image is rebuilt when `config/` changed, when `engine-compose` in `{app}-pipeline-images` is not the context's `engine.version`, or when the kaos-lib package moved (its Dockerfile counts as one more step that declares the ARG).
 
-`{app}-pipeline-images` records `engine-version` (the render), `engine-compose` (the compose image), and, after a failed run, `engine-last-error` and `engine-attempt` (`<engine version>@<epoch>`). The exit handler's `engine-record` step writes them to the gitops file (one line, at most 200 characters, from the failed pod's log: engine check, render, enhance or the compose image build) and clears them after a run that rendered or built the compose image. The operator reads `engine-last-error` to show state `failed`.
+`{app}-pipeline-images` records `engine-version` (the render), `engine-compose` (the compose image), and, after a failed run, `engine-last-error` and `engine-attempt` (`<engine version>@<epoch>`; `<engine version>@<epoch>@<commit>@<kaos-lib>` for an app refused for the step contract, see below). The exit handler's `engine-record` step writes them to the gitops file (one line, at most 200 characters, from the failed pod's log: engine check, render, enhance or the compose image build) and clears them after a run that rendered or built the compose image. The operator reads `engine-last-error` to show state `failed`.
 
-**ENGINE DRIFT** (`ml-ci-reconcile`): a render or compose image whose recorded engine is not the context's `engine.version` submits one build. It re-renders and rebuilds the compose image only: `detect-steps` rebuilds no other image. The records are read from gitops, so a render already pushed is not submitted again while ArgoCD has not synced it. **One attempt per hour:** while `engine-attempt` names the context's engine version and is younger than an hour, the poll submits nothing (a broken engine release does not loop builds; a new engine version has another name and is tried at once). A failed render never replaces the live WorkflowTemplate: `hera-enhance-commit` only starts after `hera-render` succeeded, and writes the file only after the enhance, the gate and the size guard.
+**ENGINE DRIFT** (`ml-ci-reconcile`): a render or compose image whose recorded engine is not the context's `engine.version` submits one build. It re-renders and rebuilds the compose image only: `detect-steps` rebuilds no other image (except across kaos-lib 0.5, see "The step contract"). The records are read from gitops, so a render already pushed is not submitted again while ArgoCD has not synced it. **One attempt per hour:** while `engine-attempt` names the context's engine version and is younger than an hour, the poll submits nothing (a broken engine release does not loop builds; a new engine version has another name and is tried at once). A failed render never replaces the live WorkflowTemplate and builds no image: `hera-enhance-commit` only starts after `hera-render` succeeded and writes the file only after the enhance, the step table check, the gate and the size guard, and `build-push` is the step group after the render.
 
 The PR check (`ml-ci-pr-render`) renders with the same template and the same engine. The step-folder gate does not look for a `compose-and-validate` folder.
 
@@ -97,6 +97,42 @@ bash charts/custom/kubecore-ci-workflows/tests/engine-drift/run.sh /tmp/rendered
 ```
 
 The engine's `enhance.py` must understand every flag this chart passes (`--helper-configmap` since 0.12.149).
+
+## The step contract (PRD novelcore/kaos#1911, chart 0.14.0, BREAKING)
+
+This chart renders, builds and reports apps on the step contract only: `pipeline.py` declares `kind=`, `inputs=` and `produces=` (no `outputs=`, no `hpc_time_limit=`), a step runs with no arguments and reads one context, and kaos-lib is 0.5 or newer. There is no second path for older apps. It needs a pipeline engine on the step contract (kaos-hpc-operator `engine/`, the release that writes the step table) and a kaos-lib 0.5 delivered by the platform; with an older engine every render fails closed ("the rendered pipeline carries no step table").
+
+**An app is never left half-moved (AC-01, T-05).** An app that has not moved fails before anything is recorded, and the pipeline it had keeps running:
+
+| What is old | Where it fails | With |
+|---|---|---|
+| `pipeline.py`: a step without `kind=`, `outputs=`, `hpc_time_limit=` (every app from before the contract has at least the first) | `hera-render`, the engine's own refusal | the engine's message, which names the step and what to write |
+| kaos-lib: the platform holds the app at a kaos-lib older than 0.5 because its `.kaos/compat.yaml` does not accept 0.5 (or declares nothing while an older one is delivered) | `detect-steps` (`kaos-lib.py contract`), before the render | what to write in `.kaos/compat.yaml` and the guide |
+| the engine: the context pins an engine from before the contract | the enhance steps (`engine.py steps`, exit 5) | "not on the step contract" (a platform fault, reported as an engine error) |
+
+In all three nothing is committed to gitops (no WorkflowTemplate, no `engine-version`, no `last-built-sha`, no image key) and no image is built: the render is a step group of its own **before** `build-push` (until 0.13 they shared a group, so a refused app had every step image built first). The one build let through with an older kaos-lib is the one whose commit already accepts 0.5: its record (`kaos-lib-compat`) is how the platform learns the new range and then delivers 0.5.
+
+**What the app's engineer sees.** The step that refuses calls `not_migrated` (`_helpers.tpl`), which leaves `/workspace/not-migrated` (one line: what to change) and the "What to change" section of the report comment (`/workspace/report-extra.md`). The exit handler's `engine-record` then replaces the commit status `kubecore-ml-ci` with `Not built: this app must move to kaos-lib 0.5. Guide: <address>` (the check links the guide, `kaosLib.guideUrl` + `/migrate-to-0.5.html`) and records `engine-last-error` = `not migrated (<guide>): <what to change>`, which the operator shows on the app. The pull request check (`ml-ci-pr-render`, the same `hera-render`) posts the same description on `wft-render`. The kaos-lib check is not part of the pull request check: the pull request that changes the range is the one that must pass, and the platform only learns the new range from the build after its merge. None of these texts names the platform's internals.
+
+How a refusal is told from any other failed render: the engine's migration messages end with its migration guide's address (`authoring-schema.json`, `migration_guide`); `hera-render` reads that address from the engine it runs and looks for it in the render's error. The message, without that address, is what the report shows; the address the engineer gets is the chart's (`kaosLib.guideUrl`).
+
+**One attempt, no loop.** A refused build records `engine-attempt` as `<engine version>@<epoch>@<commit>@<kaos-lib>` (the kaos-lib is the first 12 hex of the sha256 of the spec the context delivered; `engine.py attempt` / `engine.py refused`). While HEAD is that commit and the gitops context still pins that engine and delivers that kaos-lib, `ml-ci-reconcile` submits nothing, in the hourly poll and in a forced run alike (NOT MIGRATED GUARD, ahead of COMMIT DRIFT): another build would read what the refused one read. A push to the app, a new engine or another kaos-lib is tried at once. Any other engine failure keeps the one-attempt-per-hour guard.
+
+**kaos-lib across 0.5.** Images built with a kaos-lib from before the contract cannot run a pipeline of this engine, so a reconcile-submitted build does not leave them "stale, rebuilt on use" when the context delivers 0.5: it rebuilds them (after the render, which an app that has not moved fails first). The bump pull request (`files/kaos-lib.py bump`) whose range crosses 0.5 says that changing the range is not enough and links the guide; a new `.kaos/compat.yaml` points at the guide's `support-window.html`.
+
+**The form.** Every name a step declares in `inputs=` is a form field that holds a dataset reference (`dataset-<name>@<version>`). `hera-enhance-commit` reads the names from the engine's step table (the compose step's `--steps` argument, `engine.py steps`) and gives each field the catalog's choices (`files/dataset-choices.py fill`); a field named `dataset` is no longer special. The default stays what the app's config says, `latest` included (it is resolved to a commit when the run starts); a default the catalog does not offer becomes the latest of the same dataset, or of the project's default dataset. `dataset-sha` is `none` when no step declares an input. The chart adds no form field and removes none, so it cannot collide with the keys the engine reserves (`plan`, `pipeline-version`).
+
+**Not done here: refusing an ADVANCED override over about 60 KiB at submit.** The override is a workflow parameter the engine passes to the compose step as an argument; above that size the step cannot start. A check before it needs either an extra task in the pipeline's DAG with its own image, or an expression on the compose argument whose message compose prints: both are the engine's to write (it owns the DAG and compose), and a chart post-pass that rewrote the argument could only make compose fail with an unrelated parse error.
+
+```bash
+bash charts/custom/kubecore-ci-workflows/tests/step-contract/run.sh /tmp/rendered.yaml   # the wording, the PR check, where the step table is read
+# with a real engine (a python that has the kaos-pipeline-engine wheel installed), and apps still on the old contract:
+ENGINE_PYTHON=/path/venv/bin/python OLD_APPS="/path/app-a /path/app-b" bash .../tests/step-contract/run.sh /tmp/rendered.yaml
+```
+
+The fixtures of `tests/connections` are two chart-owned apps on the contract (`fixtures/apps/hera`, `fixtures/apps/yolo`) rendered by the engine pinned in `harness.py` (`ENGINE_REF`); `run.sh` there says how to regenerate them and the golden files after an engine change.
+
+**Moving the pins (the cutover).** The chart, the operator's pin of it, the engine pin and the platform's kaos-lib value move together, in a freeze: kaos-lib 0.5 delivered first, then the operator release that pins this chart and the engine on the contract. `pipelineLint.*` must name a kaos-lib 0.5 wheel (rule set 2.0.0) from the same moment: the 0.4 linter reports the new keywords as errors.
 
 ## Tests
 

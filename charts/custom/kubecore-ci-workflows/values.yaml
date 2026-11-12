@@ -343,6 +343,10 @@ pendingReaper:
 # release notes of a ==X.Y.Z version (a git archive spec names its own source).
 kaosLib:
   changelogUrl: https://raw.githubusercontent.com/kaos-io/kaos-lib/main/CHANGELOG.md
+  # The kaos-lib guide (the published docs of kaos-lib, written for app engineers). The chart links two of
+  # its pages: migrate-to-0.5.html from a build or a bump pull request of an app that has not moved to the
+  # step contract (PRD novelcore/kaos#1911), and support-window.html from a new .kaos/compat.yaml.
+  guideUrl: https://storage.googleapis.com/kaos-dev-511509-kaos-lib/docs
 
 # Pipeline lint (PRD novelcore/kaos#1682 F-02): ml-ci-pr-render runs the kaos-lib linter on every
 # PR of a Hera ML app and posts the `pipeline-lint` status plus one PR comment. The linter is

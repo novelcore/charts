@@ -1,0 +1,29 @@
+# The experiment config tree — root defaults list (Hydra).
+#
+# Compute: each step is sized whole-node from its class budget, which the
+# platform computes and injects at release time (you never set it here).
+# A class budget is the node's allocatable MINUS the DaemonSets that are
+# scheduled before any workload pod — asking for more than that produces a
+# pod that waits forever for a node that can never exist.
+# Group choices here are the DEFAULTS; each group renders as one
+# dropdown on the submit form (options = the files in the group dir).
+defaults:
+  - _self_
+  # platform-registered schemas (types + enums) — the yaml sections
+  # below merge onto these and are validated at compose time
+  - data_schema
+  - quantization_schema
+  - experiment
+  - dataset
+  - calibration
+  - data
+  - model: yolov8n
+  - train
+  - train/optimizer: sgd
+  - train/callbacks: early_stopping
+  - train/qat: default_qat
+  - image_processing: mosaic_default
+  - quantization
+  - registration
+  - logging
+  - platform: live # platform-owned group (searchpath); NOT a form surface

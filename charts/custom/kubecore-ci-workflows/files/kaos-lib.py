@@ -8,6 +8,8 @@ Contract: kubecore-operator study/kubecore/package-delivery-design.md. The opera
   context ml-ci-reconcile: the spec the platform context delivers.
   support the kaos-lib support verdict of the version a build resolved.
   bump    the bump pull request (branch kaos-lib/bump-<version>) in the app repo.
+  contract  whether a build may install a spec: the step contract starts at kaos-lib 0.5
+          (PRD novelcore/kaos#1911, AC-01).
 
 Standard library + PyYAML only (the toolbox image has both). Every input is data: nothing
 read here is ever evaluated by a shell.
@@ -64,6 +66,19 @@ def registry_record_url(spec, base=RELEASES_BASE):
     return f"{base}/{'rc' if rc else 'stable'}/{tag}/release.json"
 
 
+# The step contract (PRD novelcore/kaos#1911): the first kaos-lib a pipeline step can run with. A pipeline
+# rendered by this chart's engine gives a step one context and takes one result back, which kaos-lib reads
+# and writes from this version on.
+CONTRACT_MIN = "0.5"
+# Pages of the kaos-lib guide, under the address the chart is given (kaosLib.guideUrl).
+MIGRATION_PAGE = "migrate-to-0.5.html"
+SUPPORT_WINDOW_PAGE = "support-window.html"
+
+
+def guide_page(guide_url, page):
+    return guide_url.rstrip("/") + "/" + page
+
+
 ARG_RE = re.compile(r"^\s*ARG\s+KAOS_LIB_PACKAGE(\s|=|$)", re.M)
 NONE = "none"  # pipeline-images kaos-lib-package: no step Dockerfile declares ARG KAOS_LIB_PACKAGE
 BUMP_PREFIX = "kaos-lib/bump-"
@@ -99,8 +114,16 @@ def read_compat(repo_dir):
     """The app's declared range (.kaos/compat.yaml, key kaos-lib); "" when none is declared."""
     try:
         with open(os.path.join(repo_dir, COMPAT_PATH)) as f:
-            doc = yaml.safe_load(f) or {}
-    except (OSError, yaml.YAMLError):
+            return read_compat_text(f.read())
+    except OSError:
+        return ""
+
+
+def read_compat_text(text):
+    """The kaos-lib range in the text of a compat file; "" when it declares none."""
+    try:
+        doc = yaml.safe_load(text) or {}
+    except yaml.YAMLError:
         return ""
     val = doc.get(COMPAT_KEY) if isinstance(doc, dict) else None
     return str(val).strip() if val is not None else ""
@@ -222,6 +245,64 @@ def bump_range(version):
     if v[0] == 0:
         return f">=0.{v[1]},<0.{v[1] + 1}"
     return f">={v[0]}.{v[1]},<{v[0] + 1}"
+
+
+# ---------------------------------------------------------------- the step contract
+
+def spec_version(spec):
+    """The version a spec installs; "" for a commit archive (it names no version) or an unreadable spec."""
+    for pattern in (REGISTRY_RE, RELEASE_RE, TAG_RE):
+        m = pattern.match(spec)
+        if m:
+            return m.group(3).lstrip("v")
+    if INDEX_RE.match(spec):
+        return spec.rsplit("==", 1)[1].strip()
+    return ""
+
+
+def on_contract(version):
+    """True when version is kaos-lib 0.5 or later (0.5.0rcN is part of 0.5), False when it is older, None
+    when it is not a released version: unknown is never refused."""
+    try:
+        return (parse_version(version) + [0])[:2] >= parse_version(CONTRACT_MIN)
+    except ValueError:
+        return None
+
+
+def accepts_contract(compat):
+    """The app's declared range admits the first release of the step contract."""
+    try:
+        return bool(compat) and contains(compat, CONTRACT_MIN + ".0")
+    except ValueError:
+        return False
+
+
+def crosses_contract(recorded, spec):
+    """The images were built with a kaos-lib from before the step contract and spec is on it: they cannot
+    run a pipeline of this engine, so they are not "stale, rebuilt on use"."""
+    return on_contract(spec_version(recorded)) is False and on_contract(spec_version(spec)) is True
+
+
+def contract_check(spec, compat, guide_url):
+    """{ok, message}: may a build install spec?
+
+    Refused: a spec older than the step contract for an app whose own range does not accept kaos-lib 0.5.
+    Its steps would be built with a kaos-lib that cannot read what the pipeline hands them. Not refused: a
+    spec with no readable version; and an app whose range already accepts 0.5 while the platform still
+    delivers the older spec (the build that reports the new range: the platform moves the app after it).
+    """
+    version = spec_version(spec)
+    if on_contract(version) is not False:
+        return {"ok": True, "message": ""}
+    if accepts_contract(compat):
+        return {"ok": True, "message": f"kaos-lib {version} is still delivered to this app; its {COMPAT_PATH} "
+                                       f"accepts {CONTRACT_MIN}, so the platform moves it after this build"}
+    rng = bump_range(CONTRACT_MIN + ".0")
+    return {"ok": False, "message":
+            f"this app is built with kaos-lib {version}; pipelines need kaos-lib {CONTRACT_MIN} or newer. "
+            f"Accept it in {COMPAT_PATH} (kaos-lib: \"{rng}\"; the \"Bump kaos-lib\" pull request does this) and "
+            f"move the app's steps to the step API of kaos-lib {CONTRACT_MIN}: "
+            f"{guide_page(guide_url, MIGRATION_PAGE)}"}
 
 
 # ---------------------------------------------------------------- support verdict
@@ -352,17 +433,17 @@ def fetch(url):
         return ""
 
 
-def compat_file(current, specifier):
+def compat_file(current, specifier, guide_url):
     """`.kaos/compat.yaml` with its kaos-lib line set to specifier; comments and other keys kept."""
     line = f'{COMPAT_KEY}: "{specifier}"'
     if current and re.search(rf"^{re.escape(COMPAT_KEY)}\s*:", current, re.M):
         return re.sub(rf"^{re.escape(COMPAT_KEY)}\s*:.*$", line, current, count=1, flags=re.M)
     head = ("# The kaos-lib versions this app's code works with: a PEP 440 version specifier.\n"
-            "# Written by the platform's bump pull request; see docs/kaos-lib-versions.md.\n")
+            f"# Written by the platform's bump pull request; see {guide_page(guide_url, SUPPORT_WINDOW_PAGE)}\n")
     return (current.rstrip("\n") + "\n" if current else head) + line + "\n"
 
 
-def bump(gh, slug, base, version, spec, default_changelog, log=print):
+def bump(gh, slug, base, version, spec, default_changelog, guide_url, log=print):
     """Open the ONE bump pull request for version, close the bump pull requests it supersedes.
 
     Idempotent: a pull request ever opened for this version's branch (open, closed or merged)
@@ -400,7 +481,10 @@ def bump(gh, slug, base, version, spec, default_changelog, log=print):
         if code == 200:
             current, sha = base64.b64decode(cur["content"]).decode(), cur["sha"]
         rng = bump_range(version)
-        new = compat_file(current, rng)
+        # The range this pull request replaces does not accept kaos-lib 0.5 and the new version is 0.5 or
+        # later: the app's steps must change too, so the pull request says so and links the guide.
+        migrate = on_contract(version) is True and not accepts_contract(read_compat_text(current))
+        new = compat_file(current, rng, guide_url)
         if new != current:
             body = {"message": f"chore(kaos-lib): accept kaos-lib {version} ({rng})",
                     "content": base64.b64encode(new.encode()).decode(), "branch": branch}
@@ -429,7 +513,16 @@ def bump(gh, slug, base, version, spec, default_changelog, log=print):
                 f"- **Merge it** when you are ready: the push builds your step images with kaos-lib {version}.\n"
                 f"- **Close it** to stay on the version your images have: the platform opens no second pull request "
                 f"for {version}.\n\n"
-                f"Package: `{spec}`\n\n## Release notes\n\n"
+                + (f"## Before you merge: move the app to kaos-lib {CONTRACT_MIN}\n\n"
+                   f"kaos-lib {CONTRACT_MIN} changes how a step is written, so changing the range is not enough: "
+                   f"`pipeline.py` and every step's `entry.py` change once. Follow the guide, on this branch: "
+                   f"{guide_page(guide_url, MIGRATION_PAGE)}\n\n"
+                   f"1. `kaosctl lint --fix`, then choose a `kind=` for every step.\n"
+                   f"2. Rewrite each step's `entry.py` with the guide's table.\n"
+                   f"3. `kaosctl lint`, then try each step with `kaosctl step run <step>`.\n\n"
+                   f"The checks on this pull request fail until the app has moved, and so does the build "
+                   f"after a merge: the pipeline that runs today stays as it is until then.\n\n" if migrate else "")
+                + f"Package: `{spec}`\n\n## Release notes\n\n"
                 + (notes or f"No release notes for {version} were found at {url or 'the package changelog'}.")
                 + "\n\n🤖 Opened by the KubeCore platform (kaos-lib delivery).")
         code, pr = gh.call("POST", f"/repos/{slug}/pulls",
@@ -474,8 +567,13 @@ def main(argv=None):
     c.add_argument("--context", required=True)
     s = sub.add_parser("support")
     s.add_argument("--context", required=True)
+    k = sub.add_parser("contract")
+    k.add_argument("--spec", required=True)
+    k.add_argument("--recorded", default="")
+    k.add_argument("--compat", default="")
+    k.add_argument("--guide-url", required=True)
     b = sub.add_parser("bump")
-    for a in ("--slug", "--base", "--version", "--spec", "--changelog-url"):
+    for a in ("--slug", "--base", "--version", "--spec", "--changelog-url", "--guide-url"):
         b.add_argument(a, required=a != "--changelog-url", default="")
     b.add_argument("--token-file", default="/etc/github-token/token")
     args = ap.parse_args(argv)
@@ -499,8 +597,12 @@ def main(argv=None):
     elif args.cmd == "bump":
         with open(args.token_file) as f:
             gh = GitHub(f.read().strip())
-        json.dump(bump(gh, args.slug, args.base, args.version, args.spec, args.changelog_url,
+        json.dump(bump(gh, args.slug, args.base, args.version, args.spec, args.changelog_url, args.guide_url,
                        log=lambda m: print(m, file=sys.stderr)), sys.stdout)
+    elif args.cmd == "contract":
+        out = contract_check(args.spec.strip(), args.compat.strip(), args.guide_url)
+        out["crosses"] = crosses_contract(args.recorded.strip(), args.spec.strip())
+        json.dump(out, sys.stdout)
     return 0
 
 

@@ -24,17 +24,31 @@ spec:
       - platform.checkpoints.prefix=main/checkpoints
       - experiment.name={{workflow.parameters.experiment-name}}
       - experiment.description={{workflow.parameters.experiment-description}}
+      - dataset={{workflow.parameters.dataset}}
       - --render-defaults
-      - '{"experiment.name":"my-experiment-v1","experiment.description":""}'
+      - '{"experiment.name":"my-experiment-v1","experiment.description":"","dataset":"dataset-default@latest"}'
       - --advanced
       - '{{workflow.parameters.config}}'
       - --require=experiment
       - --output
       - /work/params.yaml
+      - --run
+      - '{{workflow.name}}'
+      - --steps
+      - '[{"name":"hello-world","kind":"transform","reads":["experiment"],"inputs":["dataset"],"needs":[],"produces":[{"name":"report","type":"artifact"}]}]'
+      - --context-dir
+      - /work/context
+      - --ledger-output
+      - /work/kaos-ledger.json
+      - --app
+      - dataset-gen-service
+      - --project
+      - vision
       command:
       - python
+      - -I
       - -m
-      - kubecore.compose
+      - kaos_engine.compose
       env:
       - name: MLFLOW_TRACKING_URI
         value: http://mlflow.internal.invalid
@@ -58,16 +72,10 @@ spec:
           secretKeyRef:
             name: PLACEHOLDER-lakefs-admin
             key: secretAccessKey
-      - name: CHECKPOINT_BUCKET
-        value: outputs-dataset-gen-service
-      - name: CHECKPOINT_PREFIX
-        value: main/checkpoints
-      - name: KUBECORE_RUN_ID
-        value: '{{workflow.name}}'
-      - name: KUBECORE_WORKFLOW_NAME
-        value: '{{workflow.name}}'
       - name: KAOS_CHECKPOINT_DIR
         value: /kaos/checkpoint
+      - name: KAOS_STEP_IMAGES
+        value: '{"hello-world":"{{workflow.parameters.image-hello-world}}"}'
       resources:
         requests:
           cpu: '7'
@@ -84,11 +92,18 @@ spec:
         mountPath: /dev/shm
       - name: kaos-checkpoint
         mountPath: /kaos/checkpoint
+    metadata:
+      labels:
+        platform.kubecore.io/step: compose-and-validate
+        platform.kubecore.io/step-kind: control
     outputs:
       parameters:
-      - name: params
+      - name: kaos-ledger
         valueFrom:
-          path: /work/params.yaml
+          path: /work/kaos-ledger.json
+      - name: kaos-context-hello-world
+        valueFrom:
+          path: /work/context/hello-world.json
     podSpecPatch: "containers:\n- name: main\n  resources:\n    requests:\n      cpu:\
       \ \"{{workflow.parameters.compose-and-validate-cpu}}\"\n      memory: \"{{workflow.parameters.compose-and-validate-mem}}\"\
       \n      ephemeral-storage: \"{{workflow.parameters.compose-and-validate-disk}}\"\
@@ -136,14 +151,13 @@ spec:
   - name: hello-world
     container:
       image: '{{workflow.parameters.image-hello-world}}'
-      args:
-      - --params
-      - '{{inputs.parameters.params}}'
       command:
       - python
       - -m
       - app.entry
       env:
+      - name: KAOS_STEP_CONTEXT
+        value: '{{inputs.parameters.kaos-context}}'
       - name: MLFLOW_TRACKING_URI
         value: http://mlflow.internal.invalid
       - name: MLFLOW_TRACKING_AUTH
@@ -166,14 +180,6 @@ spec:
           secretKeyRef:
             name: PLACEHOLDER-lakefs-admin
             key: secretAccessKey
-      - name: CHECKPOINT_BUCKET
-        value: outputs-dataset-gen-service
-      - name: CHECKPOINT_PREFIX
-        value: main/checkpoints
-      - name: KUBECORE_RUN_ID
-        value: '{{workflow.name}}'
-      - name: KUBECORE_WORKFLOW_NAME
-        value: '{{workflow.name}}'
       - name: KAOS_CHECKPOINT_DIR
         value: /kaos/checkpoint
       resources:
@@ -194,7 +200,17 @@ spec:
         mountPath: /kaos/checkpoint
     inputs:
       parameters:
-      - name: params
+      - name: kaos-context
+    metadata:
+      labels:
+        platform.kubecore.io/step: hello-world
+        platform.kubecore.io/step-kind: transform
+    outputs:
+      parameters:
+      - name: kaos-result
+        valueFrom:
+          default: '{"version":1,"status":"absent"}'
+          path: /work/output/kaos-result.json
     podSpecPatch: "containers:\n- name: main\n  resources:\n    requests:\n      cpu:\
       \ \"{{workflow.parameters.hello-world-cpu}}\"\n      memory: \"{{workflow.parameters.hello-world-mem}}\"\
       \n      ephemeral-storage: \"{{workflow.parameters.hello-world-disk}}\"\n  \
@@ -249,8 +265,9 @@ spec:
         template: hello-world
         arguments:
           parameters:
-          - name: params
-            value: '{{tasks.compose-and-validate.outputs.parameters.params}}'
+          - name: kaos-context
+            value: '{{=sprig.trimSuffix("}", tasks["compose-and-validate"].outputs.parameters["kaos-context-hello-world"])
+              + ",\"upstream\":{" + "}" + "}"}}'
   arguments:
     parameters:
     - name: pipeline-info
@@ -268,6 +285,9 @@ spec:
     - name: experiment-description
       description: 'Config: experiment.description'
       value: ''
+    - name: dataset
+      description: 'Config: dataset'
+      value: dataset-default@latest
     - name: config
       description: "ADVANCED: override YAML merged LAST over the composed config (OmegaConf.merge).\
         \ Overrides everything above \u2014 intended for scripted submissions (argo\

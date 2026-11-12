@@ -6,7 +6,11 @@ Triggered by the per-KubeApp Sensor created by the k8smlapp composition
 step) on push/PR to an ML app repo (pipeline.py + config/ + steps/<name>/).
 
 Flow:
-  clone → detect-steps → version → render-hera ∥ build-push (matrix) → patch-images → tag → status
+  clone → detect-steps → version → render-hera → build-push (matrix) → patch-images → tag → status
+
+An app that has not moved to the step contract (PRD novelcore/kaos#1911 AC-01) fails before anything is
+recorded: at detect-steps when its kaos-lib is older than 0.5, at the render when its pipeline.py is. No
+image is built, nothing is committed, and the exit handler reports what to change.
 
 The platform pipeline engine (PRD-HPC-1461 D-80) is the ONLY render path: the
 app's pipeline.py is rendered by the engine image the gitops pipeline-context
@@ -221,7 +225,7 @@ spec:
           - name: locked
             value: "true"
 
-  # ml-ci-run — clone -> detect-steps -> version -> render + build-push ->
+  # ml-ci-run — clone -> detect-steps -> version -> render -> build-push ->
   # patch-images -> tag -> status. locked=false (the render-only path) never
   # builds or tags: if its own detect-steps finds steps to build after all
   # (the platform context moved since the probe), it records nothing and the
@@ -244,25 +248,14 @@ spec:
         template: kaos-lib-support
         continueOn:
           failed: true
-    # build-push and render-hera run in the SAME step-group (both single-dash =
-    # parallel), because render-hera does NOT depend on build output — it only
-    # consumes detect-steps' engine outputs (produced before this group) and
-    # renders the whole WFT from pipeline.py. Keeping render-hera in its own
-    # LATER group meant a fresh app's config + Argo form were gated behind ALL
-    # its image builds (~14 min each, and they don't all fit the build pool) —
-    # so a brand-new kubeapp couldn't get its real dataset config or its real
-    # submit form until the entire build finished (often hours, or never under
-    # node pressure). Running them in parallel lands the config + form
-    # immediately while the images build alongside. patch-images (next group)
-    # still correctly waits for build-push.
-    #
-    # The render is listed BEFORE build-push (kubecore-operator#1374). The
-    # workflow's `parallelism` (mlBuildParallelism, default 2) caps running
-    # pods, and Argo hands each free slot to the group's first unstarted step
-    # in list order. With build-push first, every slot went to the next of its
-    # N matrix items, so the render started only after the LAST build had
-    # (live, poolaki 2026-10-01: ~12 min behind 8 builds). Listed first, the
-    # render takes a slot at once and the builds share the rest.
+    # The render runs BEFORE the image builds, in a group of its own (PRD
+    # novelcore/kaos#1911 AC-01, T-05). An app whose pipeline.py is still on the
+    # step contract of kaos-lib 0.4 fails the render with what to change; with
+    # the builds in the same group (0.13 and before) every step image of that app
+    # was built and pushed first, for a pipeline that could not be rendered. Now
+    # a failed render builds nothing. The render does not depend on the build
+    # output, and a new app still gets its config and its form before its
+    # images: the render takes about a minute, the builds start after it.
     - - name: render-hera
         template: render-hera
         # Renders pipeline.py with the platform engine -> enhances -> gates -> commits.
@@ -283,7 +276,7 @@ spec:
             value: "{{`{{steps.detect-steps.outputs.parameters.engine_image}}`}}"
           - name: engine_profile
             value: "{{`{{steps.detect-steps.outputs.parameters.engine_profile}}`}}"
-      - name: build-push
+    - - name: build-push
         template: build-push
         when: "{{`{{steps.detect-steps.outputs.parameters.has_changes}}`}} == true && {{`{{inputs.parameters.locked}}`}} == true"
         arguments:
@@ -628,13 +621,34 @@ spec:
         else
           printf '%s' "$KL_NONE" > /tmp/kaos_lib.json
         fi
+        # THE STEP CONTRACT (PRD novelcore/kaos#1911 AC-01, T-05): a pipeline of
+        # this chart's engine hands each step one context and takes one result
+        # back, which kaos-lib reads and writes from 0.5 on. The engine sees
+        # pipeline.py, not the library the step images install, so this is the
+        # chart's check: an app the platform holds at a kaos-lib older than 0.5
+        # (its .kaos/compat.yaml does not accept 0.5) is REFUSED here, before the
+        # render and before any image, with what to change. The one build that
+        # is let through with an older spec is the one whose commit already
+        # accepts 0.5: it reports the new range, and the platform then delivers
+        # 0.5 (its record is how the platform learns the range).
+{{ include "kubecore-ci-workflows.notMigrated" . | indent 8 }}
+        python3 -I /tmp/kaos-lib.py contract --spec "$(jq -r '.spec' /tmp/kaos_lib.json)" --recorded "$KL_REC" \
+          --compat "$(jq -r '.compat' /tmp/kaos_lib.json)" --guide-url "{{ .Values.kaosLib.guideUrl }}" > /tmp/kaos_lib_contract.json
+        if [ "$(jq -r '.ok' /tmp/kaos_lib_contract.json)" != "true" ]; then
+          not_migrated "$(jq -r '.message' /tmp/kaos_lib_contract.json)"
+          exit 1
+        fi
         # STALE, REBUILT ON USE: a reconcile-submitted build that is not the
         # KAOS-LIB DRIFT build (a re-render, a dataset or context event) must not
         # rebuild every managed step because the pin moved. It keeps the recorded
         # spec for anything it does build, so the record stays true. A push, or the
-        # reconciler's kaos-lib build, rebuilds as before.
+        # reconciler's kaos-lib build, rebuilds as before. NOT across kaos-lib 0.5:
+        # images built before the step contract cannot run the pipeline this build
+        # renders, so they are rebuilt now (after the render, which an app that has
+        # not moved fails first).
         if [ "{{`{{workflow.parameters.event_type}}`}}" = "reconcile" ] \
            && [ "{{`{{workflow.parameters.kaos_lib_rebuild}}`}}" != "true" ] && [ -n "$KL_REC" ] \
+           && [ "$(jq -r '.crosses' /tmp/kaos_lib_contract.json)" != "true" ] \
            && [ "$(jq -r '.rebuild' /tmp/kaos_lib.json)" = "true" ]; then
           jq --arg rec "$KL_REC" '.spec as $want | .rebuild = false | .spec = $rec | .record = $rec
               | .reason = "kaos-lib STALE (\($rec) -> \($want)): not rebuilt by this run; rebuilt when the app is next used"' \
@@ -1114,7 +1128,8 @@ spec:
   # Dockerfiles). Artifacts pass via the workspace PVC (a rendered+enhanced WFT
   # exceeds Argo's ~256KB parameter cap; the PVC has no such limit).
   # A failed render fails the group before hera-enhance-commit starts: nothing
-  # is committed, the live WorkflowTemplate stays as it is.
+  # is committed, the live WorkflowTemplate stays as it is, and no image is
+  # built (build-push is the next group of ml-ci-run).
   - name: render-hera
     inputs:
       parameters:
@@ -1190,7 +1205,32 @@ spec:
           python -m pip freeze --exclude-editable > /tmp/engine-constraints.txt
           python -m pip install --quiet -c /tmp/engine-constraints.txt -r /tmp/extra-deps.txt
         fi
-        python -I -m kaos_engine.render pipeline.py --repo /workspace/repo --profile "${ENGINE_PROFILE}"
+        # NOT MIGRATED (PRD novelcore/kaos#1911 AC-01): the engine refuses a pipeline.py written for the
+        # step contract of kaos-lib 0.4 (outputs=, hpc_time_limit=, a step without kind=) with a message
+        # that says what to write and ends with its migration guide's address (the engine's
+        # authoring-schema.json, migration_guide). That address is how such a refusal is told from any
+        # other failed render; the message, without the address, is what the report shows (the chart
+        # links the guide it is configured with).
+{{ include "kubecore-ci-workflows.notMigrated" . | indent 8 }}
+        set +e
+        python -I -m kaos_engine.render pipeline.py --repo /workspace/repo --profile "${ENGINE_PROFILE}" 2> /tmp/render.err
+        RENDER_RC=$?
+        set -e
+        cat /tmp/render.err >&2
+        if [ "${RENDER_RC}" != 0 ]; then
+          REFUSAL=$(python -I - /tmp/render.err <<'REFUSALEOF'
+        import importlib.util, json, pathlib, re, sys
+        schema = pathlib.Path(importlib.util.find_spec("kaos_pipeline_engine").origin).parent / "authoring-schema.json"
+        guide = json.loads(schema.read_text())["migration_guide"]
+        for line in reversed(pathlib.Path(sys.argv[1]).read_text(errors="replace").splitlines()):
+            if guide and guide in line:
+                print(re.sub(r"^[\w.]+(Error|Exception): ", "", line).replace("See " + guide, "").strip())
+                break
+        REFUSALEOF
+          ) || REFUSAL=""
+          [ -z "${REFUSAL}" ] || not_migrated "${REFUSAL}"
+          exit "${RENDER_RC}"
+        fi
         # pipeline.py writes out/raw-workflow-template.yaml under the repo; move it
         # to the shared workspace location the enhance step reads.
         cp out/raw-workflow-template.yaml /workspace/out/raw-workflow-template.yaml
@@ -1265,50 +1305,50 @@ spec:
         # kubecore-ci-workflows.platformEnhance (kubecore-operator#1161, #1375, D-80).
 {{ include "kubecore-ci-workflows.platformEnhance" . | indent 8 }}
 
-        # DATASETS (PRD novelcore/kaos#1283 D-05): offer the project's datasets in
-        # the `dataset` dropdown — <dataset>@<vN> newest first and <dataset>@latest,
-        # the default dataset first; the default is its newest version. This trusted step reads kaos-lake's read-only
-        # catalog with its own projected service-account token (names and versions,
-        # never data); the untrusted render above never sees a credential. A
-        # catalog that cannot be read leaves the parameter free text, never a red
-        # build.
+        # DATASETS (PRD novelcore/kaos#1283 D-05, PRD novelcore/kaos#1911 D-15): every name a step
+        # declares in inputs= is a form field that holds a dataset reference (the step table,
+        # /tmp/steps.json). Each one gets the project's datasets as a picker: <dataset>@<version> newest
+        # first and <dataset>@latest, the default dataset first. The default stays what the app's config
+        # says. This trusted step reads kaos-lake's read-only catalog with its own projected
+        # service-account token (names and versions, never data); the untrusted render above never
+        # sees a credential. A catalog that cannot be read leaves the fields free text, never a red
+        # build. No field is added: the form's fields are the engine's (it reserves `plan` and
+        # `pipeline-version`).
 {{ include "kubecore-ci-workflows.datasetChoicesScript" . | indent 8 }}
         # dataset-sha: what ml-ci-reconcile's DATASET DRIFT compares with the catalog later. "none" =
-        # this pipeline offers no dataset; absent = the catalog could not be read, so the record of
-        # the last good render stays.
+        # no step of this pipeline declares an input; absent = the catalog could not be read, so the
+        # record of the last good render stays.
         rm -f /tmp/dataset-sha
-        python3 - /workspace/out/workflow-template.yaml /tmp/context.yaml /var/run/secrets/kaos-lake/token /tmp/dataset-sha <<'DSEOF'
-        import importlib.util, sys
+        python3 - /workspace/out/workflow-template.yaml /tmp/context.yaml /var/run/secrets/kaos-lake/token /tmp/dataset-sha /tmp/steps.json <<'DSEOF'
+        import importlib.util, json, sys
         import yaml
         spec = importlib.util.spec_from_file_location("dataset_choices", "/tmp/dataset-choices.py")
         dc = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(dc)
-        wft_path, ctx_path, token_path, sha_path = sys.argv[1:5]
+        wft_path, ctx_path, token_path, sha_path, steps_path = sys.argv[1:6]
         wft = yaml.safe_load(open(wft_path))
-        params = (wft["spec"].get("arguments") or {}).get("parameters") or []
-        param = next((p for p in params if p.get("name") == "dataset"), None)
-        if param is None:
+        names = dc.input_names(json.load(open(steps_path)))
+        if not names:
             open(sha_path, "w").write("none")
-            print("datasets: the pipeline declares no dataset parameter")
+            print("datasets: no step of the pipeline declares an input")
             sys.exit(0)
         endpoint = (((yaml.safe_load(open(ctx_path)) or {}).get("lakefs") or {}).get("endpoint") or "").rstrip("/")
         try:
             datasets = dc.read_catalog(endpoint, token_path)
         except Exception as exc:  # noqa: BLE001
-            print(f"datasets: catalog not read ({type(exc).__name__}: {exc}); the dataset parameter stays free text")
+            print(f"datasets: catalog not read ({type(exc).__name__}: {exc}); the fields of {', '.join(names)} stay free text")
             sys.exit(0)
-        choices, default = dc.choices(datasets)
+        choices = dc.choices(datasets)
         open(sha_path, "w").write(dc.digest(choices))
         if not choices:
-            print("datasets: the project has no dataset yet; the dataset parameter stays free text")
+            print(f"datasets: the project has no dataset yet; the fields of {', '.join(names)} stay free text")
             sys.exit(0)
-        param["enum"] = choices
-        # Default to the default dataset's newest released version (a pinned version
-        # reproduces); keep a template default that names a specific offered version.
-        if param.get("value") not in choices or str(param.get("value")).endswith("@latest"):
-            param["value"] = default or choices[0]
+        try:
+            filled = dc.fill(wft, names, datasets)
+        except KeyError as exc:
+            sys.exit(f"GATE FAIL: {exc.args[0]}")
         yaml.safe_dump(wft, open(wft_path, "w"), sort_keys=False)
-        print(f"datasets: {len(choices)} choices from {len(datasets)} datasets, default {param['value']}")
+        print(f"datasets: {len(choices)} choices from {len(datasets)} datasets on " + ", ".join(f"{n} (default {v})" for n, v in filled.items()))
         DSEOF
 
         # GATE: structural release-hygiene checks (fail before committing so a bad
@@ -1371,8 +1411,8 @@ spec:
         # ml-ci-reconcile compares it with the context's engine.version and
         # re-renders when the engine moved without a push (ENGINE DRIFT).
         engine_version = sys.argv[5]
-        # dataset-sha: digest of the `dataset` choices this render offered ("none": no such
-        # parameter; missing file: the catalog was unreadable, keep the record). ml-ci-reconcile
+        # dataset-sha: digest of the dataset choices this render offered ("none": no step declares
+        # an input; missing file: the catalog was unreadable, keep the record). ml-ci-reconcile
         # compares it with the catalog and re-renders on DATASET DRIFT.
         import os
         dataset_sha = open(sys.argv[6]).read().strip() if len(sys.argv) > 6 and os.path.exists(sys.argv[6]) else ""
@@ -2057,6 +2097,14 @@ spec:
   # attempt ml-ci-reconcile's one-attempt-per-hour guard reads). A run that rendered or built the compose
   # image successfully clears both. A run that did neither leaves them as they are. The operator reads
   # engine-last-error to show state `failed`. Reporting only: the caller continues on failure.
+  #
+  # NOT MIGRATED (PRD novelcore/kaos#1911 AC-01, T-05): a run that was refused because the app is still on
+  # the step contract of kaos-lib 0.4 left /workspace/not-migrated (kubecore-ci-workflows.notMigrated). For
+  # that run this step also (1) replaces the commit status with one that says so and links the guide,
+  # (2) records `engine-last-error` = "not migrated (<guide>): <what to change>", and (3) records
+  # `engine-attempt` as <engine version>@<epoch>@<commit>@<kaos-lib>, which ml-ci-reconcile reads as "do
+  # not build this commit again with this engine and this kaos-lib": trying again cannot help, the app
+  # must change. Nothing else is recorded: no engine-version, no last-built-sha, no image.
   - name: engine-record
 {{ include "kubecore-ci-workflows.preemptionRetry" . | indent 4 }}
     container:
@@ -2074,6 +2122,31 @@ spec:
         APP_NAME="{{`{{workflow.parameters.app_name}}`}}"
         WF="{{`{{workflow.name}}`}}"; NS="{{`{{workflow.namespace}}`}}"
         PHASE="{{`{{workflow.status}}`}}"
+        SHA="{{`{{workflow.parameters.commit_sha}}`}}"
+
+        # NOT MIGRATED: what the refused step left (one line, data: bounded and stripped again here).
+        REFUSED=""
+        if [ "${PHASE}" != Succeeded ] && [ -s /workspace/not-migrated ]; then
+          REFUSED=$(head -1 /workspace/not-migrated | tr -d '\000-\037\177' | cut -c1-600)
+        fi
+        if [ -n "${REFUSED}" ]; then
+          echo "engine-record: the app has not moved to the step contract: ${REFUSED}"
+          # The commit status the app's engineer reads: what happened and the guide, which the check
+          # links too. It replaces the generic failure status posted just before this step.
+          OWNER_REPO=$(echo "{{`{{workflow.parameters.repo_url}}`}}" | sed 's|https://github.com/||; s|\.git$||')
+          API="https://api.github.com/repos/${OWNER_REPO}"
+          AUTH="Authorization: token ${TOKEN}"
+          ACCEPT="Accept: application/vnd.github+json"
+{{ include "kubecore-ci-workflows.ghApi" . | indent 10 }}
+          PAYLOAD=$(jq -nc --arg d "{{ include "kubecore-ci-workflows.notMigratedStatus" . }}" \
+            --arg u "{{ include "kubecore-ci-workflows.migrationGuideUrl" . }}" \
+            '{state: "failure", description: ($d | .[0:140]), context: "kubecore-ml-ci", target_url: $u}')
+          if gh_api POST "${API}/statuses/${SHA}" "${PAYLOAD}"; then
+            echo "engine-record: posted commit status kubecore-ml-ci=failure (not migrated) on ${OWNER_REPO}@${SHA}"
+          else
+            echo "engine-record: WARN the not-migrated commit status was not posted (HTTP ${GH_CODE}); the report comment still says what to change" >&2
+          fi
+        fi
 
         # The engine stages, by the pod's node name: detect-steps (its engine check), hera-render,
         # hera-enhance-commit and the compose-and-validate image build.
@@ -2110,6 +2183,9 @@ spec:
 
         # A pod that failed and was retried to success is not an error of the run.
         [ "${PHASE}" = Succeeded ] && ERROR=""
+        if [ -n "${REFUSED}" ]; then
+          ERROR=$(printf 'not migrated (%s): %s' "{{ include "kubecore-ci-workflows.migrationGuideUrl" . }}" "${REFUSED}" | cut -c1-200)
+        fi
         if [ -z "${ERROR}" ] && [ "${PHASE}" != Succeeded ]; then
           echo "engine-record: the run ended ${PHASE} outside the engine stages — nothing to record"
           exit 0
@@ -2129,8 +2205,8 @@ spec:
         [ -n "${IMAGES_PATH}" ] && [ -f "${IMAGES_PATH}" ] || { echo "engine-record: pipeline-images.yaml not found — nothing to record"; exit 0; }
 {{ include "kubecore-ci-workflows.engineScript" . | indent 8 }}
         if [ -n "${ERROR}" ]; then
-          VERSION=$(python3 -I /tmp/engine.py version --context "${CONTEXT_PATH:-/dev/null}")
-          ENGINE_ERROR="${ERROR}" ENGINE_ATTEMPT="${VERSION:-unknown}@$(date +%s)" \
+          ATTEMPT=$(python3 -I /tmp/engine.py attempt --context "${CONTEXT_PATH:-/dev/null}" ${REFUSED:+--refused-commit "${SHA}"})
+          ENGINE_ERROR="${ERROR}" ENGINE_ATTEMPT="${ATTEMPT}" \
             yq e -i '.data."engine-last-error" = strenv(ENGINE_ERROR) | .data."engine-attempt" = strenv(ENGINE_ATTEMPT)' "${IMAGES_PATH}"
           echo "engine-record: ${ERROR}"
           MESSAGE="record the engine error"
@@ -2154,6 +2230,10 @@ spec:
         done
         [ -n "$pushed" ] || { echo "engine-record: could not push after 5 attempts"; exit 1; }
       volumeMounts:
+      # Read-only: /workspace/not-migrated, left by the step that refused the app.
+      - name: workspace
+        mountPath: /workspace
+        readOnly: true
       - name: github-token
         mountPath: /etc/github-token
         readOnly: true
@@ -2175,7 +2255,9 @@ spec:
         # != Succeeded: an Error (executor/infra) must surface on GitHub too,
         # not only a Failed step — a silent pending is the #459 failure mode.
         when: "{{`{{workflow.status}}`}} != Succeeded"
-      - name: engine-record
+    # After the failure status, never beside it: for an app that has not moved to the step contract
+    # engine-record posts the commit status that says so, and that one must be the last.
+    - - name: engine-record
         template: engine-record
         continueOn:
           failed: true

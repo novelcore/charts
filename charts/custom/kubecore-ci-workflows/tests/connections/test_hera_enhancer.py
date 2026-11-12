@@ -3,7 +3,7 @@ import re
 import pytest
 import yaml
 
-from harness import CONNECTIONS, EXPECTED_ENV_FROM, FIXTURES, golden_text, raw_container_names, render
+from harness import CONNECTIONS, EXPECTED_ENV_FROM, FIXTURES, HPC_TWIN, golden_text, raw_container_names, render
 
 HERA = [n for n, f in FIXTURES.items() if f.kind == "hera"]
 
@@ -14,19 +14,12 @@ def test_hera_golden(name, conns):
     assert render(name, conns) == golden_text("hera", name)
 
 
-# The pinned enhancer names the HPC twin template meluxina-run until the engine syncs the
-# hpc-follower rename (hera-pipeline-template, PRD-HPC-1461 AC-12); accept both so this suite
-# passes before and after that bump.
-TWINS = ("hpc-follower", "meluxina-run")
-
-
 def _names(out):
     return {t["name"] for t in yaml.safe_load(out)["spec"]["templates"]}
 
 
 def _twin(names):
-    found = [n for n in TWINS if n in names]
-    return found[0] if found else None
+    return HPC_TWIN if HPC_TWIN in names else None
 
 
 def test_fixture_preconditions_hera():

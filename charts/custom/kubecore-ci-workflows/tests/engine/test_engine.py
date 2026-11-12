@@ -187,3 +187,101 @@ def test_stamp_refuses_a_version_that_is_not_a_label_value(tmp_path):
     path.write_text("{}")
     with pytest.raises(engine.EngineError):
         engine.stamp(str(path), "v1+abc")
+
+
+# ---------------------------------------------------------------- the step table (PRD kaos#1911)
+
+TABLE = [{"name": "prepare", "kind": "transform", "reads": [], "inputs": ["raw"], "needs": [],
+          "produces": [{"name": "clean", "type": "dataset"}]},
+         {"name": "train", "kind": "train", "reads": ["train"], "inputs": ["raw", "labels"], "needs": ["prepare"],
+          "produces": [{"name": "model", "type": "model"}]}]
+
+
+def write_wft(tmp_path, args, name="compose-and-validate"):
+    wft = {"kind": "WorkflowTemplate", "spec": {"templates": [
+        {"name": "main", "dag": {"tasks": []}}, {"name": name, "container": {"image": "x", "args": args}}]}}
+    path = tmp_path / "wft.yaml"
+    path.write_text(yaml.safe_dump(wft))
+    return str(path)
+
+
+def test_the_step_table_is_the_compose_argument_after_steps(tmp_path):
+    wft = write_wft(tmp_path, ["a=1", "--advanced", "{{workflow.parameters.config}}", "--steps", json.dumps(TABLE), "--run", "r"])
+    assert engine.step_table(wft) == TABLE
+
+
+def test_cli_steps_prints_the_table(tmp_path, capsys):
+    assert engine.main(["steps", "--wft", write_wft(tmp_path, ["--steps", json.dumps(TABLE)])]) == 0
+    assert json.loads(capsys.readouterr().out) == TABLE
+
+
+@pytest.mark.parametrize("args", [
+    ["--advanced", "x"],                        # an engine from before the step contract
+    ["--steps"],                                # nothing after it
+    ["--steps", "not json"],
+    ["--steps", json.dumps({"name": "a"})],     # not a list
+    ["--steps", json.dumps([{"name": "a"}])],   # a step without inputs
+    ["--steps", json.dumps([{"name": "a", "inputs": "raw"}])],
+])
+def test_a_render_without_a_step_table_is_not_from_an_engine_on_the_step_contract(tmp_path, capsys, args):
+    with pytest.raises(engine.EngineError) as err:
+        engine.step_table(write_wft(tmp_path, args))
+    assert err.value.code == engine.EXIT_NO_CONTRACT
+    assert engine.main(["steps", "--wft", write_wft(tmp_path, args)]) == engine.EXIT_NO_CONTRACT
+    assert "engine: FATAL" in capsys.readouterr().err
+
+
+def test_a_render_without_the_compose_step_has_no_step_table(tmp_path):
+    with pytest.raises(engine.EngineError) as err:
+        engine.step_table(write_wft(tmp_path, ["--steps", json.dumps(TABLE)], name="other"))
+    assert err.value.code == engine.EXIT_NO_CONTRACT
+
+
+# ---------------------------------------------------------------- engine-attempt (one try per refusal)
+
+COMMIT = "c" * 40
+LIB = {"spec": "kaos-lib==0.5.0", "version": "0.5.0"}
+
+
+def test_a_failed_attempt_is_the_engine_version_and_the_time(tmp_path):
+    assert engine.attempt(write_context(tmp_path, BLOCK), now=1700000000) == "v0.4.7@1700000000"
+    assert engine.attempt(write_context(tmp_path, None), now=5) == "unknown@5"
+
+
+def test_a_refused_app_records_its_commit_and_the_kaos_lib_delivered(tmp_path):
+    ctx = write_context(tmp_path, BLOCK, kaosLib=LIB)
+    value = engine.attempt(ctx, now=1700000000, refused_commit=COMMIT)
+    key = hashlib.sha256(b"kaos-lib==0.5.0").hexdigest()[:12]
+    assert value == f"v0.4.7@1700000000@{COMMIT}@{key}"
+    assert engine.refused(value, ctx, COMMIT) is True
+
+
+def test_a_refusal_holds_until_the_commit_the_engine_or_the_kaos_lib_changes(tmp_path):
+    ctx = write_context(tmp_path, BLOCK, kaosLib=LIB)
+    value = engine.attempt(ctx, now=1, refused_commit=COMMIT)
+    assert engine.refused(value, ctx, "d" * 40) is False, "a new commit is tried"
+    newer = write_context(tmp_path, dict(BLOCK, version="v0.4.8"), kaosLib=LIB)
+    assert engine.refused(value, newer, COMMIT) is False, "a new engine is tried"
+    moved = write_context(tmp_path, BLOCK, kaosLib={"spec": "kaos-lib==0.5.1"})
+    assert engine.refused(value, moved, COMMIT) is False, "another kaos-lib is tried"
+
+
+@pytest.mark.parametrize("value", ["", "v0.4.7@1700000000", "v0.4.7@1700000000@", "junk", "v0.4.7@1@" + "c" * 40])
+def test_an_attempt_that_is_not_a_refusal_never_holds(tmp_path, value):
+    assert engine.refused(value, write_context(tmp_path, BLOCK, kaosLib=LIB), COMMIT) is False
+
+
+def test_an_unreadable_context_never_holds(tmp_path):
+    value = engine.attempt(write_context(tmp_path, BLOCK, kaosLib=LIB), now=1, refused_commit=COMMIT)
+    assert engine.refused(value, str(tmp_path / "missing.yaml"), COMMIT) is False
+
+
+def test_cli_attempt_and_refused(tmp_path, capsys):
+    ctx = write_context(tmp_path, BLOCK, kaosLib=LIB)
+    assert engine.main(["attempt", "--context", ctx, "--refused-commit", COMMIT]) == 0
+    value = capsys.readouterr().out.strip()
+    assert value.startswith("v0.4.7@") and value.split("@")[2] == COMMIT
+    assert engine.main(["refused", "--context", ctx, "--commit", COMMIT, "--attempt", value]) == 0
+    assert engine.main(["refused", "--context", ctx, "--commit", "d" * 40, "--attempt", value]) == 1
+    assert engine.main(["attempt", "--context", ctx]) == 0
+    assert capsys.readouterr().out.strip().count("@") == 1

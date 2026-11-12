@@ -1,0 +1,5 @@
+# The dataset this run trains on: <dataset-repo>@<version>.
+# A dataset is its own lakeFS repository (dataset-<name>); the version is a tag
+# (v1, v2, ...) or `latest` (= the head of main). The run pins the commit it
+# resolves to, so every step reads the same data.
+dataset: "dataset-default@latest"
