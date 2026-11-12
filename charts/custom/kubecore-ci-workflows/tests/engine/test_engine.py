@@ -80,144 +80,35 @@ def test_no_quantization_means_hera_whatever_the_app_calls_itself(tmp_path):
     assert engine.profile_of(str(repo)) == "hera"
 
 
-# The four structured-config schemas the templates' vendored kubecore/derive_tree.py has had, cut down
-# to the two dataclasses the engine profiles differ in (kaos-hpc-operator engine/README.md).
-DT_HEAD = ("from dataclasses import dataclass\nfrom enum import Enum\n\n"
-           "class DataSource(Enum):\n    lakefs = 'lakefs'\n\n")
-DT_LEGACY_V1 = DT_HEAD + ("@dataclass\nclass DataConfig:\n    ref: str = 'main'\n    source: DataSource = DataSource.lakefs\n"
-                          "    version: str = ''\n    seed: int = 42\n\n"
-                          "@dataclass\nclass QuantizationConfig:\n    image_size: int = 640\n"
-                          "    output_prefix: str = 'quantization'\n")
-DT_HERA = DT_HEAD + ("@dataclass\nclass DataConfig:\n    ref: str = 'main'\n    source: DataSource = DataSource.lakefs\n"
-                     "    seed: int = 42\n\n"
-                     "@dataclass\nclass QuantizationConfig:\n    image_size: int = 640\n    output_prefix: str = ''\n")
-DT_YOLO_V1 = DT_HEAD + ("@dataclass\nclass DataConfig:\n    source: DataSource = DataSource.lakefs\n    seed: int = 42\n\n"
-                        "@dataclass\nclass QuantizationConfig:\n    image_size: int = 640\n    output_prefix: str = ''\n")
-DT_YOLO = DT_HEAD + ("@dataclass\nclass DataConfig:\n    source: DataSource = DataSource.lakefs\n    seed: int = 42\n\n"
-                     "@dataclass\nclass QuantizationConfig:\n    image_size: int = 640\n")
-
-
-def make_app(tmp_path, derive_tree=None, quantization=True, data_yaml=None):
+def make_app(tmp_path, quantization=True, own_engine=None):
+    """An app checkout; `own_engine` is the text of a kubecore/derive_tree.py it carries (an old app)."""
     repo = tmp_path / "repo"
     (repo / "config").mkdir(parents=True)
     if quantization:
         (repo / "config" / "quantization.yaml").write_text("quantization:\n  mode: none\n")
-    if data_yaml is not None:
-        (repo / "config" / "data.yaml").write_text(data_yaml)
-    if derive_tree is not None:
+    if own_engine is not None:
         (repo / "kubecore").mkdir()
-        (repo / "kubecore" / "derive_tree.py").write_text(derive_tree)
+        (repo / "kubecore" / "derive_tree.py").write_text(own_engine)
     return str(repo)
 
 
-@pytest.mark.parametrize("derive_tree, profile", [
-    (DT_LEGACY_V1, "legacy-v1"),
-    (DT_HERA, "hera"),
-    (DT_YOLO_V1, "yolo-v1"),
-    (DT_YOLO, "yolo"),
+@pytest.mark.parametrize("own_engine", [
+    "@dataclass\nclass DataConfig:\n    ref: str = 'main'\n    version: str = ''\n",   # what named legacy-v1
+    "raise SystemExit('executed')\n",
+    "def broken(:\n",
+    "x = 1\n" * 40000,                                                                   # over 64 KiB
 ])
-def test_the_vendored_derive_tree_names_the_profile(tmp_path, derive_tree, profile):
-    assert engine.profile_of(make_app(tmp_path, derive_tree)) == profile
+def test_an_app_with_an_engine_copy_of_its_own_is_not_read_and_gets_the_profile_of_its_config(tmp_path, own_engine):
+    # The engine refuses such an app as an old app (kaos-hpc-operator engine/kaos_engine/render.py); this script
+    # neither reads nor trusts what the app carries, so the refusal is the engine's and its exit code is the render's.
+    out = engine.engine_of(write_context(tmp_path, BLOCK), make_app(tmp_path, own_engine=own_engine))
+    assert out["profile"] == "yolo"
+    assert engine.engine_of(write_context(tmp_path, BLOCK), make_app(tmp_path / "h", quantization=False,
+                                                                       own_engine=own_engine))["profile"] == "hera"
 
 
-def test_a_yolo_app_of_the_template_main_renders_with_hera(tmp_path):
-    # kubecore-operator#1830: yolo-pipelines-template `main` (derive_tree blob c3c4e36, since 2026-10-19) has a
-    # quantization section AND DataConfig.ref; the `yolo` schema has no ref, so every such app failed to
-    # render with "Key 'ref' not in 'DataConfig'". Its schema is the hera profile.
-    repo = make_app(tmp_path, DT_HERA, quantization=True, data_yaml='data:\n  ref: "main"\n  seed: 42\n')
-    assert engine.profile_of(repo) == "hera"
-
-
-def test_the_derive_tree_is_parsed_never_executed(tmp_path):
-    trap = "raise SystemExit('executed')\n" + DT_YOLO
-    assert engine.profile_of(make_app(tmp_path, trap)) == "yolo"
-
-
-def test_a_derive_tree_without_a_schema_falls_back_to_the_config(tmp_path):
-    stub = "# moved to kaos-lib\nfrom kaos.derive_tree import *\n"  # parses, names no DataConfig
-    assert engine.profile_of(make_app(tmp_path, stub, quantization=True)) == "yolo"
-    assert engine.profile_of(make_app(tmp_path / "h", stub, quantization=False)) == "hera"
-
-
-# The derive_tree.py and data.yaml the profile is read from are the app's (untrusted, possibly a fork's PR
-# head). A file that is there but cannot be read safely or parsed fails the build (EXIT_PROFILE) with the
-# reason; it is never guessed around, never followed out of the checkout and never read without a bound.
-def test_a_derive_tree_that_is_not_python_fails_closed(tmp_path):
-    with pytest.raises(engine.EngineError) as exc:
-        engine.profile_of(make_app(tmp_path, "def broken(:\n"))
-    assert exc.value.code == engine.EXIT_PROFILE and "kubecore/derive_tree.py" in str(exc.value)
-
-
-# Deeply nested source makes CPython's parser raise MemoryError ("Parser stack overflowed") or
-# RecursionError ("during ast construction") instead of SyntaxError; where it does depends on the
-# Python version, so the parser is made to raise them here.
-@pytest.mark.parametrize("error", [MemoryError("Parser stack overflowed"), RecursionError("ast construction")])
-def test_a_derive_tree_too_deep_to_parse_fails_closed(tmp_path, monkeypatch, error):
-    repo = make_app(tmp_path, DT_HERA)
-
-    def deep(*args, **kwargs):
-        raise error
-    monkeypatch.setattr(engine.ast, "parse", deep)
-    with pytest.raises(engine.EngineError) as exc:
-        engine.profile_of(repo)
-    assert exc.value.code == engine.EXIT_PROFILE and type(error).__name__ in str(exc.value)
-
-
-def test_a_huge_derive_tree_is_refused_unread(tmp_path):
-    repo = make_app(tmp_path, "x = 1\n" * (engine.APP_FILE_MAX_BYTES // 6 + 1))
-    with pytest.raises(engine.EngineError, match="bytes") as exc:
-        engine.profile_of(repo)
-    assert exc.value.code == engine.EXIT_PROFILE
-
-
-@pytest.mark.parametrize("target", ["/dev/zero", "outside"])
-def test_a_symlinked_derive_tree_is_refused(tmp_path, target):
-    repo = make_app(tmp_path)
-    if target == "outside":
-        target = str(tmp_path / "outside.py")
-        (tmp_path / "outside.py").write_text(DT_HERA)
-    os.makedirs(os.path.join(repo, "kubecore"))
-    os.symlink(target, os.path.join(repo, "kubecore", "derive_tree.py"))
-    with pytest.raises(engine.EngineError, match="not a regular file") as exc:
-        engine.profile_of(repo)
-    assert exc.value.code == engine.EXIT_PROFILE
-
-
-def test_a_symlinked_kubecore_dir_is_refused(tmp_path):
-    repo = make_app(tmp_path)
-    (tmp_path / "elsewhere").mkdir()
-    (tmp_path / "elsewhere" / "derive_tree.py").write_text(DT_HERA)
-    os.symlink(str(tmp_path / "elsewhere"), os.path.join(repo, "kubecore"))
-    with pytest.raises(engine.EngineError, match="not a regular file"):
-        engine.profile_of(repo)
-
-
-def test_a_kubecore_file_is_no_vendored_schema(tmp_path):
-    repo = make_app(tmp_path)
-    (tmp_path / "repo" / "kubecore").write_text("not a directory\n")
-    assert engine.profile_of(repo) == "yolo"
-
-
-def test_a_fifo_derive_tree_is_refused_not_waited_on(tmp_path):
-    repo = make_app(tmp_path)
-    os.makedirs(os.path.join(repo, "kubecore"))
-    os.mkfifo(os.path.join(repo, "kubecore", "derive_tree.py"))
-    with pytest.raises(engine.EngineError, match="not a regular file"):
-        engine.profile_of(repo)
-
-
-def test_a_symlinked_data_yaml_is_refused(tmp_path):
-    repo = make_app(tmp_path)
-    os.symlink("/dev/zero", os.path.join(repo, "config", "data.yaml"))
-    with pytest.raises(engine.EngineError, match="config/data.yaml"):
-        engine.profile_of(repo)
-
-
-def test_the_cli_names_the_reason_and_exits_with_the_profile_code(tmp_path, capsys):
-    repo = make_app(tmp_path, "def broken(:\n")
-    assert engine.main(["context", "--context", write_context(tmp_path, BLOCK), "--repo", repo]) == engine.EXIT_PROFILE
-    err = capsys.readouterr().err
-    assert err.startswith("engine: FATAL: kubecore/derive_tree.py is not Python") and "rather than guess" in err
+def test_the_profiles_are_the_two_the_engine_has():
+    assert engine.PROFILES == ("hera", "yolo")
 
 
 def test_a_profile_outside_the_engine_set_fails_closed(tmp_path, monkeypatch):
@@ -225,20 +116,6 @@ def test_a_profile_outside_the_engine_set_fails_closed(tmp_path, monkeypatch):
     with pytest.raises(engine.EngineError, match="yolo-v9") as exc:
         engine.engine_of(write_context(tmp_path, BLOCK), str(tmp_path))
     assert exc.value.code == engine.EXIT_PROFILE
-
-
-@pytest.mark.parametrize("data_yaml, profile", [
-    ('data:\n  ref: "main"\n', "hera"),      # the yolo schema would reject data.ref
-    ('data:\n  source: "lakefs"\n', "yolo"),
-    ("not: [valid\n", "yolo"),
-])
-def test_without_a_vendored_schema_a_data_ref_means_hera(tmp_path, data_yaml, profile):
-    assert engine.profile_of(make_app(tmp_path, None, quantization=True, data_yaml=data_yaml)) == profile
-
-
-def test_the_context_carries_the_vendored_profile(tmp_path):
-    repo = make_app(tmp_path, DT_LEGACY_V1)
-    assert engine.engine_of(write_context(tmp_path, BLOCK), repo)["profile"] == "legacy-v1"
 
 
 @pytest.mark.parametrize("block", [

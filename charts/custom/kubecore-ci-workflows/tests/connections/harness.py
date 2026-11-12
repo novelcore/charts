@@ -42,7 +42,7 @@ GOLDEN = os.path.join(HERE, "golden")
 # engine on the step contract (branch prd1911/engine-contract at the time of writing; move it to the merged
 # commit, then to each engine release the chart is pinned with, and rewrite the raw fixtures and the goldens).
 ENGINE_REPO = "kaos-io/kaos-hpc-operator"
-ENGINE_REF = "a1c9962ff79f98c99ae03f56370443750e86da5c"
+ENGINE_REF = "371beb5126fac04be15056d95bf87bd23fb910dd"
 # The step the engine names a step's HPC (Slurm) variant after.
 HPC_TWIN = "hpc-follower"
 

@@ -22,8 +22,6 @@ spec:
       - train/callbacks={{workflow.parameters.train-callbacks}}
       - train/optimizer={{workflow.parameters.train-optimizer}}
       - train/qat={{workflow.parameters.train-qat}}
-      - data.source={{workflow.parameters.data-source}}
-      - data.path_override={{workflow.parameters.data-path_override}}
       - data.sample_size={{workflow.parameters.data-sample_size}}
       - data.seed={{workflow.parameters.data-seed}}
       - quantization.mode={{workflow.parameters.quantization-mode}}
@@ -92,7 +90,7 @@ spec:
       - logging.level={{workflow.parameters.logging-level}}
       - logging.log_artifacts={{workflow.parameters.logging-log_artifacts}}
       - --render-defaults
-      - '{"image_processing":"mosaic_default","model":"yolov8n","train/callbacks":"early_stopping","train/optimizer":"sgd","train/qat":"default_qat","data.source":"lakefs","data.path_override":"","data.sample_size":"","data.seed":"42","quantization.mode":"none","quantization.image_size":"640","quantization.calibration_frames":"512","quantization.calibration_seed":"42","quantization.parity_frames":"100","quantization.parity_max_abs_error":"0.05","experiment.name":"object-pose-v1-yolov8n","experiment.description":"","dataset":"dataset-default@latest","calibration":"dataset-default@latest","model.variant":"yolov8n-pose.pt","model.pretrained_weights":"","train.epochs":"100","train.batch_size":"16","train.image_size":"640","train.cos_lr":"true","train.lrf":"0.01","train.warmup_epochs":"3.0","train.warmup_momentum":"0.8","train.dropout":"0.0","train.label_smoothing":"0.0","train.nbs":"64","train.freeze":"","train.amp":"true","train.close_mosaic":"10","train.seed":"0","train.deterministic":"true","train.loss.pose":"12.0","train.loss.kobj":"2.0","train.loss.box":"7.5","train.loss.cls":"0.5","train.loss.dfl":"1.5","train.checkpointing.interval_epochs":"10","train.checkpointing.storage_path":"","train.checkpointing.resume_from":"","train.export.enabled":"false","train.export.formats":"engine","train.export.precisions":"fp16","train.optimizer.name":"SGD","train.optimizer.lr":"0.01","train.optimizer.momentum":"0.937","train.optimizer.weight_decay":"0.0005","train.callbacks.early_stopping_enabled":"true","train.callbacks.patience":"50","train.qat.epochs":"10","train.qat.lr":"0.0001","image_processing.hsv_h":"0.015","image_processing.hsv_s":"0.7","image_processing.hsv_v":"0.4","image_processing.degrees":"0.0","image_processing.translate":"0.1","image_processing.scale":"0.5","image_processing.shear":"0.0","image_processing.perspective":"0.0","image_processing.flipud":"0.0","image_processing.fliplr":"0.0","image_processing.mosaic":"1.0","image_processing.mixup":"0.0","image_processing.copy_paste":"0.0","image_processing.erasing":"0.4","image_processing.bgr":"0.0","registration.registered_model_name":"","registration.promote_to":"","logging.level":"INFO","logging.log_artifacts":"true"}'
+      - '{"image_processing":"mosaic_default","model":"yolov8n","train/callbacks":"early_stopping","train/optimizer":"sgd","train/qat":"default_qat","data.sample_size":"","data.seed":"42","quantization.mode":"none","quantization.image_size":"640","quantization.calibration_frames":"512","quantization.calibration_seed":"42","quantization.parity_frames":"100","quantization.parity_max_abs_error":"0.05","experiment.name":"object-pose-v1-yolov8n","experiment.description":"","dataset":"dataset-default@latest","calibration":"dataset-default@latest","model.variant":"yolov8n-pose.pt","model.pretrained_weights":"","train.epochs":"100","train.batch_size":"16","train.image_size":"640","train.cos_lr":"true","train.lrf":"0.01","train.warmup_epochs":"3.0","train.warmup_momentum":"0.8","train.dropout":"0.0","train.label_smoothing":"0.0","train.nbs":"64","train.freeze":"","train.amp":"true","train.close_mosaic":"10","train.seed":"0","train.deterministic":"true","train.loss.pose":"12.0","train.loss.kobj":"2.0","train.loss.box":"7.5","train.loss.cls":"0.5","train.loss.dfl":"1.5","train.checkpointing.interval_epochs":"10","train.checkpointing.storage_path":"","train.checkpointing.resume_from":"","train.export.enabled":"false","train.export.formats":"engine","train.export.precisions":"fp16","train.optimizer.name":"SGD","train.optimizer.lr":"0.01","train.optimizer.momentum":"0.937","train.optimizer.weight_decay":"0.0005","train.callbacks.early_stopping_enabled":"true","train.callbacks.patience":"50","train.qat.epochs":"10","train.qat.lr":"0.0001","image_processing.hsv_h":"0.015","image_processing.hsv_s":"0.7","image_processing.hsv_v":"0.4","image_processing.degrees":"0.0","image_processing.translate":"0.1","image_processing.scale":"0.5","image_processing.shear":"0.0","image_processing.perspective":"0.0","image_processing.flipud":"0.0","image_processing.fliplr":"0.0","image_processing.mosaic":"1.0","image_processing.mixup":"0.0","image_processing.copy_paste":"0.0","image_processing.erasing":"0.4","image_processing.bgr":"0.0","registration.registered_model_name":"","registration.promote_to":"","logging.level":"INFO","logging.log_artifacts":"true"}'
       - --advanced
       - '{{workflow.parameters.config}}'
       - --require=data
@@ -1311,15 +1309,6 @@ spec:
       enum:
       - default_qat
       - no_qat
-    - name: data-source
-      description: 'Config: data.source'
-      value: lakefs
-      enum:
-      - lakefs
-      - s3
-    - name: data-path_override
-      description: 'Config: data.path_override'
-      value: ''
     - name: data-sample_size
       description: 'Config: data.sample_size'
       value: ''

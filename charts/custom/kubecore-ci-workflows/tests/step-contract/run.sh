@@ -186,6 +186,14 @@ else
   real_render "$ENGINE_PYTHON" "${BASE_TMP}/apps/platform"
   refused_like "real engine, the removed platform config group" "config/config.yaml lists"
 
+  # An app that carries a copy of the engine (a kubecore/ folder): this chart reads nothing of it (engine.py no
+  # longer takes its profile from it), so the engine's own refusal is what the app gets: the old-app status, and
+  # nothing rendered, so nothing recorded.
+  old_app own-engine '    step("hello-world", kind="transform", reads=["experiment"])'
+  mkdir -p "${BASE_TMP}/apps/own-engine/kubecore"; printf 'x = 1\n' > "${BASE_TMP}/apps/own-engine/kubecore/derive_tree.py"
+  real_render "$ENGINE_PYTHON" "${BASE_TMP}/apps/own-engine"
+  refused_like "real engine, an app with a kubecore/ folder of its own" "a kubecore/ folder of its own"
+
   # Not an old app: a mistake in a pipeline on the step contract is the engine's own error, nothing more.
   old_app unknown-kind '    step("hello-world", kind="training", reads=["experiment"])'
   real_render "$ENGINE_PYTHON" "${BASE_TMP}/apps/unknown-kind"

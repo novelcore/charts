@@ -87,7 +87,7 @@ COMPAT_PATH = ".kaos/compat.yaml"
 COMPAT_KEY = "kaos-lib"
 # The checkout files read here (.kaos/compat.yaml, each step's Dockerfile) are the app's, untrusted:
 # a cap far above any real one (a template's step Dockerfile is well under 2 KB), so a huge or
-# endless file (a symlink to /dev/zero) is refused, not read. Same rule as engine.py _read_app_file.
+# endless file (a symlink to /dev/zero) is refused, not read.
 APP_FILE_MAX_BYTES = 64 * 1024
 EXIT_REFUSED = 5  # decide: a checkout file is there but not something to read as data
 
