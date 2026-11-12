@@ -69,7 +69,7 @@ expect_has "$RENDER_SRC" 'python -I -m kaos_engine.render pipeline.py --repo /wo
 expect_not "$(printf '%s\n' "$RENDER_SRC" | grep -v '^[[:space:]]*#')" "pip install -e" "hera-render: never installs the app (no pip install -e .)"
 expect_not "$(printf '%s\n' "$RENDER_SRC" | grep -v '^[[:space:]]*#')" "PYTHONPATH" "hera-render: no PYTHONPATH into the app checkout"
 expect_eq "$(tpl ml-ci-build hera-render '.automountServiceAccountToken')" "false" "hera-render: no service-account token in the pod that runs untrusted code"
-expect_eq "$(tpl ml-ci-build hera-render '.container.volumeMounts[].name' | tr '\n' ' ')" "workspace " "hera-render: no github-token mount"
+expect_eq "$(tpl ml-ci-build hera-render '.container.volumeMounts[].name' | tr '\n' ' ')" "workspace scratch python-overlay " "hera-render: no github-token mount (workspace, scratch and the python overlay only)"
 expect_eq "$(tpl ml-ci-build hera-render '.container.env[] | select(.name == "ENGINE_PROFILE") | .value')" '{{inputs.parameters.engine_profile}}' "hera-render: the profile reaches the script as an env var"
 expect_eq "$(yq 'select(.metadata.name == "ml-ci-pr-render") | .spec.templates[] | select(.name == "ml-ci-pr-render") | .steps[][] | select(.name == "hera-render") | .templateRef.template' "$RENDERED")" \
   "hera-render" "the PR check renders with the same template as the merge build"

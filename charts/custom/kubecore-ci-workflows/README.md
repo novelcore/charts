@@ -157,6 +157,27 @@ Fixed in this chart: the main container no longer mounts `registry-auth` (the pa
 
 The proposal that closes it, which needs the pool's identity setup (outside this chart): one Artifact Registry repository per app (or an IAM condition on the package path, to be verified), one Google account per app with writer on that repository only, and `ci-build-sa` replaced for builds by that account. Then the ambient token reaches only the app's own images, which the app may write anyway, and the policy above is unnecessary.
 
+## The render pod runs the developer's pipeline.py (PRD novelcore/kaos#1911, chart 0.14.2)
+
+`hera-render` (the merge build and the pull-request check run the same template) imports the app's `pipeline.py` and may pip-install the app's own dependencies, so it is treated as hostile code:
+
+| | |
+|---|---|
+| user | `65532`, `runAsNonRoot`, `fsGroup 65532` (the workspace volume was cloned by an earlier root step; the fsGroup makes it writable), seccomp `RuntimeDefault` |
+| container | read-only root filesystem, `allowPrivilegeEscalation: false`, every capability dropped |
+| writable | the workspace volume, `/tmp` (an `emptyDir`), and `/usr/local` |
+| `/usr/local` | an `emptyDir` filled by the `python-overlay` init container (same engine image, same restrictions) with a copy of the interpreter's tree, so `pip install` of the app's missing dependencies lands in it while the image's root stays read-only |
+| credentials | no service-account token (the executor has its own, `hera-render-exec`, workflowtaskresults only), no GitHub token, no registry secret, no lake token |
+| network | `ci-render-egress` (below) |
+
+**Network policy.** `renderPods.networkPolicy.enabled` renders `ci-render-egress`, selecting pods labelled `platform.kubecore.io/ci-pod: render`: egress to cluster DNS (kube-dns and the node-local cache), to the Kubernetes API at `renderPods.networkPolicy.kubeApiCIDRs` (the Argo executor in the pod reports the result there; the chart refuses to render the policy without it, since a render that cannot report fails), and to TCP 443 on any address outside `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16` and `169.254.0.0/16`. So the render reaches the public package index and nothing inside the cluster, no node address and not the metadata endpoint. A standard NetworkPolicy cannot name hosts (no FQDN policy is installed on the pools), so the index itself is not the only thing reachable on 443: restricting to the index needs an FQDN policy or an in-cluster mirror. It is off by default because the control plane's address belongs to the cluster; whoever installs the chart for a cluster sets it.
+
+Enforcement: the pools and the hubs run GKE Dataplane V2 (`anetd`, datapath `ADVANCED_DATAPATH`), which enforces `networking.k8s.io/v1` NetworkPolicy including egress. That was read from the clusters and their cluster description; no test pod was run against a policy there.
+
+```bash
+bash charts/custom/kubecore-ci-workflows/tests/render-isolation/run.sh   # the pod, the policy, and (podman) a read-only pip install
+```
+
 ## Tests
 
 ```bash
@@ -167,4 +188,5 @@ bash charts/custom/kubecore-ci-workflows/tests/sync-wait/kind/run.sh [outdir]   
 bash charts/custom/kubecore-ci-workflows/tests/build-pacing/run.sh               # pacing render guards
 bash charts/custom/kubecore-ci-workflows/tests/build-pacing/kind/run.sh [outdir] # real Argo: cap, render-only, mutex
 bash charts/custom/kubecore-ci-workflows/tests/build-isolation/run.sh            # what the build container mounts
+bash charts/custom/kubecore-ci-workflows/tests/render-isolation/run.sh           # the render pod and its network policy
 ```
