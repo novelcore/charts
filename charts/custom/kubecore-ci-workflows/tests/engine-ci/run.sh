@@ -320,11 +320,15 @@ EOF
 }
 # The node names Argo gives these pods: every engine step retries a lost pod (preemptionRetry), so each
 # attempt is a `(N)` child of a Retry node (kubecore-operator issue 1832: the record matched none of them).
-DETECT_NODE='wf[1].detect-steps(0)'
-RENDER_NODE='wf[3].render-hera[0].hera-render(0)'
-RENDER_RETRY='wf[3].render-hera[0].hera-render(1)'
-ENHANCE_NODE='wf[3].render-hera[1].hera-enhance-commit(0)'
-COMPOSE_NODE='wf[3].build-push(0:name:compose-and-validate,path:config)'
+# The nesting: ml-ci-build [1] probe-detect, [2] build-run (ml-ci-run-locked) > [0] run (ml-ci-run) >
+# [1] detect-steps, [3] render-hera > [0] hera-render, [1] hera-enhance-commit, and [3] build-push per item.
+PROBE_NODE='wf[1].probe-detect(0)'
+RUN='wf[2].build-run[0].run'
+DETECT_NODE="${RUN}[1].detect-steps(0)"
+RENDER_NODE="${RUN}[3].render-hera[0].hera-render(0)"
+RENDER_RETRY="${RUN}[3].render-hera[0].hera-render(1)"
+ENHANCE_NODE="${RUN}[3].render-hera[1].hera-enhance-commit(0)"
+COMPOSE_NODE="${RUN}[3].build-push(0:name:compose-and-validate,path:config)(0)"
 
 record_case Failed; pod "$DETECT_NODE" 0; pod "$RENDER_NODE" 1 'time=x argo=true\nINFO rendering\n\033[31mpipeline.py raised: ValueError: step x reads a missing key\033[0m\nexit status 1\n'; run_record
 expect_eq "$RC" 0 "engine-record (render failed): runs"
@@ -345,7 +349,7 @@ expect_has "$ERR" "engine check: engine: FATAL" "engine-record: a context with n
 record_case Failed; pod "$RENDER_NODE" 1 "$(printf 'x%.0s' $(seq 400))\n"; run_record
 expect_eq "$(printf '%s' "$ERR" | wc -c | tr -d ' ')" "200" "engine-record: the error is bounded to 200 characters"
 
-record_case Failed; pod "wf.build-push(0:name:a,path:steps/a)" 1 "error: a client step image failed\n"; run_record
+record_case Failed; pod "${RUN}[3].build-push(1:name:a,path:steps/a)(0)" 1 "error: a client step image failed\n"; run_record
 expect_eq "$ERR" "<absent>" "engine-record: a failed client step image is not an engine error"
 
 record_case Failed stale-error; pod "$DETECT_NODE" 1 "something else broke\n"; run_record
@@ -365,6 +369,16 @@ record_case Succeeded stale-error; pod "$RENDER_NODE" 1 "transient\n"; pod "$REN
 expect_eq "$ERR" "<absent>" "engine-record: a pod that failed and was retried to success is not an error of the run"
 
 # retried engine pods (kubecore-operator issue 1832)
+record_case Failed; pod "$PROBE_NODE" 1 "engine: FATAL: the pipeline context has no usable engine; failing the build\n"; run_record
+expect_has "$ERR" "engine check: engine: FATAL" "engine-record: the probe's engine check (probe-detect) that failed is recorded"
+expect_has "$ATT" "v0.4.7@" "engine-record: ... with engine-attempt, so the reconcile's hourly guard engages"
+
+record_case Succeeded stale-error; pod "$PROBE_NODE" 0; pod "$DETECT_NODE" 0; run_record
+expect_eq "$ERR" "render: boom" "engine-record: a passed engine check alone is not a render: the record stays"
+
+record_case Succeeded stale-error; pod "$COMPOSE_NODE" 1 "error: lost\n"; pod "${COMPOSE_NODE%(0)}(1)" 0; run_record
+expect_eq "$ERR/$ATT" "<absent>/<absent>" "engine-record: a compose build retried to success clears the record"
+
 record_case Failed; pod "$DETECT_NODE" 0; pod "$RENDER_NODE" 1 "pipeline.py raised: KeyError: 'output_prefix'\n"; run_record
 expect_eq "$ERR" "render: pipeline.py raised: KeyError: 'output_prefix'" "engine-record (retry-named pods): a failed render(0) records engine-last-error with stage render"
 expect_has "$ATT" "v0.4.7@" "engine-record (retry-named pods): ... and engine-attempt, which the reconcile guard reads"
@@ -379,7 +393,7 @@ expect_has "$ERR" "compose image build: error building image" "engine-record: a 
 record_case Failed; pod "$RENDER_NODE" 137 "imminent node shutdown\n"; pod "$RENDER_RETRY" 1 "pipeline.py raised: ValueError: bad step\n"; run_record
 expect_eq "$ERR" "render: pipeline.py raised: ValueError: bad step" "engine-record: the error of a retried render is its LAST attempt's"
 
-record_case Failed stale-error; pod "$DETECT_NODE" 0; pod "$RENDER_NODE" 0; pod "$ENHANCE_NODE" 0; pod "wf[3].build-push(1:name:a,path:steps/a)" 1 "error: a client step image failed\n"; run_record
+record_case Failed stale-error; pod "$DETECT_NODE" 0; pod "$RENDER_NODE" 0; pod "$ENHANCE_NODE" 0; pod "${RUN}[3].build-push(1:name:a,path:steps/a)(0)" 1 "error: a client step image failed\n"; run_record
 expect_eq "$ERR" "render: boom" "engine-record: a run that rendered but failed in a client step leaves the record as it was"
 
 record_case Succeeded; pod "$RENDER_NODE" 0; pod "$ENHANCE_NODE" 0; run_record
