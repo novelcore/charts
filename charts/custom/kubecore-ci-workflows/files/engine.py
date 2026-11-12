@@ -12,17 +12,23 @@ operator writes `engine: {version, image, wheel, wheelSha256}` into the app's gi
   fetch    download the engine wheel, verify its sha256 and unzip it (never pip). A wheel that does not
            download or whose sha256 differs fails closed.
   stamp    mark a rendered WorkflowTemplate with the engine that produced it.
+  steps    the step table of a rendered WorkflowTemplate (PRD novelcore/kaos#1911): what each step reads and
+           produces, as the engine wrote it on the compose step. A render without one is not from an engine
+           on the step contract and fails closed.
+  produced the `produced-datasets` record of a build: the short names of the datasets the rendered
+           pipeline produces (from its step table), sorted, comma separated; "" when it produces none.
+  attempt  the `engine-attempt` record of a failed run; for an old app that was refused it also
+           names the commit and the kaos-lib delivered.
+  refused  ml-ci-reconcile: exit 0 when that record is a refusal of exactly this engine, commit and kaos-lib.
 
 Standard library + PyYAML only (the toolbox image has both). Every input from the app checkout is DATA:
 files are looked up, never imported or executed. Run as `python3 -I`.
 """
 import argparse
-import ast
 import hashlib
 import json
 import os
 import re
-import stat
 import sys
 import time
 import urllib.parse
@@ -34,7 +40,10 @@ import yaml
 EXIT_NO_ENGINE = 2    # the context names no usable engine
 EXIT_INTEGRITY = 3    # the wheel is not the one the context pins: refuse
 EXIT_UNAVAILABLE = 4  # the wheel could not be downloaded or read
-EXIT_PROFILE = 5      # the app's files do not name a schema profile this script can trust
+EXIT_PROFILE = 5      # the schema profile is not one the engine has (never a profile of the app's own)
+EXIT_NO_CONTRACT = 6  # the render carries no step table: the engine is not on the step contract
+COMPOSE_STEP = "compose-and-validate"
+COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
 # The version is the operator build tag; it becomes a label value on the WorkflowTemplate and the
 # builds, so it must be one (no "+", no "/").
 VERSION_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$")
@@ -47,11 +56,7 @@ FETCH_PAUSE_SECONDS = 5
 WHEEL_MAX_BYTES = 32 * 1024 * 1024
 LOCAL_HOSTS = ("127.0.0.1", "localhost")
 # The engine's schema profiles (kaos_engine.render PROFILES). profile_of never returns anything else.
-PROFILES = ("hera", "yolo", "legacy-v1", "yolo-v1")
-# The app files the profile is read from are untrusted: a cap well above any template's (derive_tree.py
-# is at most 13 KB on every template state), so a huge or endless file is refused, not read. Parsing
-# 64 KiB of the densest Python costs ~80 MB, inside the 128Mi limit of the tooling step that runs this.
-APP_FILE_MAX_BYTES = 64 * 1024
+PROFILES = ("hera", "yolo")
 
 
 class EngineError(Exception):
@@ -78,107 +83,13 @@ def load_context(path):
         return {}
 
 
-# MIGRATION-REMOVE(after=every ML app on prod is recreated from a template without kubecore/ (PRD-HPC-1461 D-80),
-# issue=novelcore/kubecore-operator#1830): _dataclass_fields, _read_app_file, vendored_schema_profile,
-# _config_data_has_ref, APP_FILE_MAX_BYTES, EXIT_PROFILE and their use in profile_of. They keep apps that still carry the vendored kubecore/ rendering after the train.
-def _dataclass_fields(tree, name):
-    """{field: default node} of the first `class <name>` in a parsed module, None when there is none."""
-    for node in ast.walk(tree):
-        if isinstance(node, ast.ClassDef) and node.name == name:
-            return {st.target.id: st.value for st in node.body
-                    if isinstance(st, ast.AnnAssign) and isinstance(st.target, ast.Name)}
-    return None
-
-
-def _read_app_file(repo, rel):
-    """The text of <repo>/<rel>, None when there is no such file; raises EngineError(EXIT_PROFILE) when
-    it is there but not something to read as data: a symlink, not a regular file (a FIFO, a device),
-    outside the checkout, larger than APP_FILE_MAX_BYTES or not UTF-8."""
-    path = os.path.join(repo, rel)
-    try:
-        st = os.lstat(path)
-    except (FileNotFoundError, NotADirectoryError):  # no such file (or `kubecore` is not a directory)
-        return None
-    except OSError as exc:
-        raise EngineError(f"{rel}: cannot stat ({exc.strerror})", EXIT_PROFILE) from exc
-    root = os.path.realpath(repo)
-    if stat.S_ISLNK(st.st_mode) or not stat.S_ISREG(st.st_mode) \
-            or not os.path.realpath(path).startswith(root + os.sep):
-        raise EngineError(f"{rel} is not a regular file in the checkout (a symlink, a device or outside it); "
-                          "refusing to read it", EXIT_PROFILE)
-    if st.st_size > APP_FILE_MAX_BYTES:
-        raise EngineError(f"{rel} is {st.st_size} bytes, more than {APP_FILE_MAX_BYTES}; refusing to read it",
-                          EXIT_PROFILE)
-    try:
-        with open(path, "rb") as f:
-            raw = f.read(APP_FILE_MAX_BYTES + 1)
-        if len(raw) > APP_FILE_MAX_BYTES:
-            raise EngineError(f"{rel} is more than {APP_FILE_MAX_BYTES} bytes; refusing to read it", EXIT_PROFILE)
-        return raw.decode("utf-8")
-    except (OSError, UnicodeDecodeError) as exc:
-        raise EngineError(f"{rel} cannot be read as UTF-8 text ({type(exc).__name__})", EXIT_PROFILE) from exc
-
-
-def vendored_schema_profile(repo):
-    """The schema profile of the app's vendored kubecore/derive_tree.py, None when it names none.
-
-    The engine's four profiles are exactly the structured-config schemas the templates' derive_tree.py
-    has had (kaos-hpc-operator engine/README.md "Schema profiles"), and the app's config/ was written
-    against its own copy, so its DataConfig / QuantizationConfig fields say which one it needs:
-      DataConfig.ref + .version                   legacy-v1  (both templates 2026-07-14 .. 2026-10-19)
-      DataConfig.ref                              hera       (hera since 10-19, and yolo `main` since 10-19)
-      no ref, QuantizationConfig.output_prefix    yolo-v1
-      no ref, no output_prefix                    yolo
-    The file is parsed (ast), never imported or executed. An app without the file, or whose file has no
-    DataConfig (a later template that dropped the vendored copy), returns None. A file that is there but
-    cannot be read safely or parsed is NOT guessed around: EngineError(EXIT_PROFILE), the build fails.
-    """
-    rel = os.path.join("kubecore", "derive_tree.py")
-    text = _read_app_file(repo, rel)
-    if text is None:
-        return None
-    try:
-        tree = ast.parse(text, filename=rel)
-    except (SyntaxError, ValueError, RecursionError, MemoryError) as exc:
-        raise EngineError(f"{rel} is not Python this script can parse ({type(exc).__name__}); it names the schema "
-                          "profile the engine renders with, so the build fails rather than guess one", EXIT_PROFILE) from exc
-    data = _dataclass_fields(tree, "DataConfig")
-    if data is None:
-        return None
-    if "ref" in data:
-        return "legacy-v1" if "version" in data else "hera"
-    quant = _dataclass_fields(tree, "QuantizationConfig") or {}
-    return "yolo-v1" if "output_prefix" in quant else "yolo"
-
-
-def _config_data_has_ref(repo):
-    """True when config/data.yaml sets data.ref (a key the `yolo` schema rejects)."""
-    text = _read_app_file(repo, os.path.join("config", "data.yaml"))
-    if text is None:
-        return False
-    try:
-        doc = yaml.safe_load(text) or {}
-    except (yaml.YAMLError, RecursionError):
-        return False
-    section = doc.get("data", doc) if isinstance(doc, dict) else None
-    return isinstance(section, dict) and "ref" in section
-
-
 def profile_of(repo):
-    """The schema profile the engine renders and composes the app with.
-
-    First the app's vendored kubecore/derive_tree.py (vendored_schema_profile). Without one: `yolo`
-    when config/ has a quantization section, else `hera`; a quantization app whose config/data.yaml
-    still sets data.ref gets `hera` (the only current profile with DataConfig.ref). Before 0.13.3 only
-    the fallback existed and every yolo app of the template's `main` (DataConfig.ref) failed to render
-    with "Key 'ref' not in 'DataConfig'" (kubecore-operator#1830).
-    """
-    vendored = vendored_schema_profile(repo)
-    if vendored:
-        return vendored
+    """The schema profile the engine renders and composes the app with: `yolo` when config/ has a quantization
+    section, else `hera`. Nothing of the app's own is read: an app that carries a `kubecore/` folder is refused by
+    the engine itself, as an old app."""
     config = os.path.join(repo, "config")
     if os.path.isfile(os.path.join(config, "quantization.yaml")) or os.path.isdir(os.path.join(config, "quantization")):
-        return "hera" if _config_data_has_ref(repo) else "yolo"
+        return "yolo"
     return "hera"
 
 
@@ -285,6 +196,82 @@ def stamp(wft_path, version):
         yaml.dump(wft, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
 
 
+# ---------------------------------------------------------------- the step table
+
+def step_table(wft_path):
+    """The step table of a rendered WorkflowTemplate: the compose step's argument after `--steps`, one
+    object per step in pipeline order (name, kind, reads, inputs, needs, produces). It is the place to
+    read what a pipeline declares without running pipeline.py again."""
+    problem = "the compose step has no --steps argument"
+    try:
+        with open(wft_path) as f:
+            templates = (yaml.safe_load(f) or {})["spec"]["templates"]
+        args = next(t for t in templates if t.get("name") == COMPOSE_STEP)["container"]["args"]
+        table = json.loads(args[args.index("--steps") + 1])
+        if isinstance(table, list) and all(
+                isinstance(s, dict) and isinstance(s.get("name"), str) and isinstance(s.get("inputs"), list)
+                and all(isinstance(n, str) for n in s["inputs"]) for s in table):
+            return table
+        problem = "its step table is not a list of steps with a name and inputs"
+    except (OSError, yaml.YAMLError, KeyError, TypeError, IndexError, StopIteration, ValueError) as exc:
+        problem = f"{problem} ({type(exc).__name__})"
+    raise EngineError(f"the rendered pipeline carries no step table: {problem}. The pipeline engine this "
+                      "context pins is not on the step contract; nothing is committed", EXIT_NO_CONTRACT)
+
+
+def produced_datasets(table):
+    """The datasets a pipeline produces, for the `produced-datasets` record of the app's pipeline-images: the
+    short names (what the app writes in `dataset("...")`, not the repository's), once each, sorted, comma
+    separated, no spaces; "" when it produces none. A produces entry that is not a name and a type is not a
+    step table of the contract."""
+    names = set()
+    for step in table:
+        produces = step.get("produces") or []
+        if not isinstance(produces, list) or not all(
+                isinstance(e, dict) and isinstance(e.get("name"), str) and isinstance(e.get("type"), str)
+                for e in produces):
+            raise EngineError(f"step {step['name']!r}: `produces` in the step table is not a list of names with a "
+                              "type. The pipeline engine this context pins is not on the step contract; "
+                              "nothing is committed", EXIT_NO_CONTRACT)
+        names.update(e["name"] for e in produces if e["type"] == "dataset")
+    return ",".join(sorted(names))
+
+
+# ---------------------------------------------------------------- engine-attempt
+
+def _kaos_lib_key(ctx):
+    lib = ctx.get("kaosLib")
+    spec = str((lib if isinstance(lib, dict) else {}).get("spec") or "").strip()
+    return hashlib.sha256(spec.encode()).hexdigest()[:12]
+
+
+def _version(ctx):
+    block = ctx.get("engine")
+    return str(block.get("version") or "") if isinstance(block, dict) else ""
+
+
+def attempt(ctx_path, now=None, refused_commit=""):
+    """The `engine-attempt` record of a run that failed in the engine: `<engine version>@<epoch>`, read by
+    ml-ci-reconcile's one-attempt-per-hour guard. An old app that was refused (it must be created again,
+    trying again cannot help) records `<engine version>@<epoch>@<commit>@<kaos-lib>`: the commit that was
+    refused and the first 12 hex of the sha256 of the kaos-lib spec the context delivered."""
+    ctx = load_context(ctx_path)
+    value = f"{_version(ctx) or 'unknown'}@{int(time.time() if now is None else now)}"
+    if refused_commit:
+        value += f"@{refused_commit}@{_kaos_lib_key(ctx)}"
+    return value
+
+
+def refused(value, ctx_path, commit):
+    """True when value records a refusal of exactly this context's engine and kaos-lib and this commit:
+    nothing a new attempt reads has changed. Anything else, an unreadable context included, is False."""
+    parts = str(value).split("@")
+    ctx = load_context(ctx_path)
+    version = _version(ctx)
+    return (len(parts) == 4 and bool(version) and parts[0] == version and bool(COMMIT_RE.match(parts[2]))
+            and parts[2] == commit and parts[3] == _kaos_lib_key(ctx))
+
+
 # ---------------------------------------------------------------- command line
 
 def main(argv=None):
@@ -302,15 +289,33 @@ def main(argv=None):
     s = sub.add_parser("stamp")
     s.add_argument("--wft", required=True)
     s.add_argument("--version", required=True)
+    t = sub.add_parser("steps")
+    t.add_argument("--wft", required=True)
+    d = sub.add_parser("produced")
+    d.add_argument("--wft", required=True)
+    a = sub.add_parser("attempt")
+    a.add_argument("--context", required=True)
+    a.add_argument("--refused-commit", default="")
+    r = sub.add_parser("refused")
+    r.add_argument("--context", required=True)
+    r.add_argument("--commit", required=True)
+    r.add_argument("--attempt", required=True)
     args = parser.parse_args(argv)
     try:
         if args.cmd == "context":
             print(json.dumps(engine_of(args.context, args.repo), sort_keys=True))
         elif args.cmd == "version":
-            block = load_context(args.context).get("engine")
-            print(str(block.get("version") or "") if isinstance(block, dict) else "")
+            print(_version(load_context(args.context)))
         elif args.cmd == "fetch":
             print(fetch_wheel(args.wheel, args.sha256, args.dest))
+        elif args.cmd == "steps":
+            print(json.dumps(step_table(args.wft), separators=(",", ":")))
+        elif args.cmd == "produced":
+            print(produced_datasets(step_table(args.wft)))
+        elif args.cmd == "attempt":
+            print(attempt(args.context, refused_commit=args.refused_commit))
+        elif args.cmd == "refused":
+            return 0 if refused(args.attempt, args.context, args.commit) else 1
         else:
             stamp(args.wft, args.version)
     except EngineError as exc:

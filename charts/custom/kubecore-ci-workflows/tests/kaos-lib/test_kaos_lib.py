@@ -33,6 +33,10 @@ TAG = "kaos-lib[zitadel] @ https://github.com/kaos-io/kaos-lib/archive/refs/tags
 AR = "https://europe-west1-python.pkg.dev/kaos-dev-511509"
 REG = f"kaos-lib[zitadel] @ {AR}/kaos-lib/kaos-lib/kaos_lib-0.4.0-py3-none-any.whl#sha256={'c' * 64}"
 REG_RC = f"kaos-lib[zitadel] @ {AR}/kaos-lib-rc/kaos-lib/kaos_lib-0.4.0rc3-py3-none-any.whl"
+REG_05RC = f"kaos-lib[zitadel] @ {AR}/kaos-lib-rc/kaos-lib/kaos_lib-0.5.0rc2-py3-none-any.whl"
+# The address of the kaos-lib guide the chart is given (values kaosLib.guideUrl).
+GUIDE = "https://guide.example/docs"
+OLD_APP = "This app was made before the current pipelines. Create it again from the template."
 
 
 def ctx_file(tmp_path, kaos_lib=None):
@@ -426,9 +430,75 @@ def test_release_notes_take_one_section():
 
 
 def test_compat_file_keeps_comments():
-    assert kl.compat_file('# keep\nkaos-lib: ">=0.2,<0.3"\nother: 1\n', ">=0.3,<0.4") == (
+    assert kl.compat_file('# keep\nkaos-lib: ">=0.2,<0.3"\nother: 1\n', ">=0.3,<0.4", GUIDE) == (
         '# keep\nkaos-lib: ">=0.3,<0.4"\nother: 1\n')
-    assert yaml.safe_load(kl.compat_file("", ">=0.3,<0.4")) == {"kaos-lib": ">=0.3,<0.4"}
+    assert yaml.safe_load(kl.compat_file("", ">=0.3,<0.4", GUIDE)) == {"kaos-lib": ">=0.3,<0.4"}
+
+
+def test_a_new_compat_file_points_at_the_support_window_page_of_the_guide():
+    text = kl.compat_file("", ">=0.5,<0.6", GUIDE)
+    assert "see https://guide.example/docs/support-window.html\n" in text
+    assert "docs/kaos-lib-versions.md" not in text
+
+
+# ---------------------------------------------------------------- the step contract (PRD kaos#1911)
+
+@pytest.mark.parametrize("spec,version", [
+    (REG, "0.4.0"), (REG_RC, "0.4.0rc3"), (REG_05RC, "0.5.0rc2"), (WHEEL, "0.3.0"), (TAG, "0.3.0"),
+    ("kaos-lib[zitadel]==0.5.1", "0.5.1"), ("kaos-lib ==0.4.2", "0.4.2"), (GIT, ""), (LIB, ""), ("", ""), ("junk", ""),
+])
+def test_spec_version(spec, version):
+    assert kl.spec_version(spec) == version
+
+
+@pytest.mark.parametrize("version,on", [
+    ("0.4.9", False), ("0.4.0rc25", False), ("0.3.0", False), ("0.5.0rc1", True), ("0.5.0", True), ("0.5", True),
+    ("0.6.2", True), ("1.0.0", True), ("", None), ("git-0136a205a82f", None),
+])
+def test_the_step_contract_starts_at_0_5_and_an_rc_of_0_5_is_part_of_it(version, on):
+    assert kl.on_contract(version) is on
+
+
+@pytest.mark.parametrize("spec,compat,ok", [
+    (REG_05RC, ">=0.4,<0.5", True),            # the platform delivers 0.5: nothing to refuse here
+    ("kaos-lib==0.5.0", "", True),
+    (REG, ">=0.4,<0.5", False),                # held at 0.4 by its own range
+    (REG, "", False),                          # 0.4 delivered, no range declared
+    (REG, "not a range", False),
+    (REG, ">=0.5,<0.6", True),                 # the build that reports the new range: the platform moves it after
+    (REG, ">=0.4", True),
+    (GIT, ">=0.4,<0.5", True),                 # no version to read: unknown is never refused
+    ("", ">=0.4,<0.5", True),                  # nothing delivered
+])
+def test_a_build_with_a_kaos_lib_older_than_the_step_contract_is_refused(spec, compat, ok):
+    out = kl.contract_check(spec, compat)
+    assert out["ok"] is ok
+    if not ok:
+        assert "kaos-lib 0.4.0" in out["message"] and out["message"].endswith(OLD_APP)
+        assert "guide" not in out["message"].lower() and "http" not in out["message"]
+
+
+def test_the_refusal_names_no_platform_internals():
+    text = kl.contract_check(REG, ">=0.4,<0.5")["message"].lower()
+    for word in ("argo", "workflow", "namespace", "cluster", "kubectl", "configmap", "gitops"):
+        assert word not in text
+
+
+@pytest.mark.parametrize("recorded,spec,crosses", [
+    (REG, REG_05RC, True), ("kaos-lib==0.4.2", "kaos-lib==0.5.0", True),
+    (REG_05RC, "kaos-lib==0.5.1", False), ("kaos-lib==0.3.0", REG, False), ("", REG_05RC, False),
+    (GIT, REG_05RC, False), (REG, GIT, False), ("none", REG_05RC, False),
+])
+def test_images_from_before_the_step_contract_are_not_stale_they_are_rebuilt(recorded, spec, crosses):
+    assert kl.crosses_contract(recorded, spec) is crosses
+
+
+def test_contract_cli_prints_the_verdict_and_whether_the_spec_crosses(capsys):
+    assert kl.main(["contract", "--spec", REG, "--compat", ">=0.4,<0.5", "--recorded", REG]) == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["ok"] is False and out["crosses"] is False and out["message"].endswith(OLD_APP)
+    assert kl.main(["contract", "--spec", REG_05RC, "--recorded", REG]) == 0
+    assert json.loads(capsys.readouterr().out) == {"ok": True, "message": "", "crosses": True}
 
 
 # ---------------------------------------------------------------- bump (fake GitHub)
@@ -527,7 +597,8 @@ def github(monkeypatch):
 
 
 def run_bump(fake, version="0.3.0", spec="kaos-lib[zitadel]==0.3.0"):
-    return kl.bump(kl.GitHub("tok", fake.api), fake.slug, "dev", version, spec, "https://changelog", log=lambda m: None)
+    return kl.bump(kl.GitHub("tok", fake.api), fake.slug, "dev", version, spec, "https://changelog", GUIDE,
+                   log=lambda m: None)
 
 
 def test_bump_opens_one_pull_request_with_the_new_range_and_the_release_notes(github):
@@ -601,3 +672,29 @@ def test_a_tag_archive_takes_its_notes_from_the_github_release(github):
     run_bump(github, spec=TAG)
     assert "- **Migration**: from the release" in github.prs[0]["body"]
     assert f"Package: `{TAG}`" in github.prs[0]["body"]
+
+
+# ---------------------------------------------------------------- the bump across kaos-lib 0.5 (PRD kaos#1911)
+
+def test_a_bump_across_0_5_is_an_ordinary_bump_with_no_migration_section(github):
+    github.files[("dev", ".kaos/compat.yaml")] = '# c\nkaos-lib: ">=0.4,<0.5"\n'
+    run_bump(github, version="0.5.0", spec="kaos-lib[zitadel]==0.5.0")
+    body = github.prs[0]["body"]
+    assert "Before you merge" not in body and "migrat" not in body.lower() and "kaosctl" not in body
+    assert "guide.example" not in body and "## Release notes" in body
+    assert github.files[("kaos-lib/bump-0.5.0", ".kaos/compat.yaml")] == '# c\nkaos-lib: ">=0.5,<0.6"\n'
+
+
+def test_a_new_compat_file_of_a_bump_to_0_5_still_points_at_the_support_window(github):
+    github.files.clear()
+    run_bump(github, version="0.5.0", spec="kaos-lib[zitadel]==0.5.0")
+    assert "Before you merge" not in github.prs[0]["body"]
+    assert "support-window.html" in github.files[("kaos-lib/bump-0.5.0", ".kaos/compat.yaml")]
+
+
+def test_the_bump_pull_request_names_no_platform_internals(github):
+    github.files[("dev", ".kaos/compat.yaml")] = 'kaos-lib: ">=0.4,<0.5"\n'
+    run_bump(github, version="0.5.0", spec="kaos-lib[zitadel]==0.5.0")
+    text = (github.prs[0]["body"] + github.files[("kaos-lib/bump-0.5.0", ".kaos/compat.yaml")]).lower()
+    for word in ("argo", "workflow", "namespace", "cluster", "kubectl", "configmap", "gitops"):
+        assert word not in text

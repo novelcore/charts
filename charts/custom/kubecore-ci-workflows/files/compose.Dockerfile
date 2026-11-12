@@ -1,8 +1,9 @@
 # compose-and-validate step image (PRD-HPC-1461 D-80). Owned by the chart and built by ml-ci-build with
 # the app's config/ folder as the ONLY build context: an app carries no Dockerfile, no kubecore/ and no
 # steps/compose_and_validate/ for it. The rendered WorkflowTemplate carries the command and args
-# (python -I -m kaos_engine.compose, outputs params, data-lock and dataset-pin); this image only supplies the engine,
-# the app's config tree, and the kaos-lib the step images get (the same KAOS_LIB_PACKAGE build-arg).
+# (python -I -m kaos_engine.compose; its outputs are each step's context, kaos-context-<step>, and the run's
+# ledger, kaos-ledger); this image only supplies the engine, the app's config tree, and the kaos-lib the step
+# images get (the same KAOS_LIB_PACKAGE build-arg).
 ARG ENGINE_IMAGE
 FROM ${ENGINE_IMAGE}
 ARG ENGINE_VERSION

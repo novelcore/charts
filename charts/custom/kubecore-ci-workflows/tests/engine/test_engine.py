@@ -80,144 +80,35 @@ def test_no_quantization_means_hera_whatever_the_app_calls_itself(tmp_path):
     assert engine.profile_of(str(repo)) == "hera"
 
 
-# The four structured-config schemas the templates' vendored kubecore/derive_tree.py has had, cut down
-# to the two dataclasses the engine profiles differ in (kaos-hpc-operator engine/README.md).
-DT_HEAD = ("from dataclasses import dataclass\nfrom enum import Enum\n\n"
-           "class DataSource(Enum):\n    lakefs = 'lakefs'\n\n")
-DT_LEGACY_V1 = DT_HEAD + ("@dataclass\nclass DataConfig:\n    ref: str = 'main'\n    source: DataSource = DataSource.lakefs\n"
-                          "    version: str = ''\n    seed: int = 42\n\n"
-                          "@dataclass\nclass QuantizationConfig:\n    image_size: int = 640\n"
-                          "    output_prefix: str = 'quantization'\n")
-DT_HERA = DT_HEAD + ("@dataclass\nclass DataConfig:\n    ref: str = 'main'\n    source: DataSource = DataSource.lakefs\n"
-                     "    seed: int = 42\n\n"
-                     "@dataclass\nclass QuantizationConfig:\n    image_size: int = 640\n    output_prefix: str = ''\n")
-DT_YOLO_V1 = DT_HEAD + ("@dataclass\nclass DataConfig:\n    source: DataSource = DataSource.lakefs\n    seed: int = 42\n\n"
-                        "@dataclass\nclass QuantizationConfig:\n    image_size: int = 640\n    output_prefix: str = ''\n")
-DT_YOLO = DT_HEAD + ("@dataclass\nclass DataConfig:\n    source: DataSource = DataSource.lakefs\n    seed: int = 42\n\n"
-                     "@dataclass\nclass QuantizationConfig:\n    image_size: int = 640\n")
-
-
-def make_app(tmp_path, derive_tree=None, quantization=True, data_yaml=None):
+def make_app(tmp_path, quantization=True, own_engine=None):
+    """An app checkout; `own_engine` is the text of a kubecore/derive_tree.py it carries (an old app)."""
     repo = tmp_path / "repo"
     (repo / "config").mkdir(parents=True)
     if quantization:
         (repo / "config" / "quantization.yaml").write_text("quantization:\n  mode: none\n")
-    if data_yaml is not None:
-        (repo / "config" / "data.yaml").write_text(data_yaml)
-    if derive_tree is not None:
+    if own_engine is not None:
         (repo / "kubecore").mkdir()
-        (repo / "kubecore" / "derive_tree.py").write_text(derive_tree)
+        (repo / "kubecore" / "derive_tree.py").write_text(own_engine)
     return str(repo)
 
 
-@pytest.mark.parametrize("derive_tree, profile", [
-    (DT_LEGACY_V1, "legacy-v1"),
-    (DT_HERA, "hera"),
-    (DT_YOLO_V1, "yolo-v1"),
-    (DT_YOLO, "yolo"),
+@pytest.mark.parametrize("own_engine", [
+    "@dataclass\nclass DataConfig:\n    ref: str = 'main'\n    version: str = ''\n",   # what named legacy-v1
+    "raise SystemExit('executed')\n",
+    "def broken(:\n",
+    "x = 1\n" * 40000,                                                                   # over 64 KiB
 ])
-def test_the_vendored_derive_tree_names_the_profile(tmp_path, derive_tree, profile):
-    assert engine.profile_of(make_app(tmp_path, derive_tree)) == profile
+def test_an_app_with_an_engine_copy_of_its_own_is_not_read_and_gets_the_profile_of_its_config(tmp_path, own_engine):
+    # The engine refuses such an app as an old app (kaos-hpc-operator engine/kaos_engine/render.py); this script
+    # neither reads nor trusts what the app carries, so the refusal is the engine's and its exit code is the render's.
+    out = engine.engine_of(write_context(tmp_path, BLOCK), make_app(tmp_path, own_engine=own_engine))
+    assert out["profile"] == "yolo"
+    assert engine.engine_of(write_context(tmp_path, BLOCK), make_app(tmp_path / "h", quantization=False,
+                                                                       own_engine=own_engine))["profile"] == "hera"
 
 
-def test_a_yolo_app_of_the_template_main_renders_with_hera(tmp_path):
-    # kubecore-operator#1830: yolo-pipelines-template `main` (derive_tree blob c3c4e36, since 2026-10-19) has a
-    # quantization section AND DataConfig.ref; the `yolo` schema has no ref, so every such app failed to
-    # render with "Key 'ref' not in 'DataConfig'". Its schema is the hera profile.
-    repo = make_app(tmp_path, DT_HERA, quantization=True, data_yaml='data:\n  ref: "main"\n  seed: 42\n')
-    assert engine.profile_of(repo) == "hera"
-
-
-def test_the_derive_tree_is_parsed_never_executed(tmp_path):
-    trap = "raise SystemExit('executed')\n" + DT_YOLO
-    assert engine.profile_of(make_app(tmp_path, trap)) == "yolo"
-
-
-def test_a_derive_tree_without_a_schema_falls_back_to_the_config(tmp_path):
-    stub = "# moved to kaos-lib\nfrom kaos.derive_tree import *\n"  # parses, names no DataConfig
-    assert engine.profile_of(make_app(tmp_path, stub, quantization=True)) == "yolo"
-    assert engine.profile_of(make_app(tmp_path / "h", stub, quantization=False)) == "hera"
-
-
-# The derive_tree.py and data.yaml the profile is read from are the app's (untrusted, possibly a fork's PR
-# head). A file that is there but cannot be read safely or parsed fails the build (EXIT_PROFILE) with the
-# reason; it is never guessed around, never followed out of the checkout and never read without a bound.
-def test_a_derive_tree_that_is_not_python_fails_closed(tmp_path):
-    with pytest.raises(engine.EngineError) as exc:
-        engine.profile_of(make_app(tmp_path, "def broken(:\n"))
-    assert exc.value.code == engine.EXIT_PROFILE and "kubecore/derive_tree.py" in str(exc.value)
-
-
-# Deeply nested source makes CPython's parser raise MemoryError ("Parser stack overflowed") or
-# RecursionError ("during ast construction") instead of SyntaxError; where it does depends on the
-# Python version, so the parser is made to raise them here.
-@pytest.mark.parametrize("error", [MemoryError("Parser stack overflowed"), RecursionError("ast construction")])
-def test_a_derive_tree_too_deep_to_parse_fails_closed(tmp_path, monkeypatch, error):
-    repo = make_app(tmp_path, DT_HERA)
-
-    def deep(*args, **kwargs):
-        raise error
-    monkeypatch.setattr(engine.ast, "parse", deep)
-    with pytest.raises(engine.EngineError) as exc:
-        engine.profile_of(repo)
-    assert exc.value.code == engine.EXIT_PROFILE and type(error).__name__ in str(exc.value)
-
-
-def test_a_huge_derive_tree_is_refused_unread(tmp_path):
-    repo = make_app(tmp_path, "x = 1\n" * (engine.APP_FILE_MAX_BYTES // 6 + 1))
-    with pytest.raises(engine.EngineError, match="bytes") as exc:
-        engine.profile_of(repo)
-    assert exc.value.code == engine.EXIT_PROFILE
-
-
-@pytest.mark.parametrize("target", ["/dev/zero", "outside"])
-def test_a_symlinked_derive_tree_is_refused(tmp_path, target):
-    repo = make_app(tmp_path)
-    if target == "outside":
-        target = str(tmp_path / "outside.py")
-        (tmp_path / "outside.py").write_text(DT_HERA)
-    os.makedirs(os.path.join(repo, "kubecore"))
-    os.symlink(target, os.path.join(repo, "kubecore", "derive_tree.py"))
-    with pytest.raises(engine.EngineError, match="not a regular file") as exc:
-        engine.profile_of(repo)
-    assert exc.value.code == engine.EXIT_PROFILE
-
-
-def test_a_symlinked_kubecore_dir_is_refused(tmp_path):
-    repo = make_app(tmp_path)
-    (tmp_path / "elsewhere").mkdir()
-    (tmp_path / "elsewhere" / "derive_tree.py").write_text(DT_HERA)
-    os.symlink(str(tmp_path / "elsewhere"), os.path.join(repo, "kubecore"))
-    with pytest.raises(engine.EngineError, match="not a regular file"):
-        engine.profile_of(repo)
-
-
-def test_a_kubecore_file_is_no_vendored_schema(tmp_path):
-    repo = make_app(tmp_path)
-    (tmp_path / "repo" / "kubecore").write_text("not a directory\n")
-    assert engine.profile_of(repo) == "yolo"
-
-
-def test_a_fifo_derive_tree_is_refused_not_waited_on(tmp_path):
-    repo = make_app(tmp_path)
-    os.makedirs(os.path.join(repo, "kubecore"))
-    os.mkfifo(os.path.join(repo, "kubecore", "derive_tree.py"))
-    with pytest.raises(engine.EngineError, match="not a regular file"):
-        engine.profile_of(repo)
-
-
-def test_a_symlinked_data_yaml_is_refused(tmp_path):
-    repo = make_app(tmp_path)
-    os.symlink("/dev/zero", os.path.join(repo, "config", "data.yaml"))
-    with pytest.raises(engine.EngineError, match="config/data.yaml"):
-        engine.profile_of(repo)
-
-
-def test_the_cli_names_the_reason_and_exits_with_the_profile_code(tmp_path, capsys):
-    repo = make_app(tmp_path, "def broken(:\n")
-    assert engine.main(["context", "--context", write_context(tmp_path, BLOCK), "--repo", repo]) == engine.EXIT_PROFILE
-    err = capsys.readouterr().err
-    assert err.startswith("engine: FATAL: kubecore/derive_tree.py is not Python") and "rather than guess" in err
+def test_the_profiles_are_the_two_the_engine_has():
+    assert engine.PROFILES == ("hera", "yolo")
 
 
 def test_a_profile_outside_the_engine_set_fails_closed(tmp_path, monkeypatch):
@@ -225,20 +116,6 @@ def test_a_profile_outside_the_engine_set_fails_closed(tmp_path, monkeypatch):
     with pytest.raises(engine.EngineError, match="yolo-v9") as exc:
         engine.engine_of(write_context(tmp_path, BLOCK), str(tmp_path))
     assert exc.value.code == engine.EXIT_PROFILE
-
-
-@pytest.mark.parametrize("data_yaml, profile", [
-    ('data:\n  ref: "main"\n', "hera"),      # the yolo schema would reject data.ref
-    ('data:\n  source: "lakefs"\n', "yolo"),
-    ("not: [valid\n", "yolo"),
-])
-def test_without_a_vendored_schema_a_data_ref_means_hera(tmp_path, data_yaml, profile):
-    assert engine.profile_of(make_app(tmp_path, None, quantization=True, data_yaml=data_yaml)) == profile
-
-
-def test_the_context_carries_the_vendored_profile(tmp_path):
-    repo = make_app(tmp_path, DT_LEGACY_V1)
-    assert engine.engine_of(write_context(tmp_path, BLOCK), repo)["profile"] == "legacy-v1"
 
 
 @pytest.mark.parametrize("block", [
@@ -348,3 +225,150 @@ def test_stamp_refuses_a_version_that_is_not_a_label_value(tmp_path):
     path.write_text("{}")
     with pytest.raises(engine.EngineError):
         engine.stamp(str(path), "v1+abc")
+
+
+# ---------------------------------------------------------------- the step table (PRD kaos#1911)
+
+TABLE = [{"name": "prepare", "kind": "transform", "reads": [], "inputs": ["raw"], "needs": [],
+          "produces": [{"name": "clean", "type": "dataset"}]},
+         {"name": "train", "kind": "train", "reads": ["train"], "inputs": ["raw", "labels"], "needs": ["prepare"],
+          "produces": [{"name": "model", "type": "model"}]}]
+
+
+def write_wft(tmp_path, args, name="compose-and-validate"):
+    wft = {"kind": "WorkflowTemplate", "spec": {"templates": [
+        {"name": "main", "dag": {"tasks": []}}, {"name": name, "container": {"image": "x", "args": args}}]}}
+    path = tmp_path / "wft.yaml"
+    path.write_text(yaml.safe_dump(wft))
+    return str(path)
+
+
+def test_the_step_table_is_the_compose_argument_after_steps(tmp_path):
+    wft = write_wft(tmp_path, ["a=1", "--advanced", "{{workflow.parameters.config}}", "--steps", json.dumps(TABLE), "--run", "r"])
+    assert engine.step_table(wft) == TABLE
+
+
+def test_cli_steps_prints_the_table(tmp_path, capsys):
+    assert engine.main(["steps", "--wft", write_wft(tmp_path, ["--steps", json.dumps(TABLE)])]) == 0
+    assert json.loads(capsys.readouterr().out) == TABLE
+
+
+@pytest.mark.parametrize("args", [
+    ["--advanced", "x"],                        # an engine from before the step contract
+    ["--steps"],                                # nothing after it
+    ["--steps", "not json"],
+    ["--steps", json.dumps({"name": "a"})],     # not a list
+    ["--steps", json.dumps([{"name": "a"}])],   # a step without inputs
+    ["--steps", json.dumps([{"name": "a", "inputs": "raw"}])],
+])
+def test_a_render_without_a_step_table_is_not_from_an_engine_on_the_step_contract(tmp_path, capsys, args):
+    with pytest.raises(engine.EngineError) as err:
+        engine.step_table(write_wft(tmp_path, args))
+    assert err.value.code == engine.EXIT_NO_CONTRACT
+    assert engine.main(["steps", "--wft", write_wft(tmp_path, args)]) == engine.EXIT_NO_CONTRACT
+    assert "engine: FATAL" in capsys.readouterr().err
+
+
+def test_a_render_without_the_compose_step_has_no_step_table(tmp_path):
+    with pytest.raises(engine.EngineError) as err:
+        engine.step_table(write_wft(tmp_path, ["--steps", json.dumps(TABLE)], name="other"))
+    assert err.value.code == engine.EXIT_NO_CONTRACT
+
+
+# ---------------------------------------------------------------- produced datasets (pipeline-images record)
+
+def dataset_table(*produced):
+    """A step table whose steps produce the given (name, type) pairs, one step per pair."""
+    return [{"name": f"s{i}", "kind": "transform", "reads": [], "inputs": [], "needs": [],
+             "produces": [{"name": n, "type": t}]} for i, (n, t) in enumerate(produced)]
+
+
+def produced_of(tmp_path, table):
+    return engine.produced_datasets(engine.step_table(write_wft(tmp_path, ["--steps", json.dumps(table)])))
+
+
+def test_the_produced_datasets_are_the_short_names_sorted_and_comma_separated(tmp_path):
+    table = dataset_table(("features", "dataset"), ("model", "model"), ("clean", "dataset"), ("report", "artifact"))
+    assert produced_of(tmp_path, table) == "clean,features"
+
+
+def test_a_pipeline_that_produces_no_dataset_has_an_empty_record(tmp_path):
+    assert produced_of(tmp_path, dataset_table(("model", "model"), ("report", "artifact"))) == ""
+    assert produced_of(tmp_path, []) == ""
+    assert produced_of(tmp_path, [{"name": "gate", "kind": "control", "reads": [], "inputs": [], "needs": []}]) == ""
+
+
+def test_a_name_is_listed_once(tmp_path):
+    assert produced_of(tmp_path, dataset_table(("clean", "dataset"), ("clean", "dataset"))) == "clean"
+
+
+def test_cli_produced_prints_the_record(tmp_path, capsys):
+    table = dataset_table(("features", "dataset"), ("clean", "dataset"))
+    assert engine.main(["produced", "--wft", write_wft(tmp_path, ["--steps", json.dumps(table)])]) == 0
+    assert capsys.readouterr().out == "clean,features\n"
+    assert engine.main(["produced", "--wft", write_wft(tmp_path, ["--steps", json.dumps([])])]) == 0
+    assert capsys.readouterr().out == "\n"
+
+
+@pytest.mark.parametrize("produces", ["clean", [{"name": "clean"}], [{"type": "dataset"}], [{"name": 3, "type": "dataset"}]])
+def test_a_produces_entry_that_is_not_a_name_and_a_type_is_not_a_step_table_of_the_contract(tmp_path, produces):
+    table = [{"name": "a", "kind": "transform", "reads": [], "inputs": [], "needs": [], "produces": produces}]
+    with pytest.raises(engine.EngineError) as err:
+        produced_of(tmp_path, table)
+    assert err.value.code == engine.EXIT_NO_CONTRACT
+
+
+def test_a_render_without_a_step_table_records_nothing(tmp_path, capsys):
+    assert engine.main(["produced", "--wft", write_wft(tmp_path, ["--advanced", "x"])]) == engine.EXIT_NO_CONTRACT
+    out = capsys.readouterr()
+    assert out.out == "" and "engine: FATAL" in out.err
+
+
+# ---------------------------------------------------------------- engine-attempt (one try per refusal)
+
+COMMIT = "c" * 40
+LIB = {"spec": "kaos-lib==0.5.0", "version": "0.5.0"}
+
+
+def test_a_failed_attempt_is_the_engine_version_and_the_time(tmp_path):
+    assert engine.attempt(write_context(tmp_path, BLOCK), now=1700000000) == "v0.4.7@1700000000"
+    assert engine.attempt(write_context(tmp_path, None), now=5) == "unknown@5"
+
+
+def test_a_refused_app_records_its_commit_and_the_kaos_lib_delivered(tmp_path):
+    ctx = write_context(tmp_path, BLOCK, kaosLib=LIB)
+    value = engine.attempt(ctx, now=1700000000, refused_commit=COMMIT)
+    key = hashlib.sha256(b"kaos-lib==0.5.0").hexdigest()[:12]
+    assert value == f"v0.4.7@1700000000@{COMMIT}@{key}"
+    assert engine.refused(value, ctx, COMMIT) is True
+
+
+def test_a_refusal_holds_until_the_commit_the_engine_or_the_kaos_lib_changes(tmp_path):
+    ctx = write_context(tmp_path, BLOCK, kaosLib=LIB)
+    value = engine.attempt(ctx, now=1, refused_commit=COMMIT)
+    assert engine.refused(value, ctx, "d" * 40) is False, "a new commit is tried"
+    newer = write_context(tmp_path, dict(BLOCK, version="v0.4.8"), kaosLib=LIB)
+    assert engine.refused(value, newer, COMMIT) is False, "a new engine is tried"
+    moved = write_context(tmp_path, BLOCK, kaosLib={"spec": "kaos-lib==0.5.1"})
+    assert engine.refused(value, moved, COMMIT) is False, "another kaos-lib is tried"
+
+
+@pytest.mark.parametrize("value", ["", "v0.4.7@1700000000", "v0.4.7@1700000000@", "junk", "v0.4.7@1@" + "c" * 40])
+def test_an_attempt_that_is_not_a_refusal_never_holds(tmp_path, value):
+    assert engine.refused(value, write_context(tmp_path, BLOCK, kaosLib=LIB), COMMIT) is False
+
+
+def test_an_unreadable_context_never_holds(tmp_path):
+    value = engine.attempt(write_context(tmp_path, BLOCK, kaosLib=LIB), now=1, refused_commit=COMMIT)
+    assert engine.refused(value, str(tmp_path / "missing.yaml"), COMMIT) is False
+
+
+def test_cli_attempt_and_refused(tmp_path, capsys):
+    ctx = write_context(tmp_path, BLOCK, kaosLib=LIB)
+    assert engine.main(["attempt", "--context", ctx, "--refused-commit", COMMIT]) == 0
+    value = capsys.readouterr().out.strip()
+    assert value.startswith("v0.4.7@") and value.split("@")[2] == COMMIT
+    assert engine.main(["refused", "--context", ctx, "--commit", COMMIT, "--attempt", value]) == 0
+    assert engine.main(["refused", "--context", ctx, "--commit", "d" * 40, "--attempt", value]) == 1
+    assert engine.main(["attempt", "--context", ctx]) == 0
+    assert capsys.readouterr().out.strip().count("@") == 1

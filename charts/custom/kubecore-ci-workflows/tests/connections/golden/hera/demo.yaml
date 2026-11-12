@@ -17,24 +17,31 @@ spec:
     container:
       image: '{{workflow.parameters.image-compose-and-validate}}'
       args:
-      - platform.lakefs.repository=PLACEHOLDER-repo
-      - platform.lakefs.endpoint=http://lakefs.internal.invalid
-      - platform.mlflow.tracking_uri=http://mlflow.internal.invalid
-      - platform.checkpoints.bucket=outputs-demo
-      - platform.checkpoints.prefix=main/checkpoints
       - experiment.name={{workflow.parameters.experiment-name}}
       - experiment.description={{workflow.parameters.experiment-description}}
+      - dataset={{workflow.parameters.dataset}}
       - --render-defaults
-      - '{"experiment.name":"my-experiment-v1","experiment.description":""}'
+      - '{"experiment.name":"my-experiment-v1","experiment.description":"","dataset":"dataset-default@latest"}'
       - --advanced
       - '{{workflow.parameters.config}}'
       - --require=experiment
-      - --output
-      - /work/params.yaml
+      - --run
+      - '{{workflow.name}}'
+      - --steps
+      - '[{"name":"hello-world","kind":"transform","reads":["experiment"],"inputs":["dataset"],"needs":[],"produces":[{"name":"report","type":"artifact"}]}]'
+      - --context-dir
+      - /work/context
+      - --ledger-output
+      - /work/kaos-ledger.json
+      - --app
+      - demo
+      - --project
+      - data-room
       command:
       - python
+      - -I
       - -m
-      - kubecore.compose
+      - kaos_engine.compose
       env:
       - name: MLFLOW_TRACKING_URI
         value: http://mlflow.internal.invalid
@@ -58,16 +65,10 @@ spec:
           secretKeyRef:
             name: PLACEHOLDER-lakefs-admin
             key: secretAccessKey
-      - name: CHECKPOINT_BUCKET
-        value: outputs-demo
-      - name: CHECKPOINT_PREFIX
-        value: main/checkpoints
-      - name: KUBECORE_RUN_ID
-        value: '{{workflow.name}}'
-      - name: KUBECORE_WORKFLOW_NAME
-        value: '{{workflow.name}}'
       - name: KAOS_CHECKPOINT_DIR
         value: /kaos/checkpoint
+      - name: KAOS_STEP_IMAGES
+        value: '{"hello-world":"{{workflow.parameters.image-hello-world}}"}'
       resources:
         requests:
           cpu: '7'
@@ -84,16 +85,30 @@ spec:
         mountPath: /dev/shm
       - name: kaos-checkpoint
         mountPath: /kaos/checkpoint
+    metadata:
+      labels:
+        platform.kubecore.io/step: compose-and-validate
+        platform.kubecore.io/step-kind: control
     outputs:
       parameters:
-      - name: params
+      - name: kaos-ledger
         valueFrom:
-          path: /work/params.yaml
-    podSpecPatch: "containers:\n- name: main\n  resources:\n    requests:\n      cpu:\
-      \ \"{{workflow.parameters.compose-and-validate-cpu}}\"\n      memory: \"{{workflow.parameters.compose-and-validate-mem}}\"\
-      \n      ephemeral-storage: \"{{workflow.parameters.compose-and-validate-disk}}\"\
-      \n    limits:\n      cpu: \"{{workflow.parameters.compose-and-validate-cpu}}\"\
-      \n      memory: \"{{workflow.parameters.compose-and-validate-mem}}\"\n"
+          path: /work/kaos-ledger.json
+      - name: kaos-context-hello-world
+        valueFrom:
+          path: /work/context/hello-world.json
+    inputs:
+      parameters:
+      - name: cpu
+        default: '7'
+      - name: mem
+        default: 27Gi
+      - name: disk
+        default: 10Gi
+    podSpecPatch: "containers:\n- name: main\n  resources:\n    limits:\n      cpu:\
+      \ '{{inputs.parameters.cpu}}'\n      memory: '{{inputs.parameters.mem}}'\n \
+      \   requests:\n      cpu: '{{inputs.parameters.cpu}}'\n      ephemeral-storage:\
+      \ '{{inputs.parameters.disk}}'\n      memory: '{{inputs.parameters.mem}}'\n"
     nodeSelector:
       platform.kubecore.io/nodegroup-type: '{{workflow.parameters.compose-and-validate-class}}'
       platform.kubecore.io/environment: runtime
@@ -125,10 +140,11 @@ spec:
     retryStrategy:
       limit: '2'
       retryPolicy: Always
-      expression: (lastRetry.status == 'Error' or lastRetry.message matches '.*(imminent
+      expression: ((lastRetry.status == 'Error' or lastRetry.message matches '.*(imminent
         node shutdown|node is shutting down|node is draining|The node was low on resource|The
         node had condition|Pod was rejected|Evicted|evicted|pod deleted|Pod was deleted).*')
-        and not (lastRetry.message startsWith 'KaosIdle')
+        and not (lastRetry.message contains 'kaos-result.json')) and not (lastRetry.message
+        startsWith 'KaosIdle')
       backoff:
         duration: 30s
         factor: '2'
@@ -136,14 +152,13 @@ spec:
   - name: hello-world
     container:
       image: '{{workflow.parameters.image-hello-world}}'
-      args:
-      - --params
-      - '{{inputs.parameters.params}}'
       command:
       - python
       - -m
       - app.entry
       env:
+      - name: KAOS_STEP_CONTEXT
+        value: '{{inputs.parameters.kaos-context}}'
       - name: MLFLOW_TRACKING_URI
         value: http://mlflow.internal.invalid
       - name: MLFLOW_TRACKING_AUTH
@@ -166,14 +181,6 @@ spec:
           secretKeyRef:
             name: PLACEHOLDER-lakefs-admin
             key: secretAccessKey
-      - name: CHECKPOINT_BUCKET
-        value: outputs-demo
-      - name: CHECKPOINT_PREFIX
-        value: main/checkpoints
-      - name: KUBECORE_RUN_ID
-        value: '{{workflow.name}}'
-      - name: KUBECORE_WORKFLOW_NAME
-        value: '{{workflow.name}}'
       - name: KAOS_CHECKPOINT_DIR
         value: /kaos/checkpoint
       resources:
@@ -194,12 +201,26 @@ spec:
         mountPath: /kaos/checkpoint
     inputs:
       parameters:
-      - name: params
-    podSpecPatch: "containers:\n- name: main\n  resources:\n    requests:\n      cpu:\
-      \ \"{{workflow.parameters.hello-world-cpu}}\"\n      memory: \"{{workflow.parameters.hello-world-mem}}\"\
-      \n      ephemeral-storage: \"{{workflow.parameters.hello-world-disk}}\"\n  \
-      \  limits:\n      cpu: \"{{workflow.parameters.hello-world-cpu}}\"\n      memory:\
-      \ \"{{workflow.parameters.hello-world-mem}}\"\n"
+      - name: kaos-context
+      - name: cpu
+        default: '7'
+      - name: mem
+        default: 27Gi
+      - name: disk
+        default: 10Gi
+    metadata:
+      labels:
+        platform.kubecore.io/step: hello-world
+        platform.kubecore.io/step-kind: transform
+    outputs:
+      parameters:
+      - name: kaos-result
+        valueFrom:
+          path: /work/output/kaos-result.json
+    podSpecPatch: "containers:\n- name: main\n  resources:\n    limits:\n      cpu:\
+      \ '{{inputs.parameters.cpu}}'\n      memory: '{{inputs.parameters.mem}}'\n \
+      \   requests:\n      cpu: '{{inputs.parameters.cpu}}'\n      ephemeral-storage:\
+      \ '{{inputs.parameters.disk}}'\n      memory: '{{inputs.parameters.mem}}'\n"
     nodeSelector:
       platform.kubecore.io/nodegroup-type: '{{workflow.parameters.hello-world-class}}'
       platform.kubecore.io/environment: runtime
@@ -231,10 +252,11 @@ spec:
     retryStrategy:
       limit: '2'
       retryPolicy: Always
-      expression: (lastRetry.status == 'Error' or lastRetry.message matches '.*(imminent
+      expression: ((lastRetry.status == 'Error' or lastRetry.message matches '.*(imminent
         node shutdown|node is shutting down|node is draining|The node was low on resource|The
         node had condition|Pod was rejected|Evicted|evicted|pod deleted|Pod was deleted).*')
-        and not (lastRetry.message startsWith 'KaosIdle')
+        and not (lastRetry.message contains 'kaos-result.json')) and not (lastRetry.message
+        startsWith 'KaosIdle')
       backoff:
         duration: 30s
         factor: '2'
@@ -244,51 +266,36 @@ spec:
       tasks:
       - name: compose-and-validate
         template: compose-and-validate
-        when: '{{=!hasPrefix(workflow.parameters[''compose-and-validate-class''],
-          ''meluxina-'')}}'
-      - name: compose-and-validate-meluxina
-        template: hpc-follower
-        when: '{{=hasPrefix(workflow.parameters[''compose-and-validate-class''], ''meluxina-'')}}'
         arguments:
           parameters:
-          - name: step-name
-            value: compose-and-validate
-          - name: image
-            value: '{{workflow.parameters.image-compose-and-validate}}'
-          - name: step-command
-            value: '["python", "-m", "kubecore.compose", "platform.lakefs.repository=PLACEHOLDER-repo",
-              "platform.lakefs.endpoint=http://lakefs.internal.invalid", "platform.mlflow.tracking_uri=http://mlflow.internal.invalid",
-              "platform.checkpoints.bucket=outputs-demo", "platform.checkpoints.prefix=main/checkpoints",
-              {{=toJson(''experiment.name='' + workflow.parameters[''experiment-name''])}},
-              {{=toJson(''experiment.description='' + workflow.parameters[''experiment-description''])}},
-              "--render-defaults", "{\"experiment.name\":\"my-experiment-v1\",\"experiment.description\":\"\"}",
-              "--advanced", {{=toJson(workflow.parameters.config)}}, "--require=experiment",
-              "--output", "/work/params.yaml"]'
-          - name: time-limit
-            value: '240'
-          - name: deadline-seconds
-            value: '259200'
-          - name: resumable-lead
-            value: '0'
-          - name: resumable
-            value: auto
-          - name: idle-timeout
-            value: ''
-          - name: step-outputs
-            value: params
-          - name: hpc-class
-            value: '{{workflow.parameters.compose-and-validate-class}}'
+          - name: cpu
+            value: '{{=({"cpu-standard": "7", "kubecorecpu": "7", "gpu-t4": "7"}[workflow.parameters[''compose-and-validate-class'']])
+              ?? "7"}}'
+          - name: mem
+            value: '{{=({"cpu-standard": "27Gi", "kubecorecpu": "27Gi", "gpu-t4":
+              "25Gi"}[workflow.parameters[''compose-and-validate-class'']]) ?? "27Gi"}}'
+          - name: disk
+            value: '{{=({"cpu-standard": "10Gi", "kubecorecpu": "10Gi", "gpu-t4":
+              "10Gi"}[workflow.parameters[''compose-and-validate-class'']]) ?? "10Gi"}}'
       - name: hello-world
-        depends: ((compose-and-validate.Succeeded || compose-and-validate.Skipped)
-          && (compose-and-validate-meluxina.Succeeded || compose-and-validate-meluxina.Skipped))
+        depends: compose-and-validate
         template: hello-world
         arguments:
           parameters:
-          - name: params
-            value: '{{=tasks[''compose-and-validate''].status == ''Skipped'' ? tasks[''compose-and-validate-meluxina''].outputs.parameters[''params'']
-              : tasks[''compose-and-validate''].outputs.parameters[''params'']}}'
+          - name: kaos-context
+            value: '{{=sprig.trimSuffix("}", tasks["compose-and-validate"].outputs.parameters["kaos-context-hello-world"])
+              + ",\"upstream\":{" + "}" + "}"}}'
+          - name: cpu
+            value: '{{=({"cpu-standard": "7", "kubecorecpu": "7", "gpu-t4": "7"}[workflow.parameters[''hello-world-class'']])
+              ?? "7"}}'
+          - name: mem
+            value: '{{=({"cpu-standard": "27Gi", "kubecorecpu": "27Gi", "gpu-t4":
+              "25Gi"}[workflow.parameters[''hello-world-class'']]) ?? "27Gi"}}'
+          - name: disk
+            value: '{{=({"cpu-standard": "10Gi", "kubecorecpu": "10Gi", "gpu-t4":
+              "10Gi"}[workflow.parameters[''hello-world-class'']]) ?? "10Gi"}}'
         when: '{{=!hasPrefix(workflow.parameters[''hello-world-class''], ''meluxina-'')}}'
-      - name: hello-world-meluxina
+      - name: hello-world-hpc
         template: hpc-follower
         when: '{{=hasPrefix(workflow.parameters[''hello-world-class''], ''meluxina-'')}}'
         arguments:
@@ -298,9 +305,9 @@ spec:
           - name: image
             value: '{{workflow.parameters.image-hello-world}}'
           - name: step-command
-            value: '["python", "-m", "app.entry", "--params", {{=toJson(tasks[''compose-and-validate''].status
-              == ''Skipped'' ? tasks[''compose-and-validate-meluxina''].outputs.parameters[''params'']
-              : tasks[''compose-and-validate''].outputs.parameters[''params''])}}]'
+            value: '["python","-m","app.entry"]'
+          - name: step-kind
+            value: transform
           - name: time-limit
             value: '240'
           - name: deadline-seconds
@@ -311,22 +318,21 @@ spec:
             value: auto
           - name: idle-timeout
             value: ''
-          - name: step-outputs
-            value: ''
           - name: hpc-class
             value: '{{workflow.parameters.hello-world-class}}'
-        depends: ((compose-and-validate.Succeeded || compose-and-validate.Skipped)
-          && (compose-and-validate-meluxina.Succeeded || compose-and-validate-meluxina.Skipped))
+          - name: kaos-context
+            value: '{{=sprig.trimSuffix("}", tasks["compose-and-validate"].outputs.parameters["kaos-context-hello-world"])
+              + ",\"upstream\":{" + "}" + "}"}}'
+        depends: compose-and-validate
   - name: hpc-follower
     inputs:
       parameters:
       - name: step-name
       - name: image
       - name: step-command
+      - name: step-kind
       - name: time-limit
       - name: deadline-seconds
-      - name: step-outputs
-        value: ''
       - name: hpc-class
       - name: resumable-lead
         value: '0'
@@ -334,19 +340,20 @@ spec:
         value: auto
       - name: idle-timeout
         value: ''
+      - name: kaos-context
     metadata:
       labels:
         platform.kubecore.io/compute-type: hpc
         platform.kubecore.io/hpc-class: '{{inputs.parameters.hpc-class}}'
+        platform.kubecore.io/step-kind: '{{inputs.parameters.step-kind}}'
     outputs:
       parameters:
       - name: slurm-job-id
         valueFrom:
           path: /tmp/slurm-job-id
-      - name: params
+      - name: kaos-result
         valueFrom:
-          path: /tmp/outputs/params.json
-          default: '{}'
+          path: /tmp/outputs/kaos-result.json
     container:
       image: python:3.12-alpine
       command:
@@ -364,14 +371,14 @@ spec:
     parameters:
     - name: pipeline-info
       value: "HOW TO RUN: defaults are runnable as-is \u2014 just press Submit.\n\
-        PER-STEP COMPUTE: {step}-class picks the node class; {step}-cpu / {step}-mem\
-        \ dial one run's resources.\nCOMPUTE CLASSES on this pool:\n  - cpu-standard\
-        \ (cpu) \u2014 n2-standard-8\n  - kubecorecpu (cpu) \u2014 e2-standard-8\n\
-        \  - gpu-t4 (gpu) \u2014 n1-standard-8 + 1x nvidia-tesla-t4\nMELUXINA (HPC):\
-        \ pick a meluxina-* class in any {step}-class dropdown and that step runs\
-        \ as a Slurm job on MeluXina (account PLACEHOLDER-account) \u2014 queue time\
-        \ applies; the pipeline waits, stages the dataset in and the step's outputs\
-        \ back; hpc_time_limit in pipeline.py caps the job. Classes:\n  - meluxina-gpu\
+        PER-STEP COMPUTE: {step}-class picks the node class; the step gets that node\
+        \ (what it offers a pod, less the platform's reserve).\nCOMPUTE CLASSES on\
+        \ this pool:\n  - cpu-standard (cpu) \u2014 n2-standard-8\n  - kubecorecpu\
+        \ (cpu) \u2014 e2-standard-8\n  - gpu-t4 (gpu) \u2014 n1-standard-8 + 1x nvidia-tesla-t4\n\
+        MELUXINA (HPC): pick a meluxina-* class in any {step}-class dropdown and that\
+        \ step runs as a Slurm job on MeluXina (account PLACEHOLDER-account) \u2014\
+        \ queue time applies; the pipeline waits, stages the dataset in and the step's\
+        \ result back; walltime= in pipeline.py caps the job. Classes:\n  - meluxina-gpu\
         \ (gpu) \u2014 partition gpu, 4 GPUs, 128 cores, 512 GiB \u2014 4x A100-40GB,\
         \ 2x EPYC 7452, 512 GB\n  - meluxina-cpu (cpu) \u2014 partition cpu, 128 cores,\
         \ 512 GiB \u2014 2x EPYC 7452, 128 cores, 512 GB\n  - meluxina-largemem (cpu)\
@@ -385,10 +392,13 @@ spec:
     - name: experiment-description
       description: 'Config: experiment.description'
       value: ''
+    - name: dataset
+      description: 'Config: dataset'
+      value: dataset-default@latest
     - name: config
       description: "ADVANCED: override YAML merged LAST over the composed config (OmegaConf.merge).\
         \ Overrides everything above \u2014 intended for scripted submissions (argo\
-        \ submit -p config=...). May not modify platform.*."
+        \ submit -p config=...)."
       value: ''
     - name: mlflow-endpoint
       value: http://mlflow.internal.invalid
@@ -412,21 +422,8 @@ spec:
       - cpu-standard
       - kubecorecpu
       - gpu-t4
-      - meluxina-gpu
-      - meluxina-cpu
-      - meluxina-largemem
-      description: "Compute class for the 'compose-and-validate' step (the KubePool's\
-        \ class catalog; default = its cpu tier; meluxina-* classes run the step as\
-        \ a Slurm job on MeluXina \u2014 queue time applies, see pipeline-info)."
-    - name: compose-and-validate-cpu
-      value: '7'
-      description: Per-run resource override for step 'compose-and-validate'.
-    - name: compose-and-validate-mem
-      value: 27Gi
-      description: Per-run resource override for step 'compose-and-validate'.
-    - name: compose-and-validate-disk
-      value: 10Gi
-      description: Per-run resource override for step 'compose-and-validate'.
+      description: Compute class for the 'compose-and-validate' step (the KubePool's
+        class catalog; default = its cpu tier).
     - name: hello-world-class
       value: cpu-standard
       enum:
@@ -439,13 +436,4 @@ spec:
       description: "Compute class for the 'hello-world' step (the KubePool's class\
         \ catalog; default = its cpu tier; meluxina-* classes run the step as a Slurm\
         \ job on MeluXina \u2014 queue time applies, see pipeline-info)."
-    - name: hello-world-cpu
-      value: '7'
-      description: Per-run resource override for step 'hello-world'.
-    - name: hello-world-mem
-      value: 27Gi
-      description: Per-run resource override for step 'hello-world'.
-    - name: hello-world-disk
-      value: 10Gi
-      description: Per-run resource override for step 'hello-world'.
   serviceAccountName: argo-workflow

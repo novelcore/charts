@@ -1,0 +1,95 @@
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: ml-pipeline
+spec:
+  entrypoint: main
+  templates:
+  - name: compose-and-validate
+    container:
+      image: platform-managed
+      args:
+      - experiment.name={{workflow.parameters.experiment-name}}
+      - experiment.description={{workflow.parameters.experiment-description}}
+      - dataset={{workflow.parameters.dataset}}
+      - --render-defaults
+      - '{"experiment.name":"my-experiment-v1","experiment.description":"","dataset":"dataset-default@latest"}'
+      - --advanced
+      - '{{workflow.parameters.config}}'
+      - --require=experiment
+      - --run
+      - '{{workflow.name}}'
+      - --steps
+      - '[{"name":"hello-world","kind":"transform","reads":["experiment"],"inputs":["dataset"],"needs":[],"produces":[{"name":"report","type":"artifact"}]}]'
+      - --context-dir
+      - /work/context
+      - --ledger-output
+      - /work/kaos-ledger.json
+      command:
+      - python
+      - -I
+      - -m
+      - kaos_engine.compose
+    metadata:
+      labels:
+        platform.kubecore.io/step: compose-and-validate
+        platform.kubecore.io/step-kind: control
+    outputs:
+      parameters:
+      - name: kaos-ledger
+        valueFrom:
+          path: /work/kaos-ledger.json
+      - name: kaos-context-hello-world
+        valueFrom:
+          path: /work/context/hello-world.json
+  - name: hello-world
+    container:
+      image: platform-managed
+      command:
+      - python
+      - -m
+      - app.entry
+      env:
+      - name: KAOS_STEP_CONTEXT
+        value: '{{inputs.parameters.kaos-context}}'
+    inputs:
+      parameters:
+      - name: kaos-context
+    metadata:
+      labels:
+        platform.kubecore.io/step: hello-world
+        platform.kubecore.io/step-kind: transform
+    outputs:
+      parameters:
+      - name: kaos-result
+        valueFrom:
+          path: /work/output/kaos-result.json
+  - name: main
+    dag:
+      tasks:
+      - name: compose-and-validate
+        template: compose-and-validate
+      - name: hello-world
+        depends: compose-and-validate
+        template: hello-world
+        arguments:
+          parameters:
+          - name: kaos-context
+            value: '{{=sprig.trimSuffix("}", tasks["compose-and-validate"].outputs.parameters["kaos-context-hello-world"])
+              + ",\"upstream\":{" + "}" + "}"}}'
+  arguments:
+    parameters:
+    - name: experiment-name
+      description: 'Config: experiment.name'
+      value: my-experiment-v1
+    - name: experiment-description
+      description: 'Config: experiment.description'
+      value: ''
+    - name: dataset
+      description: 'Config: dataset'
+      value: dataset-default@latest
+    - name: config
+      description: "ADVANCED: override YAML merged LAST over the composed config (OmegaConf.merge).\
+        \ Overrides everything above \u2014 intended for scripted submissions (argo\
+        \ submit -p config=...)."
+      value: ''

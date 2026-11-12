@@ -5,9 +5,13 @@
 #   helm template t charts/custom/kubecore-ci-workflows > /tmp/rendered.yaml
 #   bash charts/custom/kubecore-ci-workflows/tests/connections/run.sh /tmp/rendered.yaml
 #
-# Needs python3 with pyyaml and pytest. The pinned Hera enhancer (harness.ENHANCER_REF) is fetched from
-# GitHub (GITHUB_TOKEN used when set); set ENHANCER_DIR to use a local checkout.
+# Needs python3 with pyyaml and pytest. The pinned pipeline engine (harness.ENGINE_REF of
+# kaos-io/kaos-hpc-operator) is fetched from GitHub (GITHUB_TOKEN used when set); set ENGINE_DIR to a local
+# `engine/` directory instead. To regenerate after an engine change (read the diff):
+#   ENGINE_DIR=<kaos-hpc-operator>/engine ENGINE_PYTHON=<python with engine/requirements.txt> python3 harness.py write-raw
+#   ENGINE_DIR=<kaos-hpc-operator>/engine python3 harness.py write-goldens
+#   ENGINE_DIR=<kaos-hpc-operator>/engine UPDATE_GOLDEN=1 RENDERED=/tmp/rendered.yaml python3 -m pytest test_step_token.py
 # Exit status is pytest's.
 set -eu
 HERE=$(cd "$(dirname "$0")" && pwd)
-RENDERED="$1" python3 -m pytest -v "${HERE}/test_hera_enhancer.py" "${HERE}/test_harness_cli.py" "${HERE}/test_step_token.py"
+RENDERED="$1" python3 -m pytest -v "${HERE}/test_hera_enhancer.py" "${HERE}/test_harness_cli.py" "${HERE}/test_step_token.py" "${HERE}/test_step_table.py"

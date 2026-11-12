@@ -595,13 +595,20 @@ spec:
         # "@<path>" reads the description from the shared workspace (see the
         # entrypoint's status-success step). GitHub caps description at 140.
         case "${DESC}" in @*) DESC=$(cat "${DESC#@}") ;; esac
-        DESC=$(printf '%s' "${DESC}" | cut -c1-140)
         API="https://api.github.com/repos/${OWNER_REPO}"
         ARGO_BASE="{{ .Values.argo.uiBaseUrl }}"
         RUN_URL=""
         if [ -n "${ARGO_BASE}" ]; then
           RUN_URL="${ARGO_BASE}/workflows/{{`{{workflow.namespace}}`}}/{{`{{workflow.name}}`}}?uid={{`{{workflow.uid}}`}}"
         fi
+        # OLD APP (PRD novelcore/kaos#1911 AC-01): the render refused this pull request because the
+        # app was made before the current pipelines (hera-render left /workspace/old-app).
+        # The check then says so; the report comment carries what to change. The
+        # description is the chart's own text: nothing the render wrote is put into this request.
+        if [ "${STATE}" = "failure" ] && [ -s /workspace/old-app ]; then
+          DESC="{{ include "kubecore-ci-workflows.oldAppStatus" . }}"
+        fi
+        DESC=$(printf '%s' "${DESC}" | cut -c1-140)
         if [ -n "${RUN_URL}" ]; then
           PAYLOAD="{\"state\":\"${STATE}\",\"description\":\"${DESC}\",\"context\":\"wft-render\",\"target_url\":\"${RUN_URL}\"}"
         else

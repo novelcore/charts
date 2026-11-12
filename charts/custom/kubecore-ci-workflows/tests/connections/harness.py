@@ -1,14 +1,19 @@
-"""Golden harness for the connection envFrom renderer (kaos PRD 1034, CON-02).
+"""Golden harness for the connection envFrom renderer (kaos PRD 1034, CON-02) and for what the chart
+reads of a rendered pipeline (PRD novelcore/kaos#1911: the step table, the dataset pickers).
 
-Runs the platform enhancer against fixture contexts: `kubecore.enhance` from
-ENHANCER_REF of the hera-pipeline-template, the commit the engine's `kubecore/` is a byte copy of
-(kaos-hpc-operator engine/UPSTREAM.json), fetched and unpacked here. The chart itself enhances with
-the engine wheel (kubecore-ci-workflows.platformEnhance), which tests/engine-ci exercises.
+The fixtures are two chart-owned apps on the step contract (fixtures/apps/hera, fixtures/apps/yolo), each
+rendered ONCE by the platform pipeline engine into fixtures/hera-raw/ (`write-raw`), and enhanced by the
+same engine against fixture contexts into golden/ (`write-goldens`). The engine is `engine/` of
+kaos-io/kaos-hpc-operator at ENGINE_REF, fetched and unpacked here; set ENGINE_DIR to a local `engine/`
+directory instead. The chart itself enhances with the engine wheel (kubecore-ci-workflows.platformEnhance),
+which tests/engine-ci and tests/untrusted-workspace exercise.
 
 Fixtures hold PLACEHOLDER values only; nothing captured from a real tenant.
 
 CLI:
-  harness.py write-goldens
+  harness.py write-raw        render fixtures/apps/* (needs ENGINE_PYTHON: a python with the engine's
+                              libraries, engine/requirements.txt)
+  harness.py write-goldens    enhance every fixture; also the step-token goldens
   harness.py diff-hera --raw R --context C [--catalog K] --ref-a SHA --ref-b SHA
 """
 import argparse
@@ -17,6 +22,7 @@ import difflib
 import io
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tarfile
@@ -32,10 +38,13 @@ CHART = os.path.abspath(os.path.join(HERE, "..", ".."))
 FIX = os.path.join(HERE, "fixtures")
 GOLDEN = os.path.join(HERE, "golden")
 
-# The enhancer code the goldens pin: hera-pipeline-template commit d167461 (GPU driver prelude), the one
-# the engine's kubecore/ is synced to. Move it together with the engine and rewrite the goldens.
-ENHANCER_REPO = "novelcore/hera-pipeline-template"
-ENHANCER_REF = "d167461ad4b4876b4ead4bf331c7fcf1e505f708"
+# The engine the raw fixtures and the goldens are made with: kaos-io/kaos-hpc-operator, the commit of the
+# engine on the step contract (branch prd1911/engine-contract at the time of writing; move it to the merged
+# commit, then to each engine release the chart is pinned with, and rewrite the raw fixtures and the goldens).
+ENGINE_REPO = "kaos-io/kaos-hpc-operator"
+ENGINE_REF = "e0e8b48beb4466fbf438b5bca402b4f3a7acd9b3"
+# The step the engine names a step's HPC (Slurm) variant after.
+HPC_TWIN = "hpc-follower"
 
 
 @dataclass(frozen=True)
@@ -54,8 +63,10 @@ def _fx(kind, app, project, source, catalog=None):
                    os.path.join(FIX, catalog) if catalog else None)
 
 
-_YOLO = "hera-raw/yolo-pipelines-template.yaml"
-_HERA = "hera-raw/hera-pipeline-template.yaml"
+_YOLO = "hera-raw/yolo-app.yaml"
+_HERA = "hera-raw/hera-app.yaml"
+# fixture app -> (its raw render, the schema profile the chart would pick for it)
+APPS = {"hera": (_HERA, "hera"), "yolo": (_YOLO, "yolo")}
 
 FIXTURES = {
     "yolo-pipeline": _fx("hera", "yolo-pipeline", "vision", _YOLO),
@@ -77,34 +88,34 @@ EXPECTED_ENV_FROM = [
 ]
 
 
-# ── Hera enhancer ───────────────────────────────────────────────────────────
+# ── the engine ──────────────────────────────────────────────────────────────
 
-_ENHANCER_CACHE = {}
-_ENHANCER_FAIL = {}
+_ENGINE_CACHE = {}
+_ENGINE_FAIL = {}
 _SHA_RE = re.compile(r"[0-9a-f]{40}")
 
 
-def fetch_enhancer(ref: str, repo: str = "novelcore/hera-pipeline-template") -> str:
-    """A directory containing kubecore/ for `repo`@`ref` (or $ENHANCER_DIR unchanged)."""
-    if os.environ.get("ENHANCER_DIR"):
-        return os.environ["ENHANCER_DIR"]
+def fetch_engine(ref: str, repo: str = ENGINE_REPO) -> str:
+    """The `engine/` directory (it holds kubecore/ and kaos_engine/) of `repo`@`ref`, or $ENGINE_DIR unchanged."""
+    if os.environ.get("ENGINE_DIR"):
+        return os.environ["ENGINE_DIR"]
     if not _SHA_RE.fullmatch(ref):
-        raise ValueError(f"enhancer ref must be a 40-char lowercase hex sha, got {ref!r}")
+        raise ValueError(f"engine ref must be a 40-char lowercase hex sha, got {ref!r}")
     key = (repo, ref)
-    if key in _ENHANCER_CACHE:
-        return _ENHANCER_CACHE[key]
-    if key in _ENHANCER_FAIL:  # fail fast: one fetch attempt per session, failures included
-        raise RuntimeError(f"enhancer fetch for {repo}@{ref} already failed: {_ENHANCER_FAIL[key]}")
+    if key in _ENGINE_CACHE:
+        return _ENGINE_CACHE[key]
+    if key in _ENGINE_FAIL:  # fail fast: one fetch attempt per session, failures included
+        raise RuntimeError(f"engine fetch for {repo}@{ref} already failed: {_ENGINE_FAIL[key]}")
     try:
-        root = _fetch_enhancer(repo, ref)
+        root = _fetch_engine(repo, ref)
     except Exception as e:
-        _ENHANCER_FAIL[key] = repr(e)
+        _ENGINE_FAIL[key] = repr(e)
         raise
-    _ENHANCER_CACHE[key] = root
+    _ENGINE_CACHE[key] = root
     return root
 
 
-def _fetch_enhancer(repo: str, ref: str) -> str:
+def _fetch_engine(repo: str, ref: str) -> str:
     req = urllib.request.Request(f"https://api.github.com/repos/{repo}/tarball/{ref}",
                                  headers={"Accept": "application/vnd.github+json", "User-Agent": "kubecore-ci"})
     tok = os.environ.get("GITHUB_TOKEN", "")
@@ -112,20 +123,18 @@ def _fetch_enhancer(repo: str, ref: str) -> str:
         req.add_header("Authorization", f"Bearer {tok}")
     with urllib.request.urlopen(req, timeout=60) as r:
         tb = tarfile.open(fileobj=io.BytesIO(r.read()), mode="r:gz")
-    root = tempfile.mkdtemp(prefix=f"enhancer-{ref[:12]}-")
-    dst = os.path.join(root, "kubecore")
-    os.makedirs(dst)
+    root = tempfile.mkdtemp(prefix=f"engine-{ref[:12]}-")
     n = 0
     for m in tb.getmembers():
         parts = m.name.split("/", 1)
-        if len(parts) < 2 or not parts[1].startswith("kubecore/") or "/local-dev/" in parts[1] + "/":
+        if len(parts) < 2 or not parts[1].startswith(("engine/kubecore/", "engine/kaos_engine/")):
             continue
-        rel = parts[1][len("kubecore/"):]
-        if not rel or "__pycache__" in rel:
+        rel = parts[1][len("engine/"):]
+        if "__pycache__" in rel or "/local-dev/" in rel:
             continue
         if ".." in rel.split("/") or os.path.isabs(rel):
             raise RuntimeError(f"unsafe tar member path {m.name!r}")
-        out = os.path.join(dst, rel)
+        out = os.path.join(root, rel)
         if m.isdir():
             os.makedirs(out, exist_ok=True)
         elif m.isfile():
@@ -134,11 +143,30 @@ def _fetch_enhancer(repo: str, ref: str) -> str:
                 f.write(src.read())
             n += 1
     if n == 0:
-        raise RuntimeError(f"no kubecore/ files in {repo}@{ref}")
+        raise RuntimeError(f"no engine/kubecore files in {repo}@{ref}")
     return root
 
 
-def enhance_hera(enhancer_dir: str, raw_path: str, ctx: dict, catalog_path: Optional[str]) -> str:
+def render_raw(engine_dir: str, app: str) -> str:
+    """Render fixtures/apps/<app> with the engine runner, as hera-render does; returns the raw WFT text."""
+    python = os.environ.get("ENGINE_PYTHON")
+    if not python:
+        raise RuntimeError("write-raw needs ENGINE_PYTHON: a python with the engine's libraries "
+                           "(kaos-hpc-operator engine/requirements.txt)")
+    source, profile = APPS[app]
+    with tempfile.TemporaryDirectory() as td:
+        repo = os.path.join(td, "repo")
+        shutil.copytree(os.path.join(FIX, "apps", app), repo)
+        cmd = [python, "-m", "kaos_engine.render", "pipeline.py", "--repo", repo, "--profile", profile,
+               "--engine", engine_dir]
+        p = subprocess.run(cmd, cwd=engine_dir, capture_output=True, text=True)
+        if p.returncode != 0:
+            raise RuntimeError(f"kaos_engine.render exited {p.returncode}\nstderr:\n{p.stderr}")
+        with open(os.path.join(repo, "out", "raw-workflow-template.yaml")) as f:
+            return f.read()
+
+
+def enhance_hera(engine_dir: str, raw_path: str, ctx: dict, catalog_path: Optional[str]) -> str:
     with tempfile.TemporaryDirectory() as td:
         ctx_path = os.path.join(td, "context.yaml")
         with open(ctx_path, "w") as f:
@@ -148,7 +176,7 @@ def enhance_hera(enhancer_dir: str, raw_path: str, ctx: dict, catalog_path: Opti
         if catalog_path:
             cmd += ["--catalog", os.path.abspath(catalog_path)]
         cmd += ["--output", out_path]
-        p = subprocess.run(cmd, cwd=enhancer_dir, capture_output=True, text=True)
+        p = subprocess.run(cmd, cwd=engine_dir, capture_output=True, text=True)
         if p.returncode != 0:
             raise RuntimeError(f"kubecore.enhance exited {p.returncode}\nstderr:\n{p.stderr}")
         with open(out_path) as f:
@@ -176,7 +204,7 @@ def render(name: str, connections: Optional[list], *, ctx_override: Optional[Cal
     ctx = with_connections(_load(fx.context), connections)
     if ctx_override is not None:
         ctx = ctx_override(ctx)
-    return enhance_hera(fetch_enhancer(ENHANCER_REF, ENHANCER_REPO), fx.source, ctx, fx.catalog)
+    return enhance_hera(fetch_engine(ENGINE_REF), fx.source, ctx, fx.catalog)
 
 
 def raw_container_names(name: str) -> set:
@@ -214,6 +242,7 @@ def _udiff(a: str, b: str, la: str, lb: str) -> int:
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
+    sub.add_parser("write-raw")
     sub.add_parser("write-goldens")
     h = sub.add_parser("diff-hera")
     h.add_argument("--raw", required=True)
@@ -223,6 +252,13 @@ def main(argv=None) -> int:
     h.add_argument("--ref-b", required=True)
     a = ap.parse_args(argv)
 
+    if a.cmd == "write-raw":
+        for app, (source, _) in APPS.items():
+            text = render_raw(fetch_engine(ENGINE_REF), app)
+            with open(os.path.join(FIX, source), "w") as f:
+                f.write(text)
+            print(f"wrote fixtures/{source}")
+        return 0
     if a.cmd == "write-goldens":
         for name, fx in FIXTURES.items():
             text = render(name, None)
@@ -231,19 +267,20 @@ def main(argv=None) -> int:
             with open(p, "w") as f:
                 f.write(text)
             print(f"wrote {os.path.relpath(p, HERE)}")
+        print("now rewrite the step-token goldens: UPDATE_GOLDEN=1 RENDERED=<rendered chart> pytest test_step_token.py")
         return 0
     if a.cmd == "diff-hera":
-        if os.environ.get("ENHANCER_DIR"):
-            print("diff-hera: ENHANCER_DIR is set, so both refs resolve to the same directory and the "
-                  "diff would be vacuous; unset ENHANCER_DIR", file=sys.stderr)
+        if os.environ.get("ENGINE_DIR"):
+            print("diff-hera: ENGINE_DIR is set, so both refs resolve to the same directory and the "
+                  "diff would be vacuous; unset ENGINE_DIR", file=sys.stderr)
             return 2
         if a.ref_a == a.ref_b:
             print(f"diff-hera: --ref-a and --ref-b are both {a.ref_a!r}; nothing to compare", file=sys.stderr)
             return 2
     ctx = _bare_context(a.context)
     if a.cmd == "diff-hera":
-        ta = enhance_hera(fetch_enhancer(a.ref_a, ENHANCER_REPO), a.raw, ctx, a.catalog)
-        tb = enhance_hera(fetch_enhancer(a.ref_b, ENHANCER_REPO), a.raw, ctx, a.catalog)
+        ta = enhance_hera(fetch_engine(a.ref_a), a.raw, ctx, a.catalog)
+        tb = enhance_hera(fetch_engine(a.ref_b), a.raw, ctx, a.catalog)
         return _udiff(ta, tb, a.ref_a, a.ref_b)
     return 2
 

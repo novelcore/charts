@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
-# Tests for PRD novelcore/kaos#1283 D-05: hera-enhance-commit offers the project's datasets in
-# the `dataset` dropdown from kaos-lake's read-only catalog, and never fails the render when the
-# catalog cannot be read, and records a digest of what it offered (dataset-sha) for ml-ci-reconcile's
-# DATASET DRIFT. The scripts under test are cut from the rendered chart and EXECUTED against a local
-# fake catalog. Usage (from the repo root):
+# Tests for the dataset pickers of an ML pipeline (PRD novelcore/kaos#1283 D-05, PRD novelcore/kaos#1911
+# D-15): hera-enhance-commit offers the project's datasets, from kaos-lake's read-only catalog, on the form
+# field of EVERY name a step declares in inputs= (the engine's step table), never fails the render when
+# the catalog cannot be read, and records a digest of what it offered (dataset-sha) for ml-ci-reconcile's
+# DATASET DRIFT. A field named `dataset` is no longer special. The chart adds no form field. The scripts
+# under test are cut from the rendered chart and EXECUTED against a local fake catalog. Usage (from the
+# repo root):
 #
 #   bash charts/custom/kubecore-ci-workflows/tests/dataset-choices/run.sh
 #
@@ -51,18 +53,25 @@ sleep 1
 echo pod-token > "$WORK/token"
 wft() { printf 'spec:\n  arguments:\n    parameters:\n%s  templates: []\n' "$1" > "$WORK/wft.yaml"; }
 ctx() { printf 'lakefs:\n  endpoint: http://127.0.0.1:%s/\n' "$1" > "$WORK/ctx.yaml"; }
-run() { rm -f "$WORK/sha"; python3 "$WORK/datasets.py" "$WORK/wft.yaml" "$WORK/ctx.yaml" "$WORK/token" "$WORK/sha"; }
+# steps INPUTS...: the engine's step table, one step per argument ("raw,labels" = a step with two inputs).
+steps() { python3 -c "
+import json, sys
+print(json.dumps([{'name': f's{i}', 'kind': 'train', 'reads': [], 'inputs': [n for n in a.split(',') if n], 'needs': [], 'produces': []}
+                  for i, a in enumerate(sys.argv[1:])]))" "$@" > "$WORK/steps.json"; }
+run() { rm -f "$WORK/sha"; python3 "$WORK/datasets.py" "$WORK/wft.yaml" "$WORK/ctx.yaml" "$WORK/token" "$WORK/sha" "$WORK/steps.json"; }
 sha() { cat "$WORK/sha" 2>/dev/null || echo "<absent>"; }
+ALL="dataset-default@v3,dataset-default@latest,dataset-cars@v2,dataset-cars@v1,dataset-cars@latest"
 # sha256 of the sorted choices, one per line
-WANT_SHA=$(python3 -c "import hashlib; print(hashlib.sha256('\n'.join(sorted(['dataset-default@v3','dataset-default@latest','dataset-cars@v2','dataset-cars@v1','dataset-cars@latest'])).encode()).hexdigest())")
-param() { python3 -c "import sys,yaml; p=[x for x in yaml.safe_load(open('$WORK/wft.yaml'))['spec']['arguments']['parameters'] if x['name']=='dataset'][0]; print(p.get('value'), '|', ','.join(p.get('enum') or []))"; }
+WANT_SHA=$(python3 -c "import hashlib; print(hashlib.sha256('\n'.join(sorted('$ALL'.split(','))).encode()).hexdigest())")
+param() { python3 -c "import sys,yaml; p=[x for x in yaml.safe_load(open('$WORK/wft.yaml'))['spec']['arguments']['parameters'] if x['name']=='${1:-dataset}'][0]; print(p.get('value'), '|', ','.join(p.get('enum') or []))"; }
+names() { python3 -c "import yaml; print(','.join(x['name'] for x in yaml.safe_load(open('$WORK/wft.yaml'))['spec']['arguments']['parameters']))"; }
 
 wft "    - {name: dataset, value: dataset-default@latest}
 "
-ctx $PORT
+ctx $PORT; steps dataset
 run >/dev/null
-expect_eq "$(param)" "dataset-default@v3 | dataset-default@v3,dataset-default@latest,dataset-cars@v2,dataset-cars@v1,dataset-cars@latest" \
-  "default dataset first, versions newest first, then latest; default = its newest version"
+expect_eq "$(param)" "dataset-default@latest | $ALL" \
+  "default dataset first, versions newest first, then latest; the default stays what the app's config says (latest is resolved when the run starts)"
 
 expect_eq "$(sha)" "$WANT_SHA" "the render records the digest of the sorted choices"
 expect_eq "$(python3 -I "$WORK/dataset-choices.py" digest "http://127.0.0.1:$PORT/" "$WORK/token")" "$WANT_SHA" \
@@ -71,35 +80,67 @@ expect_eq "$(python3 -I "$WORK/dataset-choices.py" digest "http://127.0.0.1:$POR
 wft "    - {name: dataset, value: dataset-cars@v1}
 "
 run >/dev/null
-expect_eq "$(param | cut -d'|' -f1)" "dataset-cars@v1 " "a default that is still offered is kept"
+expect_eq "$(param | cut -d'|' -f1)" "dataset-cars@v1 " "a default that names an offered version is kept"
+
+# Several inputs, under any name: each one is a picker; a field no step declares as an input is not.
+wft "    - {name: raw, value: dataset-cars@latest}
+    - {name: labels, value: dataset-cars@v9}
+    - {name: extra, value: dataset-missing@v1}
+    - {name: dataset, value: free-text}
+    - {name: train-epochs, value: '3'}
+    - {name: config, value: ''}
+"
+steps "raw" "raw,labels" "extra" ""
+out=$(run)
+expect_eq "$(param raw)" "dataset-cars@latest | $ALL" "input raw: a picker, its default kept"
+expect_eq "$(param labels)" "dataset-cars@latest | $ALL" "input labels: a version the catalog does not offer becomes the latest of the same dataset"
+expect_eq "$(param extra)" "dataset-default@latest | $ALL" "input extra: a dataset the project does not have becomes the latest of the default dataset"
+expect_eq "$(param dataset)" "free-text | " "a field named dataset that no step declares as an input is left alone"
+expect_eq "$(param train-epochs)" "3 | " "an ordinary field is left alone"
+expect_eq "$(names)" "raw,labels,extra,dataset,train-epochs,config" "the chart adds no form field and removes none (plan and pipeline-version stay the engine's to reserve)"
+expect_eq "$(grep -cE '[&*]id[0-9]+' "$WORK/wft.yaml")" "0" "each picker carries its own list (no YAML alias between fields)"
+expect_eq "$(sha)" "$WANT_SHA" "several inputs record the same digest: it is the catalog's choices"
+case "$out" in *"extra (default dataset-default@latest), labels (default dataset-cars@latest), raw (default dataset-cars@latest)"*) PASSED=$((PASSED + 1)); echo "PASS: the log names every field it filled and its default";;
+  *) FAILED=$((FAILED + 1)); echo "FAIL: the log does not name the fields: $out";; esac
+
+# An input with no form field: the engine gives every input a field of its own name, so this is a broken render.
+wft "    - {name: raw, value: dataset-cars@latest}
+"
+steps "raw,labels"
+out=$(run 2>&1); rc=$?
+expect_eq "$rc" "1" "an input without a form field fails the render"
+case "$out" in *"GATE FAIL: the pipeline declares the input 'labels' but its form has no field of that name"*) PASSED=$((PASSED + 1)); echo "PASS: it says which";;
+  *) FAILED=$((FAILED + 1)); echo "FAIL: no reason printed: $out";; esac
 
 wft "    - {name: dataset, value: dataset-default@latest}
 "
+steps dataset
 ctx 1
 out=$(run); rc=$?
 expect_eq "$rc" "0" "an unreachable catalog never fails the render"
-expect_eq "$(param)" "dataset-default@latest | " "and leaves the parameter free text"
+expect_eq "$(param)" "dataset-default@latest | " "and leaves the field free text"
 expect_eq "$(sha)" "<absent>" "and records nothing, so the last good record stays"
 python3 "$WORK/dataset-choices.py" digest http://127.0.0.1:1/ "$WORK/token" >/dev/null 2>&1; rc=$?
 expect_eq "$rc" "1" "the drift check's digest of an unreadable catalog fails (no drift) instead of printing one"
 case "$out" in *"catalog not read"*) PASSED=$((PASSED + 1)); echo "PASS: it says why";; *) FAILED=$((FAILED + 1)); echo "FAIL: no reason printed: $out";; esac
 
-wft "    - {name: data-ref, value: main}
+wft "    - {name: dataset, value: main}
 "
-ctx $PORT
+ctx $PORT; steps "" ""
 run >/dev/null; rc=$?
-expect_eq "$rc" "0" "a pipeline without a dataset parameter is left alone"
-expect_eq "$(grep -c enum "$WORK/wft.yaml")" "0" "no enum added"
+expect_eq "$rc" "0" "a pipeline whose steps declare no input is left alone"
+expect_eq "$(grep -c enum "$WORK/wft.yaml")" "0" "no enum added, even on a field named dataset"
 expect_eq "$(sha)" "none" "and records that the pipeline offers no dataset"
 
 echo "pod-token-wrong" > "$WORK/token"
 wft "    - {name: dataset, value: x}
 "
+steps dataset
 run >/dev/null; rc=$?
 expect_eq "$rc" "0" "a refused token never fails the render"
 expect_eq "$(sha)" "<absent>" "and records nothing"
 
-# A catalog with no dataset: the parameter stays free text, and "no dataset" is what is recorded.
+# A catalog with no dataset: the field stays free text, and "no dataset" is what is recorded.
 echo pod-token > "$WORK/token"
 printf '{"datasets": []}' > "$WORK/empty.json"
 cat > "$WORK/empty.py" <<'PY'
@@ -116,7 +157,7 @@ ctx 18912
 wft "    - {name: dataset, value: x}
 "
 run >/dev/null
-expect_eq "$(param)" "x | " "an empty catalog leaves the parameter free text"
+expect_eq "$(param)" "x | " "an empty catalog leaves the field free text"
 expect_eq "$(sha)" "$(python3 -c "import hashlib; print(hashlib.sha256(b'').hexdigest())")" "and records the digest of no choices (a later first dataset is drift)"
 kill $EMPTY 2>/dev/null
 
@@ -126,6 +167,15 @@ wft "    - {name: dataset, value: dataset-cars@v1, enum: [dataset-gone@v1, datas
 "
 run >/dev/null
 expect_eq "$(param | cut -d'|' -f2 | grep -c gone)" "0" "a deleted dataset's entry is gone from the enum on the next render"
+
+# The step table the picker reads is the one the enhance step wrote (kubecore-ci-workflows.platformEnhance).
+ENHANCE=$(awk '/name: hera-enhance-commit$/{f=1} f' "$WORK/rendered.yaml")
+P_STEPS=$(printf '%s\n' "$ENHANCE" | grep -n -m1 'engine.py steps --wft /workspace/out/workflow-template.yaml > /tmp/steps.json' | cut -d: -f1)
+P_FILL=$(printf '%s\n' "$ENHANCE" | grep -n -m1 "<<'DSEOF'" | cut -d: -f1)
+[ -n "$P_STEPS" ] && [ -n "$P_FILL" ] && [ "$P_STEPS" -lt "$P_FILL" ] \
+  && { PASSED=$((PASSED + 1)); echo "PASS: hera-enhance-commit reads the step table of the enhanced WorkflowTemplate before it fills the pickers"; } \
+  || { FAILED=$((FAILED + 1)); echo "FAIL: step table (${P_STEPS:-absent}) is not read before the pickers are filled (${P_FILL:-absent})"; }
+expect_eq "$(printf '%s\n' "$ENHANCE" | grep -c '/tmp/dataset-sha /tmp/steps.json <<')" "1" "and hands it to the picker step"
 
 # ── pipeline-images records dataset-sha ──────────────────────────────────────
 awk "/<<'IMGEOF'/{f=1;next} /^ *IMGEOF\$/{f=0} f" "$WORK/rendered.yaml" | sed 's/^        //' > "$WORK/images.py"
@@ -142,7 +192,7 @@ expect_eq "$(images '  dataset-sha: old
 ')" "old" "an unreadable catalog keeps the last good record"
 expect_eq "$(images '')" "<absent>" "and records nothing where there was none"
 printf 'none' > "$WORK/sha"
-expect_eq "$(images '')" "none" "a pipeline without a dataset parameter records none"
+expect_eq "$(images '')" "none" "a pipeline whose steps declare no input records none"
 
 echo "${PASSED} passed, ${FAILED} failed"
 exit "$FAILED"

@@ -4,7 +4,11 @@
 # app's pipeline-images), and ml-ci-reconcile re-renders an app whose record is not the
 # context's engine.version. A failing engine records `engine-attempt`
 # (<version>@<epoch>) and ml-ci-reconcile submits at most one drift build per hour
-# per engine version. Also the force-mode "already satisfied" no-op: a forced
+# per engine version. An app that was REFUSED because it was made before the current pipelines (an old app)
+# contract (PRD novelcore/kaos#1911 AC-01, T-05) records
+# <version>@<epoch>@<commit>@<kaos-lib> and is not built again, by the poll or by a
+# forced run, until its commit, the engine or the kaos-lib delivered changes: one
+# attempt, no loop. Also the force-mode "already satisfied" no-op: a forced
 # reconcile of a HEAD already built and rendered from the current context by the
 # current engine submits nothing (kaos e2e a3c48d99). Usage (from the repo root):
 #
@@ -79,9 +83,10 @@ mlEnvironment:
   name: train
 EOF
   cat > "$T/wft.json" <<'EOF'
-{"spec": {"arguments": {"parameters": [{"name": "step-a-mem", "value": "13Gi"}]},
-          "templates": [{"name": "step-a",
-                         "nodeSelector": {"platform.kubecore.io/environment": "train"}}]}}
+{"spec": {"templates": [{"name": "compose-and-validate",
+                          "inputs": {"parameters": [{"name": "mem", "default": "13Gi"}]}},
+                         {"name": "step-a",
+                          "nodeSelector": {"platform.kubecore.io/environment": "train"}}]}}
 EOF
   cm
   images "$ENG" "$ENG"
@@ -165,6 +170,14 @@ run_drift() {
 new_case; run_drift
 expect_eq "$RC/$NEEDS" "0/false" "in sync: the render and the compose image ran on the context's engine — no build"
 expect_has "$OUT" "up to date" "in sync: reports up to date"
+expect_has "$OUT" "context in sync (13Gi)" "in sync: the live pipeline's memory is read from the compose step's default (the form has no per-step memory field)"
+
+new_case; jq '.spec.templates[0].inputs.parameters[0].default = "12Gi"' "$T/wft.json" > "$T/w.tmp" && mv "$T/w.tmp" "$T/wft.json"; run_drift
+expect_eq "$RC/$NEEDS" "0/true" "the context's cpu budget changed since the live pipeline was rendered: re-render"
+expect_has "$OUT" "CONTEXT DRIFT — platform says 13Gi but the live WFT renders 12Gi" "context drift: says both numbers"
+
+new_case; jq 'del(.spec.templates[0].inputs)' "$T/wft.json" > "$T/w.tmp" && mv "$T/w.tmp" "$T/wft.json"; run_drift
+expect_has "$OUT" "WARN cannot read" "a live pipeline with no memory default is skipped loudly, never read from a form field that is gone"
 
 new_case; images "$OLD_ENG" "$ENG"; run_drift
 expect_eq "$RC/$NEEDS" "0/true" "the engine moved: re-render"
@@ -235,6 +248,59 @@ new_case; images "$OLD_ENG" "$OLD_ENG"
 jq '.data["last-built-sha"] = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"' "$T/cm.json" > "$T/c.tmp" \
   && mv "$T/c.tmp" "$T/cm.json"; run_drift
 expect_has "$OUT" "COMMIT DRIFT" "an unbuilt commit is still reported as commit drift first"
+
+# ── an old app: one attempt (PRD kaos#1911) ─
+# The refused build recorded the engine, the commit and the kaos-lib it read. While all three are what
+# they were, a new build would be refused again: the poll and the forced run submit nothing.
+
+OLD_CTX=$(printf 'old' | sha256sum | cut -c1-64)
+NO_LIB=$(printf '' | sha256sum | cut -c1-12)            # the fixture context delivers no kaos-lib
+OTHER_SHA=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+refused() { echo "${1:-$ENG}@$(( $(date +%s) - ${4:-172800} ))@${2:-$HEAD_SHA}@${3:-$NO_LIB}"; }   # two days ago by default
+unbuilt() { jq --arg s "$OTHER_SHA" '.data["last-built-sha"] = $s' "$T/cm.json" > "$T/c.tmp" && mv "$T/c.tmp" "$T/cm.json"; }
+
+new_case; cm "$OLD_CTX"; images "$OLD_ENG" "$OLD_ENG" "$OLD_CTX" "$(refused)"; unbuilt; run_drift
+expect_eq "$RC/$NEEDS" "0/false" "old app: HEAD was refused by this engine two days ago and never built: no new build (no COMMIT DRIFT, no CONTEXT DRIFT, no ENGINE DRIFT loop)"
+expect_has "$OUT" "OLD APP — commit ${HEAD_SHA} was refused by engine ${ENG}" "old app: says which commit and engine"
+expect_has "$OUT" "Create it again from the template." "old app: ... and what to do"
+expect_eq "$(printf '%s' "$OUT" | grep -c migrate)" "0" "old app: ... with no guide to link"
+expect_has "$OUT" "Nothing is submitted until the app is pushed to, or the engine or the kaos-lib the platform delivers changes" "old app: ... and what ends the hold"
+for n in 1 2 3; do run_drift; done
+expect_eq "$RC/$NEEDS" "0/false" "old app: every later poll decides the same (it does not expire after an hour)"
+
+new_case; images "$OLD_ENG" "$OLD_ENG" "$CTX_SHA" "$(refused "$ENG" "$HEAD_SHA" "$NO_LIB" 60)"; run_drift
+expect_has "$OUT" "OLD APP" "old app: a refusal a minute old is held by the same guard, not by the hourly one"
+
+new_case; images "$OLD_ENG" "$OLD_ENG" "$CTX_SHA" "$(refused "$ENG" "$OTHER_SHA")"; unbuilt; run_drift
+expect_eq "$RC/$NEEDS" "0/true" "old app: the app was pushed to (HEAD is not the refused commit): built at once"
+expect_has "$OUT" "COMMIT DRIFT" "old app: ... as the unbuilt push it is"
+
+new_case; images "$OLD_ENG" "$OLD_ENG" "$CTX_SHA" "$(refused "$OLD_ENG")"; unbuilt; run_drift
+expect_eq "$RC/$NEEDS" "0/true" "old app: the platform pins another engine than the one that refused: tried again"
+
+new_case; images "$OLD_ENG" "$OLD_ENG" "$CTX_SHA" "$(refused "$ENG" "$HEAD_SHA" "$(printf 'kaos-lib==0.4.3' | sha256sum | cut -c1-12)")"; unbuilt; run_drift
+expect_eq "$RC/$NEEDS" "0/true" "old app: the platform delivers another kaos-lib than the refused build read: tried again"
+
+new_case; cm "$OLD_CTX"; images "$OLD_ENG" "$OLD_ENG" "$OLD_CTX" "$(refused)"; unbuilt; FORCE=true run_drift
+expect_eq "$RC/$NEEDS" "0/false" "old app, forced (the platform context changed, but not the engine or the kaos-lib): no build either"
+expect_has "$OUT" "OLD APP" "old app, forced: says why"
+
+new_case; images "$OLD_ENG" "$OLD_ENG" "$CTX_SHA" "$(refused "$ENG" "$OTHER_SHA")"; unbuilt; FORCE=true run_drift
+expect_eq "$RC/$NEEDS" "0/true" "old app, forced, after a push: built"
+
+new_case; images "$OLD_ENG" "$OLD_ENG" "$CTX_SHA" "$(refused "$OLD_ENG")"; FORCE=true run_drift
+expect_eq "$RC/$NEEDS" "0/true" "old app, forced, after the engine pin moved: built"
+
+# The guard runs under the image's busybox sh in production: no bash-only syntax in it.
+for SH in dash "busybox sh"; do
+  command -v "${SH%% *}" >/dev/null 2>&1 || continue
+  new_case; images "$OLD_ENG" "$OLD_ENG" "$CTX_SHA" "$(refused)"; unbuilt
+  printf '#!/bin/sh
+exec %s "$@"
+' "$SH" > "$T/bin/posix-sh"; chmod +x "$T/bin/posix-sh"
+  DRIFT_SHELL="$T/bin/posix-sh" run_drift
+  expect_eq "$RC/$NEEDS" "0/false" "old app: the guard holds under ${SH}"
+done
 
 # ── force: already satisfied ─────────────────────────────────────────────────
 # kaos e2e a3c48d99 (2026-10-19): the app-creation ci-sync (force) waited out

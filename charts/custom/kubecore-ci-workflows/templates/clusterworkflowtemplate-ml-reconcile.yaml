@@ -27,10 +27,11 @@ changes — those flow operator -> XR -> composition -> ConfigMap, and the WFT
 picks them up on the next build this reconciler submits.
 
 Dataset changes (PRD novelcore/kaos#1283 D-05) are the second input of a render
-besides the commit that the poll can see: the pipeline's `dataset` dropdown is
-read from kaos-lake's catalog at render time only. The render records a digest of
-the choices it offered (dataset-sha, in {app}-pipeline-images); DATASET DRIFT
-compares it with the catalog now and re-renders when they differ. The engine is
+besides the commit that the poll can see: the pipeline's dataset pickers (the form
+field of every name a step declares in inputs=) are filled from kaos-lake's catalog
+at render time only. The render records a digest of the choices it offered
+(dataset-sha, in {app}-pipeline-images); DATASET DRIFT compares it with the catalog
+now and re-renders when they differ. The engine is
 the third (PRD-HPC-1461 D-80): ENGINE DRIFT compares the engine the gitops context
 pins with the one the last render and the compose image were built on
 (engine-version, engine-compose) and re-renders when it moved. kaos-lake
@@ -456,6 +457,21 @@ spec:
           ENG_CTX=$(yq e '.data."context-sha" // ""' /tmp/gitops-images.yaml)
           ENG_ATTEMPT=$(yq e '.data."engine-attempt" // ""' /tmp/gitops-images.yaml)
         fi
+        # OLD APP GUARD (PRD novelcore/kaos#1911 AC-01, T-05): the last build of this app was refused
+        # because the app was made before the current pipelines, and it recorded engine-attempt as
+        # <engine version>@<epoch>@<commit>@<kaos-lib>. While HEAD is that commit and the gitops context
+        # still pins that engine and delivers that kaos-lib, another build reads exactly what the refused
+        # one read and is refused again: nothing is submitted, by the poll or by a forced run. The app's
+        # next push, a new engine or another kaos-lib is tried at once. The refused build reported what
+        # to change on the commit; this run only says why it submits nothing.
+        old_app_guard() {
+          [ -n "$ENG_ATTEMPT" ] && [ -s /tmp/engine-context.yaml ] || return 0
+          if python3 -I /tmp/engine.py refused --context /tmp/engine-context.yaml --commit "$HEAD_SHA" --attempt "$ENG_ATTEMPT"; then
+            printf 'false' > /tmp/needs_build
+            echo "reconcile: OLD APP — commit ${HEAD_SHA} was refused by engine ${ENG_WANT}: the app was made before the current pipelines. {{ include "kubecore-ci-workflows.oldAppNotice" . }} Its build reported it on the commit. Nothing is submitted until the app is pushed to, or the engine or the kaos-lib the platform delivers changes"
+            exit 0
+          fi
+        }
 
         if [ "$FORCE" = "true" ]; then
           WANT_CTX="{{`{{workflow.parameters.context_sha}}`}}"
@@ -464,6 +480,7 @@ spec:
             HAVE_CTX=$(gitops_ctx_sha)
             [ "$HAVE_CTX" = "$WANT_CTX" ] || not_yet "gitops ${CTX_REL} is not the context this trigger is for yet (${HAVE_CTX:0:12} != ${WANT_CTX:0:12})"
           fi
+          old_app_guard
           # QUEUED: a build of HEAD is already waiting on the app's build lock
           # (a webhook build created after this run began waiting, or another
           # trigger's build). It starts after this step and renders the context
@@ -512,6 +529,7 @@ spec:
           exit 0
         fi
 
+        old_app_guard
         if [ "$LAST" != "$HEAD_SHA" ]; then
           printf 'true' > /tmp/needs_build
           echo "reconcile: COMMIT DRIFT — a push was never built (dropped webhook?); submitting ml-ci-build"
@@ -523,11 +541,15 @@ spec:
         # broken engine release fails every render, and a new engine moves the context too (so CONTEXT
         # DRIFT below would fire on every poll): for the SAME engine version, at most one drift re-render
         # per hour. A successful render clears the record; a newer engine release has another version.
-        case "${ENG_ATTEMPT##*@}" in
+        # (The record of an app that was refused for the step contract has two more fields and is held
+        # by the OLD APP GUARD above for as long as nothing changes, not for an hour.)
+        ATT_VERSION=$(printf '%s' "$ENG_ATTEMPT" | cut -d@ -f1)
+        ATT_EPOCH=$(printf '%s' "$ENG_ATTEMPT" | cut -s -d@ -f2)
+        case "$ATT_EPOCH" in
           ""|*[!0-9]*) ;;
           *)
-            ENG_AGE=$(( $(date +%s) - ${ENG_ATTEMPT##*@} ))
-            if [ -n "$ENG_WANT" ] && [ "${ENG_ATTEMPT%@*}" = "$ENG_WANT" ] && [ "$ENG_AGE" -ge 0 ] && [ "$ENG_AGE" -lt 3600 ]; then
+            ENG_AGE=$(( $(date +%s) - ATT_EPOCH ))
+            if [ -n "$ENG_WANT" ] && [ "$ATT_VERSION" = "$ENG_WANT" ] && [ "$ENG_AGE" -ge 0 ] && [ "$ENG_AGE" -lt 3600 ]; then
               printf 'false' > /tmp/needs_build
               echo "reconcile: ENGINE ATTEMPT GUARD — the build for engine ${ENG_WANT} failed ${ENG_AGE}s ago; not re-rendering before an hour has passed"
               exit 0
@@ -669,7 +691,9 @@ spec:
         # context to 26Gi — only the app I pushed to by hand was correct).
         #
         # Compare the context's default cpu class + its whole-node budget against
-        # what the live WFT actually renders. A mismatch means the WFT predates
+        # what the live WFT actually renders (the memory the compose step, which runs
+        # on the default cpu class, takes by default: a step gets the machine of its
+        # class and the form has no per-step memory field). A mismatch means the WFT predates
         # the current platform data -> rebuild to re-render it. This is
         # self-limiting: once re-rendered the two agree and it goes quiet.
         CTX=$(kubectl get configmap "${APP}-pipeline-context" -n "${ML_NS}" \
@@ -678,7 +702,7 @@ spec:
           WANT=$(echo "$CTX" | sed -n '/^computeClasses:/,/^[a-z]/p' | sed -n '/^  cpu:/,/^  [a-z]/p' \
                  | grep -E '^      memoryGiB:' | head -1 | tr -dc '0-9')
           GOT=$(kubectl get workflowtemplate "${APP}-pipeline" -n "${ML_NS}" -o json 2>/dev/null \
-                | jq -r '[.spec.arguments.parameters[] | select(.name|endswith("-mem")) | .value] | first // empty' \
+                | jq -r '[.spec.templates[] | select(.name == "compose-and-validate") | .inputs.parameters[]? | select(.name == "mem") | .default] | first // empty' \
                 | tr -dc '0-9')
           # Say WHY we could not compare. Silently skipping is how this check
           # disabled itself: the SA could not read the WFT, GOT was empty, the
@@ -723,19 +747,19 @@ spec:
           echo "reconcile: WARN no ${ML_NS}/${APP}-pipeline-context — context-drift check SKIPPED"
         fi
 
-        # DATASET DRIFT (PRD novelcore/kaos#1283 D-05): the `dataset` dropdown is
-        # read from kaos-lake's catalog at render time, so a version released (or a
+        # DATASET DRIFT (PRD novelcore/kaos#1283 D-05): the dataset pickers are
+        # filled from kaos-lake's catalog at render time, so a version released (or a
         # dataset deleted) after the last render is missing from (or still in) the
         # live WFT with no commit and no context change. Compare the digest the
         # last render recorded (dataset-sha) with the catalog now. Unknown never
         # means "submit work": an unreadable catalog, a context without a lakeFS
         # endpoint, or (outside a dataset event) a pipeline rendered before the
-        # record existed is no drift. "none" = the pipeline offers no dataset.
+        # record existed is no drift. "none" = no step of the pipeline declares an input.
 {{ include "kubecore-ci-workflows.datasetChoicesScript" . | indent 8 }}
         DS_LAST=$(echo "$CM" | jq -r '.data["dataset-sha"] // empty')
         DS_ENDPOINT=$(echo "${CTX:-}" | sed -n '/^lakefs:/,/^[a-z]/p' | sed -n 's/^  endpoint: *"\{0,1\}\([^"]*\)"\{0,1\}$/\1/p' | head -1)
         if [ "$DS_LAST" = "none" ]; then
-          echo "reconcile: the pipeline offers no dataset — dataset drift does not apply"
+          echo "reconcile: no step of the pipeline declares an input — dataset drift does not apply"
         elif [ -z "$DS_LAST" ] && [ "$DATASET_EVENT" != "true" ]; then
           echo "reconcile: no dataset-sha recorded yet (rendered before it existed) — dataset drift unknown this poll"
         elif [ -z "$DS_ENDPOINT" ]; then

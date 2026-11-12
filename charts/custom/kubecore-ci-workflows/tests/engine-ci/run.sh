@@ -6,7 +6,10 @@
 #     compose-and-validate image is rebuilt (config/ changed, the engine moved, kaos-lib moved);
 #   - the compose Dockerfile (files/compose.Dockerfile) as build-push hands it to kaniko;
 #   - hera-enhance-commit: nothing replaces the live WorkflowTemplate before the render, enhance and gates pass;
-#   - the exit handler's engine-record: `engine-last-error` / `engine-attempt` written and cleared.
+#   - the exit handler's engine-record: `engine-last-error` / `engine-attempt` written and cleared;
+#   - PRD novelcore/kaos#1911 AC-01: an app made before the current pipelines is refused before
+#     anything is built or committed (detect-steps for its kaos-lib, hera-render for its pipeline.py), and
+#     engine-record turns that into the commit status, the error record and the one-attempt record.
 # The wheel download and the sha256 check are in tests/untrusted-workspace, files/engine.py in tests/engine,
 # ENGINE DRIFT and its one-attempt-per-hour guard in tests/engine-drift. Usage (from the repo root):
 #
@@ -24,7 +27,9 @@ APP=app1
 ENG=v0.4.7
 OLD_ENG=v0.4.6
 ENGINE_IMAGE="reg.example/kaos-pipeline-engine:${ENG}"
-SPEC="kaos-lib==0.4.0"
+SPEC="kaos-lib==0.5.0"
+OLD_APP_SENTENCE="This app was made before the current pipelines. Create it again from the template."
+STATUS_TEXT="Not built: this app was made before the current pipelines. Create it again from the template."
 
 expect_eq() {
   if [ "$1" = "$2" ]; then PASSED=$((PASSED + 1)); echo "PASS: $3"
@@ -72,18 +77,26 @@ expect_eq "$(yq 'select(.metadata.name == "ml-ci-pr-render") | .spec.templates[]
 # run_render STUB_BEHAVIOUR: the script against a stub python; the stub logs its arguments.
 #   STUB_BEHAVIOUR ok: render writes out/raw-workflow-template.yaml; fail: exits 1 (pipeline.py raised);
 #   deps: the extra-dependencies call prints one requirement.
+OLD_APP_ERROR_DEFAULT="kubecore.authoring.AuthoringError: step 'hello-world' has no kind=. Every step declares what it does: kind= is one of ingest, transform, train, evaluate, publish, control (for example step('hello-world', kind='transform', ...)). ${OLD_APP_SENTENCE}"
 run_render() {
+  OLD_APP_ERROR="${OLD_APP_ERROR:-$OLD_APP_ERROR_DEFAULT}"
   T=$(mktemp -d "${BASE_TMP}/render-XXXX"); mkdir -p "$T/bin" "$T/workspace/repo/out" "$T/workspace/out"
   printf 'stale\n' > "$T/workspace/out/raw-workflow-template.yaml"   # a previous render of the same workspace
   printf 'stale\n' > "$T/workspace/repo/out/raw-workflow-template.yaml"
+  # A stand-in engine package: only what the chart reads of it, the marker of an old app's refusal.
+  mkdir -p "$T/pkg/kaos_pipeline_engine"; : > "$T/pkg/kaos_pipeline_engine/__init__.py"
+  printf '{"old_app_marker": "Create it again from the template."}\n' > "$T/pkg/kaos_pipeline_engine/authoring-schema.json"
+  printf '%s\n' "$OLD_APP_ERROR" > "$T/old-error"   # what the engine prints for an app from before the step contract
   cat > "$T/bin/python" <<EOF
 #!/usr/bin/env bash
 echo "python \$*" >> "$T/calls"
 case "\$*" in
   *"extra_dependencies"*) [ "$1" = deps ] && echo "scikit-image>=0.22" ;;
   *"-m kaos_engine.render"*) [ "$1" = fail ] && { echo "pipeline.py raised" >&2; exit 1; }
+                             [ "$1" = old ] && { printf 'Traceback (most recent call last):\n  File "pipeline.py", line 9\n' >&2; cat "$T/old-error" >&2; exit 1; }
                              echo "kind: WorkflowTemplate" > out/raw-workflow-template.yaml ;;
   *"-m pip freeze"*) echo "hera==5.27.0" ;;
+  "-I - "*) shift 2; PYTHONPATH="$T/pkg" exec python3 - "\$@" ;;   # the refusal reader, run for real
 esac
 exit 0
 EOF
@@ -104,6 +117,38 @@ expect_has "$CALLS" "python -m pip install --quiet -c $T/engine-constraints.txt 
 run_render fail hera
 expect_eq "$([ "$RC" != 0 ] && echo failed)" "failed" "hera-render: a render that fails fails the step"
 expect_eq "$(ls "$T/workspace/out/raw-workflow-template.yaml" 2>/dev/null)" "" "hera-render: ... and leaves no raw WorkflowTemplate of an earlier render behind"
+expect_has "$OUT" "pipeline.py raised" "hera-render: the render's own error stays in the step log"
+expect_eq "$(ls "$T/workspace/old-app" "$T/workspace/report-extra.md" 2>/dev/null)" "" "hera-render: a render that fails for another reason is not reported as an app that has not moved"
+
+# PRD novelcore/kaos#1911 AC-01: an app made before the current pipelines. The engine refuses it with a
+# message that ends with its old_app_marker; the chart reports the reason and says to create the app again.
+run_render old hera
+expect_eq "$RC" "1" "hera-render (old app): the step fails with the render's exit code"
+expect_eq "$(ls "$T/workspace/out/raw-workflow-template.yaml" 2>/dev/null)" "" "hera-render (old app): no raw WorkflowTemplate for the enhance step"
+WHAT="step 'hello-world' has no kind=. Every step declares what it does: kind= is one of ingest, transform, train, evaluate, publish, control (for example step('hello-world', kind='transform', ...))."
+expect_eq "$(cat "$T/workspace/old-app" 2>/dev/null)" "$WHAT" "hera-render (old app): the reason is left for the report, without the exception name and the old-app sentence"
+expect_has "$OUT" "kaos-ci: OLD APP: $WHAT $OLD_APP_SENTENCE" "hera-render (old app): ... and is one line of the step log"
+EXTRA=$(cat "$T/workspace/report-extra.md" 2>/dev/null)
+expect_has "$EXTRA" "#### What to change" "hera-render (old app): the report comment gets a section"
+expect_has "$EXTRA" "$WHAT" "hera-render (old app): ... with the engine's message"
+expect_has "$EXTRA" "Create it again from the template." "hera-render (old app): ... and what to do"
+expect_not "$EXTRA" "http" "hera-render (old app): ... with no guide to link"
+expect_not "$EXTRA" "kaosctl" "hera-render (old app): ... and no command that moves the app"
+expect_has "$EXTRA" "the pipeline you could run before this commit is still the one that runs" "hera-render (old app): says the app keeps the pipeline it had"
+for WORD in Argo argo workflow Workflow namespace cluster kubectl ConfigMap gitops; do
+  expect_not "$EXTRA" "$WORD" "hera-render (old app): the report section does not name the platform's internals ($WORD)"
+done
+OLD_APP_ERROR="kubecore.authoring.AuthoringError: step 'train': hpc_time_limit= was removed. Write walltime= with the same value (walltime='12h'). ${OLD_APP_SENTENCE}" run_render old hera
+expect_eq "$(cat "$T/workspace/old-app" 2>/dev/null)" "step 'train': hpc_time_limit= was removed. Write walltime= with the same value (walltime='12h')." "hera-render (old app): a removed keyword is reported the same way"
+OLD_APP_ERROR="kubecore.authoring.AuthoringError: step 'x' is wrong. ${OLD_APP_SENTENCE}" run_render old hera
+expect_eq "$(cat "$T/workspace/old-app" 2>/dev/null)" "step 'x' is wrong." "hera-render (old app): the old-app sentence is not part of the reason"
+OLD_APP_ERROR="kubecore.authoring.AuthoringError: ${OLD_APP_SENTENCE}" run_render old hera
+expect_eq "$RC/$(cat "$T/workspace/old-app" 2>/dev/null | wc -c)" "1/1" "hera-render (old app): a refusal that is only the old-app sentence is still reported (an empty reason)"
+expect_has "$(cat "$T/workspace/report-extra.md" 2>/dev/null)" "Create it again from the template." "hera-render (old app): ... with its section"
+OLD_APP_ERROR="kubecore.authoring.AuthoringError: step 'x' has a bad walltime." run_render old hera
+expect_eq "$RC/$(ls "$T/workspace/old-app" 2>/dev/null)" "1/" "hera-render: a refusal without the marker is an ordinary failure, not an old app"
+OLD_APP_ERROR="kubecore.authoring.AuthoringError: step 'x': bad \`name\` \$(id) ${OLD_APP_SENTENCE}" run_render old hera
+expect_eq "$(cat "$T/workspace/old-app" 2>/dev/null)" "step 'x': bad name \$(id)" "hera-render (old app): the message is data (backticks dropped, nothing evaluated)"
 
 # ── a failed render never replaces the live WorkflowTemplate ─────────────────
 
@@ -136,19 +181,20 @@ detect_case() {  # detect_case ENGINE_COMPOSE [KL]
     printf 'a: 1\n' > config/data.yaml
     printf 'FROM python:3.12\nARG KAOS_LIB_PACKAGE="kaos-lib==0.3.0"\n' > steps/a/Dockerfile
     printf 'FROM scratch\n' > steps/compose_and_validate/Dockerfile   # a leftover of an old app: not an app step any more
+    if [ -n "${COMPAT:-}" ]; then mkdir .kaos && printf 'kaos-lib: "%s"\n' "$COMPAT" > .kaos/compat.yaml; fi
     git init -q && git add -A && git -c user.email=t@t -c user.name=t commit -qm one \
       && printf 'x\n' > README.md && git add -A && git -c user.email=t@t -c user.name=t commit -qm two )
   BUILT=$(git -C "$T/workspace/repo" rev-parse HEAD)
-  python3 - "$T/fixture/kubeapps/${APP}/main" "$BUILT" "$1" "${2:--}" "${ENGINE_IN_CTX:-yes}" <<'PY'
+  python3 - "$T/fixture/kubeapps/${APP}/main" "$BUILT" "$1" "${2:--}" "${ENGINE_IN_CTX:-yes}" "${CTX_SPEC:-kaos-lib==0.5.0}" <<'PY'
 import sys, yaml
-d, built, compose, kl, eng = sys.argv[1:6]
+d, built, compose, kl, eng, ctx_spec = sys.argv[1:7]
 data = {"last-built-sha": built, "a": "reg/app:a-dev-v1-x-1", "compose-and-validate": "reg/app:compose-and-validate-dev-v1-x-1"}
 if compose != "-":
     data["engine-compose"] = compose
 if kl != "-":
     data["kaos-lib-package"] = kl
 yaml.safe_dump({"kind": "ConfigMap", "metadata": {"name": "app1-pipeline-images"}, "data": data}, open(d + "/pipeline-images.yaml", "w"))
-ctx = {"project": "proj", "app": "app1", "kaosLib": {"spec": "kaos-lib==0.4.0", "version": "0.4.0"}}
+ctx = {"project": "proj", "app": "app1", "kaosLib": {"spec": ctx_spec, "version": ctx_spec.rsplit("==", 1)[-1]}}
 if eng == "yes":
     ctx["engine"] = {"version": "v0.4.7", "image": "reg.example/kaos-pipeline-engine:v0.4.7",
                      "wheel": "https://example.com/engine.whl", "wheelSha256": "a" * 64, "mode": "legacy"}
@@ -167,6 +213,7 @@ run_detect() {
       -e "s#{{workflow.parameters.gitops_branch}}#main#g" \
       -e "s#{{workflow.parameters.app_name}}#${APP}#g" \
       -e "s#{{workflow.parameters.event_type}}#${EVENT:-push}#g" \
+      -e "s#{{workflow.parameters.kaos_lib_rebuild}}#false#g" \
       -e "s#/tmp/#${T}/#g" -e "s#/workspace#${T}/workspace#g" -e "s#/etc/github-token/token#${T}/token#g" \
       "$DETECT_SRC" > "$T/detect.sh"
   OUT=$(cd "$T" && PATH="$T/bin:$PATH" bash "$T/detect.sh" 2>&1); RC=$?
@@ -218,6 +265,35 @@ expect_eq "$([ "$RC" != 0 ] && echo failed)" "failed" "detect-steps: no pipeline
 
 detect_case "$ENG" "$SPEC"; run_detect
 expect_not "$(cat "$T/step_pairs")" "compose" "detect-steps: an app's own steps/compose_and_validate is not an app step (the compose image is the chart's)"
+
+# ── detect-steps: a kaos-lib older than the step contract (PRD novelcore/kaos#1911 AC-01) ──
+
+OLD_SPEC="kaos-lib==0.4.3"
+CTX_SPEC="$OLD_SPEC" COMPAT=">=0.4,<0.5" detect_case "$ENG" "$OLD_SPEC"; run_detect
+expect_eq "$([ "$RC" != 0 ] && echo failed)" "failed" "detect-steps (kaos-lib 0.4, range <0.5): the build is refused"
+expect_eq "$(ls "$T/changed_steps.json" "$T/engine.json" 2>/dev/null)" "" "detect-steps (kaos-lib 0.4): ... before it decides what to build or which engine renders"
+NM=$(cat "$T/workspace/old-app" 2>/dev/null)
+expect_eq "$NM" "It is built with kaos-lib 0.4.3; the current pipelines need kaos-lib 0.5 or newer." "detect-steps (kaos-lib 0.4): says what is wrong"
+expect_has "$OUT" "kaos-ci: OLD APP: It is built with kaos-lib 0.4.3; the current pipelines need kaos-lib 0.5 or newer. $OLD_APP_SENTENCE" "detect-steps (kaos-lib 0.4): one line of the step log, the same old-app sentence"
+expect_has "$(cat "$T/workspace/report-extra.md" 2>/dev/null)" "#### What to change" "detect-steps (kaos-lib 0.4): the report comment gets its section"
+CTX_SPEC="$OLD_SPEC" detect_case "$ENG" "$OLD_SPEC"; run_detect
+expect_eq "$([ "$RC" != 0 ] && echo failed)" "failed" "detect-steps (kaos-lib 0.4, no range declared): refused too"
+CTX_SPEC="$OLD_SPEC" COMPAT=">=0.5,<0.6" detect_case "$ENG" "$OLD_SPEC"; run_detect
+expect_eq "$RC" "0" "detect-steps (kaos-lib 0.4 still delivered, the commit accepts 0.5): the build goes on: it is how the platform learns the new range"
+expect_eq "$(ls "$T/workspace/old-app" 2>/dev/null)" "" "detect-steps: ... and nothing is reported as an old app"
+expect_eq "$(cat "$T/kaos_lib_compat")" ">=0.5,<0.6" "detect-steps: ... the range it will report is the commit's"
+COMPAT=">=0.4,<0.5" detect_case "$ENG" "$SPEC"; run_detect
+expect_eq "$RC/$CHANGED" "0/[]" "detect-steps (kaos-lib 0.5 delivered): the app's range is not what this check reads"
+
+# Images from before the step contract are not "stale, rebuilt on use": a reconcile-submitted build
+# rebuilds them (after the render, which an app that has not moved fails first).
+detect_case "$ENG" "$OLD_SPEC"; EVENT=reconcile run_detect
+expect_eq "$RC/$CHANGED" '0/[{"name":"a","path":"steps/a"},'"$COMPOSE"']' "detect-steps (reconcile, images on kaos-lib 0.4, 0.5 delivered): every image that installs kaos-lib rebuilds"
+expect_not "$OUT" "kaos-lib STALE" "detect-steps: ... they are not left stale"
+expect_eq "$(cat "$T/kaos_lib_package")" "$SPEC" "detect-steps: ... and are built with the kaos-lib the platform delivers"
+detect_case "$ENG" "kaos-lib==0.5.1"; EVENT=reconcile run_detect
+expect_eq "$CHANGED" "[]" "detect-steps (reconcile, images on another 0.5): stale, rebuilt on use, as before"
+expect_has "$OUT" "kaos-lib STALE" "detect-steps: ... and says so"
 
 # ── the compose Dockerfile ───────────────────────────────────────────────────
 
@@ -279,7 +355,8 @@ if extra == "stale-error":
     data["engine-last-error"] = "render: boom"
     data["engine-attempt"] = "v0.4.7@1"
 yaml.safe_dump({"kind": "ConfigMap", "metadata": {"name": "app1-pipeline-images"}, "data": data}, open(d + "/pipeline-images.yaml", "w"))
-ctx = {"engine": {"version": "v0.4.7", "image": "reg.example/kaos-pipeline-engine:v0.4.7", "wheel": "https://x/e.whl", "wheelSha256": "a" * 64}}
+ctx = {"engine": {"version": "v0.4.7", "image": "reg.example/kaos-pipeline-engine:v0.4.7", "wheel": "https://x/e.whl", "wheelSha256": "a" * 64},
+       "kaosLib": {"spec": "kaos-lib==0.5.0"}}
 yaml.safe_dump({"kind": "ConfigMap", "data": {"context.yaml": yaml.safe_dump(ctx)}}, open(d + "/pipeline-context.yaml", "w"))
 PY
   git init -q --bare -b main "$T/origin.git"
@@ -309,11 +386,27 @@ if [ "\$1" = clone ]; then set -- "\${@:1:\$((\$#-2))}" "$T/origin.git" "\${@: -
 exec /usr/bin/git "\$@"
 EOF
   chmod +x "$T/bin/kubectl" "$T/bin/git"
+  # GitHub: every call is logged with its payload and answered ${GH_ANSWER:-201}.
+  cat > "$T/bin/curl" <<CURLEOF
+#!/usr/bin/env bash
+out=""; data=""; url=""
+while [ \$# -gt 0 ]; do
+  case "\$1" in -o) out="\$2"; shift ;; -d) data="\$2"; shift ;; -D|-w|-X|-H|--connect-timeout|--max-time) shift ;; -*) ;; *) url="\$1" ;; esac
+  shift
+done
+printf '%s %s\n' "\$url" "\$data" >> "$T/github-calls"
+[ -n "\$out" ] && printf '{}' > "\$out"
+printf '%s' "${GH_ANSWER:-201}"
+CURLEOF
+  chmod +x "$T/bin/curl"
   sed -e "s#{{workflow.parameters.gitops_repository}}#proj-gitops#g" -e "s#{{workflow.parameters.gitops_branch}}#main#g" \
       -e "s#{{workflow.parameters.app_name}}#${APP}#g" -e "s#{{workflow.name}}#wf#g" -e "s#{{workflow.namespace}}#ci#g" \
-      -e "s#{{workflow.status}}#${PHASE}#g" -e "s#/tmp/#${T}/#g" -e "s#/etc/github-token/token#${T}/token#g" "$REC_SRC" > "$T/record.sh"
+      -e "s#{{workflow.parameters.commit_sha}}#${COMMIT}#g" -e "s#{{workflow.parameters.repo_url}}#https://github.com/org/proj-app1.git#g" \
+      -e "s#{{workflow.uid}}#uid1#g" -e "s#^\( *\)ARGO_BASE=\"\"#\1ARGO_BASE=\"${ARGO_BASE_TEST:-}\"#" -e "s#{{workflow.status}}#${PHASE}#g" -e "s#/tmp/#${T}/#g" -e "s#/workspace#${T}/workspace#g" \
+      -e "s#/etc/github-token/token#${T}/token#g" "$REC_SRC" > "$T/record.sh"
   OUT=$(cd "$T" && PATH="$T/bin:$PATH" HOME="$T" bash "$T/record.sh" 2>&1); RC=$?
   [ -n "${SHOW:-}" ] && echo "$OUT"
+  CALLS=$(cat "$T/github-calls" 2>/dev/null)
   rm -rf "$T/check"; git clone -q "$T/origin.git" "$T/check" 2>/dev/null
   IMG="$T/check/kubeapps/${APP}/main/pipeline-images.yaml"
   ERR=$(yq '.data."engine-last-error" // "<absent>"' "$IMG"); ATT=$(yq '.data."engine-attempt" // "<absent>"' "$IMG")
@@ -322,6 +415,7 @@ EOF
 # attempt is a `(N)` child of a Retry node (kubecore-operator issue 1832: the record matched none of them).
 # The nesting: ml-ci-build [1] probe-detect, [2] build-run (ml-ci-run-locked) > [0] run (ml-ci-run) >
 # [1] detect-steps, [3] render-hera > [0] hera-render, [1] hera-enhance-commit, and [3] build-push per item.
+COMMIT=$(printf 'c%.0s' $(seq 40))
 PROBE_NODE='wf[1].probe-detect(0)'
 RUN='wf[2].build-run[0].run'
 DETECT_NODE="${RUN}[1].detect-steps(0)"
@@ -336,6 +430,55 @@ expect_eq "$ERR" "render: pipeline.py raised: ValueError: step x reads a missing
 expect_has "$ATT" "v0.4.7@" "engine-record: the attempt is recorded as <engine version>@<epoch>"
 expect_eq "$(( $(date +%s) - ${ATT##*@} < 120 ))" "1" "engine-record: ... with the time of this attempt"
 expect_has "$(git -C "$T/check" log -1 --format=%s)" "record the engine error" "engine-record: committed to gitops"
+
+expect_eq "$CALLS" "" "engine-record: a render that failed for another reason posts no status of its own"
+
+# PRD novelcore/kaos#1911 AC-01: the run was refused because the app was made before the current pipelines.
+WHAT="step 'hello-world' has no kind=. Every step declares what it does: kind= is one of ingest, transform, train, evaluate, publish, control."
+refused_case() {  # refused_case NODE [SEED]: a failed run whose NODE left /workspace/old-app
+  record_case Failed "${2:-}"; mkdir -p "$T/workspace"; printf '%s\n' "$WHAT" > "$T/workspace/old-app"
+  pod "wf.detect-steps" 0; pod "$1" 1 "Traceback\nkubecore.authoring.AuthoringError: step 'hello-world' has no kind=\nkaos-ci: OLD APP: ${WHAT} ${OLD_APP_SENTENCE}\n"
+}
+refused_case "$RENDER_NODE"; run_record
+expect_eq "$RC" 0 "engine-record (old app): runs"
+expect_eq "$ERR" "$(printf '%s %s' "$STATUS_TEXT" "$WHAT" | cut -c1-200)" "engine-record (old app): engine-last-error is the old-app sentence and the reason, at most 200 characters"
+KEY=$(printf 'kaos-lib==0.5.0' | sha256sum | cut -c1-12)
+expect_eq "$(printf '%s' "$ATT" | cut -d@ -f1,3,4)" "v0.4.7@${COMMIT}@${KEY}" "engine-record (old app): engine-attempt names the engine, the refused commit and the kaos-lib delivered"
+expect_eq "$(( $(date +%s) - $(printf '%s' "$ATT" | cut -d@ -f2) < 120 ))" "1" "engine-record (old app): ... and when"
+expect_eq "$(yq '.data | keys | sort | join(",")' "$IMG")" "a,engine-attempt,engine-last-error,engine-version,last-built-sha" "engine-record (old app): no other key is written"
+expect_eq "$(yq '.data."last-built-sha" + "/" + .data."engine-version" + "/" + .data.a' "$IMG")" "x/v0.4.7/reg/app:a-1" "engine-record (old app): the built commit, the engine of the last render and the images stay as they were"
+expect_eq "$(printf '%s\n' "$CALLS" | grep -c .)" "1" "engine-record (old app): one GitHub call"
+expect_has "$CALLS" "https://api.github.com/repos/org/proj-app1/statuses/${COMMIT} " "engine-record (old app): a commit status on the built commit"
+STATUS=$(printf '%s' "$CALLS" | cut -d' ' -f2-)
+expect_eq "$(printf '%s' "$STATUS" | jq -r '.state + "/" + .context')" "failure/kubecore-ml-ci" "engine-record (old app): the build's own check, failed"
+expect_eq "$(printf '%s' "$STATUS" | jq -r '.description')" "$STATUS_TEXT" "engine-record (old app): the description says the app is old and to create it again (the reason does not fit 140 characters)"
+expect_eq "$(( $(printf '%s' "$STATUS" | jq -r '.description' | wc -c) <= 140 ))" "1" "engine-record (old app): ... within GitHub's 140 characters"
+expect_eq "$(printf '%s' "$STATUS" | jq -r 'has("target_url")')" "false" "engine-record (old app): no run report address is configured, so the check links none"
+expect_not "$STATUS" "migrate" "engine-record (old app): no guide is linked"
+for WORD in Argo argo workflow Workflow namespace cluster kubectl ConfigMap gitops; do
+  expect_not "$STATUS $ERR" "$WORD" "engine-record (old app): status and record do not name the platform's internals ($WORD)"
+done
+
+refused_case "wf.detect-steps"; run_record
+expect_has "$ERR" "$STATUS_TEXT" "engine-record (old app at detect-steps, a kaos-lib older than 0.5): recorded the same way"
+expect_eq "$(printf '%s' "$ATT" | cut -d@ -f3)" "$COMMIT" "engine-record: ... with the refused commit"
+
+refused_case "$RENDER_NODE"; GH_ANSWER=403 run_record
+expect_eq "$RC" 0 "engine-record (old app): a status GitHub refuses does not stop the record"
+expect_has "$ERR" "$STATUS_TEXT" "engine-record: ... which is still written"
+
+WHAT_SHORT="step 'x' has no kind=."
+record_case Failed; mkdir -p "$T/workspace"; printf '%s\n' "$WHAT_SHORT" > "$T/workspace/old-app"; pod "$RENDER_NODE" 1 "boom\n"; ARGO_BASE_TEST=https://argo.example run_record
+STATUS=$(printf '%s' "$CALLS" | cut -d' ' -f2-)
+expect_eq "$(printf '%s' "$STATUS" | jq -r '.description')" "$STATUS_TEXT $WHAT_SHORT" "engine-record (old app): a reason that fits GitHub's 140 characters follows the sentence"
+expect_eq "$(printf '%s' "$STATUS" | jq -r '.target_url')" "https://argo.example/workflows/ci/wf?uid=uid1" "engine-record (old app): the check links the run report, as the failure status does"
+record_case Failed; mkdir -p "$T/workspace"; printf '\n' > "$T/workspace/old-app"; pod "$RENDER_NODE" 1 "boom\n"; run_record
+STATUS=$(printf '%s' "$CALLS" | cut -d' ' -f2-)
+expect_eq "$(printf '%s' "$STATUS" | jq -r '.description')/$ERR" "$STATUS_TEXT/$STATUS_TEXT" "engine-record (old app): a refusal with no reason is the sentence alone, with no trailing space"
+expect_eq "$(printf '%s' "$ATT" | cut -d@ -f3)" "$COMMIT" "engine-record (old app): ... and is still the one attempt"
+
+record_case Succeeded stale-error; mkdir -p "$T/workspace"; printf 'leftover\n' > "$T/workspace/old-app"; pod "$RENDER_NODE" 0; pod "$ENHANCE_NODE" 0; run_record
+expect_eq "$ERR/$ATT/$CALLS" "<absent>/<absent>/" "engine-record: a run that succeeded is never reported as old app, whatever the workspace holds"
 
 record_case Failed; pod "$RENDER_NODE" 0; pod "$ENHANCE_NODE" 4 "engine: FATAL: engine wheel sha256 mismatch: the context pins aaa, https://x/e.whl is bbb\n"; run_record
 expect_has "$ERR" "enhance: engine: FATAL: engine wheel sha256 mismatch" "engine-record: a wheel that does not verify is the enhance error"
@@ -402,8 +545,74 @@ expect_has "$OUT" "already recorded" "engine-record: nothing to clear, nothing c
 expect_eq "$(git -C "$T/origin.git" rev-parse main)" "$before" "engine-record: ... no empty commit"
 
 # the exit handler runs it next to the failure status, and a failing record never fails the run
-expect_eq "$(yq 'select(.metadata.name == "ml-ci-build") | .spec.templates[] | select(.name == "exit-handler") | .steps[0][] | select(.name == "engine-record") | .continueOn.failed' "$RENDERED")" \
+expect_eq "$(yq 'select(.metadata.name == "ml-ci-build") | .spec.templates[] | select(.name == "exit-handler") | .steps[][] | select(.name == "engine-record") | .continueOn.failed' "$RENDERED")" \
   "true" "exit-handler: engine-record is reporting only (continueOn failed)"
+expect_eq "$(yq 'select(.metadata.name == "ml-ci-build") | .spec.templates[] | select(.name == "exit-handler") | .steps | map(map(.name) | join("+")) | join(" > ")' "$RENDERED")" \
+  "post-failure-status > engine-record > run-report" "exit-handler: engine-record runs after the failure status (its old-app status is the last one) and before the report"
+
+# ── patch-images: the datasets the pipeline produces are recorded with every build ──────────────────────────
+
+PATCH_SRC="${BASE_TMP}/patch.src"; script ml-ci-build patch-images > "$PATCH_SRC"
+# run_patch TABLE_JSON|none: a gitops origin holding the committed WorkflowTemplate (its compose step carries
+# TABLE_JSON as the step table; "none": a render of an engine from before the step contract) and the app's
+# pipeline-images with a stale produced-datasets and an unrelated image key.
+run_patch() {
+  T=$(mktemp -d "${BASE_TMP}/patch-XXXXXX"); mkdir -p "$T/bin" "$T/seed/kubeapps/${APP}/main"
+  printf 'token' > "$T/token"
+  printf 'kind: ConfigMap\nmetadata: {name: app1-pipeline-images}\ndata: {last-built-sha: old, produced-datasets: stale, a: "reg/app:a-1"}\n' \
+    > "$T/seed/kubeapps/${APP}/main/pipeline-images.yaml"
+  python3 - "$1" "$T/seed/kubeapps/${APP}/main/workflow-template.yaml" <<'PY'
+import json, sys, yaml
+args = ["a=1"] if sys.argv[1] == "none" else ["a=1", "--steps", sys.argv[1], "--run", "r"]
+wft = {"kind": "WorkflowTemplate", "metadata": {"name": "app1-pipeline"},
+       "spec": {"templates": [{"name": "main", "dag": {"tasks": []}},
+                              {"name": "compose-and-validate", "container": {"image": "x", "args": args}}]}}
+yaml.safe_dump(wft, open(sys.argv[2], "w"))
+PY
+  ( cd "$T/seed" && git init -q -b main && git add -A && git -c user.email=t@t -c user.name=t commit -qm seed )
+  git clone -q --bare "$T/seed" "$T/origin.git"
+  cat > "$T/bin/git" <<EOF
+#!/usr/bin/env bash
+if [ "\$1" = clone ]; then set -- "\${@:1:\$((\$#-2))}" "$T/origin.git" "\${@: -1}"; fi
+exec /usr/bin/git "\$@"
+EOF
+  chmod +x "$T/bin/git"
+  sed -e "s#{{workflow.parameters.gitops_repository}}#proj-gitops#g" -e "s#{{workflow.parameters.gitops_branch}}#main#g" \
+      -e "s#{{workflow.parameters.app_name}}#${APP}#g" -e "s#{{workflow.parameters.commit_sha}}#${COMMIT}#g" \
+      -e "s#{{inputs.parameters.image_tag}}#dev-v2#g" -e "s#{{inputs.parameters.changed_steps}}#[]#g" \
+      -e "s#{{workflow.parameters.[a-z_]*}}##g" -e "s#/tmp/#${T}/#g" \
+      -e "s#/etc/github-token/token#${T}/token#g" -e "s#/etc/registry-auth#${T}/none#g" "$PATCH_SRC" > "$T/patch.sh"
+  OUT=$(cd "$T" && PATH="$T/bin:$PATH" KL_RECORD="" KL_COMPAT="" ENGINE_COMPOSE="" HOME="$T" bash "$T/patch.sh" 2>&1); RC=$?
+  rm -rf "$T/check"; git clone -q "$T/origin.git" "$T/check" 2>/dev/null
+  IMG="$T/check/kubeapps/${APP}/main/pipeline-images.yaml"
+  PRODUCED=$(yq '.data."produced-datasets" // "<absent>"' "$IMG")
+}
+step_table() {  # step_table NAME:TYPE...: one step per produced output
+  local i=0 out="" sep=""
+  for e in "$@"; do
+    out="${out}${sep}{\"name\":\"s${i}\",\"kind\":\"transform\",\"reads\":[],\"inputs\":[],\"needs\":[],\"produces\":[{\"name\":\"${e%%:*}\",\"type\":\"${e##*:}\"}]}"
+    sep=","; i=$((i + 1))
+  done
+  printf '[%s]' "$out"
+}
+run_patch "$(step_table features:dataset clean:dataset model:model)"
+expect_eq "$RC" 0 "patch-images (two produced datasets): runs"
+expect_eq "$PRODUCED" "clean,features" "patch-images (two produced datasets): produced-datasets is the short names, sorted, comma separated, no spaces"
+expect_eq "$(yq '.data."last-built-sha"' "$IMG")/$(yq '.data.a' "$IMG")" "${COMMIT}/reg/app:a-1" "patch-images (two produced datasets): the other keys are as before"
+run_patch "$(step_table model:model report:artifact)"
+expect_eq "$RC/$PRODUCED" "0/" "patch-images (no produced dataset): the key is written, empty (a stale value is replaced)"
+expect_eq "$(yq '.data | has("produced-datasets")' "$IMG")" "true" "patch-images (no produced dataset): ... never omitted"
+run_patch "[]"
+expect_eq "$RC/$PRODUCED" "0/" "patch-images (a pipeline with no steps): the key is written, empty"
+# A refused build never gets here (hera-render fails first, tests/render-order); a committed render with no step
+# table is not from an engine on the step contract, and nothing is written.
+run_patch none
+expect_eq "$([ "$RC" != 0 ] && echo failed)" "failed" "patch-images (a render with no step table): the step fails"
+expect_eq "$PRODUCED/$(yq '.data."last-built-sha"' "$IMG")" "stale/old" "patch-images (a render with no step table): ... and nothing is written"
+expect_has "$OUT" "engine: FATAL" "patch-images (a render with no step table): ... saying why"
+KEYLINE='[ "${KEY}" = "produced-datasets" ] && continue'
+expect_has "$(cat "$PATCH_SRC")" "$KEYLINE" "patch-images: the digest-pin loop skips produced-datasets (it is not an image)"
+expect_has "$(script ml-ci-build hera-enhance-commit)" '"produced-datasets"' "hera-enhance-commit: the stale-key prune keeps produced-datasets"
 
 echo "engine-ci: ${PASSED} passed, ${FAILED} failed"
 exit "$FAILED"

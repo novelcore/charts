@@ -8,6 +8,8 @@ Contract: kubecore-operator study/kubecore/package-delivery-design.md. The opera
   context ml-ci-reconcile: the spec the platform context delivers.
   support the kaos-lib support verdict of the version a build resolved.
   bump    the bump pull request (branch kaos-lib/bump-<version>) in the app repo.
+  contract  whether a build may install a spec: the step contract starts at kaos-lib 0.5
+          (PRD novelcore/kaos#1911, AC-01).
 
 Standard library + PyYAML only (the toolbox image has both). Every input is data: nothing
 read here is ever evaluated by a shell.
@@ -65,6 +67,19 @@ def registry_record_url(spec, base=RELEASES_BASE):
     return f"{base}/{'rc' if rc else 'stable'}/{tag}/release.json"
 
 
+# The step contract (PRD novelcore/kaos#1911): the first kaos-lib a pipeline step can run with. A pipeline
+# rendered by this chart's engine gives a step one context and takes one result back, which kaos-lib reads
+# and writes from this version on.
+CONTRACT_MIN = "0.5"
+# The kaos-lib guide's page a new .kaos/compat.yaml points at, under the address the chart is given
+# (kaosLib.guideUrl).
+SUPPORT_WINDOW_PAGE = "support-window.html"
+
+
+def guide_page(guide_url, page):
+    return guide_url.rstrip("/") + "/" + page
+
+
 ARG_RE = re.compile(r"^\s*ARG\s+KAOS_LIB_PACKAGE(\s|=|$)", re.M)
 NONE = "none"  # pipeline-images kaos-lib-package: no step Dockerfile declares ARG KAOS_LIB_PACKAGE
 BUMP_PREFIX = "kaos-lib/bump-"
@@ -72,7 +87,7 @@ COMPAT_PATH = ".kaos/compat.yaml"
 COMPAT_KEY = "kaos-lib"
 # The checkout files read here (.kaos/compat.yaml, each step's Dockerfile) are the app's, untrusted:
 # a cap far above any real one (a template's step Dockerfile is well under 2 KB), so a huge or
-# endless file (a symlink to /dev/zero) is refused, not read. Same rule as engine.py _read_app_file.
+# endless file (a symlink to /dev/zero) is refused, not read.
 APP_FILE_MAX_BYTES = 64 * 1024
 EXIT_REFUSED = 5  # decide: a checkout file is there but not something to read as data
 
@@ -296,6 +311,66 @@ def bump_range(version):
     return f">={v[0]}.{v[1]},<{v[0] + 1}"
 
 
+# ---------------------------------------------------------------- the step contract
+
+def spec_version(spec):
+    """The version a spec installs; "" for a commit archive (it names no version) or an unreadable spec."""
+    for pattern in (REGISTRY_RE, RELEASE_RE, TAG_RE):
+        m = pattern.match(spec)
+        if m:
+            return m.group(3).lstrip("v")
+    if INDEX_RE.match(spec):
+        return spec.rsplit("==", 1)[1].strip()
+    return ""
+
+
+def on_contract(version):
+    """True when version is kaos-lib 0.5 or later (0.5.0rcN is part of 0.5), False when it is older, None
+    when it is not a released version: unknown is never refused."""
+    try:
+        return (parse_version(version) + [0])[:2] >= parse_version(CONTRACT_MIN)
+    except ValueError:
+        return None
+
+
+def accepts_contract(compat):
+    """The app's declared range admits the first release of the step contract."""
+    try:
+        return bool(compat) and contains(compat, CONTRACT_MIN + ".0")
+    except ValueError:
+        return False
+
+
+def crosses_contract(recorded, spec):
+    """The images were built with a kaos-lib from before the step contract and spec is on it: they cannot
+    run a pipeline of this engine, so they are not "stale, rebuilt on use"."""
+    return on_contract(spec_version(recorded)) is False and on_contract(spec_version(spec)) is True
+
+
+# What an app made before the current pipelines is told: the engine ends its refusals of such an app with the
+# same two sentences (kaos-hpc-operator engine step_contract.OLD_APP_NOTICE).
+OLD_APP_NOTICE = "This app was made before the current pipelines. Create it again from the template."
+
+
+def contract_check(spec, compat):
+    """{ok, message}: may a build install spec?
+
+    Refused: a spec older than the step contract for an app whose own range does not accept kaos-lib 0.5.
+    Its steps would be built with a kaos-lib that cannot read what the pipeline hands them. Not refused: a
+    spec with no readable version; and an app whose range already accepts 0.5 while the platform still
+    delivers the older spec (the build that reports the new range: the platform moves the app after it).
+    """
+    version = spec_version(spec)
+    if on_contract(version) is not False:
+        return {"ok": True, "message": ""}
+    if accepts_contract(compat):
+        return {"ok": True, "message": f"kaos-lib {version} is still delivered to this app; its {COMPAT_PATH} "
+                                       f"accepts {CONTRACT_MIN}, so the platform moves it after this build"}
+    return {"ok": False, "message":
+            f"It is built with kaos-lib {version}; the current pipelines need kaos-lib {CONTRACT_MIN} or newer. "
+            f"{OLD_APP_NOTICE}"}
+
+
 # ---------------------------------------------------------------- support verdict
 
 def support_json(ctx):
@@ -424,17 +499,17 @@ def fetch(url):
         return ""
 
 
-def compat_file(current, specifier):
+def compat_file(current, specifier, guide_url):
     """`.kaos/compat.yaml` with its kaos-lib line set to specifier; comments and other keys kept."""
     line = f'{COMPAT_KEY}: "{specifier}"'
     if current and re.search(rf"^{re.escape(COMPAT_KEY)}\s*:", current, re.M):
         return re.sub(rf"^{re.escape(COMPAT_KEY)}\s*:.*$", line, current, count=1, flags=re.M)
     head = ("# The kaos-lib versions this app's code works with: a PEP 440 version specifier.\n"
-            "# Written by the platform's bump pull request; see docs/kaos-lib-versions.md.\n")
+            f"# Written by the platform's bump pull request; see {guide_page(guide_url, SUPPORT_WINDOW_PAGE)}\n")
     return (current.rstrip("\n") + "\n" if current else head) + line + "\n"
 
 
-def bump(gh, slug, base, version, spec, default_changelog, log=print):
+def bump(gh, slug, base, version, spec, default_changelog, guide_url, log=print):
     """Open the ONE bump pull request for version, close the bump pull requests it supersedes.
 
     Idempotent: a pull request ever opened for this version's branch (open, closed or merged)
@@ -472,7 +547,7 @@ def bump(gh, slug, base, version, spec, default_changelog, log=print):
         if code == 200:
             current, sha = base64.b64decode(cur["content"]).decode(), cur["sha"]
         rng = bump_range(version)
-        new = compat_file(current, rng)
+        new = compat_file(current, rng, guide_url)
         if new != current:
             body = {"message": f"chore(kaos-lib): accept kaos-lib {version} ({rng})",
                     "content": base64.b64encode(new.encode()).decode(), "branch": branch}
@@ -501,7 +576,7 @@ def bump(gh, slug, base, version, spec, default_changelog, log=print):
                 f"- **Merge it** when you are ready: the push builds your step images with kaos-lib {version}.\n"
                 f"- **Close it** to stay on the version your images have: the platform opens no second pull request "
                 f"for {version}.\n\n"
-                f"Package: `{spec}`\n\n## Release notes\n\n"
+                + f"Package: `{spec}`\n\n## Release notes\n\n"
                 + (notes or f"No release notes for {version} were found at {url or 'the package changelog'}.")
                 + "\n\n🤖 Opened by the KubeCore platform (kaos-lib delivery).")
         code, pr = gh.call("POST", f"/repos/{slug}/pulls",
@@ -546,8 +621,12 @@ def main(argv=None):
     c.add_argument("--context", required=True)
     s = sub.add_parser("support")
     s.add_argument("--context", required=True)
+    k = sub.add_parser("contract")
+    k.add_argument("--spec", required=True)
+    k.add_argument("--recorded", default="")
+    k.add_argument("--compat", default="")
     b = sub.add_parser("bump")
-    for a in ("--slug", "--base", "--version", "--spec", "--changelog-url"):
+    for a in ("--slug", "--base", "--version", "--spec", "--changelog-url", "--guide-url"):
         b.add_argument(a, required=a != "--changelog-url", default="")
     b.add_argument("--token-file", default="/etc/github-token/token")
     args = ap.parse_args(argv)
@@ -577,8 +656,12 @@ def main(argv=None):
     elif args.cmd == "bump":
         with open(args.token_file) as f:
             gh = GitHub(f.read().strip())
-        json.dump(bump(gh, args.slug, args.base, args.version, args.spec, args.changelog_url,
+        json.dump(bump(gh, args.slug, args.base, args.version, args.spec, args.changelog_url, args.guide_url,
                        log=lambda m: print(m, file=sys.stderr)), sys.stdout)
+    elif args.cmd == "contract":
+        out = contract_check(args.spec.strip(), args.compat.strip())
+        out["crosses"] = crosses_contract(args.recorded.strip(), args.spec.strip())
+        json.dump(out, sys.stdout)
     return 0
 
 
