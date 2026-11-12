@@ -97,7 +97,7 @@ def _read_app_file(repo, rel):
     path = os.path.join(repo, rel)
     try:
         st = os.lstat(path)
-    except FileNotFoundError:
+    except (FileNotFoundError, NotADirectoryError):  # no such file (or `kubecore` is not a directory)
         return None
     except OSError as exc:
         raise EngineError(f"{rel}: cannot stat ({exc.strerror})", EXIT_PROFILE) from exc

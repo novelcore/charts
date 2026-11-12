@@ -192,6 +192,12 @@ def test_a_symlinked_kubecore_dir_is_refused(tmp_path):
         engine.profile_of(repo)
 
 
+def test_a_kubecore_file_is_no_vendored_schema(tmp_path):
+    repo = make_app(tmp_path)
+    (tmp_path / "repo" / "kubecore").write_text("not a directory\n")
+    assert engine.profile_of(repo) == "yolo"
+
+
 def test_a_fifo_derive_tree_is_refused_not_waited_on(tmp_path):
     repo = make_app(tmp_path)
     os.makedirs(os.path.join(repo, "kubecore"))
