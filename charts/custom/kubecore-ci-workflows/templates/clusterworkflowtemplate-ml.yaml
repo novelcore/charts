@@ -8,7 +8,7 @@ step) on push/PR to an ML app repo (pipeline.py + config/ + steps/<name>/).
 Flow:
   clone → detect-steps → version → render-hera → build-push (matrix) → patch-images → tag → status
 
-An app that has not moved to the step contract (PRD novelcore/kaos#1911 AC-01) fails before anything is
+An app made before the current pipelines (PRD novelcore/kaos#1911 AC-01) fails before anything is
 recorded: at detect-steps when its kaos-lib is older than 0.5, at the render when its pipeline.py is. No
 image is built, nothing is committed, and the exit handler reports what to change.
 
@@ -631,11 +631,11 @@ spec:
         # is let through with an older spec is the one whose commit already
         # accepts 0.5: it reports the new range, and the platform then delivers
         # 0.5 (its record is how the platform learns the range).
-{{ include "kubecore-ci-workflows.notMigrated" . | indent 8 }}
+{{ include "kubecore-ci-workflows.oldApp" . | indent 8 }}
         python3 -I /tmp/kaos-lib.py contract --spec "$(jq -r '.spec' /tmp/kaos_lib.json)" --recorded "$KL_REC" \
-          --compat "$(jq -r '.compat' /tmp/kaos_lib.json)" --guide-url "{{ .Values.kaosLib.guideUrl }}" > /tmp/kaos_lib_contract.json
+          --compat "$(jq -r '.compat' /tmp/kaos_lib.json)" > /tmp/kaos_lib_contract.json
         if [ "$(jq -r '.ok' /tmp/kaos_lib_contract.json)" != "true" ]; then
-          not_migrated "$(jq -r '.message' /tmp/kaos_lib_contract.json)"
+          old_app "$(jq -r '.message' /tmp/kaos_lib_contract.json)"
           exit 1
         fi
         # STALE, REBUILT ON USE: a reconcile-submitted build that is not the
@@ -1205,13 +1205,13 @@ spec:
           python -m pip freeze --exclude-editable > /tmp/engine-constraints.txt
           python -m pip install --quiet -c /tmp/engine-constraints.txt -r /tmp/extra-deps.txt
         fi
-        # NOT MIGRATED (PRD novelcore/kaos#1911 AC-01): the engine refuses a pipeline.py written for the
-        # step contract of kaos-lib 0.4 (outputs=, hpc_time_limit=, a step without kind=) with a message
-        # that says what to write and ends with its migration guide's address (the engine's
-        # authoring-schema.json, migration_guide). That address is how such a refusal is told from any
-        # other failed render; the message, without the address, is what the report shows (the chart
-        # links the guide it is configured with).
-{{ include "kubecore-ci-workflows.notMigrated" . | indent 8 }}
+        # OLD APP (PRD novelcore/kaos#1911 AC-01): the engine refuses an app made before the current
+        # pipelines (outputs=, hpc_time_limit=, disk=, a step without kind=, a `platform` config group,
+        # a kubecore/ folder) with one sentence that says what is wrong, ending "Create it again from the
+        # template." (the engine's authoring-schema.json, old_app_marker). That sentence is how such a
+        # refusal is told from any other failed render; the message is what the report shows. No app is
+        # moved: there is no guide to link.
+{{ include "kubecore-ci-workflows.oldApp" . | indent 8 }}
         set +e
         python -I -m kaos_engine.render pipeline.py --repo /workspace/repo --profile "${ENGINE_PROFILE}" 2> /tmp/render.err
         RENDER_RC=$?
@@ -1221,14 +1221,14 @@ spec:
           REFUSAL=$(python -I - /tmp/render.err <<'REFUSALEOF'
         import importlib.util, json, pathlib, re, sys
         schema = pathlib.Path(importlib.util.find_spec("kaos_pipeline_engine").origin).parent / "authoring-schema.json"
-        guide = json.loads(schema.read_text())["migration_guide"]
+        marker = json.loads(schema.read_text())["old_app_marker"]
         for line in reversed(pathlib.Path(sys.argv[1]).read_text(errors="replace").splitlines()):
-            if guide and guide in line:
-                print(re.sub(r"^[\w.]+(Error|Exception): ", "", line).replace("See " + guide, "").strip())
+            if marker and marker in line:
+                print(re.sub(r"^[\w.]+(Error|Exception): ", "", line).strip())
                 break
         REFUSALEOF
           ) || REFUSAL=""
-          [ -z "${REFUSAL}" ] || not_migrated "${REFUSAL}"
+          [ -z "${REFUSAL}" ] || old_app "${REFUSAL}"
           exit "${RENDER_RC}"
         fi
         # pipeline.py writes out/raw-workflow-template.yaml under the repo; move it
@@ -1435,7 +1435,7 @@ spec:
         # renamed step): otherwise the ConfigMap — and the image parameters the
         # submit form derives from it — keep stale entries forever
         # (kubecore-operator#1126, ml-dev-loop e2e "delete"/"rename").
-        removed = [k for k in list(data) if k not in ("last-built-sha", "context-sha", "engine-version", "engine-compose", "engine-last-error", "engine-attempt", "dataset-sha", "wft-bytes", "kaos-lib-package", "kaos-lib-compat") and k not in wanted]
+        removed = [k for k in list(data) if k not in ("last-built-sha", "context-sha", "engine-version", "engine-compose", "engine-last-error", "engine-attempt", "dataset-sha", "wft-bytes", "kaos-lib-package", "kaos-lib-compat", "produced-datasets") and k not in wanted]
         for k in removed:
             del data[k]
         context_moved = bool(context_sha) and data.get("context-sha") != context_sha
@@ -1643,6 +1643,7 @@ spec:
         APP_NAME="{{`{{workflow.parameters.app_name}}`}}"
         IMAGE_TAG="{{`{{inputs.parameters.image_tag}}`}}"
         BRANCH=$(echo "{{`{{workflow.parameters.branch}}`}}" | sed 's|^refs/heads/||')
+{{ include "kubecore-ci-workflows.engineScript" . | indent 8 }}
 
         REGISTRY="{{`{{workflow.parameters.registry_url}}`}}"
         if [ -z "$REGISTRY" ]; then REGISTRY="{{ .Values.registry.externalUrl }}"; fi
@@ -1739,6 +1740,7 @@ spec:
             [ "${KEY}" = "wft-bytes" ] && continue
             [ "${KEY}" = "kaos-lib-package" ] && continue
             [ "${KEY}" = "kaos-lib-compat" ] && continue
+            [ "${KEY}" = "produced-datasets" ] && continue
             CUR_VALUE=$(yq e ".data.\"${KEY}\"" "${IMAGES_PATH}")
             BASE="${CUR_VALUE%%@*}"
             TAG="${BASE##*:}"
@@ -1795,6 +1797,16 @@ spec:
           echo "Recording engine-compose = ${ENGINE_COMPOSE}"
           yq e -i '.data."engine-compose" = strenv(ENGINE_COMPOSE)' "${IMAGES_PATH}"
         fi
+
+        # produced-datasets (PRD novelcore/kaos#1911): the short names of the datasets the pipeline
+        # produces (the name inside dataset("...")), sorted, comma separated, "" when it produces none.
+        # The operator reads it to tell the lake which datasets the app may write. Read from the step
+        # table of the committed WorkflowTemplate, never from pipeline.py. Written on every build that
+        # records images, never omitted; a committed render without a step table fails the step
+        # (engine.py produced, exit 6) and records nothing.
+        PRODUCED=$(python3 -I /tmp/engine.py produced --wft "$(dirname "${IMAGES_PATH}")/workflow-template.yaml")
+        echo "Recording produced-datasets = ${PRODUCED:-<none>}"
+        PRODUCED="${PRODUCED}" yq e -i '.data."produced-datasets" = strenv(PRODUCED)' "${IMAGES_PATH}"
 
         git config user.name "KubeCore CI"
         git config user.email "ci@kubecore.io"
@@ -2098,10 +2110,10 @@ spec:
   # enhanced or built the compose image clears both. Any other run leaves them as they are. The operator reads
   # engine-last-error to show state `failed`. Reporting only: the caller continues on failure.
   #
-  # NOT MIGRATED (PRD novelcore/kaos#1911 AC-01, T-05): a run that was refused because the app is still on
-  # the step contract of kaos-lib 0.4 left /workspace/not-migrated (kubecore-ci-workflows.notMigrated). For
-  # that run this step also (1) replaces the commit status with one that says so and links the guide,
-  # (2) records `engine-last-error` = "not migrated (<guide>): <what to change>", and (3) records
+  # OLD APP (PRD novelcore/kaos#1911 AC-01, T-05): a run that was refused because the app was made
+  # before the current pipelines left /workspace/old-app (kubecore-ci-workflows.oldApp). For
+  # that run this step also (1) replaces the commit status with one that says so,
+  # (2) records `engine-last-error` = "<old-app sentence> <reason>", and (3) records
   # `engine-attempt` as <engine version>@<epoch>@<commit>@<kaos-lib>, which ml-ci-reconcile reads as "do
   # not build this commit again with this engine and this kaos-lib": trying again cannot help, the app
   # must change. Nothing else is recorded: no engine-version, no last-built-sha, no image.
@@ -2124,27 +2136,35 @@ spec:
         PHASE="{{`{{workflow.status}}`}}"
         SHA="{{`{{workflow.parameters.commit_sha}}`}}"
 
-        # NOT MIGRATED: what the refused step left (one line, data: bounded and stripped again here).
+        # OLD APP: what the refused step left (one line, the reason: data, bounded and stripped again here).
         REFUSED=""
-        if [ "${PHASE}" != Succeeded ] && [ -s /workspace/not-migrated ]; then
-          REFUSED=$(head -1 /workspace/not-migrated | tr -d '\000-\037\177' | cut -c1-600)
+        if [ "${PHASE}" != Succeeded ] && [ -s /workspace/old-app ]; then
+          REFUSED=$(head -1 /workspace/old-app | tr -d '\000-\037\177' | cut -c1-600)
+          OLD_APP="{{ include "kubecore-ci-workflows.oldAppStatus" . }}"
         fi
-        if [ -n "${REFUSED}" ]; then
-          echo "engine-record: the app has not moved to the step contract: ${REFUSED}"
-          # The commit status the app's engineer reads: what happened and the guide, which the check
-          # links too. It replaces the generic failure status posted just before this step.
+        if [ -n "${OLD_APP:-}" ]; then
+          echo "engine-record: the app was made before the current pipelines: ${REFUSED}"
+          # The commit status the app's engineer reads: what happened and what to do, with the engine's
+          # reason where it fits GitHub's 140 characters. It replaces the generic failure status posted
+          # just before this step and links the run report, as that one does.
           OWNER_REPO=$(echo "{{`{{workflow.parameters.repo_url}}`}}" | sed 's|https://github.com/||; s|\.git$||')
           API="https://api.github.com/repos/${OWNER_REPO}"
           AUTH="Authorization: token ${TOKEN}"
           ACCEPT="Accept: application/vnd.github+json"
+          ARGO_BASE="{{ .Values.argo.uiBaseUrl }}"
+          RUN_URL=""
+          if [ -n "${ARGO_BASE}" ]; then
+            RUN_URL="${ARGO_BASE}/workflows/{{`{{workflow.namespace}}`}}/{{`{{workflow.name}}`}}?uid={{`{{workflow.uid}}`}}"
+          fi
+          DESC="${OLD_APP}"
+          [ -z "${REFUSED}" ] || [ $(( ${#OLD_APP} + 1 + ${#REFUSED} )) -gt 140 ] || DESC="${OLD_APP} ${REFUSED}"
 {{ include "kubecore-ci-workflows.ghApi" . | indent 10 }}
-          PAYLOAD=$(jq -nc --arg d "{{ include "kubecore-ci-workflows.notMigratedStatus" . }}" \
-            --arg u "{{ include "kubecore-ci-workflows.migrationGuideUrl" . }}" \
-            '{state: "failure", description: ($d | .[0:140]), context: "kubecore-ml-ci", target_url: $u}')
+          PAYLOAD=$(jq -nc --arg d "${DESC}" --arg u "${RUN_URL}" \
+            '{state: "failure", description: ($d | .[0:140]), context: "kubecore-ml-ci"} + (if $u == "" then {} else {target_url: $u} end)')
           if gh_api POST "${API}/statuses/${SHA}" "${PAYLOAD}"; then
-            echo "engine-record: posted commit status kubecore-ml-ci=failure (not migrated) on ${OWNER_REPO}@${SHA}"
+            echo "engine-record: posted commit status kubecore-ml-ci=failure (old app) on ${OWNER_REPO}@${SHA}"
           else
-            echo "engine-record: WARN the not-migrated commit status was not posted (HTTP ${GH_CODE}); the report comment still says what to change" >&2
+            echo "engine-record: WARN the old-app commit status was not posted (HTTP ${GH_CODE}); the report comment still says what to change" >&2
           fi
         fi
 
@@ -2190,8 +2210,8 @@ spec:
 
         # A run that Succeeded has no engine error (belt and braces next to the last-attempt rule).
         [ "${PHASE}" = Succeeded ] && ERROR=""
-        if [ -n "${REFUSED}" ]; then
-          ERROR=$(printf 'not migrated (%s): %s' "{{ include "kubecore-ci-workflows.migrationGuideUrl" . }}" "${REFUSED}" | cut -c1-200)
+        if [ -n "${OLD_APP:-}" ]; then
+          ERROR=$(printf '%s %s' "${OLD_APP}" "${REFUSED}" | sed 's/ *$//' | cut -c1-200)
         fi
         if [ -z "${ERROR}" ] && [ "${PHASE}" != Succeeded ]; then
           echo "engine-record: the run ended ${PHASE} outside the engine stages — nothing to record"
@@ -2212,7 +2232,7 @@ spec:
         [ -n "${IMAGES_PATH}" ] && [ -f "${IMAGES_PATH}" ] || { echo "engine-record: pipeline-images.yaml not found — nothing to record"; exit 0; }
 {{ include "kubecore-ci-workflows.engineScript" . | indent 8 }}
         if [ -n "${ERROR}" ]; then
-          ATTEMPT=$(python3 -I /tmp/engine.py attempt --context "${CONTEXT_PATH:-/dev/null}" ${REFUSED:+--refused-commit "${SHA}"})
+          ATTEMPT=$(python3 -I /tmp/engine.py attempt --context "${CONTEXT_PATH:-/dev/null}" ${OLD_APP:+--refused-commit "${SHA}"})
           ENGINE_ERROR="${ERROR}" ENGINE_ATTEMPT="${ATTEMPT}" \
             yq e -i '.data."engine-last-error" = strenv(ENGINE_ERROR) | .data."engine-attempt" = strenv(ENGINE_ATTEMPT)' "${IMAGES_PATH}"
           echo "engine-record: ${ERROR}"
@@ -2237,7 +2257,7 @@ spec:
         done
         [ -n "$pushed" ] || { echo "engine-record: could not push after 5 attempts"; exit 1; }
       volumeMounts:
-      # Read-only: /workspace/not-migrated, left by the step that refused the app.
+      # Read-only: /workspace/old-app, left by the step that refused the app.
       - name: workspace
         mountPath: /workspace
         readOnly: true

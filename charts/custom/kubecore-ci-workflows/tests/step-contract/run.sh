@@ -1,20 +1,21 @@
 #!/usr/bin/env bash
-# An app is never left half-moved by the step contract (PRD novelcore/kaos#1911 AC-01, T-05, F-05).
+# An old app is refused before anything is recorded (PRD novelcore/kaos#1911 AC-01, T-05, F-05).
 #
-# The wave changes every app once: pipeline.py gets kind=, inputs= and produces= (outputs= and
-# hpc_time_limit= are gone), a step takes no arguments, and kaos-lib is 0.5 or newer. An app that has not
-# moved must fail BEFORE anything is recorded, with what to change and the guide's address, where its
-# engineer already looks; the pipeline it had keeps running. The parts are tested where their harness is:
+# The wave changes every app: pipeline.py gets kind=, inputs= and produces= (outputs= and hpc_time_limit=
+# are gone), a step takes no arguments, and kaos-lib is 0.5 or newer. No app is moved: an app made before it
+# is created again from the template. It must fail BEFORE anything is recorded, with the engine's one-sentence
+# reason and "Create it again from the template.", where its engineer already looks; the pipeline it had keeps
+# running. The parts are tested where their harness is:
 #
 #   tests/engine-ci      detect-steps refuses a kaos-lib older than 0.5; hera-render reports the engine's
 #                        refusal; engine-record posts the commit status and writes the one-attempt record
 #   tests/engine-drift   ml-ci-reconcile builds a refused commit once, not every poll
 #   tests/render-order   the render is a group of its own before the image builds
-#   tests/kaos-lib       the kaos-lib check itself and the bump pull request across 0.5
+#   tests/kaos-lib       the kaos-lib check itself and the bump pull request
 #   tests/engine         the step table (a render without one is not from an engine on the step contract)
 #   tests/connections    the step table and the pickers on real engine output
 #
-# This suite holds the rest: the pull request check's status for an app that has not moved, the wording
+# This suite holds the rest: the pull request check's status for an old app, the wording
 # (no platform internals, GitHub's 140 characters), where the step table is read, and, with a real
 # engine, the whole refusal: the chart's own hera-render script run against apps on the old contract.
 #
@@ -38,8 +39,7 @@ APPS="${HERE}/../connections/fixtures/apps"
 FAILED=0
 PASSED=0
 SKIPPED=0
-GUIDE="https://storage.googleapis.com/kaos-dev-511509-kaos-lib/docs/migrate-to-0.5.html"
-STATUS_TEXT="Not built: this app must move to kaos-lib 0.5. Guide: ${GUIDE}"
+STATUS_TEXT="Not built: this app was made before the current pipelines. Create it again from the template."
 INTERNALS="Argo argo workflow Workflow namespace cluster kubectl ConfigMap gitops Kubernetes pod"
 
 expect_eq() {
@@ -70,14 +70,15 @@ script() {  # script WORKFLOW TEMPLATE: the main container's script of a templat
 
 # ── the wording ──────────────────────────────────────────────────────────────
 
-expect_eq "$(grep -c -F "$STATUS_TEXT" "$RENDERED")" "2" "the not-migrated commit status is one text, used by the build and by the pull request check"
+expect_eq "$(grep -c -F "$STATUS_TEXT" "$RENDERED")" "2" "the old-app commit status is one text, used by the build and by the pull request check"
 expect_eq "$(( ${#STATUS_TEXT} <= 140 ))" "1" "it fits GitHub's 140 characters (${#STATUS_TEXT})"
-REFUSAL_FN=$(script ml-ci-build hera-render | awk '/^not_migrated\(\) \{/{f=1} f{print} f&&/^}/{exit}')
-expect_has "$REFUSAL_FN" "$GUIDE" "the report section links the guide of kaos-lib"
+REFUSAL_FN=$(script ml-ci-build hera-render | awk '/^old_app\(\) \{/{f=1} f{print} f&&/^}/{exit}')
+expect_has "$REFUSAL_FN" "Create it again from the template." "the report section says to create the app again"
+expect_not "$REFUSAL_FN" "http" "... and links no guide (no app is moved)"
 for WORD in $INTERNALS; do
   expect_not "$STATUS_TEXT $REFUSAL_FN" "$WORD" "what the app's engineer reads does not name the platform's internals ($WORD)"
 done
-expect_eq "$(script ml-ci-build detect-steps | grep -c '^not_migrated() {')" "1" "detect-steps reports the same way (a kaos-lib older than 0.5)"
+expect_eq "$(script ml-ci-build detect-steps | grep -c '^old_app() {')" "1" "detect-steps reports the same way (a kaos-lib older than 0.5)"
 expect_eq "$(yq 'select(.metadata.name == "ml-ci-build") | .spec.templates[] | select(.name == "engine-record") | .container.volumeMounts[] | select(.name == "workspace") | .readOnly' "$RENDERED")" \
   "true" "engine-record reads the refusal from the workspace, read-only"
 expect_has "$(script ml-ci-build report)" 'if [ -s /workspace/report-extra.md ]; then cat /workspace/report-extra.md' "the report comment carries the section the refused step left"
@@ -100,7 +101,7 @@ STATUS_SRC="${BASE_TMP}/pr-status.src"; script ml-ci-pr-render status > "$STATUS
 run_pr_status() {  # run_pr_status STATE DESCRIPTION [refused]
   T=$(mktemp -d "${BASE_TMP}/pr-XXXXXX"); mkdir -p "$T/bin" "$T/workspace"; printf 'token' > "$T/token"
   printf '2 steps, 9 KiB' > "$T/workspace/summary"
-  [ "${3:-}" = refused ] && printf "step 'x' has no kind=.\n\",\"state\":\"success\n" > "$T/workspace/not-migrated"
+  [ "${3:-}" = refused ] && printf "step 'x' has no kind=.\n\",\"state\":\"success\n" > "$T/workspace/old-app"
   cat > "$T/bin/curl" <<CURLEOF
 #!/usr/bin/env bash
 while [ \$# -gt 0 ]; do [ "\$1" = -d ] && printf '%s' "\$2" > "$T/payload"; shift; done
@@ -114,15 +115,15 @@ CURLEOF
   PAYLOAD=$(cat "$T/payload" 2>/dev/null)
 }
 run_pr_status failure "WorkflowTemplate render FAILED" refused
-expect_eq "$RC" "0" "pull request check (not migrated): the status step runs"
+expect_eq "$RC" "0" "pull request check (old app): the status step runs"
 expect_eq "$(printf '%s' "$PAYLOAD" | jq -r '.state + "|" + .context + "|" + .description')" "failure|wft-render|${STATUS_TEXT}" \
-  "pull request check (not migrated): the check fails with why and where the guide is"
-expect_eq "$(printf '%s' "$PAYLOAD" | jq -r '.target_url')" "$GUIDE" "pull request check (not migrated): the check links the guide"
-expect_eq "$(printf '%s' "$PAYLOAD" | jq -r 'keys | join(",")')" "context,description,state,target_url" "pull request check (not migrated): nothing the render wrote reaches the request (the description is the chart's text)"
+  "pull request check (old app): the check fails with why and what to do"
+expect_eq "$(printf '%s' "$PAYLOAD" | jq -r '.target_url // "none"')" "none" "pull request check (old app): no guide is linked (the run report is, when the platform has an address for it)"
+expect_eq "$(printf '%s' "$PAYLOAD" | jq -r 'keys | join(",")')" "context,description,state" "pull request check (old app): nothing the render wrote reaches the request (the description is the chart's text)"
 run_pr_status failure "WorkflowTemplate render FAILED"
 expect_eq "$(printf '%s' "$PAYLOAD" | jq -r '.description')" "WorkflowTemplate render FAILED" "pull request check: any other failure keeps its own description"
 run_pr_status success "@/workspace/summary" refused
-expect_eq "$(printf '%s' "$PAYLOAD" | jq -r '.state + "|" + .description')" "success|2 steps, 9 KiB" "pull request check: a render that succeeded is never reported as not migrated"
+expect_eq "$(printf '%s' "$PAYLOAD" | jq -r '.state + "|" + .description')" "success|2 steps, 9 KiB" "pull request check: a render that succeeded is never reported as an old app"
 expect_eq "$(yq 'select(.metadata.name == "ml-ci-pr-render") | .spec.templates[] | select(.name == "ml-ci-pr-render") | .steps[][] | select(.name == "hera-render") | .templateRef.template' "$RENDERED")" \
   "hera-render" "pull request check: it renders with the build's hera-render, so it refuses the same apps the same way"
 
@@ -136,7 +137,7 @@ real_render() {
   printf '#!/bin/sh\nexec "%s" "$@"\n' "$1" > "$T/bin/python"; chmod +x "$T/bin/python"
   { echo 'set -e'; sed -e "s#/tmp/#$T/#g" -e "s#/workspace#$T/workspace#g" -e "s#{{inputs.parameters.engine_image}}#local-engine#g" "$RENDER_SRC"; } > "$T/render.sh"
   OUT=$(cd "$T" && PATH="$T/bin:$PATH" ENGINE_PROFILE="${3:-hera}" sh "$T/render.sh" 2>&1); RC=$?
-  NM=$(cat "$T/workspace/not-migrated" 2>/dev/null)
+  NM=$(cat "$T/workspace/old-app" 2>/dev/null)
 }
 # old_app NAME PIPELINE_BODY: the hera fixture app with a pipeline.py from before the step contract.
 old_app() {
@@ -149,10 +150,12 @@ refused_like() {  # refused_like LABEL EXPECTED_TEXT: the asserts every refused 
   expect_eq "$([ "$RC" != 0 ] && echo failed)" "failed" "$1: the render fails"
   expect_eq "$(ls "$T/workspace/out/raw-workflow-template.yaml" 2>/dev/null)" "" "$1: nothing is rendered, so nothing can be enhanced, committed or built"
   expect_has "$NM" "$2" "$1: the report says what to change"
-  expect_not "$NM" "https://" "$1: ... without the engine's own address"
+  expect_not "$NM" "https://" "$1: ... with no address in it"
+  expect_not "$NM" "Create it again" "$1: ... and without the old-app sentence (the chart says it once)"
   expect_not "$NM" "Error: " "$1: ... and without the exception name"
-  expect_has "$(cat "$T/workspace/report-extra.md" 2>/dev/null)" "$GUIDE" "$1: the report links the guide of kaos-lib"
-  expect_has "$OUT" "kaos-ci: NOT MIGRATED: " "$1: one line of the step log says so"
+  expect_has "$(cat "$T/workspace/report-extra.md" 2>/dev/null)" "Create it again from the template." "$1: the report says to create the app again"
+  expect_not "$(cat "$T/workspace/report-extra.md" 2>/dev/null)" "http" "$1: ... and links no guide"
+  expect_has "$OUT" "kaos-ci: OLD APP: " "$1: one line of the step log says so"
 }
 
 if [ -z "${ENGINE_PYTHON:-}" ]; then
@@ -160,22 +163,30 @@ if [ -z "${ENGINE_PYTHON:-}" ]; then
 else
   real_render "$ENGINE_PYTHON" "${APPS}/hera" hera
   expect_eq "$RC" "0" "real engine, an app on the step contract (hera shape): renders"
-  expect_eq "$(ls "$T/workspace/not-migrated" 2>/dev/null)" "" "real engine, an app on the step contract: is not reported as not moved"
+  expect_eq "$(ls "$T/workspace/old-app" 2>/dev/null)" "" "real engine, an app on the step contract: is not reported as not moved"
   expect_has "$(cat "$T/workspace/out/raw-workflow-template.yaml" 2>/dev/null)" "KAOS_STEP_CONTEXT" "real engine: ... and its steps get the step context"
   real_render "$ENGINE_PYTHON" "${APPS}/yolo" yolo
   expect_eq "$RC" "0" "real engine, an app on the step contract (yolo shape): renders"
 
   old_app no-kind '    step("hello-world", reads=["experiment", "dataset"])'
   real_render "$ENGINE_PYTHON" "${BASE_TMP}/apps/no-kind"
-  refused_like "real engine, a step without kind= (every app from before the step contract)" "step 'hello-world' has no kind=. Every step declares what it does: kind= is one of ingest, transform, train, evaluate, publish, control"
+  refused_like "real engine, a step without kind= (every app from before the step contract)" "step 'hello-world' has no kind="
   old_app outputs '    step("hello-world", kind="transform", reads=["experiment"], outputs=["hello-result"])'
   real_render "$ENGINE_PYTHON" "${BASE_TMP}/apps/outputs"
-  refused_like "real engine, outputs=" "step 'hello-world': outputs= was removed. A step hands its values on with kaos_lib.step.result(...)"
+  refused_like "real engine, outputs=" "step 'hello-world': outputs= is no longer part of step()."
   old_app time-limit '    step("hello-world", kind="train", reads=["experiment"], hpc_time_limit="12h")'
   real_render "$ENGINE_PYTHON" "${BASE_TMP}/apps/time-limit"
-  refused_like "real engine, hpc_time_limit=" "step 'hello-world': hpc_time_limit= was removed. Write walltime= with the same value (walltime='12h')."
+  refused_like "real engine, hpc_time_limit=" "step 'hello-world': hpc_time_limit= is no longer part of step()."
 
-  # Not a migration: a mistake in a pipeline on the step contract is the engine's own error, nothing more.
+  old_app disk '    step("hello-world", kind="transform", reads=["experiment"], disk="20Gi")'
+  real_render "$ENGINE_PYTHON" "${BASE_TMP}/apps/disk"
+  refused_like "real engine, disk=" "step 'hello-world': disk is no longer declared"
+  old_app platform '    step("hello-world", kind="transform", reads=["experiment"])'
+  printf '  - platform: live\n' >> "${BASE_TMP}/apps/platform/config/config.yaml"
+  real_render "$ENGINE_PYTHON" "${BASE_TMP}/apps/platform"
+  refused_like "real engine, the removed platform config group" "config/config.yaml lists"
+
+  # Not an old app: a mistake in a pipeline on the step contract is the engine's own error, nothing more.
   old_app unknown-kind '    step("hello-world", kind="training", reads=["experiment"])'
   real_render "$ENGINE_PYTHON" "${BASE_TMP}/apps/unknown-kind"
   expect_eq "$([ "$RC" != 0 ] && echo failed)/$NM" "failed/" "real engine, a wrong kind= on a moved app: fails the render and is not reported as an app that has not moved"
@@ -248,7 +259,7 @@ PY
     real_render "$OLD_ENGINE_PYTHON" "${BASE_TMP}/apps/old-app"
     expect_eq "$RC" "0" "old engine, an old app: the old engine still renders it"
     python3 -I "${CHART}/files/engine.py" steps --wft "$T/workspace/out/raw-workflow-template.yaml" > "$T/steps.json" 2> "$T/steps.err"
-    expect_eq "$?" "5" "old engine, an old app: ... and the chart refuses the render (no step table), so it is never committed"
+    expect_eq "$?" "6" "old engine, an old app: ... and the chart refuses the render (no step table), so it is never committed"
     expect_has "$(cat "$T/steps.err")" "not on the step contract" "old engine: ... saying the engine is not on the step contract"
   fi
 fi

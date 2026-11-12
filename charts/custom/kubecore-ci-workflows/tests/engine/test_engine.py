@@ -398,6 +398,55 @@ def test_a_render_without_the_compose_step_has_no_step_table(tmp_path):
     assert err.value.code == engine.EXIT_NO_CONTRACT
 
 
+# ---------------------------------------------------------------- produced datasets (pipeline-images record)
+
+def dataset_table(*produced):
+    """A step table whose steps produce the given (name, type) pairs, one step per pair."""
+    return [{"name": f"s{i}", "kind": "transform", "reads": [], "inputs": [], "needs": [],
+             "produces": [{"name": n, "type": t}]} for i, (n, t) in enumerate(produced)]
+
+
+def produced_of(tmp_path, table):
+    return engine.produced_datasets(engine.step_table(write_wft(tmp_path, ["--steps", json.dumps(table)])))
+
+
+def test_the_produced_datasets_are_the_short_names_sorted_and_comma_separated(tmp_path):
+    table = dataset_table(("features", "dataset"), ("model", "model"), ("clean", "dataset"), ("report", "artifact"))
+    assert produced_of(tmp_path, table) == "clean,features"
+
+
+def test_a_pipeline_that_produces_no_dataset_has_an_empty_record(tmp_path):
+    assert produced_of(tmp_path, dataset_table(("model", "model"), ("report", "artifact"))) == ""
+    assert produced_of(tmp_path, []) == ""
+    assert produced_of(tmp_path, [{"name": "gate", "kind": "control", "reads": [], "inputs": [], "needs": []}]) == ""
+
+
+def test_a_name_is_listed_once(tmp_path):
+    assert produced_of(tmp_path, dataset_table(("clean", "dataset"), ("clean", "dataset"))) == "clean"
+
+
+def test_cli_produced_prints_the_record(tmp_path, capsys):
+    table = dataset_table(("features", "dataset"), ("clean", "dataset"))
+    assert engine.main(["produced", "--wft", write_wft(tmp_path, ["--steps", json.dumps(table)])]) == 0
+    assert capsys.readouterr().out == "clean,features\n"
+    assert engine.main(["produced", "--wft", write_wft(tmp_path, ["--steps", json.dumps([])])]) == 0
+    assert capsys.readouterr().out == "\n"
+
+
+@pytest.mark.parametrize("produces", ["clean", [{"name": "clean"}], [{"type": "dataset"}], [{"name": 3, "type": "dataset"}]])
+def test_a_produces_entry_that_is_not_a_name_and_a_type_is_not_a_step_table_of_the_contract(tmp_path, produces):
+    table = [{"name": "a", "kind": "transform", "reads": [], "inputs": [], "needs": [], "produces": produces}]
+    with pytest.raises(engine.EngineError) as err:
+        produced_of(tmp_path, table)
+    assert err.value.code == engine.EXIT_NO_CONTRACT
+
+
+def test_a_render_without_a_step_table_records_nothing(tmp_path, capsys):
+    assert engine.main(["produced", "--wft", write_wft(tmp_path, ["--advanced", "x"])]) == engine.EXIT_NO_CONTRACT
+    out = capsys.readouterr()
+    assert out.out == "" and "engine: FATAL" in out.err
+
+
 # ---------------------------------------------------------------- engine-attempt (one try per refusal)
 
 COMMIT = "c" * 40

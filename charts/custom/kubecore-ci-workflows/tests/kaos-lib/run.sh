@@ -216,6 +216,9 @@ run_patch() {  # run_patch RECORD COMPAT
   printf 'token' > "$T/token"
   printf 'kind: ConfigMap\nmetadata: {name: app1-pipeline-images}\ndata: {last-built-sha: old, a: "reg/app:a-1"}\n' \
     > "$T/seed/kubeapps/${APP}/main/pipeline-images.yaml"
+  # the committed render the build records the produced datasets from (its compose step's step table)
+  printf '{"kind": "WorkflowTemplate", "spec": {"templates": [{"name": "compose-and-validate", "container": {"image": "x", "args": ["--steps", "[]"]}}]}}\n' \
+    > "$T/seed/kubeapps/${APP}/main/workflow-template.yaml"
   git init -q --bare -b main "$T/origin.git"
   ( cd "$T/seed" && git init -q -b main && git add -A && git -c user.email=t@t -c user.name=t commit -qm seed \
       && git push -q "$T/origin.git" main )
@@ -255,7 +258,7 @@ drift_case() {  # drift_case RECORDED(-=absent) CONTEXT_SPEC(-=none); RUN_AGE = 
   CTX_SHA=$(sha256sum < "$T/gitops-context.yaml" | cut -c1-64)
   printf '{"items": []}' > "$T/workflows.json"
   printf 'computeClasses:\n  cpu:\n    allocatable:\n      memoryGiB: 13\nmlEnvironment:\n  name: train\n' > "$T/context.yaml"
-  printf '{"spec": {"arguments": {"parameters": [{"name": "a-mem", "value": "13Gi"}]}, "templates": [{"nodeSelector": {"platform.kubecore.io/environment": "train"}}]}}' > "$T/wft.json"
+  printf '{"spec": {"templates": [{"name": "compose-and-validate", "inputs": {"parameters": [{"name": "mem", "default": "13Gi"}]}}, {"nodeSelector": {"platform.kubecore.io/environment": "train"}}]}}' > "$T/wft.json"
   jq -n --arg head "$HEAD_SHA" --arg ctx "$CTX_SHA" --arg rec "$1" \
     '{data: ({"last-built-sha": $head, "context-sha": $ctx}
              + (if $rec == "-" then {} else {"kaos-lib-package": $rec} end))}' > "$T/cm.json"
@@ -418,7 +421,7 @@ expect_eq "$REQUIRED" "app project_name version spec" "kaos-lib-bump-pr: app, pr
 BUMP=$(src kaos-lib-bump-pr bump)
 expect_not "$BUMP" "{{workflow.parameters" "kaos-lib-bump-pr: parameters reach the script as env vars only"
 expect_has "$BUMP" "kaos-lib.py bump" "kaos-lib-bump-pr: runs the tested bump"
-expect_has "$BUMP" '--guide-url "https://storage.googleapis.com/kaos-dev-511509-kaos-lib/docs"' "kaos-lib-bump-pr: the bump is given the kaos-lib guide (the migration page across 0.5, the support window in a new compat file)"
+expect_has "$BUMP" '--guide-url "https://storage.googleapis.com/kaos-dev-511509-kaos-lib/docs"' "kaos-lib-bump-pr: the bump is given the kaos-lib guide address (the support window page in a new compat file)"
 expect_eq "$(grep -c 'docs/kaos-lib-versions.md' "$RENDERED")" "0" "kaos-lib-bump-pr: nothing points at the page the templates no longer have"
 
 echo "kaos-lib: ${PASSED} passed, ${FAILED} failed"

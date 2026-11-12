@@ -15,7 +15,9 @@ operator writes `engine: {version, image, wheel, wheelSha256}` into the app's gi
   steps    the step table of a rendered WorkflowTemplate (PRD novelcore/kaos#1911): what each step reads and
            produces, as the engine wrote it on the compose step. A render without one is not from an engine
            on the step contract and fails closed.
-  attempt  the `engine-attempt` record of a failed run; for an app refused for the step contract it also
+  produced the `produced-datasets` record of a build: the short names of the datasets the rendered
+           pipeline produces (from its step table), sorted, comma separated; "" when it produces none.
+  attempt  the `engine-attempt` record of a failed run; for an old app that was refused it also
            names the commit and the kaos-lib delivered.
   refused  ml-ci-reconcile: exit 0 when that record is a refusal of exactly this engine, commit and kaos-lib.
 
@@ -317,6 +319,24 @@ def step_table(wft_path):
                       "context pins is not on the step contract; nothing is committed", EXIT_NO_CONTRACT)
 
 
+def produced_datasets(table):
+    """The datasets a pipeline produces, for the `produced-datasets` record of the app's pipeline-images: the
+    short names (what the app writes in `dataset("...")`, not the repository's), once each, sorted, comma
+    separated, no spaces; "" when it produces none. A produces entry that is not a name and a type is not a
+    step table of the contract."""
+    names = set()
+    for step in table:
+        produces = step.get("produces") or []
+        if not isinstance(produces, list) or not all(
+                isinstance(e, dict) and isinstance(e.get("name"), str) and isinstance(e.get("type"), str)
+                for e in produces):
+            raise EngineError(f"step {step['name']!r}: `produces` in the step table is not a list of names with a "
+                              "type. The pipeline engine this context pins is not on the step contract; "
+                              "nothing is committed", EXIT_NO_CONTRACT)
+        names.update(e["name"] for e in produces if e["type"] == "dataset")
+    return ",".join(sorted(names))
+
+
 # ---------------------------------------------------------------- engine-attempt
 
 def _kaos_lib_key(ctx):
@@ -332,7 +352,7 @@ def _version(ctx):
 
 def attempt(ctx_path, now=None, refused_commit=""):
     """The `engine-attempt` record of a run that failed in the engine: `<engine version>@<epoch>`, read by
-    ml-ci-reconcile's one-attempt-per-hour guard. An app refused for the step contract (it must change,
+    ml-ci-reconcile's one-attempt-per-hour guard. An old app that was refused (it must be created again,
     trying again cannot help) records `<engine version>@<epoch>@<commit>@<kaos-lib>`: the commit that was
     refused and the first 12 hex of the sha256 of the kaos-lib spec the context delivered."""
     ctx = load_context(ctx_path)
@@ -371,6 +391,8 @@ def main(argv=None):
     s.add_argument("--version", required=True)
     t = sub.add_parser("steps")
     t.add_argument("--wft", required=True)
+    d = sub.add_parser("produced")
+    d.add_argument("--wft", required=True)
     a = sub.add_parser("attempt")
     a.add_argument("--context", required=True)
     a.add_argument("--refused-commit", default="")
@@ -388,6 +410,8 @@ def main(argv=None):
             print(fetch_wheel(args.wheel, args.sha256, args.dest))
         elif args.cmd == "steps":
             print(json.dumps(step_table(args.wft), separators=(",", ":")))
+        elif args.cmd == "produced":
+            print(produced_datasets(step_table(args.wft)))
         elif args.cmd == "attempt":
             print(attempt(args.context, refused_commit=args.refused_commit))
         elif args.cmd == "refused":

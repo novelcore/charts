@@ -36,7 +36,7 @@ REG_RC = f"kaos-lib[zitadel] @ {AR}/kaos-lib-rc/kaos-lib/kaos_lib-0.4.0rc3-py3-n
 REG_05RC = f"kaos-lib[zitadel] @ {AR}/kaos-lib-rc/kaos-lib/kaos_lib-0.5.0rc2-py3-none-any.whl"
 # The address of the kaos-lib guide the chart is given (values kaosLib.guideUrl).
 GUIDE = "https://guide.example/docs"
-MIGRATION = "https://guide.example/docs/migrate-to-0.5.html"
+OLD_APP = "This app was made before the current pipelines. Create it again from the template."
 
 
 def ctx_file(tmp_path, kaos_lib=None):
@@ -471,15 +471,15 @@ def test_the_step_contract_starts_at_0_5_and_an_rc_of_0_5_is_part_of_it(version,
     ("", ">=0.4,<0.5", True),                  # nothing delivered
 ])
 def test_a_build_with_a_kaos_lib_older_than_the_step_contract_is_refused(spec, compat, ok):
-    out = kl.contract_check(spec, compat, GUIDE)
+    out = kl.contract_check(spec, compat)
     assert out["ok"] is ok
     if not ok:
-        assert "kaos-lib 0.4.0" in out["message"] and MIGRATION in out["message"]
-        assert '.kaos/compat.yaml (kaos-lib: ">=0.5,<0.6"' in out["message"]
+        assert "kaos-lib 0.4.0" in out["message"] and out["message"].endswith(OLD_APP)
+        assert "guide" not in out["message"].lower() and "http" not in out["message"]
 
 
 def test_the_refusal_names_no_platform_internals():
-    text = kl.contract_check(REG, ">=0.4,<0.5", GUIDE)["message"].lower()
+    text = kl.contract_check(REG, ">=0.4,<0.5")["message"].lower()
     for word in ("argo", "workflow", "namespace", "cluster", "kubectl", "configmap", "gitops"):
         assert word not in text
 
@@ -494,10 +494,10 @@ def test_images_from_before_the_step_contract_are_not_stale_they_are_rebuilt(rec
 
 
 def test_contract_cli_prints_the_verdict_and_whether_the_spec_crosses(capsys):
-    assert kl.main(["contract", "--spec", REG, "--compat", ">=0.4,<0.5", "--recorded", REG, "--guide-url", GUIDE]) == 0
+    assert kl.main(["contract", "--spec", REG, "--compat", ">=0.4,<0.5", "--recorded", REG]) == 0
     out = json.loads(capsys.readouterr().out)
-    assert out["ok"] is False and out["crosses"] is False and MIGRATION in out["message"]
-    assert kl.main(["contract", "--spec", REG_05RC, "--recorded", REG, "--guide-url", GUIDE]) == 0
+    assert out["ok"] is False and out["crosses"] is False and out["message"].endswith(OLD_APP)
+    assert kl.main(["contract", "--spec", REG_05RC, "--recorded", REG]) == 0
     assert json.loads(capsys.readouterr().out) == {"ok": True, "message": "", "crosses": True}
 
 
@@ -676,34 +676,20 @@ def test_a_tag_archive_takes_its_notes_from_the_github_release(github):
 
 # ---------------------------------------------------------------- the bump across kaos-lib 0.5 (PRD kaos#1911)
 
-def test_a_bump_across_0_5_links_the_migration_guide_and_says_what_to_do(github):
+def test_a_bump_across_0_5_is_an_ordinary_bump_with_no_migration_section(github):
     github.files[("dev", ".kaos/compat.yaml")] = '# c\nkaos-lib: ">=0.4,<0.5"\n'
     run_bump(github, version="0.5.0", spec="kaos-lib[zitadel]==0.5.0")
     body = github.prs[0]["body"]
-    assert MIGRATION in body and "kaosctl lint --fix" in body and "kind=" in body
-    assert "changing the range is not enough" in body
-    assert body.index(MIGRATION) < body.index("## Release notes")
+    assert "Before you merge" not in body and "migrat" not in body.lower() and "kaosctl" not in body
+    assert "guide.example" not in body and "## Release notes" in body
     assert github.files[("kaos-lib/bump-0.5.0", ".kaos/compat.yaml")] == '# c\nkaos-lib: ">=0.5,<0.6"\n'
 
 
-def test_a_bump_to_an_rc_of_0_5_links_it_too(github):
-    github.files[("dev", ".kaos/compat.yaml")] = 'kaos-lib: ">=0.4,<0.4.5"\n'
-    run_bump(github, version="0.5.0rc2", spec=REG_05RC)
-    assert MIGRATION in github.prs[0]["body"]
-
-
-def test_an_app_with_no_range_that_is_bumped_to_0_5_gets_the_guide(github):
+def test_a_new_compat_file_of_a_bump_to_0_5_still_points_at_the_support_window(github):
     github.files.clear()
     run_bump(github, version="0.5.0", spec="kaos-lib[zitadel]==0.5.0")
-    assert MIGRATION in github.prs[0]["body"]
+    assert "Before you merge" not in github.prs[0]["body"]
     assert "support-window.html" in github.files[("kaos-lib/bump-0.5.0", ".kaos/compat.yaml")]
-
-
-@pytest.mark.parametrize("compat,version", [(">=0.2,<0.3", "0.3.0"), (">=0.3,<0.4", "0.4.0"), (">=0.5,<0.6", "0.6.0")])
-def test_a_bump_that_does_not_cross_0_5_has_no_migration_section(github, compat, version):
-    github.files[("dev", ".kaos/compat.yaml")] = f'kaos-lib: "{compat}"\n'
-    run_bump(github, version=version, spec=f"kaos-lib[zitadel]=={version}")
-    assert "migrate-to-0.5" not in github.prs[0]["body"] and "Before you merge" not in github.prs[0]["body"]
 
 
 def test_the_bump_pull_request_names_no_platform_internals(github):

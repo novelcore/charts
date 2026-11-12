@@ -71,8 +71,8 @@ def registry_record_url(spec, base=RELEASES_BASE):
 # rendered by this chart's engine gives a step one context and takes one result back, which kaos-lib reads
 # and writes from this version on.
 CONTRACT_MIN = "0.5"
-# Pages of the kaos-lib guide, under the address the chart is given (kaosLib.guideUrl).
-MIGRATION_PAGE = "migrate-to-0.5.html"
+# The kaos-lib guide's page a new .kaos/compat.yaml points at, under the address the chart is given
+# (kaosLib.guideUrl).
 SUPPORT_WINDOW_PAGE = "support-window.html"
 
 
@@ -177,11 +177,8 @@ def read_compat(repo_dir):
     a file that is not YAML, or no/empty kaos-lib key). A compat.yaml that cannot be read safely, or
     whose kaos-lib value is not a scalar (a string or a number), raises CheckoutFileError."""
     text = read_checkout_file(repo_dir, COMPAT_PATH)
-    return "" if text is None else read_compat_text(text)
-
-
-def read_compat_text(text):
-    """The kaos-lib range in the text of a compat file; "" when it declares none."""
+    if text is None:
+        return ""
     try:
         doc = yaml.safe_load(text) or {}
     except (yaml.YAMLError, RecursionError):
@@ -350,7 +347,12 @@ def crosses_contract(recorded, spec):
     return on_contract(spec_version(recorded)) is False and on_contract(spec_version(spec)) is True
 
 
-def contract_check(spec, compat, guide_url):
+# What an app made before the current pipelines is told: the engine ends its refusals of such an app with the
+# same two sentences (kaos-hpc-operator engine step_contract.OLD_APP_NOTICE).
+OLD_APP_NOTICE = "This app was made before the current pipelines. Create it again from the template."
+
+
+def contract_check(spec, compat):
     """{ok, message}: may a build install spec?
 
     Refused: a spec older than the step contract for an app whose own range does not accept kaos-lib 0.5.
@@ -364,12 +366,9 @@ def contract_check(spec, compat, guide_url):
     if accepts_contract(compat):
         return {"ok": True, "message": f"kaos-lib {version} is still delivered to this app; its {COMPAT_PATH} "
                                        f"accepts {CONTRACT_MIN}, so the platform moves it after this build"}
-    rng = bump_range(CONTRACT_MIN + ".0")
     return {"ok": False, "message":
-            f"this app is built with kaos-lib {version}; pipelines need kaos-lib {CONTRACT_MIN} or newer. "
-            f"Accept it in {COMPAT_PATH} (kaos-lib: \"{rng}\"; the \"Bump kaos-lib\" pull request does this) and "
-            f"move the app's steps to the step API of kaos-lib {CONTRACT_MIN}: "
-            f"{guide_page(guide_url, MIGRATION_PAGE)}"}
+            f"It is built with kaos-lib {version}; the current pipelines need kaos-lib {CONTRACT_MIN} or newer. "
+            f"{OLD_APP_NOTICE}"}
 
 
 # ---------------------------------------------------------------- support verdict
@@ -548,9 +547,6 @@ def bump(gh, slug, base, version, spec, default_changelog, guide_url, log=print)
         if code == 200:
             current, sha = base64.b64decode(cur["content"]).decode(), cur["sha"]
         rng = bump_range(version)
-        # The range this pull request replaces does not accept kaos-lib 0.5 and the new version is 0.5 or
-        # later: the app's steps must change too, so the pull request says so and links the guide.
-        migrate = on_contract(version) is True and not accepts_contract(read_compat_text(current))
         new = compat_file(current, rng, guide_url)
         if new != current:
             body = {"message": f"chore(kaos-lib): accept kaos-lib {version} ({rng})",
@@ -580,15 +576,6 @@ def bump(gh, slug, base, version, spec, default_changelog, guide_url, log=print)
                 f"- **Merge it** when you are ready: the push builds your step images with kaos-lib {version}.\n"
                 f"- **Close it** to stay on the version your images have: the platform opens no second pull request "
                 f"for {version}.\n\n"
-                + (f"## Before you merge: move the app to kaos-lib {CONTRACT_MIN}\n\n"
-                   f"kaos-lib {CONTRACT_MIN} changes how a step is written, so changing the range is not enough: "
-                   f"`pipeline.py` and every step's `entry.py` change once. Follow the guide, on this branch: "
-                   f"{guide_page(guide_url, MIGRATION_PAGE)}\n\n"
-                   f"1. `kaosctl lint --fix`, then choose a `kind=` for every step.\n"
-                   f"2. Rewrite each step's `entry.py` with the guide's table.\n"
-                   f"3. `kaosctl lint`, then try each step with `kaosctl step run <step>`.\n\n"
-                   f"The checks on this pull request fail until the app has moved, and so does the build "
-                   f"after a merge: the pipeline that runs today stays as it is until then.\n\n" if migrate else "")
                 + f"Package: `{spec}`\n\n## Release notes\n\n"
                 + (notes or f"No release notes for {version} were found at {url or 'the package changelog'}.")
                 + "\n\n🤖 Opened by the KubeCore platform (kaos-lib delivery).")
@@ -638,7 +625,6 @@ def main(argv=None):
     k.add_argument("--spec", required=True)
     k.add_argument("--recorded", default="")
     k.add_argument("--compat", default="")
-    k.add_argument("--guide-url", required=True)
     b = sub.add_parser("bump")
     for a in ("--slug", "--base", "--version", "--spec", "--changelog-url", "--guide-url"):
         b.add_argument(a, required=a != "--changelog-url", default="")
@@ -673,7 +659,7 @@ def main(argv=None):
         json.dump(bump(gh, args.slug, args.base, args.version, args.spec, args.changelog_url, args.guide_url,
                        log=lambda m: print(m, file=sys.stderr)), sys.stdout)
     elif args.cmd == "contract":
-        out = contract_check(args.spec.strip(), args.compat.strip(), args.guide_url)
+        out = contract_check(args.spec.strip(), args.compat.strip())
         out["crosses"] = crosses_contract(args.recorded.strip(), args.spec.strip())
         json.dump(out, sys.stdout)
     return 0

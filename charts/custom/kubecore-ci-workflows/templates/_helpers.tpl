@@ -236,50 +236,56 @@ if size > limit:
 {{- end }}
 
 {{/*
-The page of the kaos-lib guide that says how an app moves to the step contract of kaos-lib 0.5
-(PRD novelcore/kaos#1911). Client-facing: it is what a refused build links.
+The two sentences an app made before the current pipelines is told (PRD novelcore/kaos#1911): the owner's
+ruling is that no app is moved, an old app is created again from the template. The engine ends its refusals of
+such an app with them (its OLD_APP_NOTICE; the second sentence is the `old_app_marker` of its authoring schema).
 */}}
-{{- define "kubecore-ci-workflows.migrationGuideUrl" -}}
-{{ trimSuffix "/" .Values.kaosLib.guideUrl }}/migrate-to-0.5.html
+{{- define "kubecore-ci-workflows.oldAppNotice" -}}
+This app was made before the current pipelines. Create it again from the template.
 {{- end }}
 
 {{/*
-The commit status of a build that was refused because the app has not moved to the step contract
-(PRD novelcore/kaos#1911 AC-01). GitHub cuts a description at 140 characters: tests/step-contract checks it fits.
+The commit status of a build that was refused because the app is an old app (PRD novelcore/kaos#1911 AC-01).
+GitHub cuts a description at 140 characters: tests/step-contract checks it fits.
 */}}
-{{- define "kubecore-ci-workflows.notMigratedStatus" -}}
-Not built: this app must move to kaos-lib 0.5. Guide: {{ include "kubecore-ci-workflows.migrationGuideUrl" . }}
+{{- define "kubecore-ci-workflows.oldAppStatus" -}}
+Not built: this app was made before the current pipelines. Create it again from the template.
 {{- end }}
 
 {{/*
-not_migrated MESSAGE (PRD novelcore/kaos#1911 AC-01, T-05): this app is still on the step contract of
-kaos-lib 0.4 and the caller is about to fail. Nothing was committed and nothing is built; this only
-leaves what the app's engineer reads, for the steps that report:
-  /workspace/not-migrated      one line, what to change (the exit handler turns it into the commit status,
-                               the `engine-last-error` record and the one-attempt record)
+old_app MESSAGE (PRD novelcore/kaos#1911 AC-01, T-05): this app was made before the current pipelines and
+the caller is about to fail. MESSAGE is the refusal as the engine (or the kaos-lib check) words it: a
+sentence that says what is wrong, then the notice above. Nothing was committed and nothing is built; this
+only leaves what the app's engineer reads, for the steps that report:
+  /workspace/old-app           one line, the reason (MESSAGE without the notice; the exit handler turns it
+                               into the commit status, the `engine-last-error` record and the one-attempt
+                               record)
   /workspace/report-extra.md   the "What to change" section of the report comment (the report template
                                appends that file)
-and one `kaos-ci: NOT MIGRATED:` line in the step's log. The message is data: control characters and
-backticks are dropped and it is cut at 600 characters. It names no platform internals.
+and one `kaos-ci: OLD APP:` line in the step's log. The message is data: control characters and backticks
+are dropped and it is cut at 600 characters. It names no platform internals.
 Caller: /workspace mounted and writable; POSIX sh.
 */}}
-{{- define "kubecore-ci-workflows.notMigrated" -}}
-not_migrated() {
+{{- define "kubecore-ci-workflows.oldApp" -}}
+old_app() {
   _nm=$(printf '%s' "$1" | tr '\n\r\t' '   ' | tr -d '\000-\037\177`' | cut -c1-600)
-  printf '%s\n' "${_nm}" > /workspace/not-migrated
+  _why=$(printf '%s' "${_nm%"{{ include "kubecore-ci-workflows.oldAppNotice" . }}"}" | sed 's/ *$//')
+  printf '%s\n' "${_why}" > /workspace/old-app
   {
     echo "#### What to change"
     echo ""
-    echo "This app is written for kaos-lib 0.4. Pipelines now use the step API of kaos-lib 0.5, and every app changes once. It was not built: the pipeline you could run before this commit is still the one that runs."
+    echo "This app was made before the current pipelines. It was not built: the pipeline you could run before this commit is still the one that runs."
+    if [ -n "${_why}" ]; then
+      echo ""
+      echo '```'
+      echo "${_why}"
+      echo '```'
+    fi
     echo ""
-    echo '```'
-    echo "${_nm}"
-    echo '```'
-    echo ""
-    echo "The guide has every change, and \`kaosctl lint --fix\` makes the first ones: {{ include "kubecore-ci-workflows.migrationGuideUrl" . }}"
+    echo "Create it again from the template."
     echo ""
   } > /workspace/report-extra.md
-  echo "kaos-ci: NOT MIGRATED: ${_nm}" >&2
+  echo "kaos-ci: OLD APP: ${_nm}" >&2
 }
 {{- end }}
 
