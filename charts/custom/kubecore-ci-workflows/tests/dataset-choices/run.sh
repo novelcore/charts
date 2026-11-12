@@ -195,6 +195,8 @@ printf 'none' > "$WORK/sha"
 expect_eq "$(images '')" "none" "a pipeline whose steps declare no input records none"
 
 # ── shared datasets (PRD novelcore/kaos#1533 F-23, AC-30) ───────────────────
+# kaos-lake (pkg/kaos/sharing/peers.go) already qualifies the name: `bob/dataset-gamma` with owner `bob`; a bare name
+# plus owner (dataset-zeta) is also accepted. Neither may be double-prefixed.
 # A shared dataset is listed after the project's own as <owner>/<dataset>, with owner set and default false.
 cat > "$WORK/shared.json" <<'JSON'
 {"datasets": [
@@ -202,12 +204,13 @@ cat > "$WORK/shared.json" <<'JSON'
   {"name": "dataset-zeta", "owner": "bob", "default": false, "versions": [{"tag": "v1", "commit": "z1"}]},
   {"name": "dataset-default", "default": true, "versions": [{"tag": "v3", "commit": "c3"}]},
   {"name": "dataset-b", "owner": "acme", "default": false, "versions": [{"tag": "v1", "commit": "b1"}]},
-  {"name": "dataset-alpha", "owner": "bob", "default": false, "versions": [{"tag": "v2", "commit": "a2"}]}
+  {"name": "dataset-alpha", "owner": "bob", "default": false, "versions": [{"tag": "v2", "commit": "a2"}]},
+  {"name": "bob/dataset-gamma", "owner": "bob", "default": false, "versions": [{"tag": "v1", "commit": "g1"}]}
 ]}
 JSON
 python3 "$WORK/empty.py" 18913 "$WORK/shared.json" & SHARED=$!
 sleep 1
-SH_ALL="dataset-default@v3,dataset-default@latest,dataset-cars@v2,dataset-cars@v1,dataset-cars@latest,bob/dataset-zeta@v1,bob/dataset-zeta@latest,bob/dataset-alpha@v2,bob/dataset-alpha@latest,acme/dataset-b@v1,acme/dataset-b@latest"
+SH_ALL="dataset-default@v3,dataset-default@latest,dataset-cars@v2,dataset-cars@v1,dataset-cars@latest,bob/dataset-zeta@v1,bob/dataset-zeta@latest,bob/dataset-alpha@v2,bob/dataset-alpha@latest,bob/dataset-gamma@v1,bob/dataset-gamma@latest,acme/dataset-b@v1,acme/dataset-b@latest"
 ctx 18913; steps dataset
 wft "    - {name: dataset, value: dataset-gone@v1}
 "
@@ -225,6 +228,7 @@ expect_eq "$(param | cut -d'|' -f1)" "bob/dataset-alpha@latest " "a shared datas
 SH_SHA=$(python3 -c "import hashlib; print(hashlib.sha256('\n'.join(sorted('$SH_ALL'.split(','))).encode()).hexdigest())")
 expect_eq "$(sha)" "$SH_SHA" "the digest includes the shared refs, so a share or unshare re-renders"
 expect_eq "$(python3 -I "$WORK/dataset-choices.py" digest "http://127.0.0.1:18913/" "$WORK/token")" "$SH_SHA" "and ml-ci-reconcile computes the same digest"
+expect_eq "$(param | grep -c 'bob/bob/')" "0" "a name the catalog already qualified is not prefixed twice (no bob/bob/...)"
 kill $SHARED 2>/dev/null
 
 # A project with no dataset of its own: the fallback never picks a shared dataset (the value stays as it is).

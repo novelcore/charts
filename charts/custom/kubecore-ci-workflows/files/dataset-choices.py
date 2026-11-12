@@ -22,7 +22,8 @@ def read_catalog(endpoint, token_path):
 
 
 def _ref(d):
-    """The name a reference uses: a shared dataset is `<owner>/<dataset>` (PRD novelcore/kaos#1533 F-23)."""
+    """The name a reference uses. kaos-lake already qualifies a shared dataset's name (`<owner>/dataset-<n>`,
+    owner = the owning project); a bare name with an owner is qualified here, a qualified one is left alone."""
     name, owner = d.get("name", ""), d.get("owner")
     return f"{owner}/{name}" if owner and "/" not in name else name
 
