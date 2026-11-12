@@ -318,11 +318,15 @@ EOF
   IMG="$T/check/kubeapps/${APP}/main/pipeline-images.yaml"
   ERR=$(yq '.data."engine-last-error" // "<absent>"' "$IMG"); ATT=$(yq '.data."engine-attempt" // "<absent>"' "$IMG")
 }
-RENDER_NODE='wf.render-hera[0].hera-render'
-ENHANCE_NODE='wf.render-hera[1].hera-enhance-commit'
-COMPOSE_NODE='wf.build-push(0:name:compose-and-validate,path:config)'
+# The node names Argo gives these pods: every engine step retries a lost pod (preemptionRetry), so each
+# attempt is a `(N)` child of a Retry node (kubecore-operator issue 1832: the record matched none of them).
+DETECT_NODE='wf[1].detect-steps(0)'
+RENDER_NODE='wf[3].render-hera[0].hera-render(0)'
+RENDER_RETRY='wf[3].render-hera[0].hera-render(1)'
+ENHANCE_NODE='wf[3].render-hera[1].hera-enhance-commit(0)'
+COMPOSE_NODE='wf[3].build-push(0:name:compose-and-validate,path:config)'
 
-record_case Failed; pod "wf.detect-steps" 0; pod "$RENDER_NODE" 1 'time=x argo=true\nINFO rendering\n\033[31mpipeline.py raised: ValueError: step x reads a missing key\033[0m\nexit status 1\n'; run_record
+record_case Failed; pod "$DETECT_NODE" 0; pod "$RENDER_NODE" 1 'time=x argo=true\nINFO rendering\n\033[31mpipeline.py raised: ValueError: step x reads a missing key\033[0m\nexit status 1\n'; run_record
 expect_eq "$RC" 0 "engine-record (render failed): runs"
 expect_eq "$ERR" "render: pipeline.py raised: ValueError: step x reads a missing key" "engine-record: the last error line of the failed render, one line, no colour codes"
 expect_has "$ATT" "v0.4.7@" "engine-record: the attempt is recorded as <engine version>@<epoch>"
@@ -335,7 +339,7 @@ expect_has "$ERR" "enhance: engine: FATAL: engine wheel sha256 mismatch" "engine
 record_case Failed; pod "$COMPOSE_NODE" 1 "error building image: kaniko failed\n"; run_record
 expect_has "$ERR" "compose image build: error building image" "engine-record: a failed compose image build is recorded"
 
-record_case Failed; pod "wf.detect-steps" 1 "engine: FATAL: the pipeline context has no usable engine; failing the build\n"; run_record
+record_case Failed; pod "$DETECT_NODE" 1 "engine: FATAL: the pipeline context has no usable engine; failing the build\n"; run_record
 expect_has "$ERR" "engine check: engine: FATAL" "engine-record: a context with no usable engine is recorded"
 
 record_case Failed; pod "$RENDER_NODE" 1 "$(printf 'x%.0s' $(seq 400))\n"; run_record
@@ -344,7 +348,7 @@ expect_eq "$(printf '%s' "$ERR" | wc -c | tr -d ' ')" "200" "engine-record: the 
 record_case Failed; pod "wf.build-push(0:name:a,path:steps/a)" 1 "error: a client step image failed\n"; run_record
 expect_eq "$ERR" "<absent>" "engine-record: a failed client step image is not an engine error"
 
-record_case Failed stale-error; pod "wf.detect-steps" 1 "something else broke\n"; run_record
+record_case Failed stale-error; pod "$DETECT_NODE" 1 "something else broke\n"; run_record
 expect_eq "$ERR" "render: boom" "engine-record: a run that failed outside the engine leaves the record as it was"
 
 record_case Succeeded stale-error; pod "$RENDER_NODE" 0; pod "$ENHANCE_NODE" 0; run_record
@@ -354,11 +358,29 @@ expect_has "$(git -C "$T/check" log -1 --format=%s)" "clear the engine error" "e
 record_case Succeeded stale-error; pod "$COMPOSE_NODE" 0; run_record
 expect_eq "$ERR/$ATT" "<absent>/<absent>" "engine-record: a run that built the compose image clears them too"
 
-record_case Succeeded stale-error; pod "wf.detect-steps" 0; run_record
+record_case Succeeded stale-error; pod "$DETECT_NODE" 0; run_record
 expect_eq "$ERR" "render: boom" "engine-record: a run that ran no engine stage leaves the record as it was"
 
-record_case Succeeded stale-error; pod "$RENDER_NODE" 1 "transient\n"; pod "$RENDER_NODE" 0; pod "$ENHANCE_NODE" 0; run_record
+record_case Succeeded stale-error; pod "$RENDER_NODE" 1 "transient\n"; pod "$RENDER_RETRY" 0; pod "$ENHANCE_NODE" 0; run_record
 expect_eq "$ERR" "<absent>" "engine-record: a pod that failed and was retried to success is not an error of the run"
+
+# retried engine pods (kubecore-operator issue 1832)
+record_case Failed; pod "$DETECT_NODE" 0; pod "$RENDER_NODE" 1 "pipeline.py raised: KeyError: 'output_prefix'\n"; run_record
+expect_eq "$ERR" "render: pipeline.py raised: KeyError: 'output_prefix'" "engine-record (retry-named pods): a failed render(0) records engine-last-error with stage render"
+expect_has "$ATT" "v0.4.7@" "engine-record (retry-named pods): ... and engine-attempt, which the reconcile guard reads"
+expect_has "$OUT" "engine-record: render:" "engine-record (retry-named pods): ... and never says the run failed outside the engine"
+
+record_case Succeeded stale-error; pod "$DETECT_NODE" 0; pod "$RENDER_NODE" 137 "imminent node shutdown\n"; pod "$RENDER_RETRY" 0; pod "$ENHANCE_NODE" 0; run_record
+expect_eq "$ERR/$ATT" "<absent>/<absent>" "engine-record: render(0) preempted, render(1) succeeded: no error, the stale one cleared"
+
+record_case Failed stale-error; pod "$RENDER_NODE" 137 "imminent node shutdown\n"; pod "$RENDER_RETRY" 0; pod "$ENHANCE_NODE" 0; pod "$COMPOSE_NODE" 1 "error building image: kaniko failed\n"; run_record
+expect_has "$ERR" "compose image build: error building image" "engine-record: a preempted attempt retried to success is not the error; the stage that failed last is"
+
+record_case Failed; pod "$RENDER_NODE" 137 "imminent node shutdown\n"; pod "$RENDER_RETRY" 1 "pipeline.py raised: ValueError: bad step\n"; run_record
+expect_eq "$ERR" "render: pipeline.py raised: ValueError: bad step" "engine-record: the error of a retried render is its LAST attempt's"
+
+record_case Failed stale-error; pod "$DETECT_NODE" 0; pod "$RENDER_NODE" 0; pod "$ENHANCE_NODE" 0; pod "wf[3].build-push(1:name:a,path:steps/a)" 1 "error: a client step image failed\n"; run_record
+expect_eq "$ERR" "render: boom" "engine-record: a run that rendered but failed in a client step leaves the record as it was"
 
 record_case Succeeded; pod "$RENDER_NODE" 0; pod "$ENHANCE_NODE" 0; run_record
 before=$(git -C "$T/origin.git" rev-parse main)
