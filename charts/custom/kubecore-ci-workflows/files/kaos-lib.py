@@ -126,11 +126,29 @@ def read_checkout_file(repo_dir, rel):
                                 "refusing to read it")
     if st.st_size > APP_FILE_MAX_BYTES:
         raise CheckoutFileError(f"{rel} is {st.st_size} bytes, more than {APP_FILE_MAX_BYTES}; refusing to read it")
+    # Defence in depth against a swap between the lstat and the open: never follow a final symlink,
+    # never block on a FIFO, and check what was actually opened before reading it.
     try:
-        with open(path, "rb") as f:
-            raw = f.read(APP_FILE_MAX_BYTES + 1)
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except OSError as exc:
+        raise CheckoutFileError(f"{rel} cannot be opened as a regular file ({exc.strerror}); refusing to read it") from exc
+    try:
+        fst = os.fstat(fd)
+        if not stat.S_ISREG(fst.st_mode):
+            raise CheckoutFileError(f"{rel} is not a regular file in the checkout (a symlink, a device or outside it); "
+                                    "refusing to read it")
+        chunks, size = [], 0
+        while size <= APP_FILE_MAX_BYTES:
+            chunk = os.read(fd, APP_FILE_MAX_BYTES + 1 - size)
+            if not chunk:
+                break
+            chunks.append(chunk)
+            size += len(chunk)
+        raw = b"".join(chunks)
     except OSError as exc:
         raise CheckoutFileError(f"{rel} cannot be read ({exc.strerror})") from exc
+    finally:
+        os.close(fd)
     if len(raw) > APP_FILE_MAX_BYTES:
         raise CheckoutFileError(f"{rel} is more than {APP_FILE_MAX_BYTES} bytes; refusing to read it")
     try:
@@ -141,7 +159,8 @@ def read_checkout_file(repo_dir, rel):
 
 def read_compat(repo_dir):
     """The app's declared range (.kaos/compat.yaml, key kaos-lib); "" when none is declared (no file,
-    or a file that is not YAML). A compat.yaml that cannot be read safely raises CheckoutFileError."""
+    a file that is not YAML, or no/empty kaos-lib key). A compat.yaml that cannot be read safely, or
+    whose kaos-lib value is not a scalar (a string or a number), raises CheckoutFileError."""
     text = read_checkout_file(repo_dir, COMPAT_PATH)
     if text is None:
         return ""
@@ -150,7 +169,14 @@ def read_compat(repo_dir):
     except (yaml.YAMLError, RecursionError):
         return ""
     val = doc.get(COMPAT_KEY) if isinstance(doc, dict) else None
-    return str(val).strip() if val is not None else ""
+    if val is None:
+        return ""
+    # Only a scalar is ever turned into text: str() of a list or mapping built from YAML aliases
+    # (a few hundred bytes) expands to gigabytes. A bool or a date is no specifier either.
+    if isinstance(val, bool) or not isinstance(val, (str, int, float)):
+        raise CheckoutFileError(f"{COMPAT_PATH}: {COMPAT_KEY} is a {type(val).__name__}, not a version "
+                                "specifier string; refusing to use it")
+    return str(val).strip()
 
 
 def managed(repo_dir, step_paths):

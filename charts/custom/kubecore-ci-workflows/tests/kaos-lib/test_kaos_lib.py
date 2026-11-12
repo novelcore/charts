@@ -271,6 +271,61 @@ def test_the_cli_does_not_hang_on_dev_zero(tmp_path, victim):
     assert f"kaos-lib: REFUSED: {victim} is not a regular file" in proc.stderr
 
 
+@pytest.mark.parametrize("value, compat", [('">=0.2,<0.3"', ">=0.2,<0.3"), ("0.4", "0.4"), ("1", "1"), ("", "")])
+def test_a_scalar_compat_value_is_the_range(tmp_path, value, compat):
+    repo = app_repo(tmp_path)
+    (repo / ".kaos" / "compat.yaml").write_text(f"kaos-lib: {value}\n")
+    assert kl.read_compat(repo) == compat
+
+
+@pytest.mark.parametrize("value", ["[a, b]", "{a: b}", "true", "2026-11-12"])
+def test_a_compat_value_that_is_not_a_scalar_is_refused(tmp_path, value):
+    repo = app_repo(tmp_path)
+    (repo / ".kaos" / "compat.yaml").write_text(f"kaos-lib: {value}\n")
+    with pytest.raises(kl.CheckoutFileError, match="not a version specifier"):
+        kl.read_compat(repo)
+
+
+ALIAS_BOMB = "a: &a [x, x, x, x, x, x, x, x, x, x]\n" + "".join(
+    f"{chr(98 + i)}: &{chr(98 + i)} [*{chr(97 + i)}, *{chr(97 + i)}, *{chr(97 + i)}, *{chr(97 + i)}, *{chr(97 + i)},"
+    f" *{chr(97 + i)}, *{chr(97 + i)}, *{chr(97 + i)}, *{chr(97 + i)}, *{chr(97 + i)}]\n" for i in range(8)
+) + "kaos-lib: *i\n"  # 10**9 leaves in well under 1 KiB
+
+
+def test_a_compat_alias_bomb_is_refused_not_expanded(tmp_path):
+    # A subprocess with a deadline: str() of the value would expand 10**9 strings.
+    assert len(ALIAS_BOMB) < 1024
+    repo = app_repo(tmp_path)
+    (repo / ".kaos" / "compat.yaml").write_text(ALIAS_BOMB)
+    proc = subprocess.run([sys.executable, "-I", str(SCRIPT), "decide", "--context", str(ctx_file(tmp_path, {"spec": GIT})),
+                           "--repo", str(repo), "--steps", str(steps_file(tmp_path, "steps/a"))],
+                          capture_output=True, text=True, timeout=30)
+    assert proc.returncode == kl.EXIT_REFUSED and proc.stdout == ""
+    assert "kaos-lib: REFUSED: .kaos/compat.yaml: kaos-lib is a list" in proc.stderr
+
+
+def test_a_symlink_swapped_in_after_the_lstat_is_not_followed(tmp_path, monkeypatch):
+    # The lstat saw a regular file; by the open it is a symlink to /dev/zero: O_NOFOLLOW refuses it.
+    repo = app_repo(tmp_path)
+    target = repo / ".kaos" / "compat.yaml"
+    real_lstat = os.lstat
+
+    def lstat_then_swap(path, *a, **kw):
+        st = real_lstat(path, *a, **kw)
+        if str(path) == str(target):
+            os.remove(target)
+            os.symlink("/dev/zero", target)
+        return st
+    monkeypatch.setattr(kl.os, "lstat", lstat_then_swap)
+    real_realpath = os.path.realpath
+    # The containment check is made to pass so the open itself is what refuses the swapped-in symlink.
+    monkeypatch.setattr(kl.os.path, "realpath",
+                        lambda p: os.path.join(real_realpath(repo), ".kaos", "compat.yaml") if str(p) == str(target)
+                        else real_realpath(p))
+    with pytest.raises(kl.CheckoutFileError, match="cannot be opened as a regular file"):
+        kl.read_compat(repo)
+
+
 # ---------------------------------------------------------------- versions
 
 @pytest.mark.parametrize("specifier,version,ok", [
