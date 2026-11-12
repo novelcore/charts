@@ -19,7 +19,7 @@ with pipeline("ml-pipeline") as p:
     train = step("model-training", kind="train", gpu=True, needs=[prepare], walltime="12h",
                  reads=["experiment", "data", "model", "train", "image_processing", "logging"],
                  produces=[model("checkpoints")])
-    qat = step("qat-finetune", kind="train", gpu=True, needs=[train], disk="20Gi",
+    qat = step("qat-finetune", kind="train", gpu=True, needs=[train],
                reads=["experiment", "train", "quantization"],
                when="{{workflow.parameters.quantization-mode}} == qat",
                produces=[model("qat")])

@@ -17,11 +17,6 @@ spec:
     container:
       image: '{{workflow.parameters.image-compose-and-validate}}'
       args:
-      - platform.lakefs.repository=PLACEHOLDER-repo
-      - platform.lakefs.endpoint=http://lakefs.internal.invalid
-      - platform.mlflow.tracking_uri=http://mlflow.internal.invalid
-      - platform.checkpoints.bucket=outputs-data-clean
-      - platform.checkpoints.prefix=main/checkpoints
       - experiment.name={{workflow.parameters.experiment-name}}
       - experiment.description={{workflow.parameters.experiment-description}}
       - dataset={{workflow.parameters.dataset}}
@@ -30,8 +25,6 @@ spec:
       - --advanced
       - '{{workflow.parameters.config}}'
       - --require=experiment
-      - --output
-      - /work/params.yaml
       - --run
       - '{{workflow.name}}'
       - --steps
@@ -104,11 +97,18 @@ spec:
       - name: kaos-context-hello-world
         valueFrom:
           path: /work/context/hello-world.json
-    podSpecPatch: "containers:\n- name: main\n  resources:\n    requests:\n      cpu:\
-      \ \"{{workflow.parameters.compose-and-validate-cpu}}\"\n      memory: \"{{workflow.parameters.compose-and-validate-mem}}\"\
-      \n      ephemeral-storage: \"{{workflow.parameters.compose-and-validate-disk}}\"\
-      \n    limits:\n      cpu: \"{{workflow.parameters.compose-and-validate-cpu}}\"\
-      \n      memory: \"{{workflow.parameters.compose-and-validate-mem}}\"\n"
+    inputs:
+      parameters:
+      - name: cpu
+        default: '7'
+      - name: mem
+        default: 27Gi
+      - name: disk
+        default: 10Gi
+    podSpecPatch: "containers:\n- name: main\n  resources:\n    limits:\n      cpu:\
+      \ '{{inputs.parameters.cpu}}'\n      memory: '{{inputs.parameters.mem}}'\n \
+      \   requests:\n      cpu: '{{inputs.parameters.cpu}}'\n      ephemeral-storage:\
+      \ '{{inputs.parameters.disk}}'\n      memory: '{{inputs.parameters.mem}}'\n"
     nodeSelector:
       platform.kubecore.io/nodegroup-type: '{{workflow.parameters.compose-and-validate-class}}'
       platform.kubecore.io/environment: runtime
@@ -140,10 +140,11 @@ spec:
     retryStrategy:
       limit: '2'
       retryPolicy: Always
-      expression: (lastRetry.status == 'Error' or lastRetry.message matches '.*(imminent
+      expression: ((lastRetry.status == 'Error' or lastRetry.message matches '.*(imminent
         node shutdown|node is shutting down|node is draining|The node was low on resource|The
         node had condition|Pod was rejected|Evicted|evicted|pod deleted|Pod was deleted).*')
-        and not (lastRetry.message startsWith 'KaosIdle')
+        and not (lastRetry.message contains 'kaos-result.json')) and not (lastRetry.message
+        startsWith 'KaosIdle')
       backoff:
         duration: 30s
         factor: '2'
@@ -201,6 +202,12 @@ spec:
     inputs:
       parameters:
       - name: kaos-context
+      - name: cpu
+        default: '7'
+      - name: mem
+        default: 27Gi
+      - name: disk
+        default: 10Gi
     metadata:
       labels:
         platform.kubecore.io/step: hello-world
@@ -209,13 +216,11 @@ spec:
       parameters:
       - name: kaos-result
         valueFrom:
-          default: '{"version":1,"status":"absent"}'
           path: /work/output/kaos-result.json
-    podSpecPatch: "containers:\n- name: main\n  resources:\n    requests:\n      cpu:\
-      \ \"{{workflow.parameters.hello-world-cpu}}\"\n      memory: \"{{workflow.parameters.hello-world-mem}}\"\
-      \n      ephemeral-storage: \"{{workflow.parameters.hello-world-disk}}\"\n  \
-      \  limits:\n      cpu: \"{{workflow.parameters.hello-world-cpu}}\"\n      memory:\
-      \ \"{{workflow.parameters.hello-world-mem}}\"\n"
+    podSpecPatch: "containers:\n- name: main\n  resources:\n    limits:\n      cpu:\
+      \ '{{inputs.parameters.cpu}}'\n      memory: '{{inputs.parameters.mem}}'\n \
+      \   requests:\n      cpu: '{{inputs.parameters.cpu}}'\n      ephemeral-storage:\
+      \ '{{inputs.parameters.disk}}'\n      memory: '{{inputs.parameters.mem}}'\n"
     nodeSelector:
       platform.kubecore.io/nodegroup-type: '{{workflow.parameters.hello-world-class}}'
       platform.kubecore.io/environment: runtime
@@ -247,10 +252,11 @@ spec:
     retryStrategy:
       limit: '2'
       retryPolicy: Always
-      expression: (lastRetry.status == 'Error' or lastRetry.message matches '.*(imminent
+      expression: ((lastRetry.status == 'Error' or lastRetry.message matches '.*(imminent
         node shutdown|node is shutting down|node is draining|The node was low on resource|The
         node had condition|Pod was rejected|Evicted|evicted|pod deleted|Pod was deleted).*')
-        and not (lastRetry.message startsWith 'KaosIdle')
+        and not (lastRetry.message contains 'kaos-result.json')) and not (lastRetry.message
+        startsWith 'KaosIdle')
       backoff:
         duration: 30s
         factor: '2'
@@ -260,6 +266,17 @@ spec:
       tasks:
       - name: compose-and-validate
         template: compose-and-validate
+        arguments:
+          parameters:
+          - name: cpu
+            value: '{{=({"cpu-standard": "7", "kubecorecpu": "7", "gpu-t4": "7"}[workflow.parameters[''compose-and-validate-class'']])
+              ?? "7"}}'
+          - name: mem
+            value: '{{=({"cpu-standard": "27Gi", "kubecorecpu": "27Gi", "gpu-t4":
+              "25Gi"}[workflow.parameters[''compose-and-validate-class'']]) ?? "27Gi"}}'
+          - name: disk
+            value: '{{=({"cpu-standard": "10Gi", "kubecorecpu": "10Gi", "gpu-t4":
+              "10Gi"}[workflow.parameters[''compose-and-validate-class'']]) ?? "10Gi"}}'
       - name: hello-world
         depends: compose-and-validate
         template: hello-world
@@ -268,15 +285,25 @@ spec:
           - name: kaos-context
             value: '{{=sprig.trimSuffix("}", tasks["compose-and-validate"].outputs.parameters["kaos-context-hello-world"])
               + ",\"upstream\":{" + "}" + "}"}}'
+          - name: cpu
+            value: '{{=({"cpu-standard": "7", "kubecorecpu": "7", "gpu-t4": "7"}[workflow.parameters[''hello-world-class'']])
+              ?? "7"}}'
+          - name: mem
+            value: '{{=({"cpu-standard": "27Gi", "kubecorecpu": "27Gi", "gpu-t4":
+              "25Gi"}[workflow.parameters[''hello-world-class'']]) ?? "27Gi"}}'
+          - name: disk
+            value: '{{=({"cpu-standard": "10Gi", "kubecorecpu": "10Gi", "gpu-t4":
+              "10Gi"}[workflow.parameters[''hello-world-class'']]) ?? "10Gi"}}'
   arguments:
     parameters:
     - name: pipeline-info
       value: "HOW TO RUN: defaults are runnable as-is \u2014 just press Submit.\n\
-        PER-STEP COMPUTE: {step}-class picks the node class; {step}-cpu / {step}-mem\
-        \ dial one run's resources.\nCOMPUTE CLASSES on this pool:\n  - cpu-standard\
-        \ (cpu) \u2014 n2-standard-8\n  - kubecorecpu (cpu) \u2014 e2-standard-8\n\
-        \  - gpu-t4 (gpu) \u2014 n1-standard-8 + 1x nvidia-tesla-t4\nSTEPS: compose-and-validate\
-        \ -> hello-world\n(This field is informational \u2014 leave it unchanged.)"
+        PER-STEP COMPUTE: {step}-class picks the node class; the step gets that node\
+        \ (what it offers a pod, less the platform's reserve).\nCOMPUTE CLASSES on\
+        \ this pool:\n  - cpu-standard (cpu) \u2014 n2-standard-8\n  - kubecorecpu\
+        \ (cpu) \u2014 e2-standard-8\n  - gpu-t4 (gpu) \u2014 n1-standard-8 + 1x nvidia-tesla-t4\n\
+        STEPS: compose-and-validate -> hello-world\n(This field is informational \u2014\
+        \ leave it unchanged.)"
       description: 'Read-only: live pool compute classes + how to fill this form.
         Leave unchanged.'
     - name: experiment-name
@@ -291,7 +318,7 @@ spec:
     - name: config
       description: "ADVANCED: override YAML merged LAST over the composed config (OmegaConf.merge).\
         \ Overrides everything above \u2014 intended for scripted submissions (argo\
-        \ submit -p config=...). May not modify platform.*."
+        \ submit -p config=...)."
       value: ''
     - name: mlflow-endpoint
       value: http://mlflow.internal.invalid
@@ -317,15 +344,6 @@ spec:
       - gpu-t4
       description: Compute class for the 'compose-and-validate' step (the KubePool's
         class catalog; default = its cpu tier).
-    - name: compose-and-validate-cpu
-      value: '7'
-      description: Per-run resource override for step 'compose-and-validate'.
-    - name: compose-and-validate-mem
-      value: 27Gi
-      description: Per-run resource override for step 'compose-and-validate'.
-    - name: compose-and-validate-disk
-      value: 10Gi
-      description: Per-run resource override for step 'compose-and-validate'.
     - name: hello-world-class
       value: cpu-standard
       enum:
@@ -334,13 +352,4 @@ spec:
       - gpu-t4
       description: Compute class for the 'hello-world' step (the KubePool's class
         catalog; default = its cpu tier).
-    - name: hello-world-cpu
-      value: '7'
-      description: Per-run resource override for step 'hello-world'.
-    - name: hello-world-mem
-      value: 27Gi
-      description: Per-run resource override for step 'hello-world'.
-    - name: hello-world-disk
-      value: 10Gi
-      description: Per-run resource override for step 'hello-world'.
   serviceAccountName: argo-workflow

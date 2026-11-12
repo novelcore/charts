@@ -95,8 +95,6 @@ spec:
       - --require=quantization
       - --require=registration
       - --require=train
-      - --output
-      - /work/params.yaml
       - --run
       - '{{workflow.name}}'
       - --steps
@@ -158,7 +156,6 @@ spec:
       parameters:
       - name: kaos-result
         valueFrom:
-          default: '{"version":1,"status":"absent"}'
           path: /work/output/kaos-result.json
   - name: prepare-data
     container:
@@ -175,13 +172,13 @@ spec:
       - name: kaos-context
     metadata:
       labels:
+        platform.kubecore.io/produces-dataset: 'true'
         platform.kubecore.io/step: prepare-data
         platform.kubecore.io/step-kind: transform
     outputs:
       parameters:
       - name: kaos-result
         valueFrom:
-          default: '{"version":1,"status":"absent"}'
           path: /work/output/kaos-result.json
   - name: model-training
     container:
@@ -211,7 +208,6 @@ spec:
       parameters:
       - name: kaos-result
         valueFrom:
-          default: '{"version":1,"status":"absent"}'
           path: /work/output/kaos-result.json
   - name: qat-finetune
     container:
@@ -227,7 +223,6 @@ spec:
         limits:
           nvidia.com/gpu: '1'
         requests:
-          ephemeral-storage: 20Gi
           nvidia.com/gpu: '1'
     inputs:
       parameters:
@@ -240,7 +235,6 @@ spec:
       parameters:
       - name: kaos-result
         valueFrom:
-          default: '{"version":1,"status":"absent"}'
           path: /work/output/kaos-result.json
   - name: model-quantization
     container:
@@ -263,7 +257,6 @@ spec:
       parameters:
       - name: kaos-result
         valueFrom:
-          default: '{"version":1,"status":"absent"}'
           path: /work/output/kaos-result.json
   - name: model-registration
     container:
@@ -286,7 +279,6 @@ spec:
       parameters:
       - name: kaos-result
         valueFrom:
-          default: '{"version":1,"status":"absent"}'
           path: /work/output/kaos-result.json
   - name: main
     dag:
@@ -612,5 +604,5 @@ spec:
     - name: config
       description: "ADVANCED: override YAML merged LAST over the composed config (OmegaConf.merge).\
         \ Overrides everything above \u2014 intended for scripted submissions (argo\
-        \ submit -p config=...). May not modify platform.*."
+        \ submit -p config=...)."
       value: ''

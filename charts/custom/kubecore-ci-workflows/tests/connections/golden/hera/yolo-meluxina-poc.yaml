@@ -17,11 +17,6 @@ spec:
     container:
       image: '{{workflow.parameters.image-compose-and-validate}}'
       args:
-      - platform.lakefs.repository=PLACEHOLDER-repo
-      - platform.lakefs.endpoint=http://lakefs.internal.invalid
-      - platform.mlflow.tracking_uri=http://mlflow.internal.invalid
-      - platform.checkpoints.bucket=outputs-yolo-meluxina-poc
-      - platform.checkpoints.prefix=main/checkpoints
       - image_processing={{workflow.parameters.image_processing}}
       - model={{workflow.parameters.model}}
       - train/callbacks={{workflow.parameters.train-callbacks}}
@@ -108,8 +103,6 @@ spec:
       - --require=quantization
       - --require=registration
       - --require=train
-      - --output
-      - /work/params.yaml
       - --run
       - '{{workflow.name}}'
       - --steps
@@ -197,11 +190,18 @@ spec:
       - name: kaos-context-model-registration
         valueFrom:
           path: /work/context/model-registration.json
-    podSpecPatch: "containers:\n- name: main\n  resources:\n    requests:\n      cpu:\
-      \ \"{{workflow.parameters.compose-and-validate-cpu}}\"\n      memory: \"{{workflow.parameters.compose-and-validate-mem}}\"\
-      \n      ephemeral-storage: \"{{workflow.parameters.compose-and-validate-disk}}\"\
-      \n    limits:\n      cpu: \"{{workflow.parameters.compose-and-validate-cpu}}\"\
-      \n      memory: \"{{workflow.parameters.compose-and-validate-mem}}\"\n"
+    inputs:
+      parameters:
+      - name: cpu
+        default: '7'
+      - name: mem
+        default: 27Gi
+      - name: disk
+        default: 10Gi
+    podSpecPatch: "containers:\n- name: main\n  resources:\n    limits:\n      cpu:\
+      \ '{{inputs.parameters.cpu}}'\n      memory: '{{inputs.parameters.mem}}'\n \
+      \   requests:\n      cpu: '{{inputs.parameters.cpu}}'\n      ephemeral-storage:\
+      \ '{{inputs.parameters.disk}}'\n      memory: '{{inputs.parameters.mem}}'\n"
     nodeSelector:
       platform.kubecore.io/nodegroup-type: '{{workflow.parameters.compose-and-validate-class}}'
       platform.kubecore.io/environment: runtime
@@ -233,10 +233,11 @@ spec:
     retryStrategy:
       limit: '2'
       retryPolicy: Always
-      expression: (lastRetry.status == 'Error' or lastRetry.message matches '.*(imminent
+      expression: ((lastRetry.status == 'Error' or lastRetry.message matches '.*(imminent
         node shutdown|node is shutting down|node is draining|The node was low on resource|The
         node had condition|Pod was rejected|Evicted|evicted|pod deleted|Pod was deleted).*')
-        and not (lastRetry.message startsWith 'KaosIdle')
+        and not (lastRetry.message contains 'kaos-result.json')) and not (lastRetry.message
+        startsWith 'KaosIdle')
       backoff:
         duration: 30s
         factor: '2'
@@ -294,6 +295,12 @@ spec:
     inputs:
       parameters:
       - name: kaos-context
+      - name: cpu
+        default: '7'
+      - name: mem
+        default: 27Gi
+      - name: disk
+        default: 10Gi
     metadata:
       labels:
         platform.kubecore.io/step: config-validation
@@ -302,13 +309,11 @@ spec:
       parameters:
       - name: kaos-result
         valueFrom:
-          default: '{"version":1,"status":"absent"}'
           path: /work/output/kaos-result.json
-    podSpecPatch: "containers:\n- name: main\n  resources:\n    requests:\n      cpu:\
-      \ \"{{workflow.parameters.config-validation-cpu}}\"\n      memory: \"{{workflow.parameters.config-validation-mem}}\"\
-      \n      ephemeral-storage: \"{{workflow.parameters.config-validation-disk}}\"\
-      \n    limits:\n      cpu: \"{{workflow.parameters.config-validation-cpu}}\"\n\
-      \      memory: \"{{workflow.parameters.config-validation-mem}}\"\n"
+    podSpecPatch: "containers:\n- name: main\n  resources:\n    limits:\n      cpu:\
+      \ '{{inputs.parameters.cpu}}'\n      memory: '{{inputs.parameters.mem}}'\n \
+      \   requests:\n      cpu: '{{inputs.parameters.cpu}}'\n      ephemeral-storage:\
+      \ '{{inputs.parameters.disk}}'\n      memory: '{{inputs.parameters.mem}}'\n"
     nodeSelector:
       platform.kubecore.io/nodegroup-type: '{{workflow.parameters.config-validation-class}}'
       platform.kubecore.io/environment: runtime
@@ -340,10 +345,11 @@ spec:
     retryStrategy:
       limit: '2'
       retryPolicy: Always
-      expression: (lastRetry.status == 'Error' or lastRetry.message matches '.*(imminent
+      expression: ((lastRetry.status == 'Error' or lastRetry.message matches '.*(imminent
         node shutdown|node is shutting down|node is draining|The node was low on resource|The
         node had condition|Pod was rejected|Evicted|evicted|pod deleted|Pod was deleted).*')
-        and not (lastRetry.message startsWith 'KaosIdle')
+        and not (lastRetry.message contains 'kaos-result.json')) and not (lastRetry.message
+        startsWith 'KaosIdle')
       backoff:
         duration: 30s
         factor: '2'
@@ -401,21 +407,26 @@ spec:
     inputs:
       parameters:
       - name: kaos-context
+      - name: cpu
+        default: '7'
+      - name: mem
+        default: 27Gi
+      - name: disk
+        default: 10Gi
     metadata:
       labels:
+        platform.kubecore.io/produces-dataset: 'true'
         platform.kubecore.io/step: prepare-data
         platform.kubecore.io/step-kind: transform
     outputs:
       parameters:
       - name: kaos-result
         valueFrom:
-          default: '{"version":1,"status":"absent"}'
           path: /work/output/kaos-result.json
-    podSpecPatch: "containers:\n- name: main\n  resources:\n    requests:\n      cpu:\
-      \ \"{{workflow.parameters.prepare-data-cpu}}\"\n      memory: \"{{workflow.parameters.prepare-data-mem}}\"\
-      \n      ephemeral-storage: \"{{workflow.parameters.prepare-data-disk}}\"\n \
-      \   limits:\n      cpu: \"{{workflow.parameters.prepare-data-cpu}}\"\n     \
-      \ memory: \"{{workflow.parameters.prepare-data-mem}}\"\n"
+    podSpecPatch: "containers:\n- name: main\n  resources:\n    limits:\n      cpu:\
+      \ '{{inputs.parameters.cpu}}'\n      memory: '{{inputs.parameters.mem}}'\n \
+      \   requests:\n      cpu: '{{inputs.parameters.cpu}}'\n      ephemeral-storage:\
+      \ '{{inputs.parameters.disk}}'\n      memory: '{{inputs.parameters.mem}}'\n"
     nodeSelector:
       platform.kubecore.io/nodegroup-type: '{{workflow.parameters.prepare-data-class}}'
       platform.kubecore.io/environment: runtime
@@ -447,10 +458,11 @@ spec:
     retryStrategy:
       limit: '2'
       retryPolicy: Always
-      expression: (lastRetry.status == 'Error' or lastRetry.message matches '.*(imminent
+      expression: ((lastRetry.status == 'Error' or lastRetry.message matches '.*(imminent
         node shutdown|node is shutting down|node is draining|The node was low on resource|The
         node had condition|Pod was rejected|Evicted|evicted|pod deleted|Pod was deleted).*')
-        and not (lastRetry.message startsWith 'KaosIdle')
+        and not (lastRetry.message contains 'kaos-result.json')) and not (lastRetry.message
+        startsWith 'KaosIdle')
       backoff:
         duration: 30s
         factor: '2'
@@ -523,6 +535,12 @@ spec:
     inputs:
       parameters:
       - name: kaos-context
+      - name: cpu
+        default: '7'
+      - name: mem
+        default: 25Gi
+      - name: disk
+        default: 10Gi
       - name: gpus
         default: '1'
     metadata:
@@ -535,14 +553,12 @@ spec:
       parameters:
       - name: kaos-result
         valueFrom:
-          default: '{"version":1,"status":"absent"}'
           path: /work/output/kaos-result.json
     podSpecPatch: "containers:\n- name: main\n  resources:\n    limits:\n      cpu:\
-      \ '{{workflow.parameters.model-training-cpu}}'\n      memory: '{{workflow.parameters.model-training-mem}}'\n\
-      \      nvidia.com/gpu: '{{inputs.parameters.gpus}}'\n    requests:\n      cpu:\
-      \ '{{workflow.parameters.model-training-cpu}}'\n      ephemeral-storage: '{{workflow.parameters.model-training-disk}}'\n\
-      \      memory: '{{workflow.parameters.model-training-mem}}'\n      nvidia.com/gpu:\
-      \ '{{inputs.parameters.gpus}}'\n"
+      \ '{{inputs.parameters.cpu}}'\n      memory: '{{inputs.parameters.mem}}'\n \
+      \     nvidia.com/gpu: '{{inputs.parameters.gpus}}'\n    requests:\n      cpu:\
+      \ '{{inputs.parameters.cpu}}'\n      ephemeral-storage: '{{inputs.parameters.disk}}'\n\
+      \      memory: '{{inputs.parameters.mem}}'\n      nvidia.com/gpu: '{{inputs.parameters.gpus}}'\n"
     nodeSelector:
       platform.kubecore.io/nodegroup-type: '{{workflow.parameters.model-training-class}}'
       platform.kubecore.io/environment: runtime
@@ -577,10 +593,11 @@ spec:
     retryStrategy:
       limit: '2'
       retryPolicy: Always
-      expression: (lastRetry.status == 'Error' or lastRetry.message matches '.*(imminent
+      expression: ((lastRetry.status == 'Error' or lastRetry.message matches '.*(imminent
         node shutdown|node is shutting down|node is draining|The node was low on resource|The
         node had condition|Pod was rejected|Evicted|evicted|pod deleted|Pod was deleted).*')
-        and not (lastRetry.message startsWith 'KaosIdle')
+        and not (lastRetry.message contains 'kaos-result.json')) and not (lastRetry.message
+        startsWith 'KaosIdle')
       backoff:
         duration: 30s
         factor: '2'
@@ -639,9 +656,9 @@ spec:
           cpu: '7'
           memory: 25Gi
         requests:
-          ephemeral-storage: 20Gi
           cpu: '7'
           memory: 25Gi
+          ephemeral-storage: 10Gi
       volumeMounts:
       - name: mlflow-svc
         mountPath: /etc/mlflow-svc
@@ -653,6 +670,12 @@ spec:
     inputs:
       parameters:
       - name: kaos-context
+      - name: cpu
+        default: '7'
+      - name: mem
+        default: 25Gi
+      - name: disk
+        default: 10Gi
       - name: gpus
         default: '1'
     metadata:
@@ -663,14 +686,12 @@ spec:
       parameters:
       - name: kaos-result
         valueFrom:
-          default: '{"version":1,"status":"absent"}'
           path: /work/output/kaos-result.json
     podSpecPatch: "containers:\n- name: main\n  resources:\n    limits:\n      cpu:\
-      \ '{{workflow.parameters.qat-finetune-cpu}}'\n      memory: '{{workflow.parameters.qat-finetune-mem}}'\n\
-      \      nvidia.com/gpu: '{{inputs.parameters.gpus}}'\n    requests:\n      cpu:\
-      \ '{{workflow.parameters.qat-finetune-cpu}}'\n      ephemeral-storage: '{{workflow.parameters.qat-finetune-disk}}'\n\
-      \      memory: '{{workflow.parameters.qat-finetune-mem}}'\n      nvidia.com/gpu:\
-      \ '{{inputs.parameters.gpus}}'\n"
+      \ '{{inputs.parameters.cpu}}'\n      memory: '{{inputs.parameters.mem}}'\n \
+      \     nvidia.com/gpu: '{{inputs.parameters.gpus}}'\n    requests:\n      cpu:\
+      \ '{{inputs.parameters.cpu}}'\n      ephemeral-storage: '{{inputs.parameters.disk}}'\n\
+      \      memory: '{{inputs.parameters.mem}}'\n      nvidia.com/gpu: '{{inputs.parameters.gpus}}'\n"
     nodeSelector:
       platform.kubecore.io/nodegroup-type: '{{workflow.parameters.qat-finetune-class}}'
       platform.kubecore.io/environment: runtime
@@ -705,10 +726,11 @@ spec:
     retryStrategy:
       limit: '2'
       retryPolicy: Always
-      expression: (lastRetry.status == 'Error' or lastRetry.message matches '.*(imminent
+      expression: ((lastRetry.status == 'Error' or lastRetry.message matches '.*(imminent
         node shutdown|node is shutting down|node is draining|The node was low on resource|The
         node had condition|Pod was rejected|Evicted|evicted|pod deleted|Pod was deleted).*')
-        and not (lastRetry.message startsWith 'KaosIdle')
+        and not (lastRetry.message contains 'kaos-result.json')) and not (lastRetry.message
+        startsWith 'KaosIdle')
       backoff:
         duration: 30s
         factor: '2'
@@ -766,6 +788,12 @@ spec:
     inputs:
       parameters:
       - name: kaos-context
+      - name: cpu
+        default: '7'
+      - name: mem
+        default: 27Gi
+      - name: disk
+        default: 10Gi
     metadata:
       labels:
         platform.kubecore.io/step: model-quantization
@@ -774,13 +802,11 @@ spec:
       parameters:
       - name: kaos-result
         valueFrom:
-          default: '{"version":1,"status":"absent"}'
           path: /work/output/kaos-result.json
-    podSpecPatch: "containers:\n- name: main\n  resources:\n    requests:\n      cpu:\
-      \ \"{{workflow.parameters.model-quantization-cpu}}\"\n      memory: \"{{workflow.parameters.model-quantization-mem}}\"\
-      \n      ephemeral-storage: \"{{workflow.parameters.model-quantization-disk}}\"\
-      \n    limits:\n      cpu: \"{{workflow.parameters.model-quantization-cpu}}\"\
-      \n      memory: \"{{workflow.parameters.model-quantization-mem}}\"\n"
+    podSpecPatch: "containers:\n- name: main\n  resources:\n    limits:\n      cpu:\
+      \ '{{inputs.parameters.cpu}}'\n      memory: '{{inputs.parameters.mem}}'\n \
+      \   requests:\n      cpu: '{{inputs.parameters.cpu}}'\n      ephemeral-storage:\
+      \ '{{inputs.parameters.disk}}'\n      memory: '{{inputs.parameters.mem}}'\n"
     nodeSelector:
       platform.kubecore.io/nodegroup-type: '{{workflow.parameters.model-quantization-class}}'
       platform.kubecore.io/environment: runtime
@@ -812,10 +838,11 @@ spec:
     retryStrategy:
       limit: '2'
       retryPolicy: Always
-      expression: (lastRetry.status == 'Error' or lastRetry.message matches '.*(imminent
+      expression: ((lastRetry.status == 'Error' or lastRetry.message matches '.*(imminent
         node shutdown|node is shutting down|node is draining|The node was low on resource|The
         node had condition|Pod was rejected|Evicted|evicted|pod deleted|Pod was deleted).*')
-        and not (lastRetry.message startsWith 'KaosIdle')
+        and not (lastRetry.message contains 'kaos-result.json')) and not (lastRetry.message
+        startsWith 'KaosIdle')
       backoff:
         duration: 30s
         factor: '2'
@@ -873,6 +900,12 @@ spec:
     inputs:
       parameters:
       - name: kaos-context
+      - name: cpu
+        default: '7'
+      - name: mem
+        default: 27Gi
+      - name: disk
+        default: 10Gi
     metadata:
       labels:
         platform.kubecore.io/step: model-registration
@@ -881,13 +914,11 @@ spec:
       parameters:
       - name: kaos-result
         valueFrom:
-          default: '{"version":1,"status":"absent"}'
           path: /work/output/kaos-result.json
-    podSpecPatch: "containers:\n- name: main\n  resources:\n    requests:\n      cpu:\
-      \ \"{{workflow.parameters.model-registration-cpu}}\"\n      memory: \"{{workflow.parameters.model-registration-mem}}\"\
-      \n      ephemeral-storage: \"{{workflow.parameters.model-registration-disk}}\"\
-      \n    limits:\n      cpu: \"{{workflow.parameters.model-registration-cpu}}\"\
-      \n      memory: \"{{workflow.parameters.model-registration-mem}}\"\n"
+    podSpecPatch: "containers:\n- name: main\n  resources:\n    limits:\n      cpu:\
+      \ '{{inputs.parameters.cpu}}'\n      memory: '{{inputs.parameters.mem}}'\n \
+      \   requests:\n      cpu: '{{inputs.parameters.cpu}}'\n      ephemeral-storage:\
+      \ '{{inputs.parameters.disk}}'\n      memory: '{{inputs.parameters.mem}}'\n"
     nodeSelector:
       platform.kubecore.io/nodegroup-type: '{{workflow.parameters.model-registration-class}}'
       platform.kubecore.io/environment: runtime
@@ -919,10 +950,11 @@ spec:
     retryStrategy:
       limit: '2'
       retryPolicy: Always
-      expression: (lastRetry.status == 'Error' or lastRetry.message matches '.*(imminent
+      expression: ((lastRetry.status == 'Error' or lastRetry.message matches '.*(imminent
         node shutdown|node is shutting down|node is draining|The node was low on resource|The
         node had condition|Pod was rejected|Evicted|evicted|pod deleted|Pod was deleted).*')
-        and not (lastRetry.message startsWith 'KaosIdle')
+        and not (lastRetry.message contains 'kaos-result.json')) and not (lastRetry.message
+        startsWith 'KaosIdle')
       backoff:
         duration: 30s
         factor: '2'
@@ -932,6 +964,17 @@ spec:
       tasks:
       - name: compose-and-validate
         template: compose-and-validate
+        arguments:
+          parameters:
+          - name: cpu
+            value: '{{=({"cpu-standard": "7", "kubecorecpu": "7", "gpu-t4": "7"}[workflow.parameters[''compose-and-validate-class'']])
+              ?? "7"}}'
+          - name: mem
+            value: '{{=({"cpu-standard": "27Gi", "kubecorecpu": "27Gi", "gpu-t4":
+              "25Gi"}[workflow.parameters[''compose-and-validate-class'']]) ?? "27Gi"}}'
+          - name: disk
+            value: '{{=({"cpu-standard": "10Gi", "kubecorecpu": "10Gi", "gpu-t4":
+              "10Gi"}[workflow.parameters[''compose-and-validate-class'']]) ?? "10Gi"}}'
       - name: config-validation
         depends: compose-and-validate
         template: config-validation
@@ -940,6 +983,15 @@ spec:
           - name: kaos-context
             value: '{{=sprig.trimSuffix("}", tasks["compose-and-validate"].outputs.parameters["kaos-context-config-validation"])
               + ",\"upstream\":{" + "}" + "}"}}'
+          - name: cpu
+            value: '{{=({"cpu-standard": "7", "kubecorecpu": "7", "gpu-t4": "7"}[workflow.parameters[''config-validation-class'']])
+              ?? "7"}}'
+          - name: mem
+            value: '{{=({"cpu-standard": "27Gi", "kubecorecpu": "27Gi", "gpu-t4":
+              "25Gi"}[workflow.parameters[''config-validation-class'']]) ?? "27Gi"}}'
+          - name: disk
+            value: '{{=({"cpu-standard": "10Gi", "kubecorecpu": "10Gi", "gpu-t4":
+              "10Gi"}[workflow.parameters[''config-validation-class'']]) ?? "10Gi"}}'
       - name: prepare-data
         depends: compose-and-validate && config-validation
         template: prepare-data
@@ -950,49 +1002,33 @@ spec:
               + ",\"upstream\":{\"config-validation\":" + sprig.default("{\"version\":1,\"status\":\"absent\"}",
               tasks["config-validation"].outputs.parameters["kaos-result"]) + "}"
               + "}"}}'
-        when: '{{=!hasPrefix(workflow.parameters[''prepare-data-class''], ''meluxina-'')}}'
-      - name: prepare-data-hpc
-        template: hpc-follower
-        when: '{{=hasPrefix(workflow.parameters[''prepare-data-class''], ''meluxina-'')}}'
-        arguments:
-          parameters:
-          - name: step-name
-            value: prepare-data
-          - name: image
-            value: '{{workflow.parameters.image-prepare-data}}'
-          - name: step-command
-            value: '["python","-m","app.entry"]'
-          - name: step-kind
-            value: transform
-          - name: time-limit
-            value: '240'
-          - name: deadline-seconds
-            value: '259200'
-          - name: resumable-lead
-            value: '0'
-          - name: resumable
-            value: auto
-          - name: idle-timeout
-            value: ''
-          - name: hpc-class
-            value: '{{workflow.parameters.prepare-data-class}}'
-          - name: kaos-context
-            value: '{{=sprig.trimSuffix("}", tasks["compose-and-validate"].outputs.parameters["kaos-context-prepare-data"])
-              + ",\"upstream\":{\"config-validation\":" + sprig.default("{\"version\":1,\"status\":\"absent\"}",
-              tasks["config-validation"].outputs.parameters["kaos-result"]) + "}"
-              + "}"}}'
-        depends: compose-and-validate && config-validation
+          - name: cpu
+            value: '{{=({"cpu-standard": "7", "kubecorecpu": "7", "gpu-t4": "7"}[workflow.parameters[''prepare-data-class'']])
+              ?? "7"}}'
+          - name: mem
+            value: '{{=({"cpu-standard": "27Gi", "kubecorecpu": "27Gi", "gpu-t4":
+              "25Gi"}[workflow.parameters[''prepare-data-class'']]) ?? "27Gi"}}'
+          - name: disk
+            value: '{{=({"cpu-standard": "10Gi", "kubecorecpu": "10Gi", "gpu-t4":
+              "10Gi"}[workflow.parameters[''prepare-data-class'']]) ?? "10Gi"}}'
       - name: model-training
-        depends: compose-and-validate && ((prepare-data.Succeeded || prepare-data.Skipped)
-          && (prepare-data-hpc.Succeeded || prepare-data-hpc.Skipped))
+        depends: compose-and-validate && prepare-data
         template: model-training
         arguments:
           parameters:
           - name: kaos-context
             value: '{{=sprig.trimSuffix("}", tasks["compose-and-validate"].outputs.parameters["kaos-context-model-training"])
-              + ",\"upstream\":{\"prepare-data\":" + sprig.default(sprig.default("{\"version\":1,\"status\":\"absent\"}",
-              tasks["prepare-data-hpc"].outputs.parameters["kaos-result"]), tasks["prepare-data"].outputs.parameters["kaos-result"])
-              + "}" + "}"}}'
+              + ",\"upstream\":{\"prepare-data\":" + sprig.default("{\"version\":1,\"status\":\"absent\"}",
+              tasks["prepare-data"].outputs.parameters["kaos-result"]) + "}" + "}"}}'
+          - name: cpu
+            value: '{{=({"cpu-standard": "7", "kubecorecpu": "7", "gpu-t4": "7"}[workflow.parameters[''model-training-class'']])
+              ?? "7"}}'
+          - name: mem
+            value: '{{=({"cpu-standard": "27Gi", "kubecorecpu": "27Gi", "gpu-t4":
+              "25Gi"}[workflow.parameters[''model-training-class'']]) ?? "25Gi"}}'
+          - name: disk
+            value: '{{=({"cpu-standard": "10Gi", "kubecorecpu": "10Gi", "gpu-t4":
+              "10Gi"}[workflow.parameters[''model-training-class'']]) ?? "10Gi"}}'
           - name: gpus
             value: '{{=workflow.parameters[''model-training-class''] in [''gpu-t4'']
               ? ''1'' : ''0''}}'
@@ -1024,11 +1060,9 @@ spec:
             value: '{{workflow.parameters.model-training-class}}'
           - name: kaos-context
             value: '{{=sprig.trimSuffix("}", tasks["compose-and-validate"].outputs.parameters["kaos-context-model-training"])
-              + ",\"upstream\":{\"prepare-data\":" + sprig.default(sprig.default("{\"version\":1,\"status\":\"absent\"}",
-              tasks["prepare-data-hpc"].outputs.parameters["kaos-result"]), tasks["prepare-data"].outputs.parameters["kaos-result"])
-              + "}" + "}"}}'
-        depends: compose-and-validate && ((prepare-data.Succeeded || prepare-data.Skipped)
-          && (prepare-data-hpc.Succeeded || prepare-data-hpc.Skipped))
+              + ",\"upstream\":{\"prepare-data\":" + sprig.default("{\"version\":1,\"status\":\"absent\"}",
+              tasks["prepare-data"].outputs.parameters["kaos-result"]) + "}" + "}"}}'
+        depends: compose-and-validate && prepare-data
       - name: qat-finetune
         depends: compose-and-validate && ((model-training.Succeeded || model-training.Skipped)
           && (model-training-hpc.Succeeded || model-training-hpc.Skipped))
@@ -1042,6 +1076,15 @@ spec:
               + ",\"upstream\":{\"model-training\":" + sprig.default(sprig.default("{\"version\":1,\"status\":\"absent\"}",
               tasks["model-training-hpc"].outputs.parameters["kaos-result"]), tasks["model-training"].outputs.parameters["kaos-result"])
               + "}" + "}"}}'
+          - name: cpu
+            value: '{{=({"cpu-standard": "7", "kubecorecpu": "7", "gpu-t4": "7"}[workflow.parameters[''qat-finetune-class'']])
+              ?? "7"}}'
+          - name: mem
+            value: '{{=({"cpu-standard": "27Gi", "kubecorecpu": "27Gi", "gpu-t4":
+              "25Gi"}[workflow.parameters[''qat-finetune-class'']]) ?? "25Gi"}}'
+          - name: disk
+            value: '{{=({"cpu-standard": "10Gi", "kubecorecpu": "10Gi", "gpu-t4":
+              "10Gi"}[workflow.parameters[''qat-finetune-class'']]) ?? "10Gi"}}'
           - name: gpus
             value: '{{=workflow.parameters[''qat-finetune-class''] in [''gpu-t4'']
               ? ''1'' : ''0''}}'
@@ -1095,6 +1138,15 @@ spec:
               + ",\"qat-finetune\":" + sprig.default(sprig.default("{\"version\":1,\"status\":\"absent\"}",
               tasks["qat-finetune-hpc"].outputs.parameters["kaos-result"]), tasks["qat-finetune"].outputs.parameters["kaos-result"])
               + "}" + "}"}}'
+          - name: cpu
+            value: '{{=({"cpu-standard": "7", "kubecorecpu": "7", "gpu-t4": "7"}[workflow.parameters[''model-quantization-class'']])
+              ?? "7"}}'
+          - name: mem
+            value: '{{=({"cpu-standard": "27Gi", "kubecorecpu": "27Gi", "gpu-t4":
+              "25Gi"}[workflow.parameters[''model-quantization-class'']]) ?? "27Gi"}}'
+          - name: disk
+            value: '{{=({"cpu-standard": "10Gi", "kubecorecpu": "10Gi", "gpu-t4":
+              "10Gi"}[workflow.parameters[''model-quantization-class'']]) ?? "10Gi"}}'
       - name: model-quantization-hpc
         template: hpc-follower
         when: '{{=(workflow.parameters[''quantization-mode''] != ''none'') && hasPrefix(workflow.parameters[''model-quantization-class''],
@@ -1148,6 +1200,15 @@ spec:
               tasks["model-quantization-hpc"].outputs.parameters["kaos-result"]),
               tasks["model-quantization"].outputs.parameters["kaos-result"]) + "}"
               + "}"}}'
+          - name: cpu
+            value: '{{=({"cpu-standard": "7", "kubecorecpu": "7", "gpu-t4": "7"}[workflow.parameters[''model-registration-class'']])
+              ?? "7"}}'
+          - name: mem
+            value: '{{=({"cpu-standard": "27Gi", "kubecorecpu": "27Gi", "gpu-t4":
+              "25Gi"}[workflow.parameters[''model-registration-class'']]) ?? "27Gi"}}'
+          - name: disk
+            value: '{{=({"cpu-standard": "10Gi", "kubecorecpu": "10Gi", "gpu-t4":
+              "10Gi"}[workflow.parameters[''model-registration-class'']]) ?? "10Gi"}}'
   - name: hpc-follower
     inputs:
       parameters:
@@ -1195,14 +1256,14 @@ spec:
     parameters:
     - name: pipeline-info
       value: "HOW TO RUN: defaults are runnable as-is \u2014 just press Submit.\n\
-        PER-STEP COMPUTE: {step}-class picks the node class; {step}-cpu / {step}-mem\
-        \ dial one run's resources.\nCOMPUTE CLASSES on this pool:\n  - cpu-standard\
-        \ (cpu) \u2014 n2-standard-8\n  - kubecorecpu (cpu) \u2014 e2-standard-8\n\
-        \  - gpu-t4 (gpu) \u2014 n1-standard-8 + 1x nvidia-tesla-t4\nMELUXINA (HPC):\
-        \ pick a meluxina-* class in any {step}-class dropdown and that step runs\
-        \ as a Slurm job on MeluXina (account PLACEHOLDER-account) \u2014 queue time\
-        \ applies; the pipeline waits, stages the dataset in and the step's result\
-        \ back; walltime= in pipeline.py caps the job. Classes:\n  - meluxina-gpu\
+        PER-STEP COMPUTE: {step}-class picks the node class; the step gets that node\
+        \ (what it offers a pod, less the platform's reserve).\nCOMPUTE CLASSES on\
+        \ this pool:\n  - cpu-standard (cpu) \u2014 n2-standard-8\n  - kubecorecpu\
+        \ (cpu) \u2014 e2-standard-8\n  - gpu-t4 (gpu) \u2014 n1-standard-8 + 1x nvidia-tesla-t4\n\
+        MELUXINA (HPC): pick a meluxina-* class in any {step}-class dropdown and that\
+        \ step runs as a Slurm job on MeluXina (account PLACEHOLDER-account) \u2014\
+        \ queue time applies; the pipeline waits, stages the dataset in and the step's\
+        \ result back; walltime= in pipeline.py caps the job. Classes:\n  - meluxina-gpu\
         \ (gpu) \u2014 partition gpu, 4 GPUs, 128 cores, 512 GiB \u2014 4x A100-40GB,\
         \ 2x EPYC 7452, 512 GB\n  - meluxina-cpu (cpu) \u2014 partition cpu, 128 cores,\
         \ 512 GiB \u2014 2x EPYC 7452, 128 cores, 512 GB\n  - meluxina-largemem (cpu)\
@@ -1467,7 +1528,7 @@ spec:
     - name: config
       description: "ADVANCED: override YAML merged LAST over the composed config (OmegaConf.merge).\
         \ Overrides everything above \u2014 intended for scripted submissions (argo\
-        \ submit -p config=...). May not modify platform.*."
+        \ submit -p config=...)."
       value: ''
     - name: mlflow-endpoint
       value: http://mlflow.internal.invalid
@@ -1518,15 +1579,6 @@ spec:
       - gpu-t4
       description: Compute class for the 'compose-and-validate' step (the KubePool's
         class catalog; default = its cpu tier).
-    - name: compose-and-validate-cpu
-      value: '7'
-      description: Per-run resource override for step 'compose-and-validate'.
-    - name: compose-and-validate-mem
-      value: 27Gi
-      description: Per-run resource override for step 'compose-and-validate'.
-    - name: compose-and-validate-disk
-      value: 10Gi
-      description: Per-run resource override for step 'compose-and-validate'.
     - name: config-validation-class
       value: cpu-standard
       enum:
@@ -1535,36 +1587,14 @@ spec:
       - gpu-t4
       description: Compute class for the 'config-validation' step (the KubePool's
         class catalog; default = its cpu tier).
-    - name: config-validation-cpu
-      value: '7'
-      description: Per-run resource override for step 'config-validation'.
-    - name: config-validation-mem
-      value: 27Gi
-      description: Per-run resource override for step 'config-validation'.
-    - name: config-validation-disk
-      value: 10Gi
-      description: Per-run resource override for step 'config-validation'.
     - name: prepare-data-class
       value: cpu-standard
       enum:
       - cpu-standard
       - kubecorecpu
       - gpu-t4
-      - meluxina-gpu
-      - meluxina-cpu
-      - meluxina-largemem
-      description: "Compute class for the 'prepare-data' step (the KubePool's class\
-        \ catalog; default = its cpu tier; meluxina-* classes run the step as a Slurm\
-        \ job on MeluXina \u2014 queue time applies, see pipeline-info)."
-    - name: prepare-data-cpu
-      value: '7'
-      description: Per-run resource override for step 'prepare-data'.
-    - name: prepare-data-mem
-      value: 27Gi
-      description: Per-run resource override for step 'prepare-data'.
-    - name: prepare-data-disk
-      value: 10Gi
-      description: Per-run resource override for step 'prepare-data'.
+      description: Compute class for the 'prepare-data' step (the KubePool's class
+        catalog; default = its cpu tier).
     - name: model-training-class
       value: gpu-t4
       enum:
@@ -1577,15 +1607,6 @@ spec:
       description: "Compute class for the 'model-training' step (the KubePool's class\
         \ catalog; default = its gpu tier; meluxina-* classes run the step as a Slurm\
         \ job on MeluXina \u2014 queue time applies, see pipeline-info)."
-    - name: model-training-cpu
-      value: '7'
-      description: Per-run resource override for step 'model-training'.
-    - name: model-training-mem
-      value: 25Gi
-      description: Per-run resource override for step 'model-training'.
-    - name: model-training-disk
-      value: 10Gi
-      description: Per-run resource override for step 'model-training'.
     - name: qat-finetune-class
       value: gpu-t4
       enum:
@@ -1598,15 +1619,6 @@ spec:
       description: "Compute class for the 'qat-finetune' step (the KubePool's class\
         \ catalog; default = its gpu tier; meluxina-* classes run the step as a Slurm\
         \ job on MeluXina \u2014 queue time applies, see pipeline-info)."
-    - name: qat-finetune-cpu
-      value: '7'
-      description: Per-run resource override for step 'qat-finetune'.
-    - name: qat-finetune-mem
-      value: 25Gi
-      description: Per-run resource override for step 'qat-finetune'.
-    - name: qat-finetune-disk
-      value: 20Gi
-      description: Per-run resource override for step 'qat-finetune'.
     - name: model-quantization-class
       value: cpu-standard
       enum:
@@ -1619,15 +1631,6 @@ spec:
       description: "Compute class for the 'model-quantization' step (the KubePool's\
         \ class catalog; default = its cpu tier; meluxina-* classes run the step as\
         \ a Slurm job on MeluXina \u2014 queue time applies, see pipeline-info)."
-    - name: model-quantization-cpu
-      value: '7'
-      description: Per-run resource override for step 'model-quantization'.
-    - name: model-quantization-mem
-      value: 27Gi
-      description: Per-run resource override for step 'model-quantization'.
-    - name: model-quantization-disk
-      value: 10Gi
-      description: Per-run resource override for step 'model-quantization'.
     - name: model-registration-class
       value: cpu-standard
       enum:
@@ -1636,13 +1639,4 @@ spec:
       - gpu-t4
       description: Compute class for the 'model-registration' step (the KubePool's
         class catalog; default = its cpu tier).
-    - name: model-registration-cpu
-      value: '7'
-      description: Per-run resource override for step 'model-registration'.
-    - name: model-registration-mem
-      value: 27Gi
-      description: Per-run resource override for step 'model-registration'.
-    - name: model-registration-disk
-      value: 10Gi
-      description: Per-run resource override for step 'model-registration'.
   serviceAccountName: argo-workflow
