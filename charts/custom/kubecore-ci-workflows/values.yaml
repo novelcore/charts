@@ -285,6 +285,18 @@ rbac:
 buildPods:
   isolateServiceAccountToken: true
 
+# The render pod runs the developer's pipeline.py (unprivileged, read-only root filesystem, no
+# Kubernetes token). Its network policy keeps it off the cluster's internal addresses and the
+# metadata endpoint: DNS, the Kubernetes API (the Argo executor in the pod reports the result there)
+# and https to public addresses (the package index) only. A standard NetworkPolicy cannot name the
+# index's hosts; an address-level rule is the narrowest it can say. Off by default because the
+# control plane's address is the cluster's: set kubeApiCIDRs (the `kubernetes` endpoint of the
+# cluster the render runs on, /32) with it, or the executor cannot report and the render fails.
+renderPods:
+  networkPolicy:
+    enabled: false
+    kubeApiCIDRs: []
+
 # Workspace volume (shared across all workflow steps via PVC)
 workspace:
   size: "5Gi"

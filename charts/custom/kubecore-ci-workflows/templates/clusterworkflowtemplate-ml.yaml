@@ -1113,9 +1113,8 @@ spec:
         mountPath: /workspace
       - name: kaniko-config
         mountPath: /kaniko/.docker
-      - name: registry-auth
-        mountPath: /etc/registry-auth
-        readOnly: true
+      # No registry-auth mount: the Dockerfile's RUN steps execute in this container, and the
+      # registry password is only needed by the docker-config init container above.
 
   # ── Render path (credential-split) ─────────────────────────────────────
   # Two steps sharing the workspace PVC. The trust boundary: `hera-render` runs
@@ -1180,14 +1179,56 @@ spec:
       # so even the executor sidecar of this untrusted-code pod can't reach the
       # GitHub token via the K8s API. Defined in rbac.yaml.
       serviceAccountName: hera-render-exec
+    # pipeline.py is the developer's code: an unprivileged user, a read-only root filesystem, no
+    # capabilities. fsGroup makes the workspace volume (cloned by the root init step of an earlier
+    # pod) writable for it. The pod label is what the render network policy selects.
+    metadata:
+      labels:
+        platform.kubecore.io/ci-pod: render
     securityContext:
-      runAsUser: 0
-      runAsGroup: 0
+      runAsNonRoot: true
+      runAsUser: 65532
+      runAsGroup: 65532
+      fsGroup: 65532
+      seccompProfile:
+        type: RuntimeDefault
+    volumes:
+    - name: scratch
+      emptyDir: {}
+    # The app's pyproject dependencies the engine lacks are pip-installed into the interpreter's own
+    # site-packages, which a read-only root filesystem forbids. The interpreter's tree (/usr/local in
+    # the python-based engine image) is copied once into a volume that is mounted over it, so the
+    # install lands there and the image's root stays read-only.
+    - name: python-overlay
+      emptyDir: {}
+    initContainers:
+    - name: python-overlay
+      image: "{{`{{inputs.parameters.engine_image}}`}}"
+      command: [sh, -c]
+      args: ["cp -a --no-preserve=ownership /usr/local/. /overlay/"]
+      {{- include "kubecore-ci-workflows.resources" .Values.tooling.heraRenderResources | nindent 6 }}
+      securityContext:
+        runAsNonRoot: true
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities:
+          drop: [ALL]
+      volumeMounts:
+      - name: python-overlay
+        mountPath: /overlay
     container:
       image: "{{`{{inputs.parameters.engine_image}}`}}"
       {{- include "kubecore-ci-workflows.resources" .Values.tooling.heraRenderResources | nindent 6 }}
       command: [sh, -c]
+      securityContext:
+        runAsNonRoot: true
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities:
+          drop: [ALL]
       env:
+      - name: HOME
+        value: /tmp
       - name: ENGINE_PROFILE
         value: "{{`{{inputs.parameters.engine_profile}}`}}"
       args:
@@ -1238,6 +1279,10 @@ spec:
       volumeMounts:
       - name: workspace
         mountPath: /workspace
+      - name: scratch
+        mountPath: /tmp
+      - name: python-overlay
+        mountPath: /usr/local
       # NO github-token mount. NO registry-auth. This is the trust boundary.
 
   # STEP 2 (TOKEN-HOLDING, platform code only): enhance -> gate -> commit.
