@@ -174,7 +174,7 @@ download or whose sha256 differs FAILS the step: enhancing with unknown code is 
 then stamped with the engine version (annotation, and the `platform.kubecore.io/engine` run label).
 Last, the step table the engine wrote on the compose step (PRD novelcore/kaos#1911: what every step reads
 and produces) is read into /tmp/steps.json. A render without one is not from an engine on the step
-contract: the step fails and nothing is committed (`engine.py steps`, exit 5).
+contract: the step fails and nothing is committed (`engine.py steps`, exit 6).
 
 Caller: ENGINE_JSON set (the `engine.py context` JSON of detect-steps/detect-engine, an immutable Argo
 parameter), PyYAML installed, /tmp/context.yaml written, the raw WFT at
