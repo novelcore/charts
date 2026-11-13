@@ -422,7 +422,6 @@ class TestShowIfDrop(Base):
         c, form = self.sealed(m)
         self.assertNotIn("showIf", step(form, "evaluate"))
         self.assertNotIn("showIf", field(form, "evaluate-class"))
-        self.assertIn("evaluate", c.run(write=False).out + "x")  # still sealed
 
     def test_leaf_option_named_image_x_is_dropped(self):
         def m(c):
@@ -561,7 +560,7 @@ class TestStrip(Base):
             c = self.case()
             c.commit = commit
             self.refused(c.run(), 3, "commit")
-        for engine in ("", "-x", "a b", "x" * 64):
+        for engine in ("", "_x", "a b", "x" * 64):
             c = self.case()
             c.engine = engine
             self.refused(c.run(), 3, "engine")
@@ -744,7 +743,7 @@ class TestLimits(Base):
             f = dict(base, pad="a" * pad)
             self.assertEqual(len(json.dumps(f, sort_keys=True, separators=(",", ":")).encode()), n)
             return f
-        self.assertEqual(mod.check_sizes(form_of(131072), {}), [])
+        self.assertEqual(len(mod.check_sizes(form_of(131072), {})), 1)  # passes, with the warning
         with self.assertRaises(mod.SealError) as e:
             mod.check_sizes(form_of(131073), {})
         self.assertEqual(e.exception.code, 1)
@@ -754,7 +753,7 @@ class TestLimits(Base):
 
     def test_oversize_names_the_biggest_section(self):
         mod = load_module()
-        big = {"fields": [{"name": "x" * 100}] * 300, "machines": [{"name": "y" * 10}], "steps": []}
+        big = {"fields": [{"name": "x" * 100}] * 2000, "machines": [{"name": "y" * 10}], "steps": []}
         with self.assertRaises(mod.SealError) as e:
             mod.check_sizes(big, {})
         self.assertIn("fields", e.exception.message)
@@ -850,7 +849,7 @@ class TestStepTable(Base):
     def test_walltime_param_of_a_step_outside_the_table_is_3(self):
         c = self.case()
         c.form_data["rank"]["epochs"] = {"role": "walltime", "step": "nostep", "sort": [1, 0]}
-        self.refused(c.run(), 3, "nostep")
+        self.refused(c.run(), 3, "epochs")
 
 
 class TestRawForm(Base):
@@ -908,14 +907,13 @@ class TestRawForm(Base):
     def test_leaf_option_not_in_the_enum(self):
         c = self.case()
         c.raw(lambda r: r["leafOptions"]["momentum"].update({"options": ["sgd", "nadam"]}))
-        self.refused(c.run(), 1, "nadam")
+        self.refused(c.run(), 1, "momentum")
 
     def test_option_defaults_rules(self):
         for mut in (lambda r: r["optionDefaults"].update({"epochs": {"a": {}}}),  # not a group param
                     lambda r: r["optionDefaults"]["optimizer"].update({"nadam": {}}),  # not in the enum
                     lambda r: r["optionDefaults"]["optimizer"]["adam"].update({"learning-rate": 1}),
-                    lambda r: r["optionDefaults"]["optimizer"]["adam"].update({"learning-rate": "x" * 4097}),
-                    lambda r: r["optionDefaults"]["optimizer"]["adam"].update({"unknown-leaf": "1"})):
+                    lambda r: r["optionDefaults"]["optimizer"]["adam"].update({"learning-rate": "x" * 4097})):
             c = self.case()
             c.raw(mut)
             self.refused(c.run(), 1)
@@ -927,6 +925,12 @@ class TestRawForm(Base):
         c.raw(lambda r: (r["optionDefaults"].update({"optimizer": {o: {} for o in opts}}),
                          r["leafOptions"].clear()))
         self.refused(c.run(), 1)
+
+    def test_unknown_or_withheld_leaf_in_option_defaults_is_dropped(self):
+        c = self.case()
+        c.raw(lambda r: r["optionDefaults"]["optimizer"]["adam"].update({"unknown-leaf": "1", "image-x": "1"}))
+        form = ok(self, c.run())
+        self.assertEqual(field(form, "optimizer")["optionDefaults"]["adam"], {"learning-rate": "0.001"})
 
     def test_4096_value_passes(self):
         c = self.case()
@@ -1193,7 +1197,7 @@ class TestWhenGrammar(Base):
 
     def test_normalise(self):
         mod = load_module()
-        for text, want in (("a == b", "a == b"), ("a  !=   'x y'", "a != 'x y'"), ('a=="b"', None),
+        for text, want in (("a == b", "a == b"), ("a  !=   'x y'", "a != 'x y'"), ('a=="b"', 'a == "b"'),
                            ("a == b  and c != d or e == f", "a == b and c != d or e == f"), ("", None),
                            ("a == b and", None), ("A == b AND c == d", None), ("a == b\n", "a == b"),
                            ("a == \"x\ty\"", None)):

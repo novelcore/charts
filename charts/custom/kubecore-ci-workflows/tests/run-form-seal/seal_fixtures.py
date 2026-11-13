@@ -8,6 +8,7 @@ compute classes of tests/connections/fixtures/contexts/yolo-meluxina-poc.yaml. S
 import copy
 import json
 import os
+import stat
 import subprocess
 import sys
 import tempfile
@@ -240,12 +241,19 @@ class Case:
     def load_wft(self):
         return yaml.safe_load(self.wft_path.read_text(encoding="utf-8"))
 
+    def _snapshot(self):
+        try:
+            st = os.lstat(self.wft_path)
+        except OSError:
+            return None
+        return self.wft_path.read_bytes() if stat.S_ISREG(st.st_mode) else ("not-regular", st.st_mode)
+
     def run(self, args=None, write=True):
         if write:
             self.write()
-        before = self.wft_path.read_bytes() if self.wft_path.exists() and not self.wft_path.is_symlink() else None
+        before = self._snapshot()
         p = subprocess.run([sys.executable, "-I", str(SEAL)] + (self.args() if args is None else args),
                            capture_output=True, text=True, cwd=str(self.root), timeout=120,
                            env={"PATH": os.environ.get("PATH", ""), "HOME": str(self.root)})
-        after = self.wft_path.read_bytes() if self.wft_path.exists() and not self.wft_path.is_symlink() else None
+        after = self._snapshot()
         return Result(p.returncode, p.stdout, p.stderr, before, after, self)
