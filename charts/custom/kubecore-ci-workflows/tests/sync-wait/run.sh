@@ -34,10 +34,14 @@ expect_eq "$AWAIT" "await-inputs" "non-build inputs are awaited first, before th
 # No deadlock: submit-build only creates the Workflow (a resource template) and
 # neither it nor check-drift takes a lock of its own; the queued build starts
 # when the sync's template finishes.
-for t in ml-ci-reconcile check-drift submit-build; do
+for t in ml-ci-reconcile submit-build; do
   L=$(yq "select(.metadata.name==\"ml-ci-reconcile\") | .spec.templates[] | select(.name==\"$t\") | .synchronization" "$R")
   expect_eq "$L" "null" "$t takes no lock of its own (the input wait never blocks a build)"
 done
+# check-drift takes a slot of the cluster-wide check-drift semaphore (tests/check-drift-cap), never a mutex:
+# it waits for no build, and no build waits for it (a slot is released when its pod ends).
+L=$(yq 'select(.metadata.name=="ml-ci-reconcile") | .spec.templates[] | select(.name=="check-drift") | .synchronization.mutexes' "$R")
+expect_eq "$L" "null" "check-drift takes no mutex of its own (the input wait never blocks a build)"
 SUBMIT_KIND=$(yq 'select(.metadata.name=="ml-ci-reconcile") | .spec.templates[] | select(.name=="submit-build") | .resource.action' "$R")
 expect_eq "$SUBMIT_KIND" "create" "submit-build only creates the build Workflow, never waits for it"
 WF_LOCK=$(yq 'select(.metadata.name=="ml-ci-reconcile") | .spec.synchronization' "$R")

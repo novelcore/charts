@@ -225,6 +225,18 @@ Compatibility: today's operator renders (callers passing `serviceAccountName` an
 ### Changelog
 
 - 0.16.0: the changes above; new suite `tests/strict-references`.
+- 0.16.2: `check-drift` is capped by a per-cluster semaphore (6) and lists narrowly; its request is 96Mi (`tooling.checkDriftResources`); the pending-reaper lists unfinished workflows only, request 64Mi (`tooling.reaperResources`); new suite `tests/check-drift-cap`.
+
+## A fan-out of reconcile runs queues instead of starving the node (PRD novelcore/kaos#1911, chart 0.16.2)
+
+Why: on a dev e2e, about 20 `check-drift` pods of `ml-ci-reconcile` ran at once (a dataset release re-checks every app; the hourly polls add more). They run on the small system node pool, requested 208Mi each and used 375-590Mi: the node starved and the workflow controller, gateway and policy engine on it stalled.
+
+- **Cap.** `check-drift` takes a slot of an Argo semaphore: `ci.checkDrift.slots` (default 6) in the ConfigMap `ci-check-drift-slots` (key `slots`), which this chart renders into the chart's namespace. The semaphore names that namespace, so the count is **per cluster**, across every project's CI namespace (the pods share one system pool). A run over the cap waits in Argo: no pod, so nothing for the pending-reaper to kill and nothing for the autoscaler to count; it is not lost, and it ends at the run's `activeDeadlineSeconds`. Argo takes the slot on the retry node, so the slot is kept across the "not yet" retries (exit 3) and a killed pod (137) retries without queueing again: a forced re-render is never dropped. The semaphore sits on `check-drift` only; `decide-and-submit` keeps the app's `{app}-build` mutex and takes no slot of its own, and a slot holder never waits for a mutex, so there is no lock cycle. A run waiting for a slot holds its app's build mutex (the build of that app queues behind a decision that takes seconds). What bounds the number is `slots` x the request on the system pool (6 x 96Mi = 576Mi); a slot is also held for up to about 45 minutes by a new app whose repository is slow to appear, so a low cap throttles a mass creation. Needs the workflow controller to read ConfigMaps in the chart's namespace (the cluster-wide install does). **Symptom when it cannot** (or when the ConfigMap is missing): every `ml-ci-reconcile` run ends in Error on the `check-drift` node with `failed to initialize semaphore <namespace>/ConfigMap/ci-check-drift-slots/slots with limit`. Check that the ConfigMap exists in the chart's namespace (`workflow.namespace`, else the release namespace), that its `slots` is a number, and that the controller's ClusterRole lets it `get` configmaps there (a namespaced controller install does not).
+- **Cheap lists.** The in-flight guard lists only unfinished workflows (`-l workflows.argoproj.io/completed!=true`, server side; a workflow the controller has not labelled yet still matches). The hourly attempt guard (`kl_last_try`) asks for the finished attempts of one app and spec by label. The "was the app used" read of the ML namespace goes through the API in pages of 10 and keeps the newest match. Before, each poll downloaded and parsed every finished workflow of the namespace (150 of ~370 KB: 804 MiB peak in the measurement below).
+- **pending-reaper.** It listed `kubectl get wf -A -o json` (every workflow of the cluster) every few minutes and kept only phase Running. It now lists `-l workflows.argoproj.io/completed!=true`: the same set. Its request is `tooling.reaperResources` (64Mi, no limit): peak 16 MiB, from 900 MiB. `tests/check-drift-cap` runs the old and the new script against the same cluster state and compares what they reap.
+- **Request.** `tooling.checkDriftResources` (check-drift only; `clusterResources` stays for the non-ML reconciler): 96Mi request, **no limit** (an OOMKill drops a forced re-render). Measured peak in a pod with the same image: 804 MiB before, 40 MiB after for the in-flight list, 75 MiB with a 0.9 MB WorkflowTemplate read on top.
+
+Tests: `tests/check-drift-cap/run.sh` (render guards; the script executed against a stub that refuses an unselected list), `tests/check-drift-cap/kind/run.sh` (real Argo v4.0.6: cap, queue, the reaper, forced runs, mutex).
 
 ## Tests
 
@@ -232,6 +244,8 @@ Compatibility: today's operator renders (callers passing `serviceAccountName` an
 helm template t charts/custom/kubecore-ci-workflows > /tmp/rendered.yaml
 bash charts/custom/kubecore-ci-workflows/tests/sync-wait/run.sh                  # render guards
 bash charts/custom/kubecore-ci-workflows/tests/reconcile-trigger/run.sh          # check-drift script against stubs
+bash charts/custom/kubecore-ci-workflows/tests/check-drift-cap/run.sh             # the check-drift cap and its narrow lists
+bash charts/custom/kubecore-ci-workflows/tests/check-drift-cap/kind/run.sh [outdir] # real Argo v4.0.6 in kind: cap, queue, reaper, forced runs
 bash charts/custom/kubecore-ci-workflows/tests/sync-wait/kind/run.sh [outdir]    # real Argo v4.0.6 in kind (needs docker, kind)
 bash charts/custom/kubecore-ci-workflows/tests/build-pacing/run.sh               # pacing render guards
 bash charts/custom/kubecore-ci-workflows/tests/build-pacing/kind/run.sh [outdir] # real Argo: cap, render-only, mutex

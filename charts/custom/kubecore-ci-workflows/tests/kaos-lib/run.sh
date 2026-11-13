@@ -272,12 +272,12 @@ case "\$*" in
   *"workflow-template=${APP}-pipeline"*)
     [ "${RUNS_UNREADABLE:-}" = 1 ] && exit 1
     if [ -n "${RUN_AGE:-}" ]; then printf '{"items": [{"metadata": {"creationTimestamp": "%s"}}]}' "${RUN_TS}"; else printf '{"items": []}'; fi ;;
-  *"get workflows -n proj-train"*)
+  *"get --raw /apis/argoproj.io/v1alpha1/namespaces/proj-train/workflows"*)
     # the namespace's full list: a labelled run, an unlabelled run with the template ref, other apps' runs
     [ "${RUNS_UNREADABLE:-}" = 1 ] && exit 1
     echo "1" >> "$T/ref-list-read"
     jq -n --arg lab "${RUN_TS}" --arg ref "${REF_TS}" --arg app "${APP}-pipeline" \
-      '{items: ([{metadata: {creationTimestamp: "2020-01-01T00:00:00Z"}, spec: {workflowTemplateRef: {name: "other-pipeline"}}}]
+      '{metadata: {}, items: ([{metadata: {creationTimestamp: "2020-01-01T00:00:00Z"}, spec: {workflowTemplateRef: {name: "other-pipeline"}}}]
         + (if \$lab != "" then [{metadata: {creationTimestamp: \$lab, labels: {"workflows.argoproj.io/workflow-template": \$app}}, spec: {workflowTemplateRef: {name: \$app}}}] else [] end)
         + (if \$ref != "" then [{metadata: {creationTimestamp: \$ref}, spec: {workflowTemplateRef: {name: \$app}}}] else [] end))}' ;;
   *"get workflows"*) cat "$T/workflows.json" ;;

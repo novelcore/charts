@@ -1,0 +1,17 @@
+{{/*
+The size of the check-drift semaphore (ml-ci-reconcile): how many check-drift pods may run
+at once in the cluster. One key, one number, read by Argo's workflow controller.
+*/}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Values.ci.checkDrift.configMapName }}
+  namespace: {{ include "kubecore-ci-workflows.namespace" . }}
+  annotations:
+    # Before the ClusterWorkflowTemplate that names it: a run that starts while the ConfigMap
+    # is missing ends in Error ("failed to initialize semaphore"), not in a retry.
+    argocd.argoproj.io/sync-wave: "-1"
+  labels:
+    {{- include "kubecore-ci-workflows.labels" . | nindent 4 }}
+data:
+  {{ .Values.ci.checkDrift.key }}: {{ .Values.ci.checkDrift.slots | int | quote }}

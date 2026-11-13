@@ -151,8 +151,7 @@ tooling:
       memory: 64Mi
     limits:
       memory: 128Mi
-  # The reconciler's check-drift and the pending-reaper list/read the cluster's
-  # workflows and pods: working set p95 135-161 MiB, max 222 MiB, CPU peak 58m
+  # The non-ML reconciler's check-drift lists/reads its app's workflows: working set p95 135-161 MiB, max 222 MiB, CPU peak 58m
   # on quiet pools. NO memory limit, on purpose: `kubectl get workflows -o json`
   # grows with the namespace (a busy e2e `{project}-ci` holds ~100 Workflows,
   # ~39 MB of JSON), and an OOMKill drops the event: a forced re-render after a
@@ -162,6 +161,23 @@ tooling:
     requests:
       cpu: 50m
       memory: 208Mi
+  # ml-ci-reconcile's check-drift alone. Its lists are narrow (unfinished workflows by selector,
+  # finished attempts by label, the newest-run read in pages of 10), so it no longer grows with
+  # the namespace: peak 40 MiB listing 150 finished workflows of ~370 KB each, 75 MiB with an
+  # 0.9 MB WorkflowTemplate read on top (before: 800 MiB, 375-590 MiB live). The request is what
+  # the scheduler counts on the small system nodes; ci.checkDrift.slots bounds how many run.
+  # NO memory limit, on purpose: an OOMKill drops a forced re-render (see clusterResources).
+  checkDriftResources:
+    requests:
+      cpu: 50m
+      memory: 96Mi
+  # pending-reaper: lists the cluster's UNFINISHED workflows only (selector), then each running
+  # one's pods. Peak 16 MiB with 2 running workflows among 150 finished ones (900 MiB when it
+  # listed every workflow). No memory limit, as for clusterResources.
+  reaperResources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
   # gcloud is Python and needs more memory than kubectl (autoscaler healer:
   # p95 130 MiB, max 199 MiB, CPU peak 57m).
   gcloudResources:
@@ -352,6 +368,18 @@ ci:
   buildSlots:
     enabled: false
     configMapName: ci-build-slots
+    key: slots
+  # Cap on check-drift pods running at once, per CLUSTER (an Argo semaphore across all
+  # projects' CI namespaces: the pods share the one system node pool). A fan-out of
+  # reconcile runs queues in Argo instead of starving that pool. The chart renders the
+  # ConfigMap next to the workflow controller's templates. What bounds the number is
+  # slots x tooling.checkDriftResources.requests.memory on the system pool (6 x 96Mi =
+  # 576Mi at the default; the pod peaks under 100 MiB). A slot is also held while a run
+  # retries "not yet" (up to ~45 min for an app whose repository is slow to appear), so a
+  # cap that is too low throttles a mass creation of apps.
+  checkDrift:
+    slots: 6
+    configMapName: ci-check-drift-slots
     key: slots
   # Upper bound (seconds) of one ml-ci-reconcile run, including its wait for the
   # app's build lock (check-drift takes the same mutex as ml-ci-build). A build

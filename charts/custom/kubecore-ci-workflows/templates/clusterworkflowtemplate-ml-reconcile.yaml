@@ -207,6 +207,22 @@ spec:
             value: "{{`{{steps.check-drift.outputs.parameters.kaos_lib_ref}}`}}"
 
   - name: check-drift
+    # At most `ci.checkDrift.slots` check-drift pods run at once in the whole cluster (an Argo
+    # semaphore, counted across every project's CI namespace: they all land on the one system
+    # pool). A fan-out (ml-ci-dataset-rerender per app, the hourly polls, a library update)
+    # QUEUES here, in Argo, with no pod: nothing for the pending-reaper to kill, nothing for the
+    # autoscaler to count, nothing starving the node. The slot is held across this template's
+    # retries (Argo takes it on the retry node), so an exit-3 "not yet" wait keeps its slot and
+    # a killed pod (137) retries without queueing again; the wait is bounded by the run's
+    # activeDeadlineSeconds. The ConfigMap is rendered by this chart, so the cap needs no other
+    # component. decide-and-submit holds the app's build mutex while this waits for a slot;
+    # slot holders never wait for a mutex, so the two cannot deadlock.
+    synchronization:
+      semaphores:
+      - namespace: {{ include "kubecore-ci-workflows.namespace" . }}
+        configMapKeyRef:
+          name: {{ .Values.ci.checkDrift.configMapName | quote }}
+          key: {{ .Values.ci.checkDrift.key | quote }}
     inputs:
       parameters:
       # await: only wait (exit 3) for inputs that are not builds, see
@@ -254,7 +270,7 @@ spec:
       # on `gcloud components install kubectl` on a busy system node, which
       # delayed a new app's first build by 17.5 minutes (2026-10-11).
       image: {{ .Values.tooling.kubectlImage | default "alpine/k8s:1.36.4" }}
-      {{- with .Values.tooling.clusterResources }}
+      {{- with .Values.tooling.checkDriftResources }}
       resources:
         {{- toYaml . | nindent 8 }}
       {{- end }}
@@ -295,7 +311,14 @@ spec:
           printf '' > /tmp/head_sha
           exit 0
         }
-        if ! INFLIGHT=$(kubectl get workflows -n "{{`{{workflow.namespace}}`}}"               -o json 2>&1); then
+        # Only the UNFINISHED workflows are listed (server-side selector on the label Argo
+        # keeps on every workflow; a workflow the controller has not labelled yet has none and
+        # still matches `!=true`). The namespace's finished runs (~140 in a busy e2e `-ci`,
+        # ~400 KB each) used to be downloaded and parsed on every poll: 375-590 MiB of kubectl
+        # and jq, enough to starve a small system node when ~20 of these ran at once
+        # (dev e2e, PRD kaos#1911). Nothing below reads a finished workflow from this list;
+        # kl_last_try, which needs the finished attempts, asks for just those.
+        if ! INFLIGHT=$(kubectl get workflows -n "{{`{{workflow.namespace}}`}}" -l 'workflows.argoproj.io/completed!=true' -o json 2>&1); then
           [ "$FORCE" = "true" ] && not_yet "cannot list workflows (${INFLIGHT})"
           echo "reconcile: WARN cannot list workflows - in-flight state unknown, skipping this poll: ${INFLIGHT}"
           printf 'false' > /tmp/needs_build
@@ -496,7 +519,10 @@ spec:
         fi
         KL_HAVE=$(echo "$CM" | jq -r '.data["kaos-lib-package"] // empty')
         kl_last_try() {
-          echo "$INFLIGHT" | jq -r --arg app "$APP" --arg ref "$1" '
+          # the finished attempts of this spec for this app only, selected server-side
+          kubectl get workflows -n "{{`{{workflow.namespace}}`}}" \
+              -l "platform.kubecore.io/app=${APP},platform.kubecore.io/submitted-by=ml-ci-reconcile,platform.kubecore.io/kaos-lib=${1}" \
+              -o json 2>/dev/null | jq -r --arg app "$APP" --arg ref "$1" '
             [.items[]
              | select((.metadata.labels // {})["platform.kubecore.io/app"] == $app
                       and (.metadata.labels // {})["platform.kubecore.io/submitted-by"] == "ml-ci-reconcile"
@@ -707,7 +733,7 @@ spec:
             # Workflow object whose spec.workflowTemplateRef.name is the app's template
             # (the platform console and gateway create runs that way, with no label).
             # The labelled list is read first; the namespace's full list (it can hold
-            # thousands of finished runs) is read only when that did not already show a
+            # thousands of finished runs) is read, in pages, only when that did not already show a
             # hot run, because a newer unlabelled run cannot change a hot answer.
             HOT={{ int (.Values.ci.kaosLibRebuild.hotSeconds | default 86400) }}
             IDLE={{ int (.Values.ci.kaosLibRebuild.idleSeconds | default 2592000) }}
@@ -722,8 +748,22 @@ spec:
               *) if [ "$USE_LABELLED" -lt "$HOT" ]; then USE_REF_NEEDED=0; fi ;;
             esac
             if [ "$USE_REF_NEEDED" = 1 ]; then
-              USE_REF=$(kubectl get workflows -n "${ML_NS}" -o json 2>/dev/null \
-                        | jq -r --arg ref "${APP}-pipeline" "$RUN_AGE_JQ" 2>/dev/null) || USE_REF=unknown
+              # Read in pages of 10 and reduced page by page: the memory is one page (~4 MB of
+              # JSON), not the namespace's thousand finished runs (a whole-list read was
+              # 800 MiB on 150 runs). Same answer as before: the age of the newest match, or
+              # never, or unknown when any page cannot be read.
+              newest_ref_run() {
+                TOK=""; BEST=""
+                while :; do
+                  PAGE=$(kubectl get --raw "/apis/argoproj.io/v1alpha1/namespaces/${ML_NS}/workflows?limit=10${TOK:+&continue=${TOK}}" 2>/dev/null) || { echo unknown; return 0; }
+                  TS=$(printf '%s' "$PAGE" | jq -r --arg ref "${APP}-pipeline" '[.items[]? | select(.spec.workflowTemplateRef.name == $ref) | .metadata.creationTimestamp | fromdateiso8601] | max // empty' 2>/dev/null) || { echo unknown; return 0; }
+                  if [ -n "$TS" ] && { [ -z "$BEST" ] || [ "$TS" -gt "$BEST" ]; }; then BEST=$TS; fi
+                  TOK=$(printf '%s' "$PAGE" | jq -r '.metadata.continue // empty' 2>/dev/null) || { echo unknown; return 0; }
+                  [ -n "$TOK" ] || break
+                done
+                if [ -z "$BEST" ]; then echo never; else echo $(( $(date +%s) - BEST )); fi
+              }
+              USE_REF=$(newest_ref_run)
               [ -n "$USE_REF" ] || USE_REF=unknown
             fi
             # the newest run of either shape: a number beats never beats unknown
