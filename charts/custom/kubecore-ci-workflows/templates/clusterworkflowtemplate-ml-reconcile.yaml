@@ -38,6 +38,10 @@ pins with the one the last render and the compose image were built on
 creates a `ml-ci-dataset-release` Workflow when a version is released, which
 submits this template for each ML app with dataset_event=true: the same check,
 run at once instead of at the next poll, and retried while a build is in flight.
+The fourth is the app's own kaos-lib pin (PRD novelcore/kaos#1911): the forced run fired by a context change
+rebuilds the stale images at once when the context marks the spec as spec.ml.kaosLib (kaosLib.pinned) and
+gitops' pipeline-images does not record it (KAOS-LIB PIN). A platform-wide move has no mark and stays with
+the poll's KAOS-LIB DRIFT, paced by the app's use.
 */}}
 apiVersion: argoproj.io/v1alpha1
 kind: ClusterWorkflowTemplate
@@ -477,6 +481,35 @@ spec:
           fi
         }
 
+        # KAOS-LIB (PRD novelcore/kaos#1147; PRD novelcore/kaos#1911 for the forced run below): the spec
+        # the gitops context delivers (KL_WANT), whether it is the app's OWN pin (KL_PINNED: the
+        # operator writes kaosLib.pinned: true only for a spec.ml.kaosLib pin), and the attempt guard
+        # (one attempt per spec per hour): kl_last_try REF prints the newest finished
+        # ml-ci-reconcile build for that spec that ended within the hour, "" when none.
+{{ include "kubecore-ci-workflows.kaosLibScript" . | indent 8 }}
+        KL_WANT=""; KL_PINNED=""; KL_CTX_READ=no
+        if curl -sf -H "Authorization: Bearer ${TOKEN}" -H "Accept: application/vnd.github.raw" \
+             "https://api.github.com/repos/${GORG}/${GREPO}/contents/${CTX_REL}?ref=${GBRANCH}" > /tmp/kl-context.yaml; then
+          KL_CTX_READ=yes
+          KL_WANT=$(python3 -I /tmp/kaos-lib.py context --context /tmp/kl-context.yaml 2>/dev/null || true)
+          KL_PINNED=$(python3 -I /tmp/kaos-lib.py pinned --context /tmp/kl-context.yaml 2>/dev/null || true)
+        fi
+        KL_HAVE=$(echo "$CM" | jq -r '.data["kaos-lib-package"] // empty')
+        kl_last_try() {
+          echo "$INFLIGHT" | jq -r --arg app "$APP" --arg ref "$1" '
+            [.items[]
+             | select((.metadata.labels // {})["platform.kubecore.io/app"] == $app
+                      and (.metadata.labels // {})["platform.kubecore.io/submitted-by"] == "ml-ci-reconcile"
+                      and (.metadata.labels // {})["platform.kubecore.io/kaos-lib"] == $ref
+                      and (.status.phase == "Succeeded" or .status.phase == "Failed" or .status.phase == "Error"))
+             | {name: .metadata.name, phase: .status.phase,
+                age: (now - ((.status.finishedAt // .metadata.creationTimestamp // "")
+                             | try fromdateiso8601 catch now))}
+             | select(.age < 3600)]
+            | sort_by(.age) | first
+            | if . == null then "" else "\(.name) (\(.phase), \(.age | floor)s ago)" end' 2>&1 || echo "unreadable"
+        }
+
         if [ "$FORCE" = "true" ]; then
           WANT_CTX="{{`{{workflow.parameters.context_sha}}`}}"
           HAVE_CTX=""
@@ -485,21 +518,57 @@ spec:
             [ "$HAVE_CTX" = "$WANT_CTX" ] || not_yet "gitops ${CTX_REL} is not the context this trigger is for yet (${HAVE_CTX:0:12} != ${WANT_CTX:0:12})"
           fi
           old_app_guard
+          # KAOS-LIB PIN (PRD novelcore/kaos#1911): the context this trigger is for delivers the app's
+          # OWN pin (spec.ml.kaosLib; the operator marks it kaosLib.pinned) and the images do not have
+          # it. The client changed this app on purpose, so its images are rebuilt now, not at the next
+          # hourly poll and not only if the app was used lately. A platform-wide move (no pin mark)
+          # is NOT decided here: it stays with the hourly poll's pacing (KAOS-LIB DRIFT below), or
+          # every app would rebuild at once. What the images have is read from gitops (the build
+          # records kaos-lib-package there when it ends; the live ConfigMap trails by an ArgoCD
+          # sync, which would submit the rebuild twice); unreadable or unrecorded gitops is unknown
+          # and never submits work, "none" (no Dockerfile declares the ARG) has nothing to rebuild.
+          PIN_REF=""
+          if [ "$KL_PINNED" = "true" ] && [ -n "$KL_WANT" ] && [ -n "$ENG_KNOWN" ]; then
+            PIN_HAVE=$(yq e '.data."kaos-lib-package" // ""' /tmp/gitops-images.yaml)
+            if [ "$PIN_HAVE" = "none" ]; then
+              echo "reconcile: kaos-lib pin ${KL_WANT} delivered, but no step Dockerfile declares ARG KAOS_LIB_PACKAGE — nothing the platform can rebuild"
+            elif [ "$PIN_HAVE" = "$KL_WANT" ]; then
+              echo "reconcile: kaos-lib pin in sync (${KL_WANT})"
+            else
+              PIN_TRY=$(kl_last_try "$(printf '%s' "$KL_WANT" | sha256sum | cut -c1-12)")
+              if [ -n "$PIN_TRY" ]; then
+                echo "reconcile: KAOS-LIB PIN (${PIN_HAVE:-<unrecorded>} -> ${KL_WANT}) — not rebuilding now: an attempt at this spec ended within the hour: ${PIN_TRY}"
+              else
+                PIN_REF=$(printf '%s' "$KL_WANT" | sha256sum | cut -c1-12)
+              fi
+            fi
+          fi
           # QUEUED: a build of HEAD is already waiting on the app's build lock
           # (a webhook build created after this run began waiting, or another
           # trigger's build). It starts after this step and renders the context
           # and datasets as they are THEN, so submitting a second one would only
           # queue a duplicate (two syncs fired at once must yield one build).
-          QUEUED=$(echo "$INFLIGHT" | jq -r --arg app "$APP" --arg sha "$HEAD_SHA" '
+          # While a pin rebuild is due, only a queued build that rebuilds the pin counts: a push
+          # build (it rebuilds a stale step as part of the build) or a reconcile build for this spec.
+          QUEUED=$(echo "$INFLIGHT" | jq -r --arg app "$APP" --arg sha "$HEAD_SHA" --arg ref "$PIN_REF" '
             [.items[] | select((.metadata.name|startswith("ml-ci-build"))
                                and (.status.phase == "Pending" or .status.phase == null
                                     or ([.status.nodes[]? | select(.phase == "Pending" and ((.message // "") | test("Waiting for .*lock")))] | length) > 0)
                                and ([.spec.arguments.parameters[]? | select(.name=="app_name") | .value] | index($app))
-                               and ([.spec.arguments.parameters[]? | select(.name=="commit_sha") | .value] | index($sha)))
+                               and ([.spec.arguments.parameters[]? | select(.name=="commit_sha") | .value] | index($sha))
+                               and ($ref == ""
+                                    or ([.spec.arguments.parameters[]? | select(.name=="event_type") | .value] | index("reconcile") | not)
+                                    or ((.metadata.labels // {})["platform.kubecore.io/kaos-lib"] == $ref)))
                       | .metadata.name] | first // empty')
           if [ -n "$QUEUED" ]; then
             printf 'false' > /tmp/needs_build
             echo "reconcile: FORCED but ${QUEUED} already queues a build of HEAD ${HEAD_SHA}; it renders from the current context when it starts — nothing to submit"
+            exit 0
+          fi
+          if [ -n "$PIN_REF" ]; then
+            printf '%s' "$PIN_REF" > /tmp/kaos_lib_ref
+            printf 'true' > /tmp/needs_build
+            echo "reconcile: KAOS-LIB PIN — the images have kaos-lib ${PIN_HAVE:-<unrecorded>} but the app pins ${KL_WANT}; submitting ml-ci-build to rebuild and re-render now"
             exit 0
           fi
           # ALREADY SATISFIED: the force exists because the webhook build of
@@ -607,15 +676,8 @@ spec:
         # delivered, or an app whose Dockerfiles declare no ARG ("none"), is
         # not drift. The same one-attempt-per-hour idea as the engine guard, per
         # spec: a spec that cannot install fails once an hour, not every poll.
-{{ include "kubecore-ci-workflows.kaosLibScript" . | indent 8 }}
-        KL_WANT=""
-        if curl -sf -H "Authorization: Bearer ${TOKEN}" -H "Accept: application/vnd.github.raw" \
-             "https://api.github.com/repos/${GORG}/${GREPO}/contents/${CTX_REL}?ref=${GBRANCH}" > /tmp/kl-context.yaml; then
-          KL_WANT=$(python3 -I /tmp/kaos-lib.py context --context /tmp/kl-context.yaml 2>/dev/null || true)
-        else
-          echo "reconcile: gitops ${CTX_REL} unreadable — kaos-lib drift unknown this poll"
-        fi
-        KL_HAVE=$(echo "$CM" | jq -r '.data["kaos-lib-package"] // empty')
+        # (KL_WANT, KL_HAVE and kl_last_try are read above, before the forced-run branch.)
+        [ "$KL_CTX_READ" = yes ] || echo "reconcile: gitops ${CTX_REL} unreadable — kaos-lib drift unknown this poll"
         if [ -z "$KL_WANT" ]; then
           :
         elif [ "$KL_HAVE" = "none" ]; then
@@ -624,18 +686,7 @@ spec:
           echo "reconcile: kaos-lib in sync (${KL_WANT})"
         else
           KL_REF=$(printf '%s' "$KL_WANT" | sha256sum | cut -c1-12)
-          LAST_TRY=$(echo "$INFLIGHT" | jq -r --arg app "$APP" --arg ref "$KL_REF" '
-            [.items[]
-             | select((.metadata.labels // {})["platform.kubecore.io/app"] == $app
-                      and (.metadata.labels // {})["platform.kubecore.io/submitted-by"] == "ml-ci-reconcile"
-                      and (.metadata.labels // {})["platform.kubecore.io/kaos-lib"] == $ref
-                      and (.status.phase == "Succeeded" or .status.phase == "Failed" or .status.phase == "Error"))
-             | {name: .metadata.name, phase: .status.phase,
-                age: (now - ((.status.finishedAt // .metadata.creationTimestamp // "")
-                             | try fromdateiso8601 catch now))}
-             | select(.age < 3600)]
-            | sort_by(.age) | first
-            | if . == null then "" else "\(.name) (\(.phase), \(.age | floor)s ago)" end' 2>&1) || LAST_TRY="unreadable: ${LAST_TRY}"
+          LAST_TRY=$(kl_last_try "$KL_REF")
           if [ -n "$LAST_TRY" ]; then
             echo "reconcile: KAOS-LIB DRIFT (${KL_HAVE:-<unrecorded>} -> ${KL_WANT}) — not rebuilding this poll: an attempt at this spec ended within the hour: ${LAST_TRY}"
           else

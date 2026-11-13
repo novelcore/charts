@@ -56,16 +56,18 @@ BASE_TMP=$(mktemp -d)
 trap 'rm -rf "$BASE_TMP"' EXIT
 ago() { jq -rn --argjson s "$1" 'now - $s | floor | todate'; }
 
-# context_cm FILE SPEC [SUPPORT_JSON]: a gitops pipeline-context.yaml delivering SPEC.
+# context_cm FILE SPEC [SUPPORT_JSON]: a gitops pipeline-context.yaml delivering SPEC (PINNED=1: as the app's own pin).
 context_cm() {
   python3 - "$@" <<'PY'
-import json, sys, yaml
+import json, os, sys, yaml
 path, spec = sys.argv[1], sys.argv[2]
 ctx = {"project": "proj", "app": "app1",
        "engine": {"version": "v0.4.7", "image": "reg.example/kaos-pipeline-engine:v0.4.7",
                   "wheel": "https://example.com/engine.whl", "wheelSha256": "a" * 64}}
 if spec != "-":
     ctx["kaosLib"] = {"spec": spec, "version": sys.argv[4] if len(sys.argv) > 4 else "0.2.1"}
+    if os.environ.get("PINNED") == "1":
+        ctx["kaosLib"]["pinned"] = True
     if len(sys.argv) > 3 and sys.argv[3]:
         ctx["kaosLib"]["support"] = sys.argv[3]
 yaml.safe_dump({"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "app1-pipeline-context"},
@@ -290,10 +292,16 @@ EOF
 case "\$*" in
   *"/commits/dev"*) printf '{"sha": "%s"}' "$HEAD_SHA" ;;
   *"pipeline-context.yaml"*) cat "$T/gitops-context.yaml" ;;
+  *"pipeline-images.yaml"*) if [ -f "$T/fixture-images.yaml" ]; then cat "$T/fixture-images.yaml"; else exit 22; fi ;;
   *) exit 22 ;;
 esac
 EOF
   chmod +x "$T/bin/kubectl" "$T/bin/curl"
+  # GIT_REC: what the gitops pipeline-images records as kaos-lib-package ("-" = no such key); unset = gitops images unreadable
+  if [ -n "${GIT_REC+x}" ]; then
+    { printf 'data:\n  last-built-sha: %s\n  context-sha: %s\n  engine-version: %s\n  engine-compose: %s\n' "$HEAD_SHA" "$CTX_SHA" "$ENGINE_V" "$ENGINE_V"
+      [ "$GIT_REC" = "-" ] || printf '  kaos-lib-package: "%s"\n' "$GIT_REC"; } > "$T/fixture-images.yaml"
+  fi
 }
 attempt() {  # attempt PHASE AGE_S REF
   jq --arg fin "$(ago "$2")" --arg ph "$1" --arg ref "$3" --arg app "$APP" '.items += [{metadata: {name: "b1", creationTimestamp: $fin,
@@ -302,7 +310,7 @@ attempt() {  # attempt PHASE AGE_S REF
     "$T/workflows.json" > "$T/w" && mv "$T/w" "$T/workflows.json"
 }
 run_drift() {
-  sed -e "s#{{workflow.namespace}}#ci#g" -e "s#{{workflow.parameters.force}}#false#g" \
+  sed -e "s#{{workflow.namespace}}#ci#g" -e "s#{{workflow.parameters.force}}#${FORCE:-false}#g" -e "s#{{inputs.parameters.mode}}#decide#g" \
       -e "s#{{workflow.parameters.context_sha}}##g" -e "s#{{workflow.parameters.app_name}}#${APP}#g" \
       -e "s#{{workflow.parameters.project_name}}#proj#g" -e "s#{{workflow.parameters.branch}}#dev#g" \
       -e "s#{{workflow.parameters.ci_namespace}}#ci#g" -e "s#{{workflow.parameters.gitops_repository}}#proj-gitops#g" \
@@ -369,6 +377,61 @@ expect_eq "$([ -f "$T/ref-list-read" ] && wc -l < "$T/ref-list-read" || echo 0)"
 RUN_AGE="" REF_AGE="" drift_case "$OLD" "$SPEC"; run_drift
 expect_eq "$NEEDS" "false" "reconcile: no run of either shape (other apps' runs only): never used, not rebuilt"
 expect_has "$OUT" "app use: never" "reconcile: says never"
+# ── KAOS-LIB PIN (PRD novelcore/kaos#1911): the forced run (the trigger fired when the app's context changes) rebuilds at once for the app's OWN pin ──
+# FORCE=true: ci-sync's run. PINNED=1: the context marks the spec as spec.ml.kaosLib. GIT_REC: kaos-lib-package in the gitops pipeline-images.
+pin_case() {  # pin_case RECORDED(-=no key): the context delivers $SPEC as the app's pin; the use of the app is irrelevant here
+  PINNED=1 FORCE=true GIT_REC="$1" drift_case "$1" "$SPEC"
+}
+pin_case "$OLD"; FORCE=true run_drift
+expect_eq "$RC/$NEEDS/$KREF" "0/true/$REF" "pin: the app pins another spec than its images have: rebuild now, labelled with its ref"
+expect_has "$OUT" "KAOS-LIB PIN" "pin: says why"
+RUN_AGE="" REF_AGE="" pin_case "$OLD"; FORCE=true run_drift
+expect_eq "$RC/$NEEDS/$KREF" "0/true/$REF" "pin: an app that never ran is rebuilt too (the client just changed it)"
+RUN_AGE=3456000 pin_case "$OLD"; FORCE=true run_drift
+expect_eq "$NEEDS/$KREF" "true/$REF" "pin: ... and one idle for 40 days"
+RUNS_UNREADABLE=1 pin_case "$OLD"; FORCE=true run_drift
+expect_eq "$NEEDS/$KREF" "true/$REF" "pin: ... the app's use is not read at all"
+pin_case "-"; FORCE=true run_drift
+expect_eq "$NEEDS/$KREF" "true/$REF" "pin: images built before the record existed: rebuilt once"
+pin_case "$SPEC"; FORCE=true run_drift
+expect_eq "$RC/$NEEDS/$KREF" "0/false/" "pin: the images (gitops) already have the pin: nothing to rebuild (a finished rebuild never re-triggers)"
+expect_has "$OUT" "kaos-lib pin in sync" "pin: says so"
+# the live ConfigMap trails gitops by an ArgoCD sync: gitops decides, or a finished build would be submitted twice
+PINNED=1 FORCE=true GIT_REC="$SPEC" drift_case "$OLD" "$SPEC"; FORCE=true run_drift
+expect_eq "$NEEDS/$KREF" "false/" "pin: the live ConfigMap still shows the old spec but gitops already records the build: not submitted twice"
+pin_case none; FORCE=true run_drift
+expect_eq "$KREF" "" "pin: no Dockerfile declares the ARG: nothing the platform can rebuild"
+expect_has "$OUT" "nothing the platform can rebuild" "pin: says so"
+PINNED=1 FORCE=true drift_case "$OLD" "$SPEC"; FORCE=true run_drift
+expect_eq "$KREF" "" "pin: gitops pipeline-images unreadable: unknown never submits a kaos-lib rebuild"
+FORCE=true GIT_REC="$OLD" drift_case "$OLD" "$SPEC"; FORCE=true run_drift
+expect_eq "$KREF" "" "platform move (the context does not mark a pin): the forced run leaves it to the hourly poll's pacing"
+expect_not "$OUT" "KAOS-LIB PIN" "platform move: the forced run does not decide kaos-lib"
+# a failed attempt at this spec holds the retry back for an hour (a spec that cannot install fails once an hour)
+pin_case "$OLD"; attempt Failed 600 "$REF"; FORCE=true run_drift
+expect_eq "$KREF" "" "pin: an attempt at this spec failed 10 min ago: not again now"
+expect_has "$OUT" "an attempt at this spec ended within the hour" "pin: says why"
+pin_case "$OLD"; attempt Failed 7200 "$REF"; FORCE=true run_drift
+expect_eq "$NEEDS/$KREF" "true/$REF" "pin: the last attempt is over an hour old: rebuild"
+pin_case "$OLD"; attempt Failed 600 "000000000000"; FORCE=true run_drift
+expect_eq "$KREF" "$REF" "pin: a recent attempt at ANOTHER spec (the previous pin) does not hold this one back"
+# a build of HEAD already queued on the lock: no duplicate, unless it would not rebuild the pin
+queue_build() {  # queue_build EVENT_TYPE LABEL: a Pending ml-ci-build of HEAD
+  jq --arg ev "$1" --arg ref "$2" --arg head "$HEAD_SHA" --arg app "$APP" '.items += [{metadata: {name: "ml-ci-build-q", labels: (if $ref == "" then {} else {"platform.kubecore.io/kaos-lib": $ref} end)},
+     status: {phase: "Pending"}, spec: {arguments: {parameters: [{name: "app_name", value: $app}, {name: "commit_sha", value: $head}, {name: "event_type", value: $ev}]}}}]' \
+    "$T/workflows.json" > "$T/w" && mv "$T/w" "$T/workflows.json"
+}
+pin_case "$OLD"; queue_build push ""; FORCE=true run_drift
+expect_eq "$NEEDS/$KREF" "false/" "pin: a PUSH build of HEAD is queued (it rebuilds a stale step as part of the build): nothing submitted, no duplicate"
+expect_has "$OUT" "already queues a build of HEAD" "pin: says why"
+pin_case "$OLD"; queue_build reconcile "$REF"; FORCE=true run_drift
+expect_eq "$NEEDS/$KREF" "false/" "pin: a reconcile build for this very spec is queued: no duplicate"
+pin_case "$OLD"; queue_build reconcile ""; FORCE=true run_drift
+expect_eq "$NEEDS/$KREF" "true/$REF" "pin: a queued reconcile build that leaves stale images alone does not count: the pin rebuild is queued behind it"
+SUBMIT=$(yq 'select(.metadata.name == "ml-ci-reconcile") | .spec.templates[] | select(.name == "submit-build") | .resource.manifest' "$RENDERED" \
+        | yq '.spec.arguments.parameters[] | select(.name == "kaos_lib_rebuild") | .value')
+expect_has "$SUBMIT" "kaos_lib_ref != ''" "reconcile: the build submitted for a pin is the kaos-lib rebuild (kaos_lib_rebuild=true: detect-steps rebuilds the stale steps)"
+
 LABEL=$(yq 'select(.metadata.name == "ml-ci-reconcile") | .spec.templates[] | select(.name == "submit-build") | .resource.manifest' "$RENDERED" \
         | yq '.metadata.labels["platform.kubecore.io/kaos-lib"]')
 expect_eq "$LABEL" "{{inputs.parameters.kaos_lib_ref}}" "reconcile: the submitted build carries the spec ref (the attempt guard's label)"
