@@ -416,7 +416,7 @@ support_case 0.3.1 "$SUPPORT" true
 expect_eq "$RC" 0 "support: behind on a release: allowed"
 support_case 0.4.0 "" false
 expect_eq "$RC/${POSTED:-none}" "0/none" "support: no support data in the context: no status"
-TARGET=$(helm template t "${HERE}/../.." --set argo.uiBaseUrl=https://argo.example 2>/dev/null \
+TARGET=$(helm template t "${HERE}/../.." --set github.tokenSecretName=ci-token --set argo.uiBaseUrl=https://argo.example 2>/dev/null \
   | yq 'select(.metadata.name == "ml-ci-build") | .spec.templates[] | select(.name == "kaos-lib-support") | .container.args[0]')
 expect_has "$TARGET" 'RUN_URL="${ARGO_BASE}/workflows/' "support: the status links to the Argo run (target_url)"
 
@@ -444,7 +444,7 @@ PY
   expect_eq "$S" "true" "$wf: posts kaos-lib/support, reporting only"
 done
 PARAMS=$(yq 'select(.metadata.name == "kaos-lib-bump-pr") | [.spec.arguments.parameters[].name] | join(" ")' "$RENDERED" | grep -v '^---$' | grep .)
-expect_eq "$PARAMS" "app project_name repo_url branch version spec github_token_secret" "kaos-lib-bump-pr: the parameter contract (github_token_secret is defaulted, F-26) the composition renders against"
+expect_eq "$PARAMS" "app project_name repo_url branch version spec" "kaos-lib-bump-pr: the parameter contract the composition renders against"
 REQUIRED=$(yq 'select(.metadata.name == "kaos-lib-bump-pr") | [.spec.arguments.parameters[] | select(has("value") | not) | .name] | join(" ")' "$RENDERED" | grep -v '^---$' | grep .)
 expect_eq "$REQUIRED" "app project_name version spec" "kaos-lib-bump-pr: app, project_name, version and spec are required"
 BUMP=$(src kaos-lib-bump-pr bump)

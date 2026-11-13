@@ -42,7 +42,7 @@ expect_has() {
 BASE_TMP=$(mktemp -d)
 trap 'rm -rf "$BASE_TMP"; kill ${CATALOG_PID:-0} ${BROKEN_PID:-0} 2>/dev/null' EXIT
 RENDERED="${BASE_TMP}/rendered.yaml"
-helm template t "$CHART" --set github.org=acme > "$RENDERED" || { echo "FAIL: helm template"; exit 1; }
+helm template t "$CHART" --set github.tokenSecretName=ci-token --set github.org=acme > "$RENDERED" || { echo "FAIL: helm template"; exit 1; }
 
 # ── CI no longer writes the app repo's dataset config ───────────────────────
 # The composition owns .kubecore/dataset-config.yaml; a second writer's

@@ -96,7 +96,7 @@ PYEOF
   WHEEL="$T/stub.whl"
 fi
 SHA=$(sha256sum "$WHEEL" | cut -c1-64)
-helm template t "$CHART" --set "pipelineLint.kaosLibWheelUrl=file://${WHEEL}" --set "pipelineLint.kaosLibWheelSha256=${SHA}" > "$T/r.yaml" \
+helm template t "$CHART" --set github.tokenSecretName=ci-token --set "pipelineLint.kaosLibWheelUrl=file://${WHEEL}" --set "pipelineLint.kaosLibWheelSha256=${SHA}" > "$T/r.yaml" \
   || { echo "FAIL: helm template with the test pin"; exit 1; }
 mkdir -p "$T/bin"
 # curl stub: GET comments answers $T/comments.json; every call is logged; bodies are kept.

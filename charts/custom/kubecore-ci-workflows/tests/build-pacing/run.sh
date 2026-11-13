@@ -12,8 +12,8 @@ CHART=$(cd "$(dirname "$0")/../.." && pwd)
 FAILED=0; PASSED=0
 expect_eq() { if [ "$1" = "$2" ]; then PASSED=$((PASSED+1)); echo "PASS: $3"; else FAILED=$((FAILED+1)); echo "FAIL: $3"; echo "  expected: $2"; echo "  actual:   $1"; fi; }
 R=$(mktemp); ON=$(mktemp); trap 'rm -f "$R" "$ON"' EXIT
-helm template t "$CHART" > "$R" || { echo "FAIL: helm template"; exit 1; }
-helm template t "$CHART" --set ci.buildSlots.enabled=true > "$ON" || { echo "FAIL: helm template (slots on)"; exit 1; }
+helm template t "$CHART" --set github.tokenSecretName=ci-token > "$R" || { echo "FAIL: helm template"; exit 1; }
+helm template t "$CHART" --set github.tokenSecretName=ci-token --set ci.buildSlots.enabled=true > "$ON" || { echo "FAIL: helm template (slots on)"; exit 1; }
 ML='select(.kind=="ClusterWorkflowTemplate" and .metadata.name=="ml-ci-build")'
 tmpl() { yq "$ML | .spec.templates[] | select(.name==\"$2\") | $3" "$1"; }
 

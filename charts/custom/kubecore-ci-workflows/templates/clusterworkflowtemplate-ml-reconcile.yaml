@@ -47,7 +47,8 @@ metadata:
     {{- include "kubecore-ci-workflows.labels" . | nindent 4 }}
 spec:
   # F-26 (Strict templateReferencing refuses a Workflow's own serviceAccountName
-  # and volumes): the template owns both. Existing callers that still pass their
+  # and volumes): the template owns both. The token Secret name is fixed from
+  # values, never a parameter (a submitter must not pick which Secret mounts). Existing callers that still pass their
   # own serviceAccountName/volumes keep working: the Workflow's fields win.
   serviceAccountName: {{ .Values.reconciler.serviceAccountName | default "operate-workflow-sa" }}
   entrypoint: ml-ci-reconcile
@@ -139,17 +140,13 @@ spec:
     # change, and a pipeline that records no dataset-sha yet counts as drifted.
     - name: dataset_event
       value: "false"
-    # The token Secret in the CI namespace (F-26: a parameter, so the volume
-    # needs no Workflow-level override). Defaults to the pool's github.tokenSecretName.
-    - name: github_token_secret
-      value: {{ .Values.github.tokenSecretName | quote }}
     - name: node_class
       value: {{ .Values.ci.defaultNodeClass | default (dig "platform.kubecore.io/nodegroup-type" "kubecorecpu" .Values.nodeSelector) | quote }}
 
   volumes:
   - name: github-token
     secret:
-      secretName: "{{`{{workflow.parameters.github_token_secret}}`}}"
+      secretName: {{ required "github.tokenSecretName" .Values.github.tokenSecretName }}
 
   templates:
   - name: ml-ci-reconcile

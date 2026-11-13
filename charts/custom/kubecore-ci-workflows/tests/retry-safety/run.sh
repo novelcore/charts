@@ -34,7 +34,7 @@ expect_has() {
 BASE_TMP=$(mktemp -d)
 trap 'rm -rf "$BASE_TMP"' EXIT
 RENDERED="${BASE_TMP}/rendered.yaml"
-helm template t "$CHART" --set github.org=acme > "$RENDERED" || { echo "FAIL: helm template"; exit 1; }
+helm template t "$CHART" --set github.tokenSecretName=ci-token --set github.org=acme > "$RENDERED" || { echo "FAIL: helm template"; exit 1; }
 
 # ── every ML step retries a preemption ───────────────────────────────────────
 

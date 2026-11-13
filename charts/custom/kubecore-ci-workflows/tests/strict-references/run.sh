@@ -15,7 +15,7 @@
 #      is EXECUTED on fixture CronWorkflows), including OQ-5: two fan-outs for
 #      one app submit Workflows that serialise on ml-ci-reconcile's
 #      `{app}-build` mutex;
-#   4. the reconcile templates own their ServiceAccount and token volume (C2a),
+#   4. the reconcile templates own their ServiceAccount and a FIXED token Secret (C2a),
 #      the autoscaler healer owns its ServiceAccount (C2b);
 #   5. backward compatibility: a caller that still passes serviceAccountName
 #      and volumes of its own is untouched by the template change.
@@ -207,36 +207,52 @@ PY
   [ -s "${BASE_TMP}/t.yaml" ] || { fail "C2a: template $t not rendered"; continue; }
   expect_eq "$(python3 -I -c "import yaml,sys;d=yaml.safe_load(open(sys.argv[1]))['spec'];print(d['serviceAccountName'])" "${BASE_TMP}/t.yaml")" \
     "operate-workflow-sa" "C2a: $t owns serviceAccountName operate-workflow-sa"
-  expect_eq "$(python3 -I -c "import yaml,sys;d=yaml.safe_load(open(sys.argv[1]))['spec'];print([p.get('value') for p in d['arguments']['parameters'] if p['name']=='github_token_secret'])" "${BASE_TMP}/t.yaml")" \
-    "['ci-token']" "C2a: $t has github_token_secret defaulting to github.tokenSecretName"
+  expect_eq "$(python3 -I -c "import yaml,sys;d=yaml.safe_load(open(sys.argv[1]))['spec'];print([p['name'] for p in d['arguments']['parameters'] if 'token' in p['name']])" "${BASE_TMP}/t.yaml")" \
+    "[]" "C2a: $t has no token-secret parameter (a submitter cannot choose the mounted Secret)"
   expect_eq "$(python3 -I -c "import yaml,sys;d=yaml.safe_load(open(sys.argv[1]))['spec'];print([v['secret']['secretName'] for v in d['volumes'] if v['name']=='github-token'])" "${BASE_TMP}/t.yaml")" \
-    "['{{workflow.parameters.github_token_secret}}']" "C2a: $t's github-token volume reads the parameter"
+    "['ci-token']" "C2a: $t's github-token volume is the fixed github.tokenSecretName"
 done
 tmpl ml-autoscaler-healer > "${BASE_TMP}/h.yaml"
 expect_eq "$(python3 -I -c "import yaml,sys;print(yaml.safe_load(open(sys.argv[1]))['spec'].get('serviceAccountName'))" "${BASE_TMP}/h.yaml")" \
   "ml-compute-probe-sa" "C2b: the healer template owns ml-compute-probe-sa"
-helm template t "$CHART" --set github.org=acme --set autoscalerHealer.serviceAccountName=custom-sa --show-only templates/clusterworkflowtemplate-autoscaler-healer.yaml 2>/dev/null \
+helm template t "$CHART" --set github.org=acme --set github.tokenSecretName=ci-token --set autoscalerHealer.serviceAccountName=custom-sa --show-only templates/clusterworkflowtemplate-autoscaler-healer.yaml 2>/dev/null \
   | python3 -I -c "import yaml,sys;print([d for d in yaml.safe_load_all(sys.stdin) if d and d['kind']=='ClusterWorkflowTemplate'][0]['spec']['serviceAccountName'])" > "${BASE_TMP}/h2.out"
 expect_eq "$(cat "${BASE_TMP}/h2.out")" "custom-sa" "C2b: autoscalerHealer.serviceAccountName overrides it"
-helm template t "$CHART" --set github.org=acme --set reconciler.serviceAccountName=other-sa --show-only templates/clusterworkflowtemplate-reconcile.yaml 2>/dev/null \
+helm template t "$CHART" --set github.org=acme --set github.tokenSecretName=ci-token --set reconciler.serviceAccountName=other-sa --show-only templates/clusterworkflowtemplate-reconcile.yaml 2>/dev/null \
   | python3 -I -c "import yaml,sys;print([d for d in yaml.safe_load_all(sys.stdin) if d and d['kind']=='ClusterWorkflowTemplate'][0]['spec']['serviceAccountName'])" > "${BASE_TMP}/r2.out"
 expect_eq "$(cat "${BASE_TMP}/r2.out")" "other-sa" "C2a: reconciler.serviceAccountName overrides it"
 
 # ── 5: backward compatibility with today's operator ──────────────────────────
-# A Workflow of the OLD shape (own serviceAccountName + volumes, no
-# github_token_secret) still resolves under Argo's merge: the Workflow's own
-# fields win over the template's, and an unset github_token_secret takes the
-# template default. Check the parameter has a default (a caller omitting it
-# must not hit "missing parameter") and that nothing the old callers pass was
-# removed from the templates' parameter list.
-for t in ci-reconcile ml-ci-reconcile; do
-  tmpl "$t" > "${BASE_TMP}/t.yaml"
-  expect_eq "$(python3 -I -c "
-import yaml,sys
-d=yaml.safe_load(open(sys.argv[1]))['spec']
-print([('value' in p) for p in d['arguments']['parameters'] if p['name']=='github_token_secret'])" "${BASE_TMP}/t.yaml")" "[True]" \
-    "compat: $t's github_token_secret has a default, so an old caller that omits it still validates"
-done
+# A caller of the old shape (own serviceAccountName + volumes) is unaffected:
+# the Workflow's own fields win over the template's. The templates take no new
+# parameter (asserted in section 4), so there is nothing an old caller omits.
 
+# ── 6: no template volume takes its Secret name from a parameter ─────────────
+python3 -I - "$RENDERED" <<'PY' > "${BASE_TMP}/vol.out"
+import sys, yaml
+bad = []; n = 0
+def walk(node, where):
+    global n
+    if isinstance(node, dict):
+        for v in node.get("volumes") or []:
+            sn = ((v.get("secret") or {}).get("secretName")) or ""
+            n += 1 if sn else 0
+            # ALLOWED: ci-build / ci-rc-build mount the optional PRD 695 user CI secrets
+            # ({project}-ci-secrets, {project}-{app}-ci-secrets) into the build pod;
+            # pre-existing, not touched by F-26. Anything else must be a fixed name.
+            if where in ("ClusterWorkflowTemplate/ci-build", "ClusterWorkflowTemplate/ci-rc-build") \
+               and v.get("name") in ("ci-secrets-project", "ci-secrets-app"):
+                continue
+            if "{{workflow.parameters" in sn or "{{inputs.parameters" in sn:
+                bad.append(f"{where}: volume {v.get('name')} secretName={sn}")
+        for k, v in node.items(): walk(v, where)
+    elif isinstance(node, list):
+        for v in node: walk(v, where)
+for d in yaml.safe_load_all(open(sys.argv[1])):
+    if d: walk(d, f"{d['kind']}/{d['metadata']['name']}")
+print("secrets=%d" % n)
+for b in bad: print("BAD " + b)
+PY
+grep '^BAD' "${BASE_TMP}/vol.out" && fail "a template volume's secretName comes from a parameter" || ok "no template volume's secretName contains {{workflow.parameters or {{inputs.parameters"
 echo; echo "strict-references: ${PASSED} passed, ${FAILED} failed"
 exit "$FAILED"

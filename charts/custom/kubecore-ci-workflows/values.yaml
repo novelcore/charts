@@ -257,8 +257,8 @@ workflow:
 reconciler:
   serviceAccountName: operate-workflow-sa
 
-# F-26: ServiceAccount ml-autoscaler-healer runs as (created per project by the
-# operator, WI-annotated for the GCP probe).
+# F-26: ServiceAccount ml-autoscaler-healer runs as (one per pool, in the
+# argo-workflows namespace, WI-bound for the GCP probe).
 autoscalerHealer:
   serviceAccountName: ml-compute-probe-sa
 
