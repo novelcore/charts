@@ -228,6 +228,7 @@ Compatibility: today's operator renders (callers passing `serviceAccountName` an
 - 0.16.0: the changes above; new suite `tests/strict-references`.
 - 0.16.2: `check-drift` is capped by a per-cluster semaphore (6) and lists narrowly; its request is 96Mi (`tooling.checkDriftResources`); the pending-reaper lists unfinished workflows only, request 64Mi (`tooling.reaperResources`); new suite `tests/check-drift-cap`.
 - 0.17.1: `patch-images` records each step image with its digest on Artifact Registry too (it only knew the in-cluster registry's user and password, so on Artifact Registry it was skipped and the record kept tags; a run that starts from a later step compares images by digest and was refused). The token is the build service account's, from the metadata server; without one the build still passes and the log says what stops working. New suite `tests/digest-pin` (the block executed against a stub registry). PRD novelcore/kaos#1911, D-52.
+- 0.17.2: the digest step of `patch-images` no longer takes the `context-sha` record key for an image (every build on Artifact Registry printed a warning that no digest was resolvable for it; found by running the 0.17.1 block against the real registry on dev). PRD novelcore/kaos#1911, D-52.
 
 ## A fan-out of reconcile runs queues instead of starving the node (PRD novelcore/kaos#1911, chart 0.16.2)
 

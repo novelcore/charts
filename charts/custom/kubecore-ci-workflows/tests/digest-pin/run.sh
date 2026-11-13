@@ -52,6 +52,7 @@ data:
   last-built-sha: aaaa
   engine-version: 0.1.0
   produced-datasets: clean
+  context-sha: 6a7d4e53
   prep: $1/demo:prep-1
   old: $1/demo:gone-1
 YEOF
@@ -65,6 +66,7 @@ OUT=$(run "$GAR" "$T/none")
 expect_eq "$(yq '.data.prep' "$T/images.yaml")" "$GAR/demo:prep-1@$(digest prep-1)" "Artifact Registry: a built step is recorded with its digest"
 expect_eq "$(yq '.data.old' "$T/images.yaml")" "$GAR/demo:old-latest@$(digest old-latest)" "Artifact Registry: a pruned tag is resolved from the step's latest tag"
 expect_eq "$(yq '.data["last-built-sha"] + " " + .data["produced-datasets"]' "$T/images.yaml")" "aaaa clean" "Artifact Registry: keys that are not images are left alone"
+expect_lacks "$OUT" "context-sha" "Artifact Registry: the context hash is not taken for an image (no warning about it)"
 expect_has "$(cat "$T/calls")" "https://europe-west1-docker.pkg.dev/v2/proj/org/demo/manifests/prep-1" "Artifact Registry: asks the registry host over https, with the project and repository in the path"
 expect_has "$(cat "$T/calls")" "-u oauth2accesstoken:tok-123" "Artifact Registry: authenticates with the service account's token"
 expect_lacks "$OUT" "tok-123" "Artifact Registry: the token is not printed"
