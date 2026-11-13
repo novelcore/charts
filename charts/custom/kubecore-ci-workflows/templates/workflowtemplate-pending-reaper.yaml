@@ -19,7 +19,7 @@ spec:
     - name: reap
       container:
         image: {{ .Values.tooling.kubectlImage | default "alpine/k8s:1.36.4" }}
-        {{- include "kubecore-ci-workflows.resources" .Values.tooling.clusterResources | nindent 8 }}
+        {{- include "kubecore-ci-workflows.resources" .Values.tooling.reaperResources | nindent 8 }}
         command: [sh, -c]
         args:
           - |
@@ -27,7 +27,9 @@ spec:
             NOW=$(date +%s)
             PENDING_MAX={{ .Values.pendingReaper.pendingMaxSeconds | default 2700 }}
             TERM_GRACE={{ .Values.pendingReaper.terminateGraceSeconds | default 1200 }}
-            kubectl get wf -A -o json | jq -c '.items[] | select(.status.phase=="Running") | {ns: .metadata.namespace, name: .metadata.name, shutdown: (.spec.shutdown // ""), seen: (.metadata.annotations["reaper.kubecore.io/shutdown-seen"] // "")}' | while read -r wf; do
+            # Only unfinished workflows are listed (server-side selector; the loop below keeps phase Running only, so the set is the same).
+            # The whole cluster's finished runs used to be downloaded here: ~900 MiB on 150 of them.
+            kubectl get wf -A -l workflows.argoproj.io/completed!=true -o json | jq -c '.items[] | select(.status.phase=="Running") | {ns: .metadata.namespace, name: .metadata.name, shutdown: (.spec.shutdown // ""), seen: (.metadata.annotations["reaper.kubecore.io/shutdown-seen"] // "")}' | while read -r wf; do
               NS=$(echo "$wf" | jq -r .ns); NAME=$(echo "$wf" | jq -r .name)
               SHUTDOWN=$(echo "$wf" | jq -r .shutdown); SEEN=$(echo "$wf" | jq -r .seen)
               if [ -n "$SHUTDOWN" ]; then

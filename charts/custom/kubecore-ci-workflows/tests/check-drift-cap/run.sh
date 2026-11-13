@@ -33,7 +33,7 @@ expect_eq "$(printf '%s' "$SEM" | yq '.configMapKeyRef.name')" "ci-check-drift-s
 expect_eq "$(printf '%s' "$SEM" | yq '.configMapKeyRef.key')" "slots" "the semaphore reads the key slots"
 CM_NS=$(yq 'select(.kind=="ConfigMap" and .metadata.name=="ci-check-drift-slots") | .metadata.namespace' "$R")
 expect_eq "$(printf '%s' "$SEM" | yq '.namespace')" "$CM_NS" "the semaphore names the ConfigMap's namespace (one cluster-wide count, not one per project CI namespace)"
-expect_eq "$(yq 'select(.kind=="ConfigMap" and .metadata.name=="ci-check-drift-slots") | .data.slots' "$R")" "3" "default cap is 3"
+expect_eq "$(yq 'select(.kind=="ConfigMap" and .metadata.name=="ci-check-drift-slots") | .data.slots' "$R")" "6" "default cap is 6 (memory is not the constraint: 6 x the request on the system pool)"
 expect_eq "$(yq 'select(.kind=="ConfigMap" and .metadata.name=="ci-check-drift-slots") | .metadata.annotations["argocd.argoproj.io/sync-wave"]' "$R")" "-1" "the ConfigMap syncs before the templates that name it (a missing one makes the run end in Error)"
 expect_eq "$(helm template t "$CHART" --set github.org=acme --set github.tokenSecretName=tok --set ci.checkDrift.slots=5 \
   | yq 'select(.kind=="ConfigMap" and .metadata.name=="ci-check-drift-slots") | .data.slots')" "5" "the cap is a chart value"
@@ -143,5 +143,52 @@ case "$OUT" in ''|*[!0-9]*) FAILED=$((FAILED+1)); echo "FAIL: newest_ref_run: no
   if [ "$OUT" -ge 7200 ] && [ "$OUT" -le 7260 ]; then PASSED=$((PASSED+1)); echo "PASS: newest_ref_run: the newest match (7200s) across three pages ($OUT)"; else FAILED=$((FAILED+1)); echo "FAIL: newest_ref_run: expected ~7200, got $OUT"; fi;; esac
 expect_eq "$(grep -c 'limit=10' "$S/calls.log")" "3" "newest_ref_run: three pages of 10, not the whole namespace"
 expect_has "$(grep 'continue=tok2' "$S/calls.log")" "limit=10&continue=tok2" "newest_ref_run: follows the continue token"
+
+# 4. the pending-reaper lists the same cheap way and reaps exactly what it reaped before
+RS="$T/reaper.src"
+yq 'select(.kind=="WorkflowTemplate" and .metadata.name=="pending-reaper") | .spec.templates[0].container.args[0]' "$R" > "$RS"
+expect_has "$(grep 'kubectl get wf -A' "$RS")" "-l workflows.argoproj.io/completed!=true" "pending-reaper: the cluster-wide list is unfinished workflows only"
+expect_eq "$(yq 'select(.kind=="WorkflowTemplate" and .metadata.name=="pending-reaper") | .spec.templates[0].container.resources.requests.memory' "$R")" "64Mi" "pending-reaper: request from the measurement (own value tooling.reaperResources)"
+expect_eq "$(yq 'select(.kind=="WorkflowTemplate" and .metadata.name=="pending-reaper") | .spec.templates[0].container.resources.limits' "$R")" "null" "pending-reaper: still no memory limit"
+# Run the old script (every workflow listed) and the new one against the same cluster state: a Running
+# workflow with a Pending pod past its limit, one with a fresh Pending pod, one with an unhonoured
+# shutdown, one the controller has not labelled yet, and many finished ones. Same actions expected.
+runreaper() { # script
+  S=$(mktemp -d "$T/r-XXXX"); mkdir -p "$S/bin"
+  now=$(date +%s); old=$(jq -rn --argjson n "$now" '$n - 4000 | todate'); fresh=$(jq -rn --argjson n "$now" '$n - 10 | todate')
+  { echo '{"items":['
+    for i in $(seq 1 20); do echo "{\"metadata\":{\"namespace\":\"ns\",\"name\":\"done$i\",\"labels\":{\"workflows.argoproj.io/completed\":\"true\"}},\"status\":{\"phase\":\"Succeeded\"},\"spec\":{}},"; done
+    echo '{"metadata":{"namespace":"ns","name":"stuck","labels":{"workflows.argoproj.io/completed":"false"}},"status":{"phase":"Running"},"spec":{}},'
+    echo '{"metadata":{"namespace":"ns","name":"young","labels":{"workflows.argoproj.io/completed":"false"}},"status":{"phase":"Running"},"spec":{}},'
+    echo '{"metadata":{"namespace":"ns","name":"unlabelled"},"status":{"phase":"Running"},"spec":{}},'
+    echo '{"metadata":{"namespace":"ns","name":"desync","labels":{"workflows.argoproj.io/completed":"false"},"annotations":{"reaper.kubecore.io/shutdown-seen":"1"}},"status":{"phase":"Running"},"spec":{"shutdown":"Stop"}}'
+    echo ']}'; } > "$S/wf.json"
+  printf '{"items":[{"metadata":{"name":"stuck-pod","creationTimestamp":"%s"},"status":{"phase":"Pending"},"spec":{}}]}' "$old" > "$S/pods-stuck.json"
+  printf '{"items":[{"metadata":{"name":"young-pod","creationTimestamp":"%s"},"status":{"phase":"Pending"},"spec":{}}]}' "$fresh" > "$S/pods-young.json"
+  printf '{"items":[]}' > "$S/pods-none.json"
+  cat > "$S/bin/kubectl" <<STUB
+#!/usr/bin/env bash
+case "\$*" in
+  *"get wf -A"*"completed!=true"*) jq '{items: [.items[] | select((.metadata.labels // {})["workflows.argoproj.io/completed"] != "true")]}' "$S/wf.json" ;;
+  *"get wf -A"*) cat "$S/wf.json" ;;
+  *"get pods -l workflows.argoproj.io/workflow=stuck"*) cat "$S/pods-stuck.json" ;;
+  *"get pods -l workflows.argoproj.io/workflow=young"*) cat "$S/pods-young.json" ;;
+  *"get pods"*) cat "$S/pods-none.json" ;;
+  *"get events"*) echo '{"items":[]}' ;;
+  *annotate*|*patch*|*delete*) echo "ACTION: \$*" >> "$S/actions.log" ;;
+  *) exit 1 ;;
+esac
+STUB
+  chmod +x "$S/bin/kubectl"
+  PATH="$S/bin:$PATH" bash "$1" > "$S/out.txt" 2>&1
+  { grep -E '^(REAP|grace)' "$S/out.txt"; cat "$S/actions.log" 2>/dev/null; } | sed -E 's/[0-9]+s//g' | sort
+}
+OLD_RS="$T/reaper-old.src"; sed 's# -l workflows.argoproj.io/completed!=true##' "$RS" > "$OLD_RS"
+expect_eq "$(grep -c 'completed!=true' "$OLD_RS")" "0" "reaper equivalence: the old command is the same script with the selector removed"
+OLD_SET=$(runreaper "$OLD_RS"); NEW_SET=$(runreaper "$RS")
+expect_eq "$NEW_SET" "$OLD_SET" "pending-reaper: the same actions with the selector as with the whole list"
+expect_has "$NEW_SET" "REAP-PENDING: ns/stuck pod stuck-pod" "pending-reaper: the stuck run is reaped"
+expect_has "$NEW_SET" "REAP-DESYNC: ns/desync" "pending-reaper: the unhonoured shutdown is reaped"
+case "$NEW_SET" in *young*) FAILED=$((FAILED+1)); echo "FAIL: pending-reaper: a fresh Pending pod must not be reaped";; *) PASSED=$((PASSED+1)); echo "PASS: pending-reaper: a fresh Pending pod is left alone";; esac
 
 echo "check-drift-cap: ${PASSED} passed, ${FAILED} failed"; exit "$FAILED"
