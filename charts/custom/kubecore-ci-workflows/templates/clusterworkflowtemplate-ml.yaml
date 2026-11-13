@@ -2256,13 +2256,24 @@ spec:
         ESC=$(printf '\033')
         while IFS='|' read -r STAGE POD CODE; do
           [ -n "${CODE}" ] && [ "${CODE}" != 0 ] || continue
-          kubectl logs -n "${NS}" "${POD}" -c main --tail=200 2>/dev/null | sed "s/${ESC}\[[0-9;]*m//g" > /tmp/log.txt || true
+          # Lines that say only that the step failed are dropped, or the error grep below picks them over
+          # the step's real error (kubecore-operator issue 1864): Argo's executor closes a failed step's log
+          # with `Error: exit status 1` (and `... argo=true ...`).
+          kubectl logs -n "${NS}" "${POD}" -c main --tail=200 2>/dev/null | sed "s/${ESC}\[[0-9;]*m//g" \
+            | grep -vE '^Error: exit status [0-9]+$|argo=true' > /tmp/log.txt || true
           if [ "${STAGE}" = "engine check" ]; then
             LINE=$(grep 'engine: FATAL' /tmp/log.txt | tail -1)
             [ -n "${LINE}" ] || continue
           else
-            LINE=$(grep -iE 'fatal|error|exception|mismatch|failed|denied|cannot|unable' /tmp/log.txt | tail -1)
+            # The last error-looking line, or an engine refusal (`kaos-engine: <reason>`, printed without a
+            # traceback; not its `kaos-engine: version=` and `extra-dep` lines); kaniko's closing line only when there
+            # is nothing else. A Python traceback's last line (`pkg.mod.SomeError: what`) loses its module path
+            # so the 200 characters carry the message.
+            ERR_RE='fatal|error|exception|mismatch|failed|denied|cannot|unable|^kaos-engine: '
+            LINE=$(grep -vE '^kaos-engine: (version=|extra-dep )|^error building image: ' /tmp/log.txt | grep -iE "${ERR_RE}" | tail -1)
+            [ -n "${LINE}" ] || LINE=$(grep -iE "${ERR_RE}" /tmp/log.txt | tail -1)
             [ -n "${LINE}" ] || LINE=$(grep . /tmp/log.txt | tail -1)
+            LINE=$(printf '%s' "${LINE}" | sed -E 's/^([A-Za-z_][A-Za-z0-9_]*[.])+([A-Za-z_][A-Za-z0-9_]*(Error|Exception): )/\2/')
           fi
           ERROR=$(printf '%s: %s' "${STAGE}" "${LINE}" | tr -d '\000-\037\177' | cut -c1-200)
           break
