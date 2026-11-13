@@ -201,7 +201,7 @@ bash charts/custom/kubecore-ci-workflows/tests/run-form-seal/run.sh   # order, e
 ```
 
 
-## Platform templates by prefix (PRD novelcore/kaos#1911, chart 0.15.3)
+## Platform templates by prefix (PRD novelcore/kaos#1911, chart 0.15.4)
 
 The engine reserves the prefix `kaos-` for its own templates and refuses a developer step that starts with it, so the pull-request gate and its report treat every template named `kaos-*` as the platform's, not as a step with a folder. Two kinds, told apart by name:
 
