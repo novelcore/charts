@@ -226,5 +226,39 @@ expect_eq "$RC" "1" "gate: step without a Dockerfile fails"
 expect_has "$OUT" "expected steps/step_a/Dockerfile" "gate: names the missing file relative to the repo"
 expect_no_pwn "$T" "gate: no module of the checkout imported"
 
+# The gate also reads the shape of the engine after the images moved: the step's template is named after the step and
+# its container image is the template's own input `image` (the task fills it from the image record).
+mkdir -p "$T/workspace/repo/steps/step_a"
+cat > "$T/workspace/out/workflow-template.yaml" <<'EOF'
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata: {name: app1-pipeline}
+spec:
+  arguments:
+    parameters: [{name: promote-x, value: "false"}]
+  templates:
+  - name: compose-and-validate
+    inputs: {parameters: [{name: image}]}
+    container: {image: "{{inputs.parameters.image}}"}
+  - name: kaos-promote
+    inputs: {parameters: [{name: image}]}
+    container: {image: "{{inputs.parameters.image}}"}
+  - name: hpc-follower
+    inputs: {parameters: [{name: image}]}
+    container: {image: "registry.example/follower:1"}
+  - name: step-a
+    inputs: {parameters: [{name: image}]}
+    container: {image: "{{inputs.parameters.image}}"}
+EOF
+echo "FROM scratch" > "$T/workspace/repo/steps/step_a/Dockerfile"
+OUT=$(cd "$T" && sh "$T/gate.sh" 2>&1); RC=$?
+expect_eq "$RC" "0" "gate (template inputs): the platform's own templates need no folder, the step has its Dockerfile"
+expect_has "$(cat "$T/workspace/report-extra.md")" '| `step-a` | built from `steps/step_a/` |' "gate (template inputs): the report names the step's folder"
+expect_has "$(cat "$T/workspace/report-extra.md")" '| `kaos-promote` | built by the platform |' "gate (template inputs): the final task is the platform's"
+rm -r "$T/workspace/repo/steps/step_a"
+OUT=$(cd "$T" && sh "$T/gate.sh" 2>&1); RC=$?
+expect_eq "$RC" "1" "gate (template inputs): a step without a Dockerfile fails"
+expect_has "$OUT" "expected steps/step_a/Dockerfile" "gate (template inputs): names the missing file"
+
 echo "untrusted-workspace: ${PASSED} passed, ${FAILED} failed"
 exit "$FAILED"

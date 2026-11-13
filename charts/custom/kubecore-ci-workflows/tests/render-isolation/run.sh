@@ -71,6 +71,12 @@ else
     "$(grep -q 'kubeApiCIDRs' "$T/err" && echo true || echo false)"
 fi
 
+# The copy must not touch the volume's own root directory: on a cluster that root belongs to root, and a
+# non-root "cp -a /usr/local/. /overlay/" ends 1 on its times after copying everything (seen on dev, chart
+# 0.14.2). Rootless podman does not reproduce that, so the shape of the command is asserted as well.
+check "the overlay copy copies the entries, never the mount root itself" "true" \
+  "$(q '.initContainers[] | select(.name == "python-overlay") | .args[0]' | grep -q -- '-mindepth 1 -maxdepth 1 -exec cp -a --no-preserve=ownership -t /overlay/' && echo true || echo false)"
+
 # ── executed: pip install under a read-only root filesystem, as an unprivileged user ──
 IMG="${OVERLAY_IMAGE:-docker.io/library/python:3.12-slim}"
 if command -v podman > /dev/null && podman image exists "$IMG" 2> /dev/null; then
@@ -78,7 +84,12 @@ if command -v podman > /dev/null && podman image exists "$IMG" 2> /dev/null; the
   podman volume create "$V" > /dev/null
   U="--user 65532:65532 --cap-drop=ALL --security-opt no-new-privileges --security-opt label=disable --read-only --tmpfs /tmp"
   # shellcheck disable=SC2086
-  OUT=$(podman run --rm $U -e HOME=/tmp -v "$V:/overlay:U" "$IMG" sh -c 'cp -a --no-preserve=ownership /usr/local/. /overlay/' 2>&1 \
+  # The volume as the kubelet hands it over with fsGroup: its root belongs to root, the group may write.
+  # (Mounting it ":U" made the test user its owner and hid a failing copy.) The command is the rendered one.
+  podman run --rm --security-opt label=disable -v "$V:/overlay" "$IMG" sh -c 'chown root:65532 /overlay && chmod 2775 /overlay'
+  COPY=$(q '.initContainers[] | select(.name == "python-overlay") | .args[0]')
+  # shellcheck disable=SC2086
+  OUT=$(podman run --rm $U -e HOME=/tmp -v "$V:/overlay" "$IMG" sh -c "$COPY" 2>&1 \
     && podman run --rm $U -e HOME=/tmp -e PIP_NO_CACHE_DIR=1 -e PYTHONDONTWRITEBYTECODE=1 -v "$V:/usr/local" "$IMG" sh -c '
       python -m pip freeze --exclude-editable > /tmp/c.txt && echo six > /tmp/r.txt &&
       python -m pip install --quiet --disable-pip-version-check -c /tmp/c.txt -r /tmp/r.txt &&

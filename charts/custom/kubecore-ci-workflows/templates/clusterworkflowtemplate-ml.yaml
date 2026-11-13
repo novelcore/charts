@@ -1205,7 +1205,10 @@ spec:
     - name: python-overlay
       image: "{{`{{inputs.parameters.engine_image}}`}}"
       command: [sh, -c]
-      args: ["cp -a --no-preserve=ownership /usr/local/. /overlay/"]
+      # Copy the entries, not the directory itself: the volume's root belongs to root (group-writable through
+      # fsGroup), so a non-root cp cannot set its times and "cp -a /usr/local/. /overlay/" ends 1 after
+      # copying everything ("preserving times for '/overlay/.': Operation not permitted").
+      args: ["cd /usr/local && find . -mindepth 1 -maxdepth 1 -exec cp -a --no-preserve=ownership -t /overlay/ {} +"]
       {{- include "kubecore-ci-workflows.resources" .Values.tooling.heraRenderResources | nindent 6 }}
       securityContext:
         runAsNonRoot: true
@@ -1464,10 +1467,16 @@ spec:
         # wft-bytes: the size of the rendered WorkflowTemplate, reported here so a pipeline growing
         # towards the size guard (wftSize.limitKiB) is visible before it fails.
         wft_bytes = sys.argv[7] if len(sys.argv) > 7 else ""
-        # collect image-<step> configMapKeyRef keys the WFT expects
+        # collect the pipeline-images keys the WFT reads. Two shapes, accepted in any order of the pins: the workflow's
+        # own arguments (image-<step> with valueFrom.configMapKeyRef, the engine before the images moved) and the
+        # inputs of a template (the engine reads the record in compose's template: an input per step with the same
+        # valueFrom.configMapKeyRef, and no image is an argument of the workflow).
         wanted = set()
-        for p in wft["spec"].get("arguments", {}).get("parameters", []):
-            ref = p.get("valueFrom", {}).get("configMapKeyRef", {})
+        candidates = list(wft["spec"].get("arguments", {}).get("parameters", []) or [])
+        for tpl in wft["spec"].get("templates", []) or []:
+            candidates += (tpl.get("inputs") or {}).get("parameters", []) or []
+        for p in candidates:
+            ref = (p.get("valueFrom") or {}).get("configMapKeyRef") or {}
             if ref.get("name") == f"{app}-pipeline-images":
                 wanted.add(ref["key"])
         data = images_doc.setdefault("data", {})

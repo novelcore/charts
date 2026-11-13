@@ -423,6 +423,40 @@ expect_eq "$(images_key engine-version)" "$ENG" "engine-version is never pruned 
 OUT=$(write "$OLD_ENG")
 expect_eq "$(images_key engine-version)" "$OLD_ENG" "a render on another engine records that engine"
 
+# ── the image record is read from template inputs as from workflow arguments ──
+# The engine after the images moved reads the record in compose's template (an input `image` and one `image-<step>` per
+# step, each with valueFrom.configMapKeyRef) and puts no image in the workflow's arguments. Both shapes keep the same keys.
+
+wft_inputs() {
+  python3 - "$W/wft.yaml" "$@" <<'EOF'
+import sys, yaml
+steps = sys.argv[2:]
+def ref(key):
+    return {"configMapKeyRef": {"name": "app1-pipeline-images", "key": key}}
+inputs = [{"name": "image", "valueFrom": ref("compose-and-validate")}] + \
+         [{"name": f"image-{s}", "valueFrom": ref(s)} for s in steps]
+yaml.safe_dump({"metadata": {"name": "app1-pipeline", "namespace": "proj-train"},
+                "spec": {"arguments": {"parameters": [{"name": "promote-x", "value": "false"}]},
+                         "templates": [{"name": "compose-and-validate", "inputs": {"parameters": inputs}},
+                                       {"name": "step-a", "inputs": {"parameters": [{"name": "image"}]}}]}},
+               open(sys.argv[1], "w"))
+EOF
+}
+cat > "$W/images.yaml" <<'EOF'
+apiVersion: v1
+kind: ConfigMap
+metadata: {name: app1-pipeline-images, namespace: proj-train}
+data: {last-built-sha: aaaa, step-a: "reg/app:step-a-1", step-z: "reg/app:step-z-1", engine-compose: v0.4.7}
+EOF
+wft_inputs step-a step-c; OUT=$(write "$ENG")
+expect_eq "$(images_key step-a)" "reg/app:step-a-1" "template inputs: a built step keeps its image"
+expect_eq "$(images_key step-c)" ":step-c-latest" "template inputs: a step the record lacks is seeded as never built"
+expect_eq "$(images_key compose-and-validate)" ":compose-and-validate-latest" "template inputs: the compose key is seeded too"
+expect_eq "$(images_key step-z)" "<absent>" "template inputs: a step that left the render is pruned"
+expect_eq "$(images_key engine-compose)" "v0.4.7" "template inputs: the engine records are not pruned"
+BEFORE=$(cat "$W/images.yaml"); OUT=$(write "$ENG")
+expect_eq "$(cat "$W/images.yaml")" "$BEFORE" "template inputs: a second render rewrites nothing"
+
 # ── the digest pin leaves the records alone ───────────────────────────────────
 
 PATCH=$(yq 'select(.kind == "ClusterWorkflowTemplate" and .metadata.name == "ml-ci-build")

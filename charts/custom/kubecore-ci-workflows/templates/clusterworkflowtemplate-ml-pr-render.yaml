@@ -286,8 +286,8 @@ spec:
         # before it commits (duplicate form params, @script templates).
         # GATE 2: step ↔ folder — every step the enhancer wired to a
         # platform-built image (container.image is the
-        # workflow.parameters.image-<step> moustache, kubecore/enhance.py) must
-        # have steps/<dir>/Dockerfile (dir = step name with '-' → '_').
+        # workflow.parameters.image-<step> moustache, or the input `image` of a template named after the step,
+        # kubecore/enhance.py) must have steps/<dir>/Dockerfile (dir = step name with '-' → '_').
         # Steps with a verbatim image are NOT checked, nor is compose-and-validate (the
         # platform builds it from the app's config/ and its own Dockerfile): the
         # platform.kubecore.io/image escape hatch, and platform-injected
@@ -311,17 +311,36 @@ spec:
         # pipeline order with where each image comes from, so the developer
         # sees the step they just added/renamed/removed by name — written
         # BEFORE the gates so a failed gate's report carries it too.
+        # Which step's folder builds a template's image: two shapes, both accepted so the pins can move in any
+        # order. The engine before the images moved gives the template the workflow parameter image-<step>
+        # (the moustache); the engine after it gives the template an input `image` that its task fills
+        # from the image record, and the template is named after the step. The platform's own templates
+        # (compose, the final task, the HPC follower) have no step folder.
         moustache = r"\{" + r"\{workflow\.parameters\.image-(.+)\}" + r"\}"
+        image_input = "{" + "{inputs.parameters.image}" + "}"
+        platform_templates = ("compose-and-validate", "kaos-promote", "hpc-follower")
+
+        def built_from(t):
+            image = str(t["container"].get("image", ""))
+            m = re.fullmatch(moustache, image)
+            if m:
+                return m.group(1)
+            if image == image_input and t["name"] not in platform_templates:
+                return t["name"]
+            return None
+
         rows = []
         for t in spec["templates"]:
             if "container" not in t:
                 continue
             image = str(t["container"].get("image", ""))
-            m = re.fullmatch(moustache, image)
-            if m and m.group(1) == "compose-and-validate":
+            step = built_from(t)
+            if t["name"] == "compose-and-validate" or step == "compose-and-validate":
                 src = "built by the platform from `config/`"
+            elif t["name"] in platform_templates and image == image_input:
+                src = "built by the platform"
             else:
-                src = f"built from `steps/{m.group(1).replace('-', '_')}/`" if m else f"verbatim `{image}`"
+                src = f"built from `steps/{step.replace('-', '_')}/`" if step else f"verbatim `{image}`"
             rows.append(f"| `{t['name']}` | {src} |")
         Path("/workspace/report-extra.md").write_text(
             f"#### Rendered pipeline — {len(rows)} steps, {len(names)} form params\n\n"
@@ -336,11 +355,10 @@ spec:
         steps = [t for t in spec["templates"] if "container" in t]
         missing = []
         for t in steps:
-            # regex split in two so the Helm renderer never sees a double brace
-            ref = re.fullmatch(r"\{" + r"\{workflow\.parameters\.image-(.+)\}" + r"\}", str(t["container"].get("image", "")))
-            if ref is None or ref.group(1) == "compose-and-validate":
+            step = built_from(t)   # the regexes are split in two so the Helm renderer never sees a double brace
+            if step is None or step == "compose-and-validate":
                 continue  # verbatim image (escape hatch or platform-injected step), or the platform's compose image: nothing to build
-            dockerfile = Path("steps") / ref.group(1).replace("-", "_") / "Dockerfile"
+            dockerfile = Path("steps") / step.replace("-", "_") / "Dockerfile"
             if not (Path("/workspace/repo") / dockerfile).is_file():
                 missing.append((t["name"], str(dockerfile)))
         if missing:
