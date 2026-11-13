@@ -57,6 +57,7 @@ STEP_KINDS = ("ingest", "transform", "train", "evaluate", "publish", "control") 
 TIME_RE = re.compile(r"^[0-9]+[mh]?$")  # lint/constants.py:69
 MAX_MINUTES = 43200  # lint/constants.py:79 (30 days, = v1 maxMinutes)
 RESERVED_STEP_NAMES = frozenset({"main", "compose-and-validate"})  # lint/constants.py:41
+ENGINE_TEMPLATES = frozenset({"kaos-promote", "hpc-follower"})  # engine promote.py, meluxina.py HPC_TWIN_TEMPLATE
 WHEN_NAME = "[A-Za-z0-9_.-]+"  # lint/when_text.py:19-22: NAME (==|!=) ("..."|'...'|NAME), joined by and/or
 WHEN_COMPARISON_RE = re.compile(r"""\s*(%s)\s*(==|!=)\s*("[^"]*"|'[^']*'|%s)""" % (WHEN_NAME, WHEN_NAME))
 WHEN_JOIN_RE = re.compile(r"\s+(and|or)(?=\s)")
@@ -334,6 +335,8 @@ def strip_forged(wft, ctx, engine):
             ENGINE_ANNOTATION: engine}),
         ("spec.workflowMetadata.labels", spec.get("workflowMetadata"), "labels", {ENGINE_LABEL: engine}),
         ("spec.workflowMetadata.annotations", spec.get("workflowMetadata"), "annotations", {}),
+        # Argo applies labelsFrom after the run's own labels and overwrites them: no ui.* or platform.* key survives
+        ("spec.workflowMetadata.labelsFrom", spec.get("workflowMetadata"), "labelsFrom", {}),
     ]
     for place, holder, key, allow in places:
         if holder is None:
@@ -392,8 +395,9 @@ def check_step_table(steps, wft):
         tn = t["name"]
         if tn in names:
             continue
-        # engine-owned templates: compose, the dag, kaos-promote/gather/matrix, the HPC follower and a step's HPC twin
-        if tn in owned or tn.startswith("kaos-") or tn.startswith("hpc-") or (tn.endswith("-hpc") and tn[:-4] in names):
+        # exactly what the engine emits: compose, the dag, kaos-promote, the HPC follower, and a matrix step's
+        # kaos-gather-<step> and kaos-matrix-<step>
+        if tn in owned or tn in ENGINE_TEMPLATES or any(tn == pre + n for pre in ("kaos-gather-", "kaos-matrix-") for n in names):
             continue
         raise refuse(f"template {q(tn)} is not in the step table")
     have = {t["name"] for t in wft["spec"]["templates"]}
@@ -409,7 +413,7 @@ def argo_enum(p):
     return e if isinstance(e, list) and e and all(isinstance(x, str) for x in e) else None
 
 
-def validate_raw(raw_text, params, roles):
+def validate_raw(raw_text, params, roles, notes):
     """Returns (types, option_defaults, leaf_options, group_names). Any violation refuses (exit 1)."""
     empty = ({}, {}, {}, set())
     if raw_text is None:
@@ -428,12 +432,17 @@ def validate_raw(raw_text, params, roles):
         if not isinstance(parts[k], dict):
             raise refuse(f"the raw form's {k} is not a mapping")
     by_name = {p["name"]: p for p in params}
+    ignored = set()
     cfg = {n for n, r in roles.items() if r in ("experiment", "setting")}
     for name, t in parts["types"].items():
-        if name not in by_name or name not in cfg:
-            raise refuse(f"the raw form types {q(name)}, which is not a config parameter")
+        if name not in by_name:
+            raise refuse(f"the raw form types {q(name)}, which is not a parameter")
         if t not in RAW_TYPES:
             raise refuse(f"the raw form gives {q(name)} a type that is not one of {', '.join(RAW_TYPES)}")
+        if name not in cfg:  # the engine types every config leaf, an input's too: only experiment/setting use it
+            notes.append(f"run form: raw form type of {q(name)} ignored (its role is {roles[name]}, not experiment or setting)")
+            ignored.add(name)
+    types = {k: v for k, v in parts["types"].items() if k not in ignored}
     groups = set()
     for g, options in parts["optionDefaults"].items():
         p = by_name.get(g)
@@ -460,7 +469,7 @@ def validate_raw(raw_text, params, roles):
         if not set(lo["options"]) <= set(argo_enum(by_name[lo["group"]])):
             raise refuse(f"the raw form's leafOptions of {q(leaf)} lists an option that is not in the enum of "
                          f"{q(lo['group'])}")
-    return parts["types"], parts["optionDefaults"], parts["leafOptions"], groups
+    return types, parts["optionDefaults"], parts["leafOptions"], groups
 
 
 # ---- step 4: config/_form.yaml (author data) ---------------------------------------------------------------------
@@ -605,8 +614,10 @@ def parse_when(text):
     """[(name, op, value), ...] and the joiners, or None when the text is not the kaos-lib `when=` grammar."""
     if not isinstance(text, str):
         return None
+    if has_control(text):  # kaos-lib lint/when_text.py: a control character anywhere, tab and newline included
+        return None
     text = text.strip()
-    if not text or has_control(text):
+    if not text:
         return None
     pos, comps, joins = 0, [], []
     while True:
@@ -1214,7 +1225,7 @@ def seal(args, notes):
     check_step_table(steps, wft)
     roles, step_of = _roles(params_list, form_data["rank"], {s["name"] for s in steps})
     # step 3, 4
-    raw_parts = validate_raw(form_data.get("raw"), params_list, roles)
+    raw_parts = validate_raw(form_data.get("raw"), params_list, roles, notes)
     form_yaml = read_form_yaml(args.config_dir)
     # step 5, 6
     form, _withheld = build_form(wft, ctx, form_data, steps, form_yaml, raw_parts, roles, step_of, notes)

@@ -1005,7 +1005,7 @@ class TestRawForm(Base):
     def test_types_of_a_non_config_role_are_ignored_with_one_line(self):  # C-1: H4 types every leaf, an input's too
         c = self.case()
         c.raw(lambda r: r["types"].update({"dataset": "string", "train-class": "enum", "prep-walltime": "integer",
-                                           "pipeline-info": "text"}))
+                                           "pipeline-info": "string"}))
         r = c.run()
         form = ok(self, r)
         d = field(form, "dataset")
