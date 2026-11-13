@@ -1,0 +1,1619 @@
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: PLACEHOLDER-app-pipeline
+  annotations:
+    platform.kubecore.io/generated-by: ml-ci-build/hera-render
+    platform.kubecore.io/cost-tracking: enabled
+    platform.kubecore.io/engine-version: 0.9.9
+  namespace: ns-a
+  labels:
+    platform.kubecore.io/project: PLACEHOLDER-project
+    platform.kubecore.io/app: PLACEHOLDER-app
+    platform.kubecore.io/managed-by: kubecore-ci
+spec:
+  entrypoint: main
+  templates:
+  - name: compose-and-validate
+    container:
+      image: '{{inputs.parameters.image}}'
+      args:
+      - model={{workflow.parameters.model}}
+      - optim={{workflow.parameters.optim}}
+      - experiment.name={{workflow.parameters.experiment-name}}
+      - experiment.description={{workflow.parameters.experiment-description}}
+      - dataset={{workflow.parameters.dataset}}
+      - model.width={{workflow.parameters.model-width}}
+      - model.dropout={{workflow.parameters.model-dropout}}
+      - model.name={{workflow.parameters.model-name}}
+      - model.warmup={{workflow.parameters.model-warmup}}
+      - optim.lr={{workflow.parameters.optim-lr}}
+      - optim.fused={{workflow.parameters.optim-fused}}
+      - optim.api_token={{workflow.parameters.optim-api_token}}
+      - --render-defaults
+      - '{"model":"small","optim":"adam","experiment.name":"my-experiment-v1","experiment.description":"","dataset":"dataset-default@latest","model.width":"64","model.dropout":"0.1","model.name":"tiny","model.warmup":"5","optim.lr":"0.001","optim.fused":"true","optim.api_token":"abc"}'
+      - --advanced
+      - '{{workflow.parameters.config}}'
+      - --require=experiment
+      - --require=model
+      - --require=optim
+      - --run
+      - '{{workflow.name}}'
+      - --run-uid
+      - '{{workflow.uid}}'
+      - --steps
+      - '[{"name":"dataset-loading","kind":"ingest","reads":[],"inputs":["dataset"],"needs":[],"produces":[{"name":"loaded","type":"dataset"}]},{"name":"hello-world","kind":"transform","reads":["experiment"],"inputs":["dataset"],"needs":["dataset-loading"],"produces":[{"name":"report","type":"artifact"}]},{"name":"train","kind":"train","reads":["model","optim"],"inputs":[],"needs":["dataset-loading"],"produces":[{"name":"m","type":"model"}],"when_text":"optim
+        == sgd and model != large","when_fields":["optim","model"]},{"name":"evaluate","kind":"evaluate","reads":[],"inputs":[],"needs":["train"],"produces":[],"matrix":{"seed":[1,2]}}]'
+      - --context-dir
+      - /work/context
+      - --ledger-output
+      - /work/kaos-ledger.json
+      - --reused-dir
+      - /work/reused
+      - --when-field
+      - optim={{=workflow.parameters['optim']}}
+      - --when-field
+      - model={{=workflow.parameters['model']}}
+      - --images-output
+      - /work/kaos-images.json
+      - --app
+      - PLACEHOLDER-app
+      - --project
+      - PLACEHOLDER-project
+      - --walltime
+      - dataset-loading={{workflow.parameters.dataset-loading-walltime}}
+      - --walltime
+      - hello-world={{workflow.parameters.hello-world-walltime}}
+      - --walltime
+      - train={{workflow.parameters.train-walltime}}
+      - --checkpoint-every
+      - train={{workflow.parameters.train-checkpoint-every}}
+      - --walltime
+      - evaluate={{workflow.parameters.evaluate-walltime}}
+      - --class
+      - dataset-loading={{workflow.parameters.dataset-loading-class}}
+      - --class
+      - train={{workflow.parameters.train-class}}
+      - --class
+      - evaluate={{workflow.parameters.evaluate-class}}
+      - --class-offers
+      - '{"dataset-loading":{"offered":["cpu-standard","kubecorecpu"],"refused":{"gpu-t4":["it
+        is a GPU machine and the step does not declare gpu=True","Add gpu=True to
+        the step in pipeline.py to run it on a GPU machine."],"meluxina-gpu":["a ingest
+        step never runs on HPC (Slurm)","Choose one of: cpu-standard, kubecorecpu."],"meluxina-cpu":["a
+        ingest step never runs on HPC (Slurm)","Choose one of: cpu-standard, kubecorecpu."],"meluxina-largemem":["a
+        ingest step never runs on HPC (Slurm)","Choose one of: cpu-standard, kubecorecpu."]}},"train":{"offered":["cpu-standard","kubecorecpu","gpu-t4","meluxina-gpu","meluxina-cpu","meluxina-largemem"],"refused":{}},"evaluate":{"offered":["cpu-standard","kubecorecpu","meluxina-cpu","meluxina-largemem"],"refused":{"gpu-t4":["it
+        is a GPU machine and the step does not declare gpu=True","Add gpu=True to
+        the step in pipeline.py to run it on a GPU machine."],"meluxina-gpu":["it
+        is a GPU machine and the step does not declare gpu=True","Add gpu=True to
+        the step in pipeline.py to run it on a GPU machine."]}}}'
+      - --hpc-classes
+      - meluxina-gpu,meluxina-cpu,meluxina-largemem
+      - --reuse-from-run={{workflow.parameters.reuse-from-run}}
+      - --start-from-step={{workflow.parameters.start-from-step}}
+      - --promote
+      - loaded={{workflow.parameters.promote-loaded}}
+      - --matrix
+      - evaluate={{workflow.parameters.evaluate-matrix}}
+      - --parallel
+      - evaluate={{workflow.parameters.evaluate-parallel}}
+      - --settings-output
+      - /work/kaos-run-settings.json
+      command:
+      - python
+      - -I
+      - -m
+      - kaos_engine.compose
+      env:
+      - name: MLFLOW_TRACKING_URI
+        value: http://mlflow.internal.invalid
+      - name: MLFLOW_TRACKING_AUTH
+        value: zitadel
+      - name: ZITADEL_DOMAIN
+        value: oidc.internal.invalid
+      - name: ZITADEL_MLFLOW_PROJECT_ID
+        value: PLACEHOLDER-oidc-project-id
+      - name: ZITADEL_MACHINE_KEY_FILE
+        value: /etc/mlflow-svc/ZITADEL_MACHINE_KEY
+      - name: LAKEFS_ENDPOINT
+        value: http://lakefs.internal.invalid
+      - name: LAKEFS_ACCESS_KEY
+        valueFrom:
+          secretKeyRef:
+            name: PLACEHOLDER-lakefs-admin
+            key: accessKeyId
+      - name: LAKEFS_SECRET_KEY
+        valueFrom:
+          secretKeyRef:
+            name: PLACEHOLDER-lakefs-admin
+            key: secretAccessKey
+      - name: KAOS_CHECKPOINT_DIR
+        value: /kaos/checkpoint
+      - name: KAOS_STEP_IMAGES
+        value: '{"dataset-loading":"{{inputs.parameters.image-dataset-loading}}","evaluate":"{{inputs.parameters.image-evaluate}}","hello-world":"{{inputs.parameters.image-hello-world}}","train":"{{inputs.parameters.image-train}}"}'
+      resources:
+        requests:
+          cpu: '7'
+          memory: 27Gi
+          ephemeral-storage: 10Gi
+        limits:
+          cpu: '7'
+          memory: 27Gi
+      volumeMounts:
+      - name: mlflow-svc
+        mountPath: /etc/mlflow-svc
+        readOnly: true
+      - name: dshm
+        mountPath: /dev/shm
+      - name: kaos-checkpoint
+        mountPath: /kaos/checkpoint
+    metadata:
+      labels:
+        platform.kubecore.io/step: compose-and-validate
+        platform.kubecore.io/step-kind: control
+    outputs:
+      parameters:
+      - name: kaos-ledger
+        valueFrom:
+          path: /work/kaos-ledger.json
+      - name: kaos-context-dataset-loading
+        valueFrom:
+          path: /work/context/dataset-loading.json
+      - name: kaos-context-hello-world
+        valueFrom:
+          path: /work/context/hello-world.json
+      - name: kaos-context-train
+        valueFrom:
+          path: /work/context/train.json
+      - name: kaos-context-evaluate
+        valueFrom:
+          path: /work/context/evaluate.json
+      - name: kaos-reused-dataset-loading
+        valueFrom:
+          path: /work/reused/dataset-loading.json
+      - name: kaos-reused-hello-world
+        valueFrom:
+          path: /work/reused/hello-world.json
+      - name: kaos-reused-train
+        valueFrom:
+          path: /work/reused/train.json
+      - name: kaos-reused-evaluate
+        valueFrom:
+          path: /work/reused/evaluate.json
+      - name: kaos-images
+        valueFrom:
+          path: /work/kaos-images.json
+      - name: kaos-run-settings
+        valueFrom:
+          path: /work/kaos-run-settings.json
+    inputs:
+      parameters:
+      - name: cpu
+        default: '7'
+      - name: mem
+        default: 27Gi
+      - name: disk
+        default: 10Gi
+      - name: image
+        valueFrom:
+          configMapKeyRef:
+            name: PLACEHOLDER-app-pipeline-images
+            key: compose-and-validate
+      - name: image-dataset-loading
+        valueFrom:
+          configMapKeyRef:
+            name: PLACEHOLDER-app-pipeline-images
+            key: dataset-loading
+      - name: image-evaluate
+        valueFrom:
+          configMapKeyRef:
+            name: PLACEHOLDER-app-pipeline-images
+            key: evaluate
+      - name: image-hello-world
+        valueFrom:
+          configMapKeyRef:
+            name: PLACEHOLDER-app-pipeline-images
+            key: hello-world
+      - name: image-train
+        valueFrom:
+          configMapKeyRef:
+            name: PLACEHOLDER-app-pipeline-images
+            key: train
+    podSpecPatch: "containers:\n- name: main\n  resources:\n    limits:\n      cpu:\
+      \ '{{inputs.parameters.cpu}}'\n      memory: '{{inputs.parameters.mem}}'\n \
+      \   requests:\n      cpu: '{{inputs.parameters.cpu}}'\n      ephemeral-storage:\
+      \ '{{inputs.parameters.disk}}'\n      memory: '{{inputs.parameters.mem}}'\n"
+    nodeSelector:
+      platform.kubecore.io/nodegroup-type: cpu-standard
+    activeDeadlineSeconds: 1800
+    tolerations:
+    - key: platform.kubecore.io/ml-workload
+      operator: Equal
+      value: cpu
+      effect: NoSchedule
+    - key: platform.kubecore.io/ml-workload
+      operator: Equal
+      value: gpu
+      effect: NoSchedule
+    volumes:
+    - name: mlflow-svc
+      secret:
+        secretName: PLACEHOLDER-mlflow-svc
+    - name: dshm
+      emptyDir:
+        medium: Memory
+        sizeLimit: 1Gi
+    - name: kaos-checkpoint
+      emptyDir: {}
+    retryStrategy:
+      limit: '2'
+      retryPolicy: Always
+      expression: ((lastRetry.status == 'Error' or lastRetry.message matches '.*(imminent
+        node shutdown|node is shutting down|node is draining|The node was low on resource|The
+        node had condition|Pod was rejected|Evicted|evicted|pod deleted|Pod was deleted).*')
+        and not (lastRetry.message contains 'kaos-result.json')) and not (lastRetry.message
+        startsWith 'KaosIdle')
+      backoff:
+        duration: 30s
+        factor: '2'
+        maxDuration: 10m
+  - name: kaos-promote
+    container:
+      image: '{{inputs.parameters.image}}'
+      args: []
+      command:
+      - python
+      - -I
+      - -m
+      - kaos_engine.promote
+      env:
+      - name: MLFLOW_TRACKING_URI
+        value: http://mlflow.internal.invalid
+      - name: MLFLOW_TRACKING_AUTH
+        value: zitadel
+      - name: ZITADEL_DOMAIN
+        value: oidc.internal.invalid
+      - name: ZITADEL_MLFLOW_PROJECT_ID
+        value: PLACEHOLDER-oidc-project-id
+      - name: ZITADEL_MACHINE_KEY_FILE
+        value: /etc/mlflow-svc/ZITADEL_MACHINE_KEY
+      - name: LAKEFS_ENDPOINT
+        value: http://lakefs.internal.invalid
+      - name: LAKEFS_ACCESS_KEY
+        valueFrom:
+          secretKeyRef:
+            name: PLACEHOLDER-lakefs-admin
+            key: accessKeyId
+      - name: LAKEFS_SECRET_KEY
+        valueFrom:
+          secretKeyRef:
+            name: PLACEHOLDER-lakefs-admin
+            key: secretAccessKey
+      - name: KAOS_CHECKPOINT_DIR
+        value: /kaos/checkpoint
+      - name: KAOS_RUN
+        value: '{{workflow.name}}'
+      - name: KAOS_PROMOTE_PLAN
+        value: '{{inputs.parameters.kaos-promote-plan}}'
+      resources:
+        requests:
+          cpu: '7'
+          memory: 27Gi
+          ephemeral-storage: 10Gi
+        limits:
+          cpu: '7'
+          memory: 27Gi
+      volumeMounts:
+      - name: mlflow-svc
+        mountPath: /etc/mlflow-svc
+        readOnly: true
+      - name: dshm
+        mountPath: /dev/shm
+      - name: kaos-checkpoint
+        mountPath: /kaos/checkpoint
+    metadata:
+      labels:
+        platform.kubecore.io/step: kaos-promote
+        platform.kubecore.io/step-kind: control
+    inputs:
+      parameters:
+      - name: cpu
+        default: 100m
+      - name: mem
+        default: 256Mi
+      - name: disk
+        default: 1Gi
+      - name: image
+        valueFrom:
+          configMapKeyRef:
+            name: PLACEHOLDER-app-pipeline-images
+            key: compose-and-validate
+      - name: kaos-promote-plan
+    podSpecPatch: "containers:\n- name: main\n  resources:\n    limits:\n      cpu:\
+      \ '{{inputs.parameters.cpu}}'\n      memory: '{{inputs.parameters.mem}}'\n \
+      \   requests:\n      cpu: '{{inputs.parameters.cpu}}'\n      ephemeral-storage:\
+      \ '{{inputs.parameters.disk}}'\n      memory: '{{inputs.parameters.mem}}'\n"
+    nodeSelector:
+      platform.kubecore.io/nodegroup-type: cpu-standard
+    activeDeadlineSeconds: 1800
+    tolerations:
+    - key: platform.kubecore.io/ml-workload
+      operator: Equal
+      value: cpu
+      effect: NoSchedule
+    - key: platform.kubecore.io/ml-workload
+      operator: Equal
+      value: gpu
+      effect: NoSchedule
+    volumes:
+    - name: mlflow-svc
+      secret:
+        secretName: PLACEHOLDER-mlflow-svc
+    - name: dshm
+      emptyDir:
+        medium: Memory
+        sizeLimit: 1Gi
+    - name: kaos-checkpoint
+      emptyDir: {}
+    retryStrategy:
+      limit: '2'
+      retryPolicy: Always
+      expression: ((lastRetry.status == 'Error' or lastRetry.message matches '.*(imminent
+        node shutdown|node is shutting down|node is draining|The node was low on resource|The
+        node had condition|Pod was rejected|Evicted|evicted|pod deleted|Pod was deleted).*')
+        and not (lastRetry.message contains 'kaos-result.json')) and not (lastRetry.message
+        startsWith 'KaosIdle')
+      backoff:
+        duration: 30s
+        factor: '2'
+        maxDuration: 10m
+  - name: kaos-gather-evaluate
+    container:
+      image: '{{inputs.parameters.image}}'
+      args: []
+      command:
+      - python
+      - -I
+      - -m
+      - kaos_engine.gather
+      env:
+      - name: MLFLOW_TRACKING_URI
+        value: http://mlflow.internal.invalid
+      - name: MLFLOW_TRACKING_AUTH
+        value: zitadel
+      - name: ZITADEL_DOMAIN
+        value: oidc.internal.invalid
+      - name: ZITADEL_MLFLOW_PROJECT_ID
+        value: PLACEHOLDER-oidc-project-id
+      - name: ZITADEL_MACHINE_KEY_FILE
+        value: /etc/mlflow-svc/ZITADEL_MACHINE_KEY
+      - name: LAKEFS_ENDPOINT
+        value: http://lakefs.internal.invalid
+      - name: LAKEFS_ACCESS_KEY
+        valueFrom:
+          secretKeyRef:
+            name: PLACEHOLDER-lakefs-admin
+            key: accessKeyId
+      - name: LAKEFS_SECRET_KEY
+        valueFrom:
+          secretKeyRef:
+            name: PLACEHOLDER-lakefs-admin
+            key: secretAccessKey
+      - name: KAOS_CHECKPOINT_DIR
+        value: /kaos/checkpoint
+      - name: KAOS_GATHER_STEP
+        value: evaluate
+      - name: KAOS_GATHER_ALLOW_FAILED
+        value: 'false'
+      - name: KAOS_GATHER_RESULTS
+        value: '{{inputs.parameters.results}}'
+      - name: KAOS_GATHER_ITEMS
+        value: '{{inputs.parameters.items}}'
+      - name: KAOS_GATHER_PLAN
+        value: '{{inputs.parameters.plan}}'
+      - name: KAOS_GATHER_STATUS
+        value: '{{inputs.parameters.status}}'
+      resources:
+        requests:
+          cpu: '7'
+          memory: 27Gi
+          ephemeral-storage: 10Gi
+        limits:
+          cpu: '7'
+          memory: 27Gi
+      volumeMounts:
+      - name: mlflow-svc
+        mountPath: /etc/mlflow-svc
+        readOnly: true
+      - name: dshm
+        mountPath: /dev/shm
+      - name: kaos-checkpoint
+        mountPath: /kaos/checkpoint
+    metadata:
+      labels:
+        platform.kubecore.io/step: kaos-gather-evaluate
+        platform.kubecore.io/step-kind: control
+    outputs:
+      parameters:
+      - name: kaos-result
+        valueFrom:
+          path: /tmp/outputs/kaos-result.json
+    inputs:
+      parameters:
+      - name: cpu
+        default: '7'
+      - name: mem
+        default: 27Gi
+      - name: disk
+        default: 10Gi
+      - name: image
+        valueFrom:
+          configMapKeyRef:
+            name: PLACEHOLDER-app-pipeline-images
+            key: compose-and-validate
+      - name: image-dataset-loading
+        valueFrom:
+          configMapKeyRef:
+            name: PLACEHOLDER-app-pipeline-images
+            key: dataset-loading
+      - name: image-evaluate
+        valueFrom:
+          configMapKeyRef:
+            name: PLACEHOLDER-app-pipeline-images
+            key: evaluate
+      - name: image-hello-world
+        valueFrom:
+          configMapKeyRef:
+            name: PLACEHOLDER-app-pipeline-images
+            key: hello-world
+      - name: image-train
+        valueFrom:
+          configMapKeyRef:
+            name: PLACEHOLDER-app-pipeline-images
+            key: train
+      - name: results
+      - name: items
+      - name: plan
+      - name: status
+    podSpecPatch: "containers:\n- name: main\n  resources:\n    limits:\n      cpu:\
+      \ '{{inputs.parameters.cpu}}'\n      memory: '{{inputs.parameters.mem}}'\n \
+      \   requests:\n      cpu: '{{inputs.parameters.cpu}}'\n      ephemeral-storage:\
+      \ '{{inputs.parameters.disk}}'\n      memory: '{{inputs.parameters.mem}}'\n"
+    nodeSelector:
+      platform.kubecore.io/nodegroup-type: cpu-standard
+    activeDeadlineSeconds: 1800
+    tolerations:
+    - key: platform.kubecore.io/ml-workload
+      operator: Equal
+      value: cpu
+      effect: NoSchedule
+    - key: platform.kubecore.io/ml-workload
+      operator: Equal
+      value: gpu
+      effect: NoSchedule
+    volumes:
+    - name: mlflow-svc
+      secret:
+        secretName: PLACEHOLDER-mlflow-svc
+    - name: dshm
+      emptyDir:
+        medium: Memory
+        sizeLimit: 1Gi
+    - name: kaos-checkpoint
+      emptyDir: {}
+    retryStrategy:
+      limit: '2'
+      retryPolicy: Always
+      expression: ((lastRetry.status == 'Error' or lastRetry.message matches '.*(imminent
+        node shutdown|node is shutting down|node is draining|The node was low on resource|The
+        node had condition|Pod was rejected|Evicted|evicted|pod deleted|Pod was deleted).*')
+        and not (lastRetry.message contains 'kaos-result.json')) and not (lastRetry.message
+        startsWith 'KaosIdle')
+      backoff:
+        duration: 30s
+        factor: '2'
+        maxDuration: 10m
+  - name: dataset-loading
+    container:
+      image: '{{inputs.parameters.image}}'
+      command:
+      - python
+      - -m
+      - app.entry
+      env:
+      - name: KAOS_STEP_CONTEXT
+        value: '{{inputs.parameters.kaos-context}}'
+      - name: MLFLOW_TRACKING_URI
+        value: http://mlflow.internal.invalid
+      - name: MLFLOW_TRACKING_AUTH
+        value: zitadel
+      - name: ZITADEL_DOMAIN
+        value: oidc.internal.invalid
+      - name: ZITADEL_MLFLOW_PROJECT_ID
+        value: PLACEHOLDER-oidc-project-id
+      - name: ZITADEL_MACHINE_KEY_FILE
+        value: /etc/mlflow-svc/ZITADEL_MACHINE_KEY
+      - name: LAKEFS_ENDPOINT
+        value: http://lakefs.internal.invalid
+      - name: LAKEFS_ACCESS_KEY
+        valueFrom:
+          secretKeyRef:
+            name: PLACEHOLDER-lakefs-admin
+            key: accessKeyId
+      - name: LAKEFS_SECRET_KEY
+        valueFrom:
+          secretKeyRef:
+            name: PLACEHOLDER-lakefs-admin
+            key: secretAccessKey
+      - name: KAOS_CHECKPOINT_DIR
+        value: /kaos/checkpoint
+      resources:
+        requests:
+          cpu: '7'
+          memory: 27Gi
+          ephemeral-storage: 10Gi
+        limits:
+          cpu: '7'
+          memory: 27Gi
+      volumeMounts:
+      - name: mlflow-svc
+        mountPath: /etc/mlflow-svc
+        readOnly: true
+      - name: dshm
+        mountPath: /dev/shm
+      - name: kaos-checkpoint
+        mountPath: /kaos/checkpoint
+    inputs:
+      parameters:
+      - name: kaos-context
+      - name: cpu
+        default: '7'
+      - name: mem
+        default: 27Gi
+      - name: disk
+        default: 10Gi
+      - name: deadline
+        default: '14400'
+      - name: image
+    metadata:
+      labels:
+        platform.kubecore.io/produces-dataset: 'true'
+        platform.kubecore.io/step: dataset-loading
+        platform.kubecore.io/step-kind: ingest
+    outputs:
+      parameters:
+      - name: kaos-result
+        valueFrom:
+          path: /work/output/kaos-result.json
+    podSpecPatch: "containers:\n- name: main\n  resources:\n    limits:\n      cpu:\
+      \ '{{inputs.parameters.cpu}}'\n      memory: '{{inputs.parameters.mem}}'\n \
+      \   requests:\n      cpu: '{{inputs.parameters.cpu}}'\n      ephemeral-storage:\
+      \ '{{inputs.parameters.disk}}'\n      memory: '{{inputs.parameters.mem}}'\n"
+    nodeSelector:
+      platform.kubecore.io/nodegroup-type: '{{workflow.parameters.dataset-loading-class}}'
+    tolerations:
+    - key: platform.kubecore.io/ml-workload
+      operator: Equal
+      value: cpu
+      effect: NoSchedule
+    - key: platform.kubecore.io/ml-workload
+      operator: Equal
+      value: gpu
+      effect: NoSchedule
+    activeDeadlineSeconds: '{{inputs.parameters.deadline}}'
+    volumes:
+    - name: mlflow-svc
+      secret:
+        secretName: PLACEHOLDER-mlflow-svc
+    - name: dshm
+      emptyDir:
+        medium: Memory
+        sizeLimit: 1Gi
+    - name: kaos-checkpoint
+      emptyDir: {}
+    retryStrategy:
+      limit: '2'
+      retryPolicy: Always
+      expression: ((lastRetry.status == 'Error' or lastRetry.message matches '.*(imminent
+        node shutdown|node is shutting down|node is draining|The node was low on resource|The
+        node had condition|Pod was rejected|Evicted|evicted|pod deleted|Pod was deleted).*')
+        and not (lastRetry.message contains 'kaos-result.json')) and not (lastRetry.message
+        startsWith 'KaosIdle')
+      backoff:
+        duration: 30s
+        factor: '2'
+        maxDuration: 10m
+  - name: hello-world
+    container:
+      image: '{{inputs.parameters.image}}'
+      command:
+      - python
+      - -m
+      - app.entry
+      env:
+      - name: KAOS_STEP_CONTEXT
+        value: '{{inputs.parameters.kaos-context}}'
+      - name: MLFLOW_TRACKING_URI
+        value: http://mlflow.internal.invalid
+      - name: MLFLOW_TRACKING_AUTH
+        value: zitadel
+      - name: ZITADEL_DOMAIN
+        value: oidc.internal.invalid
+      - name: ZITADEL_MLFLOW_PROJECT_ID
+        value: PLACEHOLDER-oidc-project-id
+      - name: ZITADEL_MACHINE_KEY_FILE
+        value: /etc/mlflow-svc/ZITADEL_MACHINE_KEY
+      - name: LAKEFS_ENDPOINT
+        value: http://lakefs.internal.invalid
+      - name: LAKEFS_ACCESS_KEY
+        valueFrom:
+          secretKeyRef:
+            name: PLACEHOLDER-lakefs-admin
+            key: accessKeyId
+      - name: LAKEFS_SECRET_KEY
+        valueFrom:
+          secretKeyRef:
+            name: PLACEHOLDER-lakefs-admin
+            key: secretAccessKey
+      - name: KAOS_CHECKPOINT_DIR
+        value: /kaos/checkpoint
+      resources:
+        requests:
+          cpu: '7'
+          memory: 27Gi
+          ephemeral-storage: 10Gi
+        limits:
+          cpu: '7'
+          memory: 27Gi
+      volumeMounts:
+      - name: mlflow-svc
+        mountPath: /etc/mlflow-svc
+        readOnly: true
+      - name: dshm
+        mountPath: /dev/shm
+      - name: kaos-checkpoint
+        mountPath: /kaos/checkpoint
+    inputs:
+      parameters:
+      - name: kaos-context
+      - name: deadline
+        default: '14400'
+      - name: image
+    metadata:
+      labels:
+        platform.kubecore.io/step: hello-world
+        platform.kubecore.io/step-kind: transform
+      annotations:
+        platform.kubecore.io/compute-class: cpu-standard
+    outputs:
+      parameters:
+      - name: kaos-result
+        valueFrom:
+          path: /work/output/kaos-result.json
+    nodeSelector:
+      platform.kubecore.io/nodegroup-type: cpu-standard
+    tolerations:
+    - key: platform.kubecore.io/ml-workload
+      operator: Equal
+      value: cpu
+      effect: NoSchedule
+    activeDeadlineSeconds: '{{inputs.parameters.deadline}}'
+    volumes:
+    - name: mlflow-svc
+      secret:
+        secretName: PLACEHOLDER-mlflow-svc
+    - name: dshm
+      emptyDir:
+        medium: Memory
+        sizeLimit: 1Gi
+    - name: kaos-checkpoint
+      emptyDir: {}
+    retryStrategy:
+      limit: '2'
+      retryPolicy: Always
+      expression: ((lastRetry.status == 'Error' or lastRetry.message matches '.*(imminent
+        node shutdown|node is shutting down|node is draining|The node was low on resource|The
+        node had condition|Pod was rejected|Evicted|evicted|pod deleted|Pod was deleted).*')
+        and not (lastRetry.message contains 'kaos-result.json')) and not (lastRetry.message
+        startsWith 'KaosIdle')
+      backoff:
+        duration: 30s
+        factor: '2'
+        maxDuration: 10m
+  - name: train
+    container:
+      image: '{{inputs.parameters.image}}'
+      command:
+      - sh
+      - -c
+      - "LD_LIBRARY_PATH=/usr/local/nvidia/lib64:/usr/local/nvidia/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}\n\
+        export LD_LIBRARY_PATH\nPATH=/usr/local/nvidia/bin:$PATH\nexport PATH\nkaos_gpus=$1\n\
+        shift\nif [ \"$kaos_gpus\" != \"0\" ]; then\n  if command -v python3 >/dev/null\
+        \ 2>&1; then\n    if ! kaos_why=`python3 -c 'import ctypes, sys\ntry:\n  \
+        \  lib = ctypes.CDLL(\"libcuda.so.1\")\nexcept OSError as e:\n    sys.exit(\"\
+        libcuda.so.1 not found: \" + str(e).replace(chr(10), \" \"))\nrc = lib.cuInit(0)\n\
+        if rc != 0:\n    sys.exit(\"cuInit returned error \" + str(rc))\n' 2>&1`;\
+        \ then\n      echo \"KAOS: this GPU step cannot reach the NVIDIA driver ($kaos_why);\
+        \ the image or node is not set up for GPU\" >&2\n      exit 1\n    fi\n  else\n\
+        \    echo \"KAOS: python3 not found in the image; skipping the NVIDIA driver\
+        \ check\" >&2\n  fi\nfi\nexec \"$@\"\n"
+      - kaos-gpu-prelude
+      - '{{inputs.parameters.gpus}}'
+      - python
+      - -m
+      - app.entry
+      env:
+      - name: KAOS_STEP_CONTEXT
+        value: '{{inputs.parameters.kaos-context}}'
+      - name: MLFLOW_TRACKING_URI
+        value: http://mlflow.internal.invalid
+      - name: MLFLOW_TRACKING_AUTH
+        value: zitadel
+      - name: ZITADEL_DOMAIN
+        value: oidc.internal.invalid
+      - name: ZITADEL_MLFLOW_PROJECT_ID
+        value: PLACEHOLDER-oidc-project-id
+      - name: ZITADEL_MACHINE_KEY_FILE
+        value: /etc/mlflow-svc/ZITADEL_MACHINE_KEY
+      - name: LAKEFS_ENDPOINT
+        value: http://lakefs.internal.invalid
+      - name: LAKEFS_ACCESS_KEY
+        valueFrom:
+          secretKeyRef:
+            name: PLACEHOLDER-lakefs-admin
+            key: accessKeyId
+      - name: LAKEFS_SECRET_KEY
+        valueFrom:
+          secretKeyRef:
+            name: PLACEHOLDER-lakefs-admin
+            key: secretAccessKey
+      - name: KAOS_CHECKPOINT_DIR
+        value: /kaos/checkpoint
+      resources:
+        limits:
+          cpu: '7'
+          memory: 25Gi
+        requests:
+          cpu: '7'
+          memory: 25Gi
+          ephemeral-storage: 10Gi
+      volumeMounts:
+      - name: mlflow-svc
+        mountPath: /etc/mlflow-svc
+        readOnly: true
+      - name: dshm
+        mountPath: /dev/shm
+      - name: kaos-checkpoint
+        mountPath: /kaos/checkpoint
+    inputs:
+      parameters:
+      - name: kaos-context
+      - name: cpu
+        default: '7'
+      - name: mem
+        default: 25Gi
+      - name: disk
+        default: 10Gi
+      - name: deadline
+        default: '43200'
+      - name: gpus
+        default: '1'
+      - name: checkpoint-every
+        default: '20'
+      - name: image
+    metadata:
+      annotations:
+        platform.kubecore.io/checkpoint-every: '20'
+        platform.kubecore.io/hpc: 12h
+      labels:
+        platform.kubecore.io/step: train
+        platform.kubecore.io/step-kind: train
+    outputs:
+      parameters:
+      - name: kaos-result
+        valueFrom:
+          path: /work/output/kaos-result.json
+    podSpecPatch: "containers:\n- name: main\n  resources:\n    limits:\n      cpu:\
+      \ '{{inputs.parameters.cpu}}'\n      memory: '{{inputs.parameters.mem}}'\n \
+      \     nvidia.com/gpu: '{{inputs.parameters.gpus}}'\n    requests:\n      cpu:\
+      \ '{{inputs.parameters.cpu}}'\n      ephemeral-storage: '{{inputs.parameters.disk}}'\n\
+      \      memory: '{{inputs.parameters.mem}}'\n      nvidia.com/gpu: '{{inputs.parameters.gpus}}'\n"
+    nodeSelector:
+      platform.kubecore.io/nodegroup-type: '{{workflow.parameters.train-class}}'
+    tolerations:
+    - key: platform.kubecore.io/ml-workload
+      operator: Equal
+      value: cpu
+      effect: NoSchedule
+    - key: platform.kubecore.io/ml-workload
+      operator: Equal
+      value: gpu
+      effect: NoSchedule
+    - key: nvidia.com/gpu
+      operator: Exists
+      effect: NoSchedule
+    activeDeadlineSeconds: '{{inputs.parameters.deadline}}'
+    volumes:
+    - name: mlflow-svc
+      secret:
+        secretName: PLACEHOLDER-mlflow-svc
+    - name: dshm
+      emptyDir:
+        medium: Memory
+        sizeLimit: 1Gi
+    - name: kaos-checkpoint
+      emptyDir: {}
+    - name: kaos-checkpoint-stage
+      emptyDir: {}
+    - name: kaos-ckpt-helper
+      configMap:
+        name: PLACEHOLDER-app-ckpt-helper
+        defaultMode: 292
+    retryStrategy:
+      limit: '2'
+      retryPolicy: Always
+      expression: ((lastRetry.status == 'Error' or lastRetry.message matches '.*(imminent
+        node shutdown|node is shutting down|node is draining|The node was low on resource|The
+        node had condition|Pod was rejected|Evicted|evicted|pod deleted|Pod was deleted).*')
+        and not (lastRetry.message contains 'kaos-result.json')) and not (lastRetry.message
+        startsWith 'KaosIdle')
+      backoff:
+        duration: 30s
+        factor: '2'
+        maxDuration: 10m
+    initContainers:
+    - name: kaos-ckpt-restore
+      image: registry.example/kaos-hpc-operator:v0.0.0
+      command:
+      - python3
+      - /ckpt-helper/checkpoint_helper.py
+      - restore
+      env:
+      - name: KAOS_CHECKPOINT_DIR
+        value: /kaos/checkpoint
+      - name: LAKEFS_ENDPOINT
+        value: http://lakefs.internal.invalid
+      - name: LAKEFS_ACCESS_KEY
+        valueFrom:
+          secretKeyRef:
+            name: PLACEHOLDER-lakefs-admin
+            key: accessKeyId
+      - name: LAKEFS_SECRET_KEY
+        valueFrom:
+          secretKeyRef:
+            name: PLACEHOLDER-lakefs-admin
+            key: secretAccessKey
+      - name: CKPT_REPO
+        value: outputs-PLACEHOLDER-app
+      - name: CKPT_BRANCH
+        value: kaos-checkpoints
+      - name: CKPT_ROOT
+        value: resume
+      - name: CKPT_KEY
+        value: '{{workflow.name}}/train'
+      - name: CKPT_EVERY_MIN
+        value: '{{inputs.parameters.checkpoint-every}}'
+      - name: CKPT_STAGE
+        value: /stage
+      - name: PYTHONDONTWRITEBYTECODE
+        value: '1'
+      resources:
+        requests:
+          cpu: 10m
+          memory: 64Mi
+        limits:
+          memory: 512Mi
+      securityContext:
+        runAsUser: 65532
+        runAsGroup: 65532
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities:
+          drop:
+          - ALL
+      volumeMounts:
+      - name: kaos-checkpoint
+        mountPath: /kaos/checkpoint
+      - name: kaos-checkpoint-stage
+        mountPath: /stage
+      - name: kaos-ckpt-helper
+        mountPath: /ckpt-helper
+        readOnly: true
+    sidecars:
+    - name: kaos-ckpt-copy
+      image: registry.example/kaos-hpc-operator:v0.0.0
+      command:
+      - python3
+      - /ckpt-helper/checkpoint_helper.py
+      - watch
+      env:
+      - name: KAOS_CHECKPOINT_DIR
+        value: /kaos/checkpoint
+      - name: LAKEFS_ENDPOINT
+        value: http://lakefs.internal.invalid
+      - name: LAKEFS_ACCESS_KEY
+        valueFrom:
+          secretKeyRef:
+            name: PLACEHOLDER-lakefs-admin
+            key: accessKeyId
+      - name: LAKEFS_SECRET_KEY
+        valueFrom:
+          secretKeyRef:
+            name: PLACEHOLDER-lakefs-admin
+            key: secretAccessKey
+      - name: CKPT_REPO
+        value: outputs-PLACEHOLDER-app
+      - name: CKPT_BRANCH
+        value: kaos-checkpoints
+      - name: CKPT_ROOT
+        value: resume
+      - name: CKPT_KEY
+        value: '{{workflow.name}}/train'
+      - name: CKPT_EVERY_MIN
+        value: '{{inputs.parameters.checkpoint-every}}'
+      - name: CKPT_STAGE
+        value: /stage
+      - name: PYTHONDONTWRITEBYTECODE
+        value: '1'
+      resources:
+        requests:
+          cpu: 10m
+          memory: 64Mi
+        limits:
+          memory: 512Mi
+      securityContext:
+        runAsUser: 65532
+        runAsGroup: 65532
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities:
+          drop:
+          - ALL
+      volumeMounts:
+      - name: kaos-checkpoint
+        mountPath: /kaos/checkpoint
+      - name: kaos-checkpoint-stage
+        mountPath: /stage
+      - name: kaos-ckpt-helper
+        mountPath: /ckpt-helper
+        readOnly: true
+  - name: evaluate
+    container:
+      image: '{{inputs.parameters.image}}'
+      command:
+      - python
+      - -m
+      - app.entry
+      env:
+      - name: KAOS_STEP_CONTEXT
+        value: '{{inputs.parameters.kaos-context}}'
+      - name: MLFLOW_TRACKING_URI
+        value: http://mlflow.internal.invalid
+      - name: MLFLOW_TRACKING_AUTH
+        value: zitadel
+      - name: ZITADEL_DOMAIN
+        value: oidc.internal.invalid
+      - name: ZITADEL_MLFLOW_PROJECT_ID
+        value: PLACEHOLDER-oidc-project-id
+      - name: ZITADEL_MACHINE_KEY_FILE
+        value: /etc/mlflow-svc/ZITADEL_MACHINE_KEY
+      - name: LAKEFS_ENDPOINT
+        value: http://lakefs.internal.invalid
+      - name: LAKEFS_ACCESS_KEY
+        valueFrom:
+          secretKeyRef:
+            name: PLACEHOLDER-lakefs-admin
+            key: accessKeyId
+      - name: LAKEFS_SECRET_KEY
+        valueFrom:
+          secretKeyRef:
+            name: PLACEHOLDER-lakefs-admin
+            key: secretAccessKey
+      - name: KAOS_CHECKPOINT_DIR
+        value: /kaos/checkpoint
+      resources:
+        requests:
+          cpu: '7'
+          memory: 27Gi
+          ephemeral-storage: 10Gi
+        limits:
+          cpu: '7'
+          memory: 27Gi
+      volumeMounts:
+      - name: mlflow-svc
+        mountPath: /etc/mlflow-svc
+        readOnly: true
+      - name: dshm
+        mountPath: /dev/shm
+      - name: kaos-checkpoint
+        mountPath: /kaos/checkpoint
+    inputs:
+      parameters:
+      - name: kaos-context
+      - name: kaos-item
+      - name: cpu
+        default: '7'
+      - name: mem
+        default: 27Gi
+      - name: disk
+        default: 10Gi
+      - name: deadline
+        default: '14400'
+      - name: image
+    metadata:
+      annotations:
+        platform.kubecore.io/hpc-resumable: 'off'
+      labels:
+        platform.kubecore.io/step: evaluate
+        platform.kubecore.io/step-kind: evaluate
+    outputs:
+      parameters:
+      - name: kaos-result
+        valueFrom:
+          default: '{"version":1,"status":"absent"}'
+          path: /work/output/kaos-result.json
+      - name: kaos-item
+        value: '{{inputs.parameters.kaos-item}}'
+    podSpecPatch: "containers:\n- name: main\n  resources:\n    limits:\n      cpu:\
+      \ '{{inputs.parameters.cpu}}'\n      memory: '{{inputs.parameters.mem}}'\n \
+      \   requests:\n      cpu: '{{inputs.parameters.cpu}}'\n      ephemeral-storage:\
+      \ '{{inputs.parameters.disk}}'\n      memory: '{{inputs.parameters.mem}}'\n"
+    nodeSelector:
+      platform.kubecore.io/nodegroup-type: '{{workflow.parameters.evaluate-class}}'
+    tolerations:
+    - key: platform.kubecore.io/ml-workload
+      operator: Equal
+      value: cpu
+      effect: NoSchedule
+    - key: platform.kubecore.io/ml-workload
+      operator: Equal
+      value: gpu
+      effect: NoSchedule
+    activeDeadlineSeconds: '{{inputs.parameters.deadline}}'
+    volumes:
+    - name: mlflow-svc
+      secret:
+        secretName: PLACEHOLDER-mlflow-svc
+    - name: dshm
+      emptyDir:
+        medium: Memory
+        sizeLimit: 1Gi
+    - name: kaos-checkpoint
+      emptyDir: {}
+    retryStrategy:
+      limit: '2'
+      retryPolicy: Always
+      expression: ((lastRetry.status == 'Error' or lastRetry.message matches '.*(imminent
+        node shutdown|node is shutting down|node is draining|The node was low on resource|The
+        node had condition|Pod was rejected|Evicted|evicted|pod deleted|Pod was deleted).*')
+        and not (lastRetry.message contains 'kaos-result.json')) and not (lastRetry.message
+        startsWith 'KaosIdle')
+      backoff:
+        duration: 30s
+        factor: '2'
+        maxDuration: 10m
+  - name: main
+    dag:
+      tasks:
+      - name: compose-and-validate
+        template: compose-and-validate
+        arguments:
+          parameters:
+          - name: cpu
+            value: '{{=({"cpu-standard": "7", "kubecorecpu": "7", "gpu-t4": "7"}[''cpu-standard''])
+              ?? "7"}}'
+          - name: mem
+            value: '{{=({"cpu-standard": "27Gi", "kubecorecpu": "27Gi", "gpu-t4":
+              "25Gi"}[''cpu-standard'']) ?? "27Gi"}}'
+          - name: disk
+            value: '{{=({"cpu-standard": "10Gi", "kubecorecpu": "10Gi", "gpu-t4":
+              "10Gi"}[''cpu-standard'']) ?? "10Gi"}}'
+      - name: dataset-loading
+        depends: compose-and-validate
+        template: dataset-loading
+        when: '{{=workflow.parameters[''start-from-step''] in ['''', ''dataset-loading'']}}'
+        arguments:
+          parameters:
+          - name: kaos-context
+            value: '{{=sprig.trimSuffix("}", tasks["compose-and-validate"].outputs.parameters["kaos-context-dataset-loading"])
+              + ",\"upstream\":{" + "}" + "}"}}'
+          - name: cpu
+            value: '{{=({"cpu-standard": "7", "kubecorecpu": "7", "gpu-t4": "7"}[workflow.parameters[''dataset-loading-class'']])
+              ?? "7"}}'
+          - name: mem
+            value: '{{=({"cpu-standard": "27Gi", "kubecorecpu": "27Gi", "gpu-t4":
+              "25Gi"}[workflow.parameters[''dataset-loading-class'']]) ?? "27Gi"}}'
+          - name: disk
+            value: '{{=({"cpu-standard": "10Gi", "kubecorecpu": "10Gi", "gpu-t4":
+              "10Gi"}[workflow.parameters[''dataset-loading-class'']]) ?? "10Gi"}}'
+          - name: deadline
+            value: '{{=int(fromJSON(tasks["compose-and-validate"].outputs.parameters["kaos-run-settings"])["dataset-loading"]["walltime"])
+              * 60}}'
+          - name: image
+            value: '{{=fromJSON(tasks["compose-and-validate"].outputs.parameters["kaos-images"])["dataset-loading"]}}'
+      - name: hello-world
+        depends: compose-and-validate && dataset-loading
+        template: hello-world
+        when: '{{=workflow.parameters[''start-from-step''] in ['''', ''hello-world'',
+          ''dataset-loading'']}}'
+        arguments:
+          parameters:
+          - name: kaos-context
+            value: '{{=sprig.trimSuffix("}", tasks["compose-and-validate"].outputs.parameters["kaos-context-hello-world"])
+              + ",\"upstream\":{\"dataset-loading\":" + sprig.default(sprig.default("{\"version\":1,\"status\":\"absent\"}",
+              tasks["compose-and-validate"].outputs.parameters["kaos-reused-dataset-loading"]),
+              tasks["dataset-loading"].outputs.parameters["kaos-result"]) + "}" +
+              "}"}}'
+          - name: deadline
+            value: '{{=int(fromJSON(tasks["compose-and-validate"].outputs.parameters["kaos-run-settings"])["hello-world"]["walltime"])
+              * 60}}'
+          - name: image
+            value: '{{=fromJSON(tasks["compose-and-validate"].outputs.parameters["kaos-images"])["hello-world"]}}'
+      - name: train
+        depends: compose-and-validate && dataset-loading
+        template: train
+        when: '{{=(workflow.parameters[''start-from-step''] in ['''', ''train'', ''dataset-loading'']
+          && (workflow.parameters[''optim''] == ''sgd'' && workflow.parameters[''model'']
+          != ''large'')) && !hasPrefix(workflow.parameters[''train-class''], ''meluxina-'')}}'
+        arguments:
+          parameters:
+          - name: kaos-context
+            value: '{{=sprig.trimSuffix("}", tasks["compose-and-validate"].outputs.parameters["kaos-context-train"])
+              + ",\"upstream\":{\"dataset-loading\":" + sprig.default(sprig.default("{\"version\":1,\"status\":\"absent\"}",
+              tasks["compose-and-validate"].outputs.parameters["kaos-reused-dataset-loading"]),
+              tasks["dataset-loading"].outputs.parameters["kaos-result"]) + "}" +
+              "}"}}'
+          - name: cpu
+            value: '{{=({"cpu-standard": "7", "kubecorecpu": "7", "gpu-t4": "7"}[workflow.parameters[''train-class'']])
+              ?? "7"}}'
+          - name: mem
+            value: '{{=({"cpu-standard": "27Gi", "kubecorecpu": "27Gi", "gpu-t4":
+              "25Gi"}[workflow.parameters[''train-class'']]) ?? "25Gi"}}'
+          - name: disk
+            value: '{{=({"cpu-standard": "10Gi", "kubecorecpu": "10Gi", "gpu-t4":
+              "10Gi"}[workflow.parameters[''train-class'']]) ?? "10Gi"}}'
+          - name: deadline
+            value: '{{=int(fromJSON(tasks["compose-and-validate"].outputs.parameters["kaos-run-settings"])["train"]["walltime"])
+              * 60}}'
+          - name: gpus
+            value: '{{=workflow.parameters[''train-class''] in [''gpu-t4''] ? ''1''
+              : ''0''}}'
+          - name: checkpoint-every
+            value: '{{=int(fromJSON(tasks["compose-and-validate"].outputs.parameters["kaos-run-settings"])["train"]["checkpoint-every"])}}'
+          - name: image
+            value: '{{=fromJSON(tasks["compose-and-validate"].outputs.parameters["kaos-images"])["train"]}}'
+      - name: train-hpc
+        template: hpc-follower
+        when: '{{=(workflow.parameters[''start-from-step''] in ['''', ''train'', ''dataset-loading'']
+          && (workflow.parameters[''optim''] == ''sgd'' && workflow.parameters[''model'']
+          != ''large'')) && hasPrefix(workflow.parameters[''train-class''], ''meluxina-'')}}'
+        arguments:
+          parameters:
+          - name: step-name
+            value: train
+          - name: image
+            value: '{{=fromJSON(tasks["compose-and-validate"].outputs.parameters["kaos-images"])["train"]}}'
+          - name: step-command
+            value: '["python","-m","app.entry"]'
+          - name: step-kind
+            value: train
+          - name: time-limit
+            value: '{{=int(fromJSON(tasks["compose-and-validate"].outputs.parameters["kaos-run-settings"])["train"]["walltime"])}}'
+          - name: deadline-seconds
+            value: '{{=6 * (int(fromJSON(tasks["compose-and-validate"].outputs.parameters["kaos-run-settings"])["train"]["walltime"])
+              + 480) * 60}}'
+          - name: resumable-lead
+            value: '0'
+          - name: resumable
+            value: auto
+          - name: idle-timeout
+            value: ''
+          - name: hpc-class
+            value: '{{workflow.parameters.train-class}}'
+          - name: kaos-context
+            value: '{{=sprig.trimSuffix("}", tasks["compose-and-validate"].outputs.parameters["kaos-context-train"])
+              + ",\"upstream\":{\"dataset-loading\":" + sprig.default(sprig.default("{\"version\":1,\"status\":\"absent\"}",
+              tasks["compose-and-validate"].outputs.parameters["kaos-reused-dataset-loading"]),
+              tasks["dataset-loading"].outputs.parameters["kaos-result"]) + "}" +
+              "}"}}'
+        depends: compose-and-validate && dataset-loading
+      - name: evaluate
+        depends: compose-and-validate && ((train.Succeeded || train-hpc.Succeeded)
+          || (train.Skipped && train-hpc.Skipped))
+        template: kaos-matrix-evaluate
+        when: '{{=workflow.parameters[''start-from-step''] in ['''', ''evaluate'',
+          ''train'', ''dataset-loading'']}}'
+        arguments:
+          parameters:
+          - name: items
+            value: '{{=toJSON(fromJSON(tasks["compose-and-validate"].outputs.parameters["kaos-run-settings"])["evaluate"]["matrix"])}}'
+          - name: par
+            value: '{{=int(fromJSON(tasks["compose-and-validate"].outputs.parameters["kaos-run-settings"])["evaluate"]["parallel"])}}'
+          - name: kaos-context
+            value: '{{=sprig.trimSuffix("}", tasks["compose-and-validate"].outputs.parameters["kaos-context-evaluate"])
+              + ",\"upstream\":{\"train\":" + sprig.default(sprig.default(sprig.default("{\"version\":1,\"status\":\"absent\"}",
+              tasks["compose-and-validate"].outputs.parameters["kaos-reused-train"]),
+              tasks["train-hpc"].outputs.parameters["kaos-result"]), tasks["train"].outputs.parameters["kaos-result"])
+              + "}"}}'
+          - name: kaos-run-settings
+            value: '{{=tasks["compose-and-validate"].outputs.parameters["kaos-run-settings"]}}'
+          - name: kaos-images
+            value: '{{=tasks["compose-and-validate"].outputs.parameters["kaos-images"]}}'
+      - name: kaos-gather-evaluate
+        template: kaos-gather-evaluate
+        depends: compose-and-validate && (evaluate.Succeeded || evaluate.Skipped)
+        arguments:
+          parameters:
+          - name: cpu
+            value: '{{=({"cpu-standard": "7", "kubecorecpu": "7", "gpu-t4": "7"}[''cpu-standard''])
+              ?? "7"}}'
+          - name: mem
+            value: '{{=({"cpu-standard": "27Gi", "kubecorecpu": "27Gi", "gpu-t4":
+              "25Gi"}[''cpu-standard'']) ?? "27Gi"}}'
+          - name: disk
+            value: '{{=({"cpu-standard": "10Gi", "kubecorecpu": "10Gi", "gpu-t4":
+              "10Gi"}[''cpu-standard'']) ?? "10Gi"}}'
+          - name: results
+            value: '{{=sprig.default("[]", tasks["evaluate"].outputs.parameters["kaos-result"])}}'
+          - name: items
+            value: '{{=sprig.default("[]", tasks["evaluate"].outputs.parameters["kaos-item"])}}'
+          - name: plan
+            value: '{{=toJSON(fromJSON(tasks["compose-and-validate"].outputs.parameters["kaos-run-settings"])["evaluate"]["matrix"])}}'
+          - name: status
+            value: '{{tasks.evaluate.status}}'
+      - name: kaos-promote
+        template: kaos-promote
+        depends: compose-and-validate && (dataset-loading.Succeeded || dataset-loading.Skipped)
+          && (hello-world.Succeeded || hello-world.Skipped) && ((train.Succeeded ||
+          train-hpc.Succeeded) || (train.Skipped && train-hpc.Skipped)) && (evaluate.Succeeded
+          || evaluate.Skipped) && kaos-gather-evaluate.Succeeded
+        when: '{{=workflow.parameters["promote-loaded"] == ''true''}}'
+        arguments:
+          parameters:
+          - name: cpu
+            value: 100m
+          - name: mem
+            value: 256Mi
+          - name: disk
+            value: 1Gi
+          - name: kaos-promote-plan
+            value: '{{=toJSON([{"step":"dataset-loading","name":"loaded","promote":workflow.parameters["promote-loaded"],"writes":fromJSON(sprig.default(sprig.default("{\"version\":1,\"status\":\"absent\"}",
+              tasks["compose-and-validate"].outputs.parameters["kaos-reused-dataset-loading"]),
+              tasks["dataset-loading"].outputs.parameters["kaos-result"]))?.writes
+              ?? []}])}}'
+  - name: kaos-matrix-evaluate
+    steps:
+    - - name: run
+        template: evaluate
+        withParam: '{{=toJSON(fromJSON(inputs.parameters["items"])[:int(inputs.parameters["par"])])}}'
+        arguments:
+          parameters:
+          - name: kaos-context
+            value: '{{=inputs.parameters["kaos-context"] + ",\"matrix\":" + fromJSON(inputs.parameters["kaos-run-settings"])["evaluate"]["matrix"][int(item.index)].text
+              + "}"}}'
+          - name: kaos-item
+            value: '{{item.index}}'
+          - name: cpu
+            value: '{{=({"cpu-standard": "7", "kubecorecpu": "7", "gpu-t4": "7"}[workflow.parameters[''evaluate-class'']])
+              ?? "7"}}'
+          - name: mem
+            value: '{{=({"cpu-standard": "27Gi", "kubecorecpu": "27Gi", "gpu-t4":
+              "25Gi"}[workflow.parameters[''evaluate-class'']]) ?? "27Gi"}}'
+          - name: disk
+            value: '{{=({"cpu-standard": "10Gi", "kubecorecpu": "10Gi", "gpu-t4":
+              "10Gi"}[workflow.parameters[''evaluate-class'']]) ?? "10Gi"}}'
+          - name: deadline
+            value: '{{=int(fromJSON(inputs.parameters["kaos-run-settings"])["evaluate"]["walltime"])
+              * 60}}'
+          - name: image
+            value: '{{=fromJSON(inputs.parameters["kaos-images"])["evaluate"]}}'
+        continueOn:
+          failed: true
+        when: '{{=!hasPrefix(workflow.parameters[''evaluate-class''], ''meluxina-'')}}'
+      - name: run-hpc
+        template: hpc-follower
+        withParam: '{{=toJSON(fromJSON(inputs.parameters["items"])[:int(inputs.parameters["par"])])}}'
+        when: '{{=hasPrefix(workflow.parameters[''evaluate-class''], ''meluxina-'')}}'
+        arguments:
+          parameters:
+          - name: step-name
+            value: evaluate
+          - name: image
+            value: '{{=fromJSON(inputs.parameters["kaos-images"])["evaluate"]}}'
+          - name: step-command
+            value: '["python","-m","app.entry"]'
+          - name: step-kind
+            value: evaluate
+          - name: time-limit
+            value: '{{=int(fromJSON(inputs.parameters["kaos-run-settings"])["evaluate"]["walltime"])}}'
+          - name: deadline-seconds
+            value: '{{=1 * (int(fromJSON(inputs.parameters["kaos-run-settings"])["evaluate"]["walltime"])
+              + 480) * 60}}'
+          - name: resumable-lead
+            value: '0'
+          - name: resumable
+            value: '0'
+          - name: idle-timeout
+            value: ''
+          - name: hpc-class
+            value: '{{workflow.parameters.evaluate-class}}'
+          - name: node-suffix
+            value: -{{=item.index}}
+          - name: kaos-item
+            value: '{{item.index}}'
+          - name: kaos-context
+            value: '{{=inputs.parameters["kaos-context"] + ",\"matrix\":" + fromJSON(inputs.parameters["kaos-run-settings"])["evaluate"]["matrix"][int(item.index)].text
+              + "}"}}'
+    - - name: rest
+        template: kaos-matrix-evaluate
+        when: '{{=len(fromJSON(inputs.parameters["items"])) > int(inputs.parameters["par"])}}'
+        arguments:
+          parameters:
+          - name: items
+            value: '{{=toJSON(fromJSON(inputs.parameters["items"])[int(inputs.parameters["par"]):])}}'
+          - name: par
+            value: '{{inputs.parameters.par}}'
+          - name: kaos-context
+            value: '{{inputs.parameters.kaos-context}}'
+          - name: kaos-run-settings
+            value: '{{inputs.parameters.kaos-run-settings}}'
+          - name: kaos-images
+            value: '{{inputs.parameters.kaos-images}}'
+    inputs:
+      parameters:
+      - name: items
+      - name: par
+      - name: kaos-context
+      - name: kaos-run-settings
+      - name: kaos-images
+    outputs:
+      parameters:
+      - name: kaos-result
+        valueFrom:
+          default: '[]'
+          expression: 'toJSON(concat((steps["run"].outputs?.parameters?.["kaos-result"]
+            == nil ? [] : fromJSON(steps["run"].outputs.parameters["kaos-result"])),
+            (steps["run-hpc"].outputs?.parameters?.["kaos-result"] == nil ? [] : fromJSON(steps["run-hpc"].outputs.parameters["kaos-result"])),
+            (steps["rest"].outputs?.parameters?.["kaos-result"] == nil ? [] : fromJSON(steps["rest"].outputs.parameters["kaos-result"]))))'
+      - name: kaos-item
+        valueFrom:
+          default: '[]'
+          expression: 'toJSON(concat((steps["run"].outputs?.parameters?.["kaos-item"]
+            == nil ? [] : fromJSON(steps["run"].outputs.parameters["kaos-item"])),
+            (steps["run-hpc"].outputs?.parameters?.["kaos-item"] == nil ? [] : fromJSON(steps["run-hpc"].outputs.parameters["kaos-item"])),
+            (steps["rest"].outputs?.parameters?.["kaos-item"] == nil ? [] : fromJSON(steps["rest"].outputs.parameters["kaos-item"]))))'
+  - name: hpc-follower
+    inputs:
+      parameters:
+      - name: step-name
+      - name: image
+      - name: step-command
+      - name: step-kind
+      - name: time-limit
+      - name: deadline-seconds
+      - name: hpc-class
+      - name: resumable-lead
+        value: '0'
+      - name: resumable
+        value: auto
+      - name: idle-timeout
+        value: ''
+      - name: node-suffix
+        value: ''
+      - name: kaos-item
+        value: ''
+      - name: kaos-context
+    activeDeadlineSeconds: '{{inputs.parameters.deadline-seconds}}'
+    retryStrategy:
+      limit: '2'
+      retryPolicy: Always
+      expression: (lastRetry.status == 'Error' or lastRetry.message matches '.*(imminent
+        node shutdown|node is shutting down|node is draining|The node was low on resource|The
+        node had condition|Pod was rejected|Evicted|evicted|pod deleted|Pod was deleted).*')
+        and not (lastRetry.message contains 'kaos-result.json')
+    metadata:
+      labels:
+        platform.kubecore.io/compute-type: hpc
+        platform.kubecore.io/hpc-class: '{{inputs.parameters.hpc-class}}'
+        platform.kubecore.io/step-kind: '{{inputs.parameters.step-kind}}'
+    outputs:
+      parameters:
+      - name: slurm-job-id
+        valueFrom:
+          path: /tmp/slurm-job-id
+      - name: kaos-result
+        valueFrom:
+          path: /tmp/outputs/kaos-result.json
+      - name: kaos-item
+        value: '{{inputs.parameters.kaos-item}}'
+    container:
+      image: registry.example/kaos-hpc-operator:v0.0.0
+      command:
+      - /follower
+      env:
+      - name: HPC_JOB_NAMESPACE
+        valueFrom:
+          fieldRef:
+            fieldPath: metadata.namespace
+      - name: WF_NAME
+        value: '{{workflow.name}}'
+      - name: WF_UID
+        value: '{{workflow.uid}}'
+      - name: STEP_NAME
+        value: '{{inputs.parameters.step-name}}'
+      - name: NODE_KEY
+        value: '{{inputs.parameters.step-name}}-hpc{{inputs.parameters.node-suffix}}'
+      - name: IMAGE_REF
+        value: '{{inputs.parameters.image}}'
+      - name: STEP_COMMAND
+        value: '{{inputs.parameters.step-command}}'
+      - name: SLURM_TIME_LIMIT
+        value: '{{inputs.parameters.time-limit}}'
+      - name: HPC_CLASS
+        value: '{{inputs.parameters.hpc-class}}'
+      - name: HPC_RESUMABLE_LEAD
+        value: '{{inputs.parameters.resumable-lead}}'
+      - name: HPC_RESUMABLE
+        value: '{{inputs.parameters.resumable}}'
+      - name: HPC_IDLE_TIMEOUT_MINUTES
+        value: '{{inputs.parameters.idle-timeout}}'
+      - name: HPC_MAX_CONTINUATIONS
+        value: '5'
+      - name: KAOS_STEP_CONTEXT
+        value: '{{inputs.parameters.kaos-context}}'
+      terminationMessagePolicy: FallbackToLogsOnError
+    serviceAccountName: hpc-submitter
+  arguments:
+    parameters:
+    - name: pipeline-info
+      value: "The defaults run as they are: press Submit.\nEach step has a class (the\
+        \ machine it runs on) and a time limit (the longest it may run, as minutes\
+        \ or hours). Only a step that declares gpu=True is offered the GPU classes.\n\
+        Machine classes:\n  - cpu-standard (cpu) — n2-standard-8\n  - kubecorecpu\
+        \ (cpu) — e2-standard-8\n  - gpu-t4 (gpu) — n1-standard-8 + 1x nvidia-tesla-t4\n\
+        HPC (Slurm) classes: pick one in a step's class field and the step runs there\
+        \ as a job. Queue time applies; the step's time limit is the job's limit.\
+        \ Classes:\n  - meluxina-gpu (gpu) — partition gpu, 4 GPUs, 128 cores, 512\
+        \ GiB — 4x A100-40GB, 2x EPYC 7452, 512 GB\n  - meluxina-cpu (cpu) — partition\
+        \ cpu, 128 cores, 512 GiB — 2x EPYC 7452, 128 cores, 512 GB\n  - meluxina-largemem\
+        \ (cpu) — partition largemem, 128 cores, 4096 GiB — 4 TB\nSteps: dataset-loading\
+        \ -> hello-world -> train -> evaluate"
+      description: How to fill this form.
+    - name: experiment-name
+      description: experiment name (used for tracking + artifact path prefixes)
+      value: my-experiment-v1
+    - name: experiment-description
+      description: optional free text stored with the run
+      value: ''
+    - name: model
+      description: 'One of: large, small.'
+      value: small
+      enum:
+      - large
+      - small
+    - name: optim
+      description: 'One of: adam, sgd.'
+      value: adam
+      enum:
+      - adam
+      - sgd
+    - name: model-width
+      description: ''
+      value: '64'
+    - name: model-dropout
+      description: ''
+      value: '0.1'
+    - name: model-name
+      description: ''
+      value: tiny
+    - name: model-warmup
+      description: ''
+      value: '5'
+    - name: optim-lr
+      description: ''
+      value: '0.001'
+    - name: optim-fused
+      description: ''
+      value: 'true'
+    - name: optim-api_token
+      description: ''
+      value: abc
+    - name: dataset
+      description: 'The dataset this run uses: <dataset-repo>@<version>. A dataset
+        is its own lakeFS repository (dataset-<name>); the version is a tag (v1, v2,
+        ...) or `latest` (= the head of main). The submit form shows this as a dropdown
+        of the datasets and versions of your project, filled in by the platform when
+        the template is released. The run resolves the choice to a commit once (step
+        dataset-loading) and every later step reads that same commit.'
+      value: dataset-default@latest
+    - name: dataset-loading-class
+      value: cpu-standard
+      enum:
+      - cpu-standard
+      - kubecorecpu
+      description: 'The machine class the ''dataset-loading'' step runs on. Default:
+        cpu-standard.'
+    - name: dataset-loading-walltime
+      value: 4h
+      description: 'The longest the step may run, as minutes or hours: 90m, 12h. Default
+        from pipeline.py.'
+    - name: hello-world-walltime
+      value: 4h
+      description: 'The longest the step may run, as minutes or hours: 90m, 12h. Default
+        from pipeline.py.'
+    - name: train-class
+      value: gpu-t4
+      enum:
+      - cpu-standard
+      - kubecorecpu
+      - gpu-t4
+      - meluxina-gpu
+      - meluxina-cpu
+      - meluxina-largemem
+      description: 'The machine class the ''train'' step runs on. Default: gpu-t4.
+        Classes that start with ''meluxina-'' run the step as a job on HPC (Slurm):
+        queue time applies.'
+    - name: train-walltime
+      value: 12h
+      description: 'The longest the step may run, as minutes or hours: 90m, 12h. Default
+        from pipeline.py.'
+    - name: train-checkpoint-every
+      value: 20m
+      description: 'How often the ''train'' step''s checkpoint is saved: minutes or
+        hours, for example 10m or 1h.'
+    - name: evaluate-class
+      value: cpu-standard
+      enum:
+      - cpu-standard
+      - kubecorecpu
+      - meluxina-cpu
+      - meluxina-largemem
+      description: 'The machine class the ''evaluate'' step runs on. Default: cpu-standard.
+        Classes that start with ''meluxina-'' run the step as a job on HPC (Slurm):
+        queue time applies.'
+    - name: evaluate-walltime
+      value: 4h
+      description: 'The longest the step may run, as minutes or hours: 90m, 12h. Default
+        from pipeline.py.'
+    - name: evaluate-matrix
+      value: '[{"seed":1},{"seed":2}]'
+      description: 'The combinations the ''evaluate'' step runs, one run each, as
+        a JSON list of objects with the names seed. Default: every combination of
+        the values in pipeline.py (2). At most 32; a value is a number, true or false,
+        or a short text.'
+    - name: evaluate-parallel
+      value: '4'
+      description: 'How many of the ''evaluate'' step''s runs go at the same time:
+        a whole number from 1 to 32, or all. Default 4: the GPU steps one machine
+        holds, so that on an HPC (Slurm) class the runs share one machine. A larger
+        number asks for more machines.'
+    - name: reuse-from-run
+      value: ''
+      description: Optional. The name of an earlier run of this app. Steps before
+        the step below are not run again; their results and outputs are taken from
+        that run. Leave empty for a normal run.
+    - name: start-from-step
+      value: ''
+      description: 'Optional. The step to run first; it and every step after it run
+        again. Needs the earlier run above. Steps: dataset-loading, hello-world, train,
+        evaluate.'
+    - name: promote-loaded
+      value: 'false'
+      enum:
+      - 'false'
+      - 'true'
+      description: Make this run's version of loaded the one other pipelines read
+        as latest.
+    - name: config
+      description: Extra settings for this run, as YAML. They replace the values above.
+      value: ''
+  serviceAccountName: argo-workflow
+  ttlStrategy:
+    secondsAfterSuccess: 3024000
+    secondsAfterFailure: 3024000
+  podGC:
+    strategy: OnWorkflowCompletion
+    deleteDelayDuration: 168h
+  workflowMetadata:
+    labels:
+      platform.kubecore.io/engine: 0.9.9

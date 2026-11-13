@@ -1404,7 +1404,7 @@ spec:
 
         # RUN FORM (PRD novelcore/kaos#1533, F-21): seal the form after the enhance and the dataset fill, before the
         # GATE, the size guard and the copy. An option file that fails to compose fails the build here.
-{{ include "kubecore-ci-workflows.runFormSeal" (dict "previous" true) | indent 8 }}
+{{ include "kubecore-ci-workflows.runFormSeal" (dict "previous" true "Files" .Files) | indent 8 }}
 
         # GATE: structural release-hygiene checks (fail before committing so a bad
         # render can't silently replace the live WFT). Duplicate params, non-

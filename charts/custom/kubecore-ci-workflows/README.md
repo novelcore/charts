@@ -188,18 +188,19 @@ Enforcement: the pools and the hubs run GKE Dataplane V2 (`anetd`, datapath `ADV
 bash charts/custom/kubecore-ci-workflows/tests/render-isolation/run.sh   # the pod, the policy, and (podman) a read-only pip install
 ```
 
-## The run form is sealed at render (PRD novelcore/kaos#1533, F-21, chart 0.15.0)
+## The run form is sealed at render (PRD novelcore/kaos#1533, F-21/F-22, chart 0.17.0)
 
-After the engine has enhanced the WorkflowTemplate and the dataset pickers are filled, `hera-enhance-commit` (the merge build) and `hera-enhance-gate` (the pull-request check) run `python3 -m kubecore.run_form seal` from the engine's directory. The seal composes the app's option files into the run form, stamps it (engine version, source commit, params digest) and writes it to the template's annotations in place. It runs before the structural GATE, the size guard and the copy to gitops, so a refusal commits nothing.
+After the engine has enhanced the WorkflowTemplate and the dataset pickers are filled, `hera-enhance-commit` (the merge build) and `hera-enhance-gate` (the pull-request check) run the seal, `python3 -I /tmp/kaos-run-form/run_form.py seal ...`. The seal is chart code (`files/run_form.py`, stdlib plus PyYAML, written to `/tmp/kaos-run-form/` by the helper `kubecore-ci-workflows.runFormScript`); it imports nothing from the engine and nothing from the checkout. It builds the run form from data the trusted enhance wrote (`/tmp/form-data.json`, which `kubecore.enhance --form-data` exports), the step table, the pipeline context and the app's optional `config/_form.yaml`, stamps it (engine version, source commit, params digest) and writes it to the template's annotations once, atomically. It is the only writer of `ui.kubecore.io/run-form`: every `ui.kubecore.io/*` key, every `platform.kubecore.io/*` key outside the platform's own, and every such key under `spec.workflowMetadata.labelsFrom` is deleted first. It runs before the structural GATE, the size guard and the copy to gitops, so a refusal commits nothing.
 
-- **Release note: an option file that fails to compose now fails the build (fail-closed), once the engine pin includes `run_form`.** The step prints the seal's `GATE FAIL: run form: ...` text, which names the field and the fix. The pull-request check fails the same way, so the author sees it before merging.
-- **Rollout (owner ruling D10).** A pinned engine without `kubecore/run_form.py` logs `run form: the pinned engine has no kubecore/run_form.py; skipping the seal` and the build continues. Moving this chart to 0.15.0 alone changes nothing; the seal starts when the engine pin moves.
+- **Release note: a bad `_form.yaml`, an option file that fails to compose, or a form over 128 KiB fails the build (fail-closed).** The step prints the seal's `GATE FAIL: run form: ...` text, which names the field or key and the fix. The pull-request check fails the same way, so the author sees it before merging. A `showIf` problem never fails a build: the `showIf` is dropped and the field always shows.
+- **Needs an engine that writes `--form-data`** (kaos-hpc-operator, the H1 to H5 hooks). With an older engine `kubecore.enhance` rejects the flag and the build fails before anything is committed; the next build after the engine pin moves passes. There is no skip branch: the seal always runs.
 - **The commit** is the `COMMIT_SHA` env var of the step (the workflow's `commit_sha`; the PR head SHA in the PR check), never spliced into the script, and is checked to be 40 lowercase hex characters before use.
-- **`--previous`** (merge build only) is the live `workflow-template.yaml` in gitops, passed only when it exists, so an unchanged form keeps its commit and a no-op push makes no gitops commit. The PR check passes none.
-- It is not run with `python3 -I`: isolated mode would hide the engine directory.
+- **`--previous`** (merge build only) is the live `workflow-template.yaml` in gitops, passed only when it exists, so an unchanged render keeps its commit and a no-op push makes no gitops commit. The PR check passes none (and seals before the dataset fill).
+- **An app is sealed once it is rebuilt.** Until then the console shows the fallback form (`form_absent`) and refuses console submits; `kubectl` and the Argo UI are unaffected.
 
 ```bash
-bash charts/custom/kubecore-ci-workflows/tests/run-form-seal/run.sh   # order, env-sourced commit, guard; the block is run against a stub engine
+bash charts/custom/kubecore-ci-workflows/tests/run-form-seal/run.sh   # the wiring (order, env-only commit, arguments, no skip) and the seal's own unit, golden and fail-closed tests
+RUN_FORM_OSR_DIR=<kaos-osr-edge-operator checkout> bash charts/custom/kubecore-ci-workflows/tests/run-form-seal/run.sh   # also runs the merged OSR consumer (needs go)
 ```
 
 
@@ -251,7 +252,7 @@ bash charts/custom/kubecore-ci-workflows/tests/build-pacing/run.sh              
 bash charts/custom/kubecore-ci-workflows/tests/build-pacing/kind/run.sh [outdir] # real Argo: cap, render-only, mutex
 bash charts/custom/kubecore-ci-workflows/tests/build-isolation/run.sh            # what the build container mounts
 bash charts/custom/kubecore-ci-workflows/tests/render-isolation/run.sh           # the render pod and its network policy
-bash charts/custom/kubecore-ci-workflows/tests/run-form-seal/run.sh              # the run-form seal wiring
+bash charts/custom/kubecore-ci-workflows/tests/run-form-seal/run.sh              # the run-form seal: wiring and module
 bash charts/custom/kubecore-ci-workflows/tests/matrix-pipeline/run.sh /tmp/rendered.yaml # a matrix pipeline: gate, record, size
 bash charts/custom/kubecore-ci-workflows/tests/strict-references/run.sh          # Strict templateReferencing conformance (F-26)
 ```

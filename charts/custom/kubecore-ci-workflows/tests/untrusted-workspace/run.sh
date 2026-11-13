@@ -111,6 +111,7 @@ for a in ("--raw", "--context", "--output"):
     p.add_argument(a, required=True)
 p.add_argument("--catalog", default="")
 p.add_argument("--helper-configmap", default="")
+p.add_argument("--form-data", default="")
 args = p.parse_args()
 wft = yaml.safe_load(open(args.raw))
 wft.setdefault("metadata", {})["annotations"] = {"enhanced-by": "platform", "yaml-from": yaml.__file__,
@@ -259,6 +260,111 @@ rm -r "$T/workspace/repo/steps/step_a"
 OUT=$(cd "$T" && sh "$T/gate.sh" 2>&1); RC=$?
 expect_eq "$RC" "1" "gate (template inputs): a step without a Dockerfile fails"
 expect_has "$OUT" "expected steps/step_a/Dockerfile" "gate (template inputs): names the missing file"
+
+# ── run-form seal (PRD kaos#1533 F-21, charts issue 234): the token pod runs no repo code ───────
+# The seal block of hera-enhance-commit, rendered from the chart, EXECUTED against a booby-trapped workspace. Its inputs
+# are valid (tests/run-form-seal/seal_fixtures.py); the trap is everything around them. No PWNED-* marker may appear, and
+# the seal either seals (planted files are ignored) or fails closed with the WFT byte-unchanged.
+SEALFIX="${HERE}/../run-form-seal"
+seal_block() {  # RESULT: the seal block of the step, paths redirected into $R
+  script_of ml-ci-build hera-enhance-commit | awk '/^# RUN FORM/{on=1} on && /^# GATE[: ]/{on=0} on' \
+    | sed -e "s#/tmp/kaos-run-form#$R/rf#g" -e "s#/tmp/context.yaml#$R/context.yaml#g" -e "s#/tmp/form-data.json#$R/form-data.json#g" \
+          -e "s#/tmp/steps.json#$R/steps.json#g" -e "s#/workspace#$R/workspace#g"
+}
+new_seal_case() {  # sets R: a fresh, valid set of seal inputs under $R (workspace/out, workspace/repo/config)
+  R=$(mktemp -d "${BASE_TMP}/seal-XXXX")
+  python3 -I -c "
+import sys
+sys.path.insert(0, '${SEALFIX}')
+import seal_fixtures as f
+c = f.Case(root='$R'); c.write()" || { echo "FAIL: seal fixtures"; exit 1; }
+  seal_block > "$R/seal.sh"
+}
+run_seal() {  # RUN_DIR: cwd of the step; sets OUT, RC
+  OUT=$(cd "$1" && env PYTHONPATH="$R/workspace/repo" COMMIT_SHA=0123456789abcdef0123456789abcdef01234567 ENGINE_VERSION=0.17.0 \
+        GITOPS_DIR="$R/gitops" sh -c "set -e; $(cat "$R/seal.sh"); echo SEALED" 2>&1); RC=$?
+}
+trap_py() {  # a module that writes a marker if it is ever imported
+  printf 'open("%s/PWNED-%s", "w").close()\n' "$R" "$2" > "$1"
+}
+ANN_OF() { yq '.metadata.annotations["ui.kubecore.io/run-form"] | length > 0' "$R/workspace/out/workflow-template.yaml"; }
+
+# 1. planted Python in the checkout and in the output directory; the step's cwd is the checkout, then the out directory
+new_seal_case
+mkdir -p "$R/workspace/repo/kubecore" "$R/workspace/repo/config"
+for d in "$R/workspace/repo" "$R/workspace/out" "$R"; do
+  trap_py "$d/sitecustomize.py" "sitecustomize"; trap_py "$d/usercustomize.py" "usercustomize"
+  printf 'import os; open("%s/PWNED-pth", "w").close()\n' "$R" > "$d/evil.pth"
+  trap_py "$d/yaml.py" "yaml"; trap_py "$d/json.py" "json"; trap_py "$d/re.py" "re"
+done
+trap_py "$R/workspace/repo/kubecore/__init__.py" "kubecore-init"; trap_py "$R/workspace/repo/kubecore/run_form.py" "kubecore-run-form"
+trap_py "$R/workspace/repo/run_form.py" "repo-run-form"
+run_seal "$R/workspace/repo"
+expect_eq "$RC" "0" "seal: a trapped checkout and output directory (cwd in the checkout) do not stop a valid seal"
+expect_has "$OUT" "run form: sealed" "seal: ...it seals"
+expect_eq "$(ANN_OF)" "true" "seal: ...and the annotation is there"
+expect_no_pwn "$R" "seal: no planted module, sitecustomize or .pth ran (cwd = checkout)"
+cp "$R/workspace/out/workflow-template.yaml" "$R/sealed.yaml"
+run_seal "$R/workspace/out"
+expect_no_pwn "$R" "seal: no planted module ran (cwd = out directory)"
+
+# 2. config/ is a symlink to a directory the render controls: fail closed, the WFT unchanged
+new_seal_case
+mkdir -p "$R/elsewhere"; printf 'fields:\n  epochs: {label: Hijacked}\n' > "$R/elsewhere/_form.yaml"
+rm -rf "$R/workspace/repo/config"; ln -s "$R/elsewhere" "$R/workspace/repo/config"
+cp "$R/workspace/out/workflow-template.yaml" "$R/before.yaml"
+run_seal "$R/workspace/repo"
+expect_eq "$RC" "1" "seal: config/ a symlink fails the step"
+expect_has "$OUT" "GATE FAIL: run form:" "seal: ...with the GATE FAIL text"
+expect_lacks_str() { case "$1" in *"$2"*) FAILED=$((FAILED + 1)); echo "FAIL: $3"; echo "  must not contain: $2" ;; *) PASSED=$((PASSED + 1)); echo "PASS: $3" ;; esac; }
+expect_lacks_str "$OUT" "SEALED" "seal: ...before the GATE"
+expect_eq "$(cmp "$R/workspace/out/workflow-template.yaml" "$R/before.yaml" && echo same)" "same" "seal: ...and the WFT is byte-unchanged"
+expect_no_pwn "$R" "seal: symlinked config/ ran nothing"
+
+# 3. repo is a symlink (the render swapped the checkout directory)
+new_seal_case
+mkdir -p "$R/other/config"; printf 'fields: {}\n' > "$R/other/config/_form.yaml"
+rm -rf "$R/workspace/repo"; ln -s "$R/other" "$R/workspace/repo"
+run_seal "$R"
+expect_eq "$RC" "1" "seal: repo/ a symlink fails the step"
+
+# 4. _form.yaml a symlink, then a FIFO (must not hang), then a directory
+new_seal_case
+printf 'fields: {}\n' > "$R/real.yaml"; ln -s "$R/real.yaml" "$R/workspace/repo/config/_form.yaml"
+cp "$R/workspace/out/workflow-template.yaml" "$R/before.yaml"
+run_seal "$R/workspace/repo"
+expect_eq "$RC" "1" "seal: a symlinked _form.yaml fails the step"
+expect_eq "$(cmp "$R/workspace/out/workflow-template.yaml" "$R/before.yaml" && echo same)" "same" "seal: ...WFT byte-unchanged"
+rm "$R/workspace/repo/config/_form.yaml"; mkfifo "$R/workspace/repo/config/_form.yaml"
+run_seal "$R/workspace/repo"
+expect_eq "$RC" "1" "seal: a _form.yaml FIFO fails the step without hanging"
+rm "$R/workspace/repo/config/_form.yaml"; mkdir "$R/workspace/repo/config/_form.yaml"
+run_seal "$R/workspace/repo"
+expect_eq "$RC" "1" "seal: a _form.yaml directory fails the step"
+expect_no_pwn "$R" "seal: planted _form.yaml entries ran nothing"
+
+# 5. /workspace/out/workflow-template.yaml is a symlink: nothing follows it, its target is untouched
+new_seal_case
+mv "$R/workspace/out/workflow-template.yaml" "$R/target.yaml"; ln -s "$R/target.yaml" "$R/workspace/out/workflow-template.yaml"
+cp "$R/target.yaml" "$R/target.before"
+run_seal "$R/workspace/out"
+expect_eq "$([ "$RC" != 0 ] && echo failed)" "failed" "seal: a symlinked workflow-template.yaml fails the step"
+expect_eq "$(cmp "$R/target.yaml" "$R/target.before" && echo same)" "same" "seal: ...the symlink target is untouched"
+expect_eq "$([ -L "$R/workspace/out/workflow-template.yaml" ] && echo link)" "link" "seal: ...and the symlink was not replaced"
+
+# 6. a render that forged the form and platform labels: the seal strips and replaces, whatever is in the checkout
+new_seal_case
+python3 -I -c "
+import yaml
+p = '$R/workspace/out/workflow-template.yaml'
+w = yaml.safe_load(open(p))
+w['metadata']['annotations']['ui.kubecore.io/run-form'] = 'FORGED'
+w['metadata']['labels']['platform.kubecore.io/evil'] = 'x'
+w['spec']['workflowMetadata']['labelsFrom'] = {'platform.kubecore.io/submitted-by': {'expression': \"'forged'\"}}
+yaml.safe_dump(w, open(p, 'w'), sort_keys=False)"
+run_seal "$R/workspace/repo"
+expect_eq "$RC" "0" "seal: a forged form and forged platform keys are replaced, not trusted"
+expect_eq "$(yq '.metadata.annotations["ui.kubecore.io/run-form"] != "FORGED" and (.metadata.labels | has("platform.kubecore.io/evil") | not) and (.spec.workflowMetadata.labelsFrom | length == 0)' "$R/workspace/out/workflow-template.yaml")" "true" "seal: ...no forged key survives"
 
 echo "untrusted-workspace: ${PASSED} passed, ${FAILED} failed"
 exit "$FAILED"

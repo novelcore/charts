@@ -1,0 +1,43 @@
+package runform
+
+// Acceptance oracle for the charts run-form seal (PRD 1533 F-21/F-22). Not part of OSR: the charts test
+// (tests/run-form-seal/test_run_form.py) injects this file with `go test -overlay`, so the OSR tree is
+// never changed. It feeds each sealed annotation to Parse, CheckJoin and StampProblem.
+
+import (
+	"encoding/json"
+	"os"
+	"testing"
+)
+
+func TestSealOracle(t *testing.T) {
+	raw, err := os.ReadFile(os.Getenv("SEAL_ORACLE_CASES"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cases map[string]struct {
+		Annotation string   `json:"annotation"`
+		Engine     string   `json:"engine"`
+		Params     []string `json:"params"`
+	}
+	if err := json.Unmarshal(raw, &cases); err != nil {
+		t.Fatal(err)
+	}
+	if len(cases) == 0 {
+		t.Fatal("no cases")
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			form, perr := Parse([]byte(c.Annotation), c.Engine)
+			if perr != nil {
+				t.Fatalf("Parse: %s", perr.Error())
+			}
+			if jerr := form.CheckJoin(c.Params); jerr != nil {
+				t.Fatalf("CheckJoin: %s", jerr.Error())
+			}
+			if got := StampProblem([]byte(c.Annotation), c.Engine); got != "" {
+				t.Fatalf("StampProblem: %s", got)
+			}
+		})
+	}
+}
