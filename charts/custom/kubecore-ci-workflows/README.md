@@ -200,6 +200,16 @@ After the engine has enhanced the WorkflowTemplate and the dataset pickers are f
 bash charts/custom/kubecore-ci-workflows/tests/run-form-seal/run.sh   # order, env-sourced commit, guard; the block is run against a stub engine
 ```
 
+
+## Platform templates by prefix (PRD novelcore/kaos#1911, chart 0.15.3)
+
+The engine reserves the prefix `kaos-` for its own templates and refuses a developer step that starts with it, so the pull-request gate and its report treat every template named `kaos-*` as the platform's, not as a step with a folder. Two kinds, told apart by name:
+
+- `kaos-matrix-<step>` is the fan of a step declared with `matrix=`: it runs the image of `<step>` and has no container of its own. It needs no folder and no image-record key; the folder `steps/<step>/` is already required by the step's own template. The report says "runs the image of step `<step>`".
+- `kaos-gather-<step>`, `kaos-promote` and any other `kaos-*` template run the platform's compose image (record key `compose-and-validate`). No folder is asked for and no key is seeded; the report says "built by the platform". Before 0.15.3 only `kaos-promote` was known, so a pipeline with a matrix step failed the gate with `step 'kaos-gather-<step>': expected steps/kaos_gather_<step>/Dockerfile`.
+
+The merge build already derived its image keys from the template inputs that read the record, so it never saw these names; `tests/matrix-pipeline` runs the gate, the record writer (seed, prune, a second pass that changes nothing) and the size guard on a real engine render of a pipeline with a matrix step.
+
 ## Tests
 
 ```bash
@@ -212,4 +222,5 @@ bash charts/custom/kubecore-ci-workflows/tests/build-pacing/kind/run.sh [outdir]
 bash charts/custom/kubecore-ci-workflows/tests/build-isolation/run.sh            # what the build container mounts
 bash charts/custom/kubecore-ci-workflows/tests/render-isolation/run.sh           # the render pod and its network policy
 bash charts/custom/kubecore-ci-workflows/tests/run-form-seal/run.sh              # the run-form seal wiring
+bash charts/custom/kubecore-ci-workflows/tests/matrix-pipeline/run.sh /tmp/rendered.yaml # a matrix pipeline: gate, record, size
 ```

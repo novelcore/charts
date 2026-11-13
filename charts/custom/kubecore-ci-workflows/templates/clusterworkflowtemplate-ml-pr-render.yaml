@@ -322,29 +322,41 @@ spec:
         # order. The engine before the images moved gives the template the workflow parameter image-<step>
         # (the moustache); the engine after it gives the template an input `image` that its task fills
         # from the image record, and the template is named after the step. The platform's own templates
-        # (compose, the final task, the HPC follower) have no step folder.
+        # have no step folder: the engine reserves the prefix `kaos-` for them (a developer step may not start
+        # with it), so every template named kaos-* is the platform's, plus compose and the HPC follower. Two
+        # kinds, told apart by name: `kaos-matrix-<step>` (the fan of a step with matrix=) runs the image of
+        # <step>, whose folder the step's own template already proves, and has no container of its own;
+        # `kaos-gather-<step>`, `kaos-promote` and any other kaos-* template run the platform's compose image
+        # (record key compose-and-validate) and never a folder of their own.
         moustache = r"\{" + r"\{workflow\.parameters\.image-(.+)\}" + r"\}"
         image_input = "{" + "{inputs.parameters.image}" + "}"
-        platform_templates = ("compose-and-validate", "kaos-promote", "hpc-follower")
+        platform_templates = ("compose-and-validate", "hpc-follower")
+        FAN = "kaos-matrix-"
+
+        def is_platform(name):
+            return name.startswith("kaos-") or name in platform_templates
 
         def built_from(t):
-            image = str(t["container"].get("image", ""))
+            image = str(t.get("container", {}).get("image", ""))
             m = re.fullmatch(moustache, image)
             if m:
                 return m.group(1)
-            if image == image_input and t["name"] not in platform_templates:
+            if image == image_input and not is_platform(t["name"]):
                 return t["name"]
             return None
 
         rows = []
         for t in spec["templates"]:
+            if t["name"].startswith(FAN):
+                rows.append(f"| `{t['name']}` | runs the image of step `{t['name'][len(FAN):]}` |")
+                continue
             if "container" not in t:
                 continue
             image = str(t["container"].get("image", ""))
             step = built_from(t)
             if t["name"] == "compose-and-validate" or step == "compose-and-validate":
                 src = "built by the platform from `config/`"
-            elif t["name"] in platform_templates and image == image_input:
+            elif is_platform(t["name"]) and image == image_input:
                 src = "built by the platform"
             else:
                 src = f"built from `steps/{step.replace('-', '_')}/`" if step else f"verbatim `{image}`"
