@@ -479,6 +479,83 @@ class TestShowIfDrop(Base):
         self.assertEqual(step(form, "evaluate")["showIf"], "use-aug == true or epochs != '5'")
 
 
+REAL = HERE / "fixtures" / "real"
+
+
+class RealCase(Case):
+    """A Case whose inputs are real engine output (fixtures/real/<name>), engine 0.9.9."""
+
+    def __init__(self, name, **kw):
+        super().__init__(**kw)
+        d = REAL / name
+        self.wft = yaml.safe_load((d / "workflow-template.yaml").read_text())
+        self.ctx = yaml.safe_load((d / "context.yaml").read_text())
+        self.steps = json.loads((d / "steps.json").read_text())
+        self.form_data = json.loads((d / "form-data.json").read_text())
+        self.engine = "0.9.9"
+
+
+class TestRealEngine(Base):
+    """Fixtures produced by the real engine (kaos-hpc-operator feature/1533-f21-seal-hooks), not by hand."""
+    NAMES = ("tests-app", "extended-app", "pinned-step")
+
+    def test_every_real_render_seals_and_is_golden(self):
+        for name in self.NAMES:
+            with self.subTest(name):
+                c = RealCase(name)
+                self.addCleanup(shutil.rmtree, c.root, ignore_errors=True)
+                r = c.run()
+                form = ok(self, r)
+                osr_checks(self, r)
+                golden = HERE / "golden" / f"real-{name}.json"
+                text = c.load_wft()["metadata"]["annotations"][ANN]
+                if UPDATE:
+                    golden.write_text(text + "\n")
+                self.assertEqual(text + "\n", golden.read_text())
+                try:
+                    import jsonschema
+                    jsonschema.Draft202012Validator(json.loads(SCHEMA.read_text())).validate(form)
+                except ImportError:
+                    pass
+
+    def test_dataset_input_is_a_dataset_picker_and_its_type_entry_is_ignored(self):
+        c = RealCase("tests-app")
+        self.addCleanup(shutil.rmtree, c.root, ignore_errors=True)
+        raw = json.loads(c.form_data["raw"])
+        self.assertIn("dataset", raw["types"])  # the engine does type the input leaf
+        r = c.run()
+        f = field(ok(self, r), "dataset")
+        self.assertEqual((f["source"], f["picker"], f["type"]), ("input", "dataset", "string"))
+        self.assertIn("raw form type of dataset ignored", r.err)
+
+    def test_real_shapes(self):
+        c = RealCase("extended-app")
+        self.addCleanup(shutil.rmtree, c.root, ignore_errors=True)
+        form = ok(self, c.run())
+        train = step(form, "train")
+        self.assertTrue(train["walltimeField"] and train["checkpointField"])
+        self.assertTrue(any(m["kind"] == "hpc" for m in form["machines"]))
+        self.assertTrue(any(f.get("optionDefaults") for f in form["fields"]))
+        for f in form["fields"]:
+            for opts in f.get("optionDefaults", {}).values():
+                self.assertFalse([k for k in opts if "token" in k])  # the credential-like leaf is dropped
+        pinned = RealCase("pinned-step")
+        self.addCleanup(shutil.rmtree, pinned.root, ignore_errors=True)
+        pf = ok(self, pinned.run())
+        self.assertTrue(any(s["classField"] is None for s in pf["steps"]))
+
+    def test_real_render_keeps_the_commit_when_unchanged(self):
+        c = RealCase("extended-app")
+        self.addCleanup(shutil.rmtree, c.root, ignore_errors=True)
+        ok(self, c.run())
+        sealed = c.load_wft()
+        c2 = RealCase("extended-app")
+        self.addCleanup(shutil.rmtree, c2.root, ignore_errors=True)
+        c2.commit = COMMIT2
+        c2.previous = sealed
+        self.assertEqual(ok(self, c2.run())["stamp"]["commit"], COMMIT)
+
+
 class TestStrip(Base):
     """3.3 step 2 and step 1."""
 
@@ -495,6 +572,28 @@ class TestStrip(Base):
         self.assertNotIn("ui.kubecore.io/raw-form", w["metadata"]["annotations"])
         self.assertNotIn("ui.kubecore.io/y", w["spec"]["workflowMetadata"]["labels"])
         self.assertEqual(w["spec"]["workflowMetadata"]["annotations"], {"keep": "me"})
+
+    def test_forged_labels_from_keys_are_deleted(self):  # I-1: Argo applies labelsFrom over the run's own labels
+        c = self.case()
+        c.wft["spec"]["workflowMetadata"]["labelsFrom"] = {
+            "platform.kubecore.io/submitted-by": {"expression": "'forged'"},
+            "platform.kubecore.io/app": {"expression": "'other-app'"},
+            "ui.kubecore.io/anything": {"expression": "'x'"},
+            "team.example.io/keep": {"expression": "workflow.name"}}
+        ok(self, c.run())
+        lf = c.load_wft()["spec"]["workflowMetadata"]["labelsFrom"]
+        self.assertEqual(lf, {"team.example.io/keep": {"expression": "workflow.name"}})
+
+    def test_labels_from_emptied_is_left_as_an_empty_mapping_or_absent(self):
+        c = self.case()
+        c.wft["spec"]["workflowMetadata"]["labelsFrom"] = {"platform.kubecore.io/source-commit": {"expression": "'x'"}}
+        ok(self, c.run())
+        self.assertEqual(c.load_wft()["spec"]["workflowMetadata"].get("labelsFrom") or {}, {})
+
+    def test_labels_from_not_a_mapping_is_3(self):
+        c = self.case()
+        c.wft["spec"]["workflowMetadata"]["labelsFrom"] = ["platform.kubecore.io/app"]
+        self.refused(c.run(), 3, "labelsFrom")
 
     def test_unknown_platform_keys_are_deleted_everywhere(self):
         c = self.case()
@@ -836,9 +935,18 @@ class TestStepTable(Base):
         c = self.case()  # main, compose-and-validate, hpc-follower, kaos-* are in the base template list
         ok(self, c.run())
 
-    def test_hpc_twin_of_a_step_is_not_a_step(self):
+    def test_only_the_engines_own_template_names_are_owned(self):
+        for name in ("train-hpc", "kaos-other", "hpc-other", "kaos-gather-ghost", "kaos-matrix-ghost", "kaos-promote-x",
+                     "hpc-follower-2", "kaos-gather-"):
+            c = self.case()
+            c.wft["spec"]["templates"].append({"name": name, "container": {"image": "x"}})
+            self.refused(c.run(), 1, name.strip("-") if name.endswith("-") else name)
+
+    def test_the_real_engine_template_set_passes(self):
         c = self.case()
-        c.wft["spec"]["templates"].append({"name": "train-hpc", "container": {"image": "x"}})
+        names = {t["name"] for t in c.wft["spec"]["templates"]}
+        self.assertTrue({"compose-and-validate", "main", "kaos-promote", "kaos-gather-train", "kaos-matrix-train",
+                         "hpc-follower"} <= names)
         ok(self, c.run())
 
     def test_extra_user_template_is_1(self):
@@ -889,11 +997,28 @@ class TestRawForm(Base):
 
     def test_types_must_be_known_and_name_experiment_or_setting(self):
         for mut in (lambda r: r["types"].update({"epochs": "float"}), lambda r: r["types"].update({"nope": "string"}),
-                    lambda r: r["types"].update({"dataset": "string"}),  # role input
-                    lambda r: r["types"].update({"train-class": "enum"}), lambda r: r.update({"types": []})):
+                    lambda r: r["types"].update({"epochs": 5}), lambda r: r.update({"types": []})):
             c = self.case()
             c.raw(mut)
             self.refused(c.run(), 1)
+
+    def test_types_of_a_non_config_role_are_ignored_with_one_line(self):  # C-1: H4 types every leaf, an input's too
+        c = self.case()
+        c.raw(lambda r: r["types"].update({"dataset": "string", "train-class": "enum", "prep-walltime": "integer",
+                                           "pipeline-info": "text"}))
+        r = c.run()
+        form = ok(self, r)
+        d = field(form, "dataset")
+        self.assertEqual((d["type"], d["picker"], d["source"]), ("string", "dataset", "input"))
+        self.assertEqual(field(form, "train-class")["type"], "enum")
+        self.assertEqual(field(form, "prep-walltime")["type"], "duration")
+        self.assertEqual(r.err.count("raw form type of dataset ignored"), 1, r.err)
+        self.assertEqual(len([ln for ln in r.err.splitlines() if "ignored" in ln]), 4)
+        self.assertNotIn("GATE FAIL", r.err)
+        # a name that is no parameter, or a type value that is not a type, still refuses
+        c = self.case()
+        c.raw(lambda r: r["types"].update({"dataset": "float"}))
+        self.refused(c.run(), 1)
 
     def test_leaf_options_group_must_be_a_group(self):
         for mut in (lambda r: r["leafOptions"]["momentum"].update({"group": "epochs"}),
@@ -1199,7 +1324,7 @@ class TestWhenGrammar(Base):
         mod = load_module()
         for text, want in (("a == b", "a == b"), ("a  !=   'x y'", "a != 'x y'"), ('a=="b"', 'a == "b"'),
                            ("a == b  and c != d or e == f", "a == b and c != d or e == f"), ("", None),
-                           ("a == b and", None), ("A == b AND c == d", None), ("a == b\n", "a == b"),
+                           ("a == b and", None), ("A == b AND c == d", None), ("a == b\n", None), ("\ta == b", None), ("a == b\t", None), ("  a == b  ", "a == b"),
                            ("a == \"x\ty\"", None)):
             self.assertEqual(mod.normalize_when(text), want, text)
 
@@ -1272,6 +1397,13 @@ class TestOsrOracle(Base):
         w = c.load_wft()
         cases["showif-drops"] = {"annotation": w["metadata"]["annotations"][ANN], "engine": ENGINE,
                                  "params": [p["name"] for p in w["spec"]["arguments"]["parameters"]]}
+        for name in TestRealEngine.NAMES:
+            c = RealCase(name)
+            self.addCleanup(shutil.rmtree, c.root, ignore_errors=True)
+            ok(self, c.run())
+            w = c.load_wft()
+            cases["real-" + name] = {"annotation": w["metadata"]["annotations"][ANN], "engine": "0.9.9",
+                                     "params": [p["name"] for p in w["spec"]["arguments"]["parameters"]]}
         (out / "cases.json").write_text(json.dumps(cases))
         gotest = out / "seal_oracle_test.go"
         gotest.write_text((HERE / "oracle" / "seal_oracle_test.go.txt").read_text())
