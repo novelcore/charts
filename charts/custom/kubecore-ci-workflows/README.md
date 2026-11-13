@@ -209,6 +209,20 @@ The engine reserves the prefix `kaos-` for its own templates and refuses a devel
 - `kaos-gather-<step>`, `kaos-promote` and any other `kaos-*` template run the platform's compose image (record key `compose-and-validate`). No folder is asked for and no key is seeded; the report says "built by the platform". Before 0.15.3 only `kaos-promote` was known, so a pipeline with a matrix step failed the gate with `step 'kaos-gather-<step>': expected steps/kaos_gather_<step>/Dockerfile`.
 
 The merge build already derived its image keys from the template inputs that read the record, so it never saw these names; `tests/matrix-pipeline` runs the gate, the record writer (seed, prune, a second pass that changes nothing) and the size guard on a real engine render of a pipeline with a matrix step.
+## Strict templateReferencing conformance (PRD novelcore/kaos#1533, F-26, chart 0.16.0)
+
+Argo's `workflowRestrictions.templateReferencing: Strict` marks a Workflow Error unless it has `workflowTemplateRef` and its own spec sets only allowlisted fields (`arguments`, `entrypoint`, `shutdown`, `suspend`, `activeDeadlineSeconds`, `priority`, `ttlStrategy`, `podGC`, `volumeClaimGC`, `archiveLogs`, `workflowMetadata`, `workflowTemplateRef`, `metrics`, `artifactGC`). A CronWorkflow's `workflowSpec` is copied into each Workflow, so it follows the same rule. This release makes the chart's own objects conform. Nothing turns Strict on here; the operator does that.
+
+- **pending-reaper (C1).** The CronWorkflow's `workflowSpec` is now only `workflowTemplateRef: {name: pending-reaper}`. The ServiceAccount, entrypoint, deadline, ttl and the reap script (unchanged) moved into a namespaced `WorkflowTemplate pending-reaper`, not a ClusterWorkflowTemplate, so a tenant namespace cannot reference it.
+- **Reconcile templates (C2a).** `ci-reconcile`, `ml-ci-reconcile` and `kaos-lib-bump-pr` own their ServiceAccount (`reconciler.serviceAccountName`, default `operate-workflow-sa`) and mount the token Secret named by `github.tokenSecretName` (fixed in the template, deliberately not a parameter, so a submitter cannot choose the mounted Secret). A caller that still passes its own `serviceAccountName` and `volumes` keeps working: the Workflow's fields win.
+- **ml-autoscaler-healer (C2b).** Owns its ServiceAccount (`autoscalerHealer.serviceAccountName`, default `ml-compute-probe-sa`).
+- **ml-ci-dataset-release (C2c).** The per-app Workflow is built from only the CronWorkflow's `workflowTemplateRef` and `arguments` (`dataset_event=true`) plus a `ttlStrategy`. The copied `serviceAccountName` and `volumes` and the `{app}-dataset-rerender` mutex are gone: concurrent runs for one app serialise on ml-ci-reconcile's `{app}-build` mutex in `decide-and-submit`.
+
+Compatibility: today's operator renders (callers passing `serviceAccountName` and `volumes`) work unchanged against 0.16.0. Test: `tests/strict-references/run.sh`.
+
+### Changelog
+
+- 0.16.0: the changes above; new suite `tests/strict-references`.
 
 ## Tests
 
@@ -223,4 +237,5 @@ bash charts/custom/kubecore-ci-workflows/tests/build-isolation/run.sh           
 bash charts/custom/kubecore-ci-workflows/tests/render-isolation/run.sh           # the render pod and its network policy
 bash charts/custom/kubecore-ci-workflows/tests/run-form-seal/run.sh              # the run-form seal wiring
 bash charts/custom/kubecore-ci-workflows/tests/matrix-pipeline/run.sh /tmp/rendered.yaml # a matrix pipeline: gate, record, size
+bash charts/custom/kubecore-ci-workflows/tests/strict-references/run.sh          # Strict templateReferencing conformance (F-26)
 ```

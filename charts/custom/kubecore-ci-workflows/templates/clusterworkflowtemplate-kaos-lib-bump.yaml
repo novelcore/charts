@@ -55,7 +55,11 @@ metadata:
   labels:
     {{- include "kubecore-ci-workflows.labels" . | nindent 4 }}
 spec:
-  serviceAccountName: {{ include "kubecore-ci-workflows.serviceAccountName" . }}
+  # F-26 (Strict templateReferencing refuses a Workflow's own serviceAccountName
+  # and volumes): the template owns both. The token Secret name is fixed from
+  # values, never a parameter (a submitter must not pick which Secret mounts). Existing callers that still pass their
+  # own serviceAccountName/volumes keep working: the Workflow's fields win.
+  serviceAccountName: {{ .Values.reconciler.serviceAccountName | default "operate-workflow-sa" }}
   entrypoint: bump
   # The system pool, as ml-ci-reconcile: the job needs only the GitHub API.
   nodeSelector:

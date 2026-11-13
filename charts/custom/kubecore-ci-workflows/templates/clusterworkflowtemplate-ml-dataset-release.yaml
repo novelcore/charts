@@ -21,8 +21,19 @@ and submits ml-ci-build to re-render on DATASET DRIFT, so an app whose datasets
 did not change costs one cheap pod, and an event that is lost is caught by the
 next hourly poll.
 
-At most one fan-out runs at a time, and the per-app run takes a mutex of its
-own: two events in a row never race to submit two builds.
+At most one fan-out runs at a time (this template's own mutex, below).
+
+The per-app Workflow is built from ONLY the CronWorkflow's workflowTemplateRef
+and arguments, plus a ttlStrategy (PRD novelcore/kaos#1533 F-26: Strict
+templateReferencing refuses a Workflow whose own spec sets serviceAccountName,
+volumes or synchronization, so none is copied or added; ml-ci-reconcile owns
+its ServiceAccount and token volume). It no longer takes a mutex of its own
+({app}-dataset-rerender): ml-ci-reconcile's decide-and-submit holds the
+`{app}-build` mutex (the one ml-ci-build holds) for check-drift AND the build
+submission, so two runs for one app, from two fan-outs or from a fan-out and
+the hourly poll, serialise there and the second sees the build the first
+queued. tests/strict-references/run.sh proves both Workflows resolve to that
+mutex (OQ-5).
 */}}
 apiVersion: argoproj.io/v1alpha1
 kind: ClusterWorkflowTemplate
@@ -85,11 +96,11 @@ spec:
                  metadata: {generateName: "ml-ci-dataset-rerender-",
                             labels: {"platform.kubecore.io/app": $app,
                                      "platform.kubecore.io/submitted-by": "dataset-release"}},
-                 spec: (.spec.workflowSpec
-                        | .arguments.parameters = ((.arguments.parameters // []) | map(select(.name != "dataset_event"))
-                                                   + [{name: "dataset_event", value: "true"}])
-                        | .synchronization = {mutexes: [{name: ($app + "-dataset-rerender")}]}
-                        | .ttlStrategy = {secondsAfterCompletion: 3600})}' \
+                 spec: {workflowTemplateRef: .spec.workflowSpec.workflowTemplateRef,
+                        arguments: {parameters: ((.spec.workflowSpec.arguments.parameters // [])
+                                                 | map(select(.name != "dataset_event"))
+                                                 + [{name: "dataset_event", value: "true"}])},
+                        ttlStrategy: {secondsAfterCompletion: 3600}}}' \
              | kubectl create -n "$NS" -f - ; then
             echo "dataset-release: ${APP}: dataset check submitted"
           else
