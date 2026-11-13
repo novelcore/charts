@@ -458,9 +458,14 @@ def validate_raw(raw_text, params, roles, notes):
                 raise refuse(f"the raw form's optionDefaults of {q(g)} has values that are not text of at most "
                              f"{MAX_OPTION_VALUE} characters")
         groups.add(g)
+    leaf_options = {}
     for leaf, lo in parts["leafOptions"].items():
-        if leaf not in cfg or leaf in groups:
+        if leaf not in by_name or leaf in groups:
             raise refuse(f"the raw form's leafOptions names {q(leaf)}, which is not a config field")
+        if leaf not in cfg:  # e.g. an input supplied by a `@package _global_` group option: no showIf, always shown
+            notes.append(f"run form: raw form leafOptions of {q(leaf)} ignored (its role is {roles[leaf]}, not "
+                         "experiment or setting)")
+            continue
         if not (isinstance(lo, dict) and set(lo) == {"group", "options"} and isinstance(lo["group"], str)
                 and isinstance(lo["options"], list) and all(isinstance(o, str) for o in lo["options"])):
             raise refuse(f"the raw form's leafOptions of {q(leaf)} is malformed")
@@ -469,7 +474,8 @@ def validate_raw(raw_text, params, roles, notes):
         if not set(lo["options"]) <= set(argo_enum(by_name[lo["group"]])):
             raise refuse(f"the raw form's leafOptions of {q(leaf)} lists an option that is not in the enum of "
                          f"{q(lo['group'])}")
-    return types, parts["optionDefaults"], parts["leafOptions"], groups
+        leaf_options[leaf] = lo
+    return types, parts["optionDefaults"], leaf_options, groups
 
 
 # ---- step 4: config/_form.yaml (author data) ---------------------------------------------------------------------
