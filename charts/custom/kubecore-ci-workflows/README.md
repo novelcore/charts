@@ -41,6 +41,8 @@ ClusterWorkflowTemplates for the platform CI: `ml-ci-build`, `ml-ci-reconcile`, 
 
 **Pin.** `pipelineLint.kaosLibWheelUrl` and `pipelineLint.kaosLibWheelSha256` name one exact kaos-lib wheel from the platform's package index; it is downloaded, verified and unzipped, never `pip install`ed (the toolbox image has Python and PyYAML but not `requests` or `packaging`, so the wheel's `kaos_lib/lint/standalone.py` runs the linter without importing the rest of kaos-lib). `pipelineLint.rulesetVersion` is the rule set of that release: the run refuses a different one, so the gate and `kaosctl lint` of the same release give the same JSON. Bump the three values together with each kaos-lib release.
 
+**Pin follows the platform's library (0.15.2).** The gate's lint pin is separate from the library the operator delivers to builds (`KAOS_LIB_PACKAGE`), so the two drift when the platform moves to a new kaos-lib and this chart is not bumped: the gate then refuses valid new keywords (for example `L-E06 RefusedArgument: step() has no argument 'matrix'`). The pin is 0.5.0rc11 (rule set 2.5.0). Move `pipelineLint.*` in the same change that moves the platform's kaos-lib value; `tests/pipeline-lint` takes a real wheel (`KAOS_LIB_WHEEL`) to prove the pinned release accepts the current keywords.
+
 **Without a context.** If the gitops context cannot be read the linter runs with its built-in defaults and the report says so (`catalogue.source`); the check that needs the project's classes (`L-E03`) is then listed as skipped, never as passed.
 
 ```bash
@@ -74,7 +76,9 @@ Why: on the HPC lab (2026-11-10) a kaos-lib pin move made every app rebuild ever
 
 **Checkout reads (0.13.5).** `detect-steps` holds the git token, and `files/kaos-lib.py decide` reads two kinds of app file there: `.kaos/compat.yaml` and each step's `Dockerfile`. Both are read as bounded data. A missing file keeps its meaning: no `compat.yaml` means no range, and a step without a `Dockerfile` is not managed. A file that is there but is a symlink, not a regular file, resolves outside the checkout, is over 64 KiB or is not UTF-8 is refused (exit 5, the reason in the log). So is a `compat.yaml` whose `kaos-lib` value is not a string or a number (a list, a mapping, a bool, a date): such a value is never turned into text, so an alias bomb is not expanded. detect-steps then takes its existing failure path: kaos-lib is left as it is, so no build-arg is passed and no record is written. Before 0.13.5 these reads followed symlinks with no bound, so a symlink to `/dev/zero` hung the step or OOM-killed it (kubecore-operator#1833). The chart's own compose Dockerfile (an absolute path under `/tmp`) is exempt only from the inside-the-checkout check.
 
-Tests: `tests/build-pacing/run.sh` (render guards), `tests/build-pacing/kind/run.sh` (real Argo: cap, render-only, mutex), `tests/kaos-lib/run.sh` (detect gate, trickle classes).
+**What counts as use (0.15.1).** `check-drift` decides an app is in use from its newest pipeline run, in either shape: a run with the label `workflows.argoproj.io/workflow-template={app}-pipeline` (submitted from the template through the Argo server) or a Workflow object whose `spec.workflowTemplateRef.name` is `{app}-pipeline` (what the platform console, the gateway and the e2e create, with no such label). Before 0.15.1 only the labelled shape counted, so an app run only through the platform was "never used", printed `KAOS-LIB STALE ... not rebuilt in the background` every hour and stayed `building` until an unrelated push. The labelled list is a server-side selector and is read first; the namespace's full list (it can hold thousands of finished runs) is read only when the labelled list did not already show a run inside `ci.kaosLibRebuild.hotSeconds`, because a newer unlabelled run cannot change a hot answer. No other decision in `ml-ci-reconcile`, `ml-ci-build` or `ml-ci-pr-render` reads that label.
+
+Tests: `tests/build-pacing/run.sh` (render guards), `tests/build-pacing/kind/run.sh` (real Argo: cap, render-only, mutex), `tests/kaos-lib/run.sh` (detect gate, trickle classes, labelled and unlabelled runs).
 
 ## Platform pipeline engine (PRD-HPC-1461 D-80, chart 0.13.0, BREAKING)
 
@@ -140,7 +144,7 @@ ENGINE_PYTHON=/path/venv/bin/python OLD_APPS="/path/app-a /path/app-b" bash .../
 
 The fixtures of `tests/connections` are two chart-owned apps on the contract (`fixtures/apps/hera`, `fixtures/apps/yolo`) rendered by the engine pinned in `harness.py` (`ENGINE_REF`); `run.sh` there says how to regenerate them and the golden files after an engine change.
 
-**Moving the pins (the cutover).** The chart, the operator's pin of it, the engine pin and the platform's kaos-lib value move together, in a freeze: kaos-lib 0.5 delivered first, then the operator release that pins this chart and the engine on the contract. `pipelineLint.*` must name a kaos-lib 0.5 wheel (rule set 2.0.0) from the same moment: the 0.4 linter reports the new keywords as errors.
+**Moving the pins (the cutover).** The chart, the operator's pin of it, the engine pin and the platform's kaos-lib value move together, in a freeze: kaos-lib 0.5 delivered first, then the operator release that pins this chart and the engine on the contract. `pipelineLint.*` must name a kaos-lib 0.5 wheel (rule set 2.0.0 or later; the pin is kaos-lib 0.5.0rc11, rule set 2.5.0) from the same moment: the 0.4 linter reports the new keywords as errors.
 
 ## What a Dockerfile can read while its image builds (PRD novelcore/kaos#1911, chart 0.14.1)
 
