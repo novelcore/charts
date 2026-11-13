@@ -209,6 +209,37 @@ python3 -I /tmp/engine.py steps --wft /workspace/out/workflow-template.yaml > /t
 {{- end }}
 
 {{/*
+Run-form seal (PRD novelcore/kaos#1533, F-21): after the enhance and the dataset fill, `kubecore.run_form seal`
+composes the app's option files into the run form, stamps it (engine version, source commit, params digest) and
+writes it to the WorkflowTemplate's annotations, in place. Used by hera-enhance-commit (merge: `previous` true,
+the live gitops template, so an unchanged form keeps its commit) and hera-enhance-gate (PR: no previous).
+A pinned engine without kubecore/run_form.py logs one line and continues (rollout, D10). One that has it and
+fails the seal fails the step with its `GATE FAIL: run form: ...` text, before anything is committed
+(fail-closed). The commit comes in through the COMMIT_SHA env var, never spliced into the script, and must be
+40 lowercase hex. Not `python3 -I`: it would hide the engine directory.
+Caller: ENGINE_DIR set (platformEnhance), COMMIT_SHA in the env; `previous` also needs GITOPS_DIR.
+Usage: include "kubecore-ci-workflows.runFormSeal" (dict "previous" true)
+*/}}
+{{- define "kubecore-ci-workflows.runFormSeal" -}}
+if [ -f "${ENGINE_DIR}/kubecore/run_form.py" ]; then
+  case "${COMMIT_SHA:-}" in
+    *[!0-9a-f]*|"") echo "GATE FAIL: run form: the source commit is not 40 lowercase hex characters" >&2; exit 1 ;;
+  esac
+  [ "${#COMMIT_SHA}" -eq 40 ] || { echo "GATE FAIL: run form: the source commit is not 40 lowercase hex characters" >&2; exit 1; }
+  set -- --wft /workspace/out/workflow-template.yaml --source-commit "${COMMIT_SHA}"
+{{- if .previous }}
+  if [ -f "${GITOPS_DIR}/workflow-template.yaml" ]; then
+    set -- "$@" --previous "${GITOPS_DIR}/workflow-template.yaml"
+  fi
+{{- end }}
+  ( cd "${ENGINE_DIR}" && python3 -m kubecore.run_form seal "$@" ) || { echo "run form: the seal failed; nothing is committed" >&2; exit 1; }
+  echo "run form: sealed"
+else
+  echo "run form: the pinned engine has no kubecore/run_form.py; skipping the seal"
+fi
+{{- end }}
+
+{{/*
 Size guard for a rendered WorkflowTemplate. Run as `python3 - <wft> <summary|""> <<'EOF'`.
 Fails the render, with the biggest templates named, when the file exceeds
 wftSize.limitKiB (the etcd object limit is ~1.5 MiB; Argo CD applies the

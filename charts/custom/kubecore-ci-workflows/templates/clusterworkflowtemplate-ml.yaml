@@ -1305,6 +1305,9 @@ spec:
       env:
       - name: ENGINE_JSON
         value: "{{`{{inputs.parameters.engine}}`}}"
+      # The commit the form is sealed with: read through the env var, never spliced into the script.
+      - name: COMMIT_SHA
+        value: "{{`{{workflow.parameters.commit_sha}}`}}"
       securityContext:
         runAsUser: 0
         runAsGroup: 0
@@ -1398,6 +1401,10 @@ spec:
         yaml.safe_dump(wft, open(wft_path, "w"), sort_keys=False)
         print(f"datasets: {len(choices)} choices from {len(datasets)} datasets on " + ", ".join(f"{n} (default {v})" for n, v in filled.items()))
         DSEOF
+
+        # RUN FORM (PRD novelcore/kaos#1533, F-21): seal the form after the enhance and the dataset fill, before the
+        # GATE, the size guard and the copy. An option file that fails to compose fails the build here.
+{{ include "kubecore-ci-workflows.runFormSeal" (dict "previous" true) | indent 8 }}
 
         # GATE: structural release-hygiene checks (fail before committing so a bad
         # render can't silently replace the live WFT). Duplicate params, non-

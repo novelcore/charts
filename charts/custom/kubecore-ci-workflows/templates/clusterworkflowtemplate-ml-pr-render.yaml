@@ -241,6 +241,9 @@ spec:
       env:
       - name: ENGINE_JSON
         value: "{{`{{inputs.parameters.engine}}`}}"
+      # The commit the form is sealed with: read through the env var, never spliced into the script.
+      - name: COMMIT_SHA
+        value: "{{`{{workflow.parameters.commit_sha}}`}}"
       securityContext:
         runAsUser: 0
         runAsGroup: 0
@@ -281,6 +284,10 @@ spec:
         # Platform enhancer (the engine wheel), isolated from the app checkout: see
         # kubecore-ci-workflows.platformEnhance (kubecore-operator#1161, #1375, D-80).
 {{ include "kubecore-ci-workflows.platformEnhance" . | indent 8 }}
+
+        # RUN FORM (PRD novelcore/kaos#1533, F-21): the same seal as the merge build, with the PR head
+        # commit and no previous template. An option file that fails to compose fails the PR check.
+{{ include "kubecore-ci-workflows.runFormSeal" (dict "previous" false) | indent 8 }}
 
         # GATE 1: release hygiene — the same checks the merge build enforces
         # before it commits (duplicate form params, @script templates).
