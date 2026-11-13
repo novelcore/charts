@@ -1781,6 +1781,22 @@ spec:
         if [ -z "${BUILD_REGISTRY}" ]; then BUILD_REGISTRY="{{ .Values.registry.internalUrl }}"; fi
         RU=$(cat /etc/registry-auth/username 2>/dev/null || true)
         RP=$(cat /etc/registry-auth/password 2>/dev/null || true)
+        # Artifact Registry (PRD novelcore/kaos#1911, D-52): no ci-registry-auth there, so this block
+        # was skipped and the record kept tags; a run that starts from a later step compares images by
+        # digest and was refused every time. The build's service account already reads the registry
+        # through Workload Identity (it pushes with it): take its token from the metadata server.
+        # MANIFESTS is the registry's manifests URL of this app's image repository.
+        MANIFESTS="http://${BUILD_REGISTRY}/v2/${IMAGE_REPO}/manifests"
+        case "${BUILD_REGISTRY}" in
+          *-docker.pkg.dev/*)
+            RU="oauth2accesstoken"
+            RP=$(curl -sf -m 10 -H "Metadata-Flavor: Google" \
+              "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token" 2>/dev/null \
+              | sed -n 's/.*"access_token" *: *"\([^"]*\)".*/\1/p' || true)
+            [ -n "${RP}" ] || { RU=""; echo "WARN digest-pin: no token from the metadata server for ${BUILD_REGISTRY%%/*}"; }
+            MANIFESTS="https://${BUILD_REGISTRY%%/*}/v2/${BUILD_REGISTRY#*/}/${IMAGE_REPO}/manifests"
+            ;;
+        esac
         if [ -n "${RU}" ] && [ -n "${BUILD_REGISTRY}" ]; then
           ACCEPT="Accept: application/vnd.oci.image.manifest.v1+json"
           ACCEPT2="Accept: application/vnd.docker.distribution.manifest.v2+json"
@@ -1788,7 +1804,7 @@ spec:
           ACCEPT4="Accept: application/vnd.docker.distribution.manifest.list.v2+json"
           head_digest() {
             curl -sfI -u "${RU}:${RP}" -H "${ACCEPT}" -H "${ACCEPT2}" -H "${ACCEPT3}" -H "${ACCEPT4}" \
-              "http://${BUILD_REGISTRY}/v2/${IMAGE_REPO}/manifests/$1" 2>/dev/null \
+              "${MANIFESTS}/$1" 2>/dev/null \
               | grep -i '^Docker-Content-Digest:' | tr -d '\r' | awk '{print $2}' | head -1
           }
           for KEY in $(yq e '.data | keys | .[]' "${IMAGES_PATH}"); do
@@ -1823,7 +1839,7 @@ spec:
             fi
           done
         else
-          echo "WARN digest-pin: no registry auth mounted — skipped"
+          echo "WARN digest-pin: no registry auth — skipped; the record keeps tags, so a run of this app cannot start from a later step until a build pins them"
         fi
         # =====================================================================
 
