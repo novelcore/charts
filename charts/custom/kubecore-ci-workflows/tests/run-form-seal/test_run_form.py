@@ -497,7 +497,7 @@ class RealCase(Case):
 
 class TestRealEngine(Base):
     """Fixtures produced by the real engine (kaos-hpc-operator feature/1533-f21-seal-hooks), not by hand."""
-    NAMES = ("tests-app", "extended-app", "pinned-step")
+    NAMES = ("tests-app", "extended-app", "pinned-step", "input-in-group-option")
 
     def test_every_real_render_seals_and_is_golden(self):
         for name in self.NAMES:
@@ -1020,11 +1020,26 @@ class TestRawForm(Base):
         c.raw(lambda r: r["types"].update({"dataset": "float"}))
         self.refused(c.run(), 1)
 
+    def test_leaf_options_of_a_non_config_role_are_dropped_with_one_line(self):  # C-2
+        c = self.case()
+        c.raw(lambda r: r["leafOptions"].update({"dataset": {"group": "optimizer", "options": ["sgd"]}}))
+        r = c.run()
+        form = ok(self, r)
+        d = field(form, "dataset")
+        self.assertNotIn("showIf", d)
+        self.assertEqual((d["source"], d["picker"]), ("input", "dataset"))
+        self.assertEqual(r.err.count("raw form leafOptions of dataset ignored"), 1, r.err)
+        self.assertIn("showIf", field(form, "momentum"))  # the others are used
+        # still refused: a leaf that is no parameter, and (for an ignored leaf) nothing else is checked of it
+        c = self.case()
+        c.raw(lambda r: r["leafOptions"].update({"nope": {"group": "optimizer", "options": ["sgd"]}}))
+        self.refused(c.run(), 1)
+
     def test_leaf_options_group_must_be_a_group(self):
         for mut in (lambda r: r["leafOptions"]["momentum"].update({"group": "epochs"}),
                     lambda r: r["leafOptions"]["momentum"].update({"group": "missing"}),
                     lambda r: r["leafOptions"].update({"nope": {"group": "optimizer", "options": ["adam"]}}),
-                    lambda r: r["leafOptions"].update({"optimizer": {"group": "optimizer", "options": ["adam"]}})):
+                    lambda r: r["leafOptions"].update({"optimizer": {"group": "optimizer", "options": ["adam"]}})):  # a group param is not a leaf
             c = self.case()
             c.raw(mut)
             self.refused(c.run(), 1)

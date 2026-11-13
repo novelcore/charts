@@ -5,3 +5,4 @@ engine's local-dev pipeline context (namespace ns-a, HPC enabled), engine versio
   extended-app  Hydra groups, a gpu step with when=, walltime 12h, checkpoint_every, a matrix step, a credential-like leaf
   pinned-step   extended-app with hello-world pinned through the compute-class annotation
 pipeline.py is the app that produced each. No hand edits.
+  input-in-group-option  tests-app without config/dataset.yaml; a Hydra group option (@package _global_) supplies the dataset input, so the raw form has leafOptions for an input (engine 68b1bb6)

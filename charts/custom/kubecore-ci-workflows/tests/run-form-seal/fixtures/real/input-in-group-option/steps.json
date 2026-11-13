@@ -1,0 +1,1 @@
+[{"name":"dataset-loading","kind":"ingest","reads":[],"inputs":["dataset"],"needs":[],"produces":[{"name":"loaded","type":"dataset"}]},{"name":"hello-world","kind":"transform","reads":["experiment"],"inputs":["dataset"],"needs":["dataset-loading"],"produces":[{"name":"report","type":"artifact"}]}]
