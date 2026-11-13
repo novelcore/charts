@@ -444,7 +444,7 @@ PY
   expect_eq "$S" "true" "$wf: posts kaos-lib/support, reporting only"
 done
 PARAMS=$(yq 'select(.metadata.name == "kaos-lib-bump-pr") | [.spec.arguments.parameters[].name] | join(" ")' "$RENDERED" | grep -v '^---$' | grep .)
-expect_eq "$PARAMS" "app project_name repo_url branch version spec" "kaos-lib-bump-pr: the parameter contract the composition renders against"
+expect_eq "$PARAMS" "app project_name repo_url branch version spec github_token_secret" "kaos-lib-bump-pr: the parameter contract (github_token_secret is defaulted, F-26) the composition renders against"
 REQUIRED=$(yq 'select(.metadata.name == "kaos-lib-bump-pr") | [.spec.arguments.parameters[] | select(has("value") | not) | .name] | join(" ")' "$RENDERED" | grep -v '^---$' | grep .)
 expect_eq "$REQUIRED" "app project_name version spec" "kaos-lib-bump-pr: app, project_name, version and spec are required"
 BUMP=$(src kaos-lib-bump-pr bump)

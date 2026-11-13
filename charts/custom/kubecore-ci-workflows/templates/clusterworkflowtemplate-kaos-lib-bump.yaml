@@ -55,7 +55,10 @@ metadata:
   labels:
     {{- include "kubecore-ci-workflows.labels" . | nindent 4 }}
 spec:
-  serviceAccountName: {{ include "kubecore-ci-workflows.serviceAccountName" . }}
+  # F-26 (Strict templateReferencing refuses a Workflow's own serviceAccountName
+  # and volumes): the template owns both. Existing callers that still pass their
+  # own serviceAccountName/volumes keep working: the Workflow's fields win.
+  serviceAccountName: {{ .Values.reconciler.serviceAccountName | default "operate-workflow-sa" }}
   entrypoint: bump
   # The system pool, as ml-ci-reconcile: the job needs only the GitHub API.
   nodeSelector:
@@ -80,10 +83,14 @@ spec:
     # The target: kaosLib.bumpTo (status.ml.kaosLib.desired and its version).
     - name: version
     - name: spec
+    # The token Secret in the CI namespace (F-26: a parameter, so the volume
+    # needs no Workflow-level override). Defaults to the pool's github.tokenSecretName.
+    - name: github_token_secret
+      value: {{ .Values.github.tokenSecretName | quote }}
   volumes:
   - name: github-token
     secret:
-      secretName: {{ .Values.github.tokenSecretName }}
+      secretName: "{{`{{workflow.parameters.github_token_secret}}`}}"
   templates:
   - name: bump
 {{ include "kubecore-ci-workflows.preemptionRetry" . | indent 4 }}

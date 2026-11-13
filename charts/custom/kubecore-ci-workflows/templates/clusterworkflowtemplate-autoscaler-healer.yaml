@@ -59,6 +59,8 @@ metadata:
   labels:
     {{- include "kubecore-ci-workflows.labels" . | nindent 4 }}
 spec:
+  # F-26: the template owns its ServiceAccount (Strict refuses one on the Workflow).
+  serviceAccountName: {{ .Values.autoscalerHealer.serviceAccountName | default "ml-compute-probe-sa" }}
   entrypoint: heal
   ttlStrategy:
     secondsAfterCompletion: {{ .Values.workflow.ttlStrategy.secondsAfterCompletion }}

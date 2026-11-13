@@ -250,6 +250,18 @@ workflow:
   podGC:
     strategy: OnWorkflowSuccess
 
+# F-26 (PRD kaos#1533): ServiceAccount the reconcile templates (ci-reconcile,
+# ml-ci-reconcile, kaos-lib-bump-pr) run as. The template owns it so a Workflow
+# need not set serviceAccountName (Strict templateReferencing refuses that).
+# Callers that still pass their own serviceAccountName keep working.
+reconciler:
+  serviceAccountName: operate-workflow-sa
+
+# F-26: ServiceAccount ml-autoscaler-healer runs as (created per project by the
+# operator, WI-annotated for the GCP probe).
+autoscalerHealer:
+  serviceAccountName: ml-compute-probe-sa
+
 # Service account for workflow execution
 serviceAccount:
   create: true

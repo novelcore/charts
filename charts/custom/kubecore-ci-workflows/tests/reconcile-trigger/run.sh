@@ -336,9 +336,12 @@ expect_eq "$(jq -r '.metadata.labels["platform.kubecore.io/app"]' "$T/created" |
 expect_eq "$(jq -r '.spec.arguments.parameters[] | select(.name=="dataset_event") | .value' "$T/created" | sort -u)" "true" \
   "each check runs ml-ci-reconcile with dataset_event=true"
 expect_eq "$(jq -r '.spec.workflowTemplateRef.name' "$T/created" | sort -u)" "ml-ci-reconcile" "from the app's own reconciler spec"
-expect_eq "$(jq -r '.spec.serviceAccountName' "$T/created" | sort -u)" "operate-workflow-sa" "as the app's own CI account"
-expect_eq "$(jq -r '.spec.synchronization.mutexes[0].name' "$T/created" | sort | tr '\n' ' ')" "mlapp-dataset-rerender other-dataset-rerender " \
-  "a mutex per app: two events never race to submit two builds"
+# F-26 (Strict templateReferencing): the Workflow carries none of serviceAccountName, volumes or
+# synchronization, whatever the cron spec had (this fixture's cron has them). ml-ci-reconcile owns
+# the account and the token volume, and its decide-and-submit holds the {app}-build mutex that
+# serialises two events for one app (tests/strict-references/run.sh proves it).
+expect_eq "$(jq -r '.spec | keys | join(",")' "$T/created" | sort -u)" "arguments,ttlStrategy,workflowTemplateRef" \
+  "only workflowTemplateRef, arguments and ttlStrategy: no serviceAccountName, volumes or own mutex"
 expect_eq "$(jq -r '.spec.arguments.parameters[] | select(.name=="app_name") | .value' "$T/created" | sort | tr '\n' ' ')" "mlapp other " \
   "the reconciler's own parameters are kept"
 
