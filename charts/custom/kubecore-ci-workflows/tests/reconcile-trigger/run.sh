@@ -101,7 +101,8 @@ EOF
 echo "\$*" >> "$T/curl.log"
 case "\$*" in
   *"/commits/"*) [ -n '$3' ] || exit 22; printf '{"sha":"%s"}' '$3' ;;
-  *"pipeline-images.yaml"*) printf 'metadata:\n  namespace: ml-proj\ndata:\n  dataset-sha: %s\n' '${GITOPS_DS:-}' ;;
+  *"pipeline-images.yaml"*) printf 'metadata:\n  namespace: ml-proj\ndata:\n  dataset-sha: %s\n' '${GITOPS_DS:-}'
+    [ -z '${GITOPS_KL:-}' ] || printf '  kaos-lib-package: "%s"\n' '${GITOPS_KL:-}' ;;
   *"pipeline-context.yaml"*) printf '%s' '$GITOPS_CTX' ;;
   *) exit 22 ;;
 esac
@@ -199,6 +200,23 @@ run_case true "$IDLE" "$HEAD_SHA" built "000000000000000000000000000000000000000
 expect_eq "$RC" "3" "force, gitops context not yet the one this trigger is for: waits (exit 3)"
 run_case true "$IDLE" "$HEAD_SHA" built "$CTX_SHA"
 expect_eq "$RC/$NEEDS" "0/true" "force, gitops context matches: builds"
+
+# ── force=true, the app's OWN kaos-lib pin (PRD novelcore/kaos#1911) ──────────
+# The operator writes kaosLib.pinned: true into the gitops context only for spec.ml.kaosLib. The forced run
+# (fired when the context changes) then rebuilds the stale images at once; a platform-wide move (no mark) stays
+# with the hourly poll's pacing. Exhaustive cases (idle apps, attempt guard, queues): tests/kaos-lib.
+PIN_CTX=$(printf 'kaosLib:\n  spec: "kaos-lib==0.5.1"\n  version: "0.5.1"\n  pinned: true\n')
+PLATFORM_CTX=$(printf 'kaosLib:\n  spec: "kaos-lib==0.5.1"\n  version: "0.5.1"\n')
+PIN_REF=$(printf '%s' "kaos-lib==0.5.1" | sha256sum | cut -c1-12)
+GITOPS_CTX="$PIN_CTX" GITOPS_KL="kaos-lib==0.5.0" run_case true "$IDLE" "$HEAD_SHA" built
+expect_eq "$RC/$NEEDS/$(cat "$T/kaos_lib_ref" 2>/dev/null)" "0/true/$PIN_REF" "force, the app pins another kaos-lib than its images have: rebuilds now (kaos_lib_ref set)"
+expect_has "$OUT" "KAOS-LIB PIN" "force, pin: says why"
+GITOPS_CTX="$PIN_CTX" GITOPS_KL="kaos-lib==0.5.1" run_case true "$IDLE" "$HEAD_SHA" built
+expect_eq "$RC/$(cat "$T/kaos_lib_ref" 2>/dev/null)" "0/" "force, the app's images already have its pin: no kaos-lib rebuild"
+GITOPS_CTX="$PLATFORM_CTX" GITOPS_KL="kaos-lib==0.5.0" run_case true "$IDLE" "$HEAD_SHA" built
+expect_eq "$RC/$(cat "$T/kaos_lib_ref" 2>/dev/null)" "0/" "force, the platform's own kaos-lib moved (no pin mark): the forced run does not rebuild it (hourly pacing)"
+GITOPS_CTX="$PIN_CTX" GITOPS_KL="kaos-lib==0.5.0" run_case false "$IDLE" "$HEAD_SHA" built
+expect_eq "$(cat "$T/kaos_lib_ref" 2>/dev/null)" "" "backstop (not forced): a pin mark changes nothing in the hourly poll's own path (its use-based pacing)"
 
 RETRY=$(yq 'select(.kind == "ClusterWorkflowTemplate" and .metadata.name == "ml-ci-reconcile")
     | .spec.templates[] | select(.name == "check-drift") | .retryStrategy.expression' "$RENDERED")

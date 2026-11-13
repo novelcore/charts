@@ -129,6 +129,17 @@ def test_context_prints_the_delivered_spec(tmp_path, capsys):
     assert capsys.readouterr().out.strip() == LIB
 
 
+def test_pinned_is_true_only_for_the_apps_own_pin_mark(tmp_path, capsys):
+    """The operator writes kaosLib.pinned: true for spec.ml.kaosLib only (PRD kaos#1911); anything else is not a pin."""
+    for block, want in (({"spec": LIB, "pinned": True}, "true"), ({"spec": LIB}, ""), ({"spec": LIB, "pinned": False}, ""),
+                        ({"spec": LIB, "pinned": "true"}, ""), (None, "")):
+        ctx = {} if block is None else {"kaosLib": block}
+        path = tmp_path / "c.yaml"
+        path.write_text(yaml.safe_dump(ctx))
+        kl.main(["pinned", "--context", str(path)])
+        assert capsys.readouterr().out.strip() == want, block
+
+
 # ---------------------------------------------------------------- checkout reads (kubecore-operator issue 1833)
 # .kaos/compat.yaml and the step Dockerfiles are the app's (untrusted), read in detect-steps, which
 # holds the git token. A file that is there but is a symlink, not a regular file, outside the

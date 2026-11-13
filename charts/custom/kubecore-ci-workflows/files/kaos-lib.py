@@ -619,6 +619,8 @@ def main(argv=None):
     d.add_argument("--steps", required=True, help="file with one step path per line")
     c = sub.add_parser("context")
     c.add_argument("--context", required=True)
+    pn = sub.add_parser("pinned")
+    pn.add_argument("--context", required=True)
     s = sub.add_parser("support")
     s.add_argument("--context", required=True)
     k = sub.add_parser("contract")
@@ -644,6 +646,9 @@ def main(argv=None):
         json.dump(out, sys.stdout)
     elif args.cmd == "context":
         print(str(kaos_lib(load_context(args.context)).get("spec") or "").strip())
+    elif args.cmd == "pinned":
+        # the operator writes kaosLib.pinned: true only for an app's own pin (spec.ml.kaosLib)
+        print("true" if kaos_lib(load_context(args.context)).get("pinned") is True else "")
     elif args.cmd == "support":
         ctx = load_context(args.context)
         sup, version = support_json(ctx), str(kaos_lib(ctx).get("version") or "").strip()
