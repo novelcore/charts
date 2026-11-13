@@ -83,13 +83,14 @@ if a.from_report:
     out({"markdown": "#### Pipeline lint: %d errors\n" % s["errors"], "status": "%d errors (rule set %s)\n" % (s["errors"], r["ruleset_version"]),
          "text": "stub text\n"}[a.format])
     sys.exit(0)
-if a.expect_ruleset and a.expect_ruleset != "2.0.0":
+if a.expect_ruleset and a.expect_ruleset != "%RULESET%":
     sys.exit(1)
 n = int(os.environ.get("STUB_ERRORS", "0"))
-out(json.dumps({"ruleset_version": "2.0.0", "summary": {"errors": n, "warnings": 0, "infos": 0, "skipped": 0},
+out(json.dumps({"ruleset_version": "%RULESET%", "summary": {"errors": n, "warnings": 0, "infos": 0, "skipped": 0},
                 "catalogue": {"given": a.catalogue}}))
 sys.exit(2 if n else 0)
 PYEOF
+  sed -i "s/%RULESET%/${RULESET}/g" "$T/w/kaos_lib/lint/standalone.py"
   touch "$T/w/kaos_lib/lint/__init__.py"
   ( cd "$T/w" && python3 -c "import zipfile; z = zipfile.ZipFile('$T/stub.whl', 'w'); [z.write(f) for f in ('kaos_lib/lint/standalone.py', 'kaos_lib/lint/__init__.py')]" )
   WHEEL="$T/stub.whl"
@@ -168,15 +169,16 @@ scenario() {
   CALLS=$(cat "$T/calls"); BODIES=$(cat "$T/bodies")
 }
 CLEAN_PY='with open("PWNED-pipeline", "w") as f: f.write("ran")
-from kubecore.authoring import pipeline, step
+from kubecore.authoring import pipeline, step, dataset, model
 with pipeline("p") as p:
-    a = step("a", kind="transform")
+    a = step("a", kind="transform", produces=[dataset("cleaned")])
+    b = step("b", kind="train", needs=[a], produces=[model("champion")], matrix={"seed": [1, 2]}, matrix_allow_failed=True, when="a.ok == true")
 '
 BAD_PY='with open("PWNED-pipeline", "w") as f: f.write("ran")
-from kubecore.authoring import pipeline, step
+from kubecore.authoring import pipeline, step, dataset
 with pipeline("p") as p:
-    a = step("a", kind="transform", needs=[b])
-    b = step("b", kind="transform")
+    a = step("a", kind="transform", produces=[dataset("cleaned")], needs=[b])
+    b = step("b", kind="transform", produces=[dataset("scored")])
 '
 if [ "$REAL" = 1 ]; then STUB_E=0; else STUB_E=1; fi
 

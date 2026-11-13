@@ -41,6 +41,8 @@ ClusterWorkflowTemplates for the platform CI: `ml-ci-build`, `ml-ci-reconcile`, 
 
 **Pin.** `pipelineLint.kaosLibWheelUrl` and `pipelineLint.kaosLibWheelSha256` name one exact kaos-lib wheel from the platform's package index; it is downloaded, verified and unzipped, never `pip install`ed (the toolbox image has Python and PyYAML but not `requests` or `packaging`, so the wheel's `kaos_lib/lint/standalone.py` runs the linter without importing the rest of kaos-lib). `pipelineLint.rulesetVersion` is the rule set of that release: the run refuses a different one, so the gate and `kaosctl lint` of the same release give the same JSON. Bump the three values together with each kaos-lib release.
 
+**Pin follows the platform's library (0.15.2).** The gate's lint pin is separate from the library the operator delivers to builds (`KAOS_LIB_PACKAGE`), so the two drift when the platform moves to a new kaos-lib and this chart is not bumped: the gate then refuses valid new keywords (for example `L-E06 RefusedArgument: step() has no argument 'matrix'`). The pin is 0.5.0rc11 (rule set 2.5.0). Move `pipelineLint.*` in the same change that moves the platform's kaos-lib value; `tests/pipeline-lint` takes a real wheel (`KAOS_LIB_WHEEL`) to prove the pinned release accepts the current keywords.
+
 **Without a context.** If the gitops context cannot be read the linter runs with its built-in defaults and the report says so (`catalogue.source`); the check that needs the project's classes (`L-E03`) is then listed as skipped, never as passed.
 
 ```bash
@@ -142,7 +144,7 @@ ENGINE_PYTHON=/path/venv/bin/python OLD_APPS="/path/app-a /path/app-b" bash .../
 
 The fixtures of `tests/connections` are two chart-owned apps on the contract (`fixtures/apps/hera`, `fixtures/apps/yolo`) rendered by the engine pinned in `harness.py` (`ENGINE_REF`); `run.sh` there says how to regenerate them and the golden files after an engine change.
 
-**Moving the pins (the cutover).** The chart, the operator's pin of it, the engine pin and the platform's kaos-lib value move together, in a freeze: kaos-lib 0.5 delivered first, then the operator release that pins this chart and the engine on the contract. `pipelineLint.*` must name a kaos-lib 0.5 wheel (rule set 2.0.0) from the same moment: the 0.4 linter reports the new keywords as errors.
+**Moving the pins (the cutover).** The chart, the operator's pin of it, the engine pin and the platform's kaos-lib value move together, in a freeze: kaos-lib 0.5 delivered first, then the operator release that pins this chart and the engine on the contract. `pipelineLint.*` must name a kaos-lib 0.5 wheel (rule set 2.0.0 or later; the pin is kaos-lib 0.5.0rc11, rule set 2.5.0) from the same moment: the 0.4 linter reports the new keywords as errors.
 
 ## What a Dockerfile can read while its image builds (PRD novelcore/kaos#1911, chart 0.14.1)
 
