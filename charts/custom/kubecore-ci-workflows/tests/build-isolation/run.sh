@@ -17,7 +17,7 @@ check() { # check DESCRIPTION EXPECTED ACTUAL
 }
 
 RENDERED=$(mktemp); trap 'rm -f "$RENDERED"' EXIT
-helm template t "$CHART" --set github.tokenSecretName=ci-token --set github.org=acme > "$RENDERED" || { echo "FAIL: helm template"; exit 1; }
+helm template t "$CHART" --set github.org=acme > "$RENDERED" || { echo "FAIL: helm template"; exit 1; }
 
 BUILD='select(.metadata.name == "ml-ci-build") | .spec.templates[] | select(.name == "build-push")'
 mounts() { yq "${BUILD} | .container.volumeMounts[].mountPath" "$RENDERED" | sort | tr '\n' ' '; }

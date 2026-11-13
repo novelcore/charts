@@ -87,7 +87,7 @@ spec:
   volumes:
   - name: github-token
     secret:
-      secretName: {{ required "github.tokenSecretName" .Values.github.tokenSecretName }}
+      secretName: {{ .Values.github.tokenSecretName }}
   templates:
   - name: bump
 {{ include "kubecore-ci-workflows.preemptionRetry" . | indent 4 }}

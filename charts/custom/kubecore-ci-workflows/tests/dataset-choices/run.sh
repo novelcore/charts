@@ -22,7 +22,7 @@ expect_eq() {
   else FAILED=$((FAILED + 1)); echo "FAIL: $3"; echo "  expected: $2"; echo "  actual:   $1"; fi
 }
 
-helm template t "$CHART" --set github.tokenSecretName=ci-token > "$WORK/rendered.yaml"
+helm template t "$CHART" > "$WORK/rendered.yaml"
 awk "/<<'DSEOF'/{f=1;next} /^ *DSEOF\$/{f=0} f" "$WORK/rendered.yaml" | sed 's/^        //' \
   | sed "s#/tmp/dataset-choices.py#$WORK/dataset-choices.py#" > "$WORK/datasets.py"
 # The helper both steps use is the chart's own file, written to /tmp by each step.

@@ -21,8 +21,8 @@ check() { # check DESCRIPTION EXPECTED ACTUAL
 }
 
 T=$(mktemp -d); trap 'rm -rf "$T"' EXIT
-helm template t "$CHART" --set github.tokenSecretName=ci-token --set github.org=acme > "$T/default.yaml" || { echo "FAIL: helm template"; exit 1; }
-helm template t "$CHART" --set github.tokenSecretName=ci-token --set github.org=acme --set renderPods.networkPolicy.enabled=true \
+helm template t "$CHART" --set github.org=acme > "$T/default.yaml" || { echo "FAIL: helm template"; exit 1; }
+helm template t "$CHART" --set github.org=acme --set renderPods.networkPolicy.enabled=true \
   --set 'renderPods.networkPolicy.kubeApiCIDRs={172.16.15.130/32}' > "$T/policy.yaml" || { echo "FAIL: helm template (policy)"; exit 1; }
 
 R='select(.metadata.name == "ml-ci-build") | .spec.templates[] | select(.name == "hera-render")'
@@ -64,7 +64,7 @@ check "the Kubernetes API is allowed at the configured address, on 443" "172.16.
 check "DNS is allowed" "true" \
   "$(yq "${NP} | .spec.egress[].ports[] | select(.port == 53)" "$T/policy.yaml" | grep -q 'port: 53' && echo true || echo false)"
 check "nothing else is allowed (4 egress rules: dns, node-local dns, api, internet)" "4" "$(yq "${NP} | .spec.egress | length" "$T/policy.yaml")"
-if helm template t "$CHART" --set github.tokenSecretName=ci-token --set github.org=acme --set renderPods.networkPolicy.enabled=true > /dev/null 2> "$T/err"; then
+if helm template t "$CHART" --set github.org=acme --set renderPods.networkPolicy.enabled=true > /dev/null 2> "$T/err"; then
   check "an enabled policy without the API address is refused at render time" "refused" "rendered"
 else
   check "an enabled policy without the API address is refused at render time" "true" \

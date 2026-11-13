@@ -13,7 +13,7 @@ CHART=$(cd "$(dirname "$0")/../.." && pwd)
 FAILED=0; PASSED=0
 expect_eq() { if [ "$1" = "$2" ]; then PASSED=$((PASSED+1)); echo "PASS: $3"; else FAILED=$((FAILED+1)); echo "FAIL: $3"; echo "  expected: $2"; echo "  actual:   $1"; fi; }
 R=$(mktemp); trap 'rm -f "$R"' EXIT
-helm template t "$CHART" --set github.tokenSecretName=ci-token > "$R" || { echo "FAIL: helm template"; exit 1; }
+helm template t "$CHART" > "$R" || { echo "FAIL: helm template"; exit 1; }
 
 # ml-ci-build takes the lock on its ml-ci-run-locked template (a render-only run takes none: tests/build-pacing).
 BUILD_LOCK=$(yq 'select(.kind=="ClusterWorkflowTemplate" and .metadata.name=="ml-ci-build") | .spec.templates[] | select(.name=="ml-ci-run-locked") | .synchronization.mutexes[0].name' "$R")

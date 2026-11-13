@@ -30,7 +30,7 @@ expect_eq() {
 BASE_TMP=$(mktemp -d)
 trap 'rm -rf "$BASE_TMP"' EXIT
 RENDERED="${BASE_TMP}/rendered.yaml"
-helm template t "$CHART" --set github.tokenSecretName=ci-token --set github.org=acme > "$RENDERED" || { echo "FAIL: helm template"; exit 1; }
+helm template t "$CHART" --set github.org=acme > "$RENDERED" || { echo "FAIL: helm template"; exit 1; }
 TOKEN_VALUE="ghs_F20fakeToken0123456789abcdefABCDEFxyz"
 
 # ── static: no token-bearing URL anywhere in the rendered chart ──────────────
@@ -151,7 +151,7 @@ for wf in ci-build ci-rc-build ml-ci-build; do
   expect_eq "$(printf '%s' "$P" | yq '.volumes[0].projected.sources[0].serviceAccountToken.path')" "token" \
     "$wf/build-push: a projected (short-lived) token, no Secret needed"
 done
-OFF=$(helm template t "$CHART" --set github.tokenSecretName=ci-token --set buildPods.isolateServiceAccountToken=false \
+OFF=$(helm template t "$CHART" --set buildPods.isolateServiceAccountToken=false \
   | yq 'select(.metadata.name == "ci-build") | .spec.templates[] | select(.name == "build-push") | has("podSpecPatch")')
 expect_eq "$OFF" "false" "buildPods.isolateServiceAccountToken=false restores the default mount"
 

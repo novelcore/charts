@@ -33,7 +33,7 @@ expect_lacks() {
 }
 
 RENDERED="${1:-}"
-if [ -z "$RENDERED" ]; then RENDERED="${T}/rendered.yaml"; helm template t "$CHART" --set github.tokenSecretName=ci-token > "$RENDERED" || exit 1; fi
+if [ -z "$RENDERED" ]; then RENDERED="${T}/rendered.yaml"; helm template t "$CHART" > "$RENDERED" || exit 1; fi
 
 COMMIT="${T}/commit.src"; GATE="${T}/gate.src"
 yq 'select(.kind == "ClusterWorkflowTemplate" and .metadata.name == "ml-ci-build")

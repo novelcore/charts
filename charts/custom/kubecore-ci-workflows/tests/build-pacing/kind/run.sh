@@ -31,7 +31,7 @@ $K get deploy workflow-controller >/dev/null 2>&1 || {
 $K create role wtr --verb=create,patch --resource=workflowtaskresults.argoproj.io >/dev/null 2>&1
 $K create rolebinding wtr --role=wtr --serviceaccount=argo:default >/dev/null 2>&1
 
-helm template t "$CHART" --set github.tokenSecretName=ci-token --set ci.buildSlots.enabled=true --set workspace.size=64Mi --set github.org=acme \
+helm template t "$CHART" --set ci.buildSlots.enabled=true --set workspace.size=64Mi --set github.org=acme \
   | python3 "${HERE}/stub.py" /dev/stdin > "$OUT/ml-ci-build.stub.yaml"
 kubectl apply -f "$OUT/ml-ci-build.stub.yaml" >/dev/null
 $K delete cm ci-build-slots --ignore-not-found >/dev/null

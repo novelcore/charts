@@ -227,32 +227,49 @@ expect_eq "$(cat "${BASE_TMP}/r2.out")" "other-sa" "C2a: reconciler.serviceAccou
 # the Workflow's own fields win over the template's. The templates take no new
 # parameter (asserted in section 4), so there is nothing an old caller omits.
 
-# ── 6: no template volume takes its Secret name from a parameter ─────────────
-python3 -I - "$RENDERED" <<'PY' > "${BASE_TMP}/vol.out"
+# ── 6: no template volume takes its Secret name from an expression ───────────
+# ANY `{{` in a volume's secretName is flagged (so `{{workflow.parameters..}}`,
+# `{{=workflow.parameters..}}`, `{{ workflow.parameters }}` and `{{inputs...}}`
+# are all caught), except the two optional PRD 695 user CI-secret volumes of
+# ci-build / ci-rc-build (pre-existing; names built from project/app).
+cat > "${BASE_TMP}/volcheck.py" <<'PY'
 import sys, yaml
-bad = []; n = 0
+bad = []
 def walk(node, where):
-    global n
     if isinstance(node, dict):
         for v in node.get("volumes") or []:
             sn = ((v.get("secret") or {}).get("secretName")) or ""
-            n += 1 if sn else 0
-            # ALLOWED: ci-build / ci-rc-build mount the optional PRD 695 user CI secrets
-            # ({project}-ci-secrets, {project}-{app}-ci-secrets) into the build pod;
-            # pre-existing, not touched by F-26. Anything else must be a fixed name.
             if where in ("ClusterWorkflowTemplate/ci-build", "ClusterWorkflowTemplate/ci-rc-build") \
                and v.get("name") in ("ci-secrets-project", "ci-secrets-app"):
                 continue
-            if "{{workflow.parameters" in sn or "{{inputs.parameters" in sn:
+            if "{{" in sn:
                 bad.append(f"{where}: volume {v.get('name')} secretName={sn}")
         for k, v in node.items(): walk(v, where)
     elif isinstance(node, list):
         for v in node: walk(v, where)
 for d in yaml.safe_load_all(open(sys.argv[1])):
     if d: walk(d, f"{d['kind']}/{d['metadata']['name']}")
-print("secrets=%d" % n)
 for b in bad: print("BAD " + b)
+sys.exit(1 if bad else 0)
 PY
-grep '^BAD' "${BASE_TMP}/vol.out" && fail "a template volume's secretName comes from a parameter" || ok "no template volume's secretName contains {{workflow.parameters or {{inputs.parameters"
+if python3 -I "${BASE_TMP}/volcheck.py" "$RENDERED" > "${BASE_TMP}/vol.out"; then
+  ok "no template volume's secretName contains an expression (two ci-secrets volumes allowlisted)"
+else cat "${BASE_TMP}/vol.out"; fail "a template volume's secretName contains an expression"; fi
+# Mutants: the check must catch each form injected into a reconcile template's token volume.
+for form in '{{workflow.parameters.x}}' '{{=workflow.parameters.x}}' '{{ workflow.parameters.x }}' '{{inputs.parameters.x}}'; do
+  M="${BASE_TMP}/mutant.yaml"
+  python3 -I - "$RENDERED" "$form" > "$M" <<'PY'
+import sys, yaml
+out = []
+for d in yaml.safe_load_all(open(sys.argv[1])):
+    if d and d["kind"] == "ClusterWorkflowTemplate" and d["metadata"]["name"] == "ml-ci-reconcile":
+        for v in d["spec"]["volumes"]:
+            if v["name"] == "github-token": v["secret"]["secretName"] = sys.argv[2]
+    out.append(d)
+yaml.safe_dump_all([d for d in out if d], sys.stdout)
+PY
+  if python3 -I "${BASE_TMP}/volcheck.py" "$M" >/dev/null; then fail "mutant not caught: secretName $form"; else ok "mutant caught: secretName $form"; fi
+done
+
 echo; echo "strict-references: ${PASSED} passed, ${FAILED} failed"
 exit "$FAILED"
