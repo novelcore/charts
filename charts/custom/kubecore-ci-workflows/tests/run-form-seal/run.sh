@@ -129,5 +129,13 @@ for w in commit gate; do
   rm -f "${T}/gitops/workflow-template.yaml"
 done
 
+# The seal module itself (files/run_form.py): unit, golden, fail-closed, parity and limit tests. Needs python3 + PyYAML;
+# jsonschema and RUN_FORM_OSR_DIR (a kaos-osr-edge-operator checkout, with go) add the schema and Go-consumer checks.
+if UT=$(python3 -m unittest discover -s "${HERE}" -p 'test_*.py' 2>&1); then
+  PASSED=$((PASSED + 1)); echo "PASS: seal module tests ($(printf '%s' "$UT" | grep -E '^(Ran|OK)' | tr '\n' ' '))"
+else
+  FAILED=$((FAILED + 1)); echo "FAIL: seal module tests"; printf '%s\n' "$UT" | tail -40
+fi
+
 echo "run-form-seal: ${PASSED} passed, ${FAILED} failed"
 exit "$FAILED"
