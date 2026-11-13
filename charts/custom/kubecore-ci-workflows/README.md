@@ -182,6 +182,20 @@ Enforcement: the pools and the hubs run GKE Dataplane V2 (`anetd`, datapath `ADV
 bash charts/custom/kubecore-ci-workflows/tests/render-isolation/run.sh   # the pod, the policy, and (podman) a read-only pip install
 ```
 
+## The run form is sealed at render (PRD novelcore/kaos#1533, F-21, chart 0.15.0)
+
+After the engine has enhanced the WorkflowTemplate and the dataset pickers are filled, `hera-enhance-commit` (the merge build) and `hera-enhance-gate` (the pull-request check) run `python3 -m kubecore.run_form seal` from the engine's directory. The seal composes the app's option files into the run form, stamps it (engine version, source commit, params digest) and writes it to the template's annotations in place. It runs before the structural GATE, the size guard and the copy to gitops, so a refusal commits nothing.
+
+- **Release note: an option file that fails to compose now fails the build (fail-closed), once the engine pin includes `run_form`.** The step prints the seal's `GATE FAIL: run form: ...` text, which names the field and the fix. The pull-request check fails the same way, so the author sees it before merging.
+- **Rollout (owner ruling D10).** A pinned engine without `kubecore/run_form.py` logs `run form: the pinned engine has no kubecore/run_form.py; skipping the seal` and the build continues. Moving this chart to 0.15.0 alone changes nothing; the seal starts when the engine pin moves.
+- **The commit** is the `COMMIT_SHA` env var of the step (the workflow's `commit_sha`; the PR head SHA in the PR check), never spliced into the script, and is checked to be 40 lowercase hex characters before use.
+- **`--previous`** (merge build only) is the live `workflow-template.yaml` in gitops, passed only when it exists, so an unchanged form keeps its commit and a no-op push makes no gitops commit. The PR check passes none.
+- It is not run with `python3 -I`: isolated mode would hide the engine directory.
+
+```bash
+bash charts/custom/kubecore-ci-workflows/tests/run-form-seal/run.sh   # order, env-sourced commit, guard; the block is run against a stub engine
+```
+
 ## Tests
 
 ```bash
@@ -193,4 +207,5 @@ bash charts/custom/kubecore-ci-workflows/tests/build-pacing/run.sh              
 bash charts/custom/kubecore-ci-workflows/tests/build-pacing/kind/run.sh [outdir] # real Argo: cap, render-only, mutex
 bash charts/custom/kubecore-ci-workflows/tests/build-isolation/run.sh            # what the build container mounts
 bash charts/custom/kubecore-ci-workflows/tests/render-isolation/run.sh           # the render pod and its network policy
+bash charts/custom/kubecore-ci-workflows/tests/run-form-seal/run.sh              # the run-form seal wiring
 ```
