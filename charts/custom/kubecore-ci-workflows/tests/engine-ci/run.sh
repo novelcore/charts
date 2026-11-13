@@ -424,14 +424,28 @@ RENDER_RETRY="${RUN}[3].render-hera[0].hera-render(1)"
 ENHANCE_NODE="${RUN}[3].render-hera[1].hera-enhance-commit(0)"
 COMPOSE_NODE="${RUN}[3].build-push(0:name:compose-and-validate,path:config)(0)"
 
-record_case Failed; pod "$DETECT_NODE" 0; pod "$RENDER_NODE" 1 'time=x argo=true\nINFO rendering\n\033[31mpipeline.py raised: ValueError: step x reads a missing key\033[0m\nexit status 1\n'; run_record
+record_case Failed; pod "$DETECT_NODE" 0; pod "$RENDER_NODE" 1 'time=x argo=true\nINFO rendering\n\033[31mpipeline.py raised: ValueError: step x reads a missing key\033[0m\nexit status 1\nError: exit status 1\n'; run_record
 expect_eq "$RC" 0 "engine-record (render failed): runs"
-expect_eq "$ERR" "render: pipeline.py raised: ValueError: step x reads a missing key" "engine-record: the last error line of the failed render, one line, no colour codes"
+expect_eq "$ERR" "render: pipeline.py raised: ValueError: step x reads a missing key" "engine-record: the last error line of the failed render, one line, no colour codes, not Argo's closing 'Error: exit status 1'"
 expect_has "$ATT" "v0.4.7@" "engine-record: the attempt is recorded as <engine version>@<epoch>"
 expect_eq "$(( $(date +%s) - ${ATT##*@} < 120 ))" "1" "engine-record: ... with the time of this attempt"
 expect_has "$(git -C "$T/check" log -1 --format=%s)" "record the engine error" "engine-record: committed to gitops"
 
 expect_eq "$CALLS" "" "engine-record: a render that failed for another reason posts no status of its own"
+
+# kubecore-operator issue 1864: a refused when= (engine 0.1.0-dev.094d290) on stage was recorded as "render: Error: exit
+# status 1", Argo's executor line. The record is the traceback's last line, without the module path.
+WHEN_ERR="step 'qat-finetune': when= is written with the name of a run-form field, for example when=\"mode != off\". Write the field's name instead of {{workflow.parameters.<field>}}."
+record_case Failed; pod "$DETECT_NODE" 0
+pod "$RENDER_NODE" 1 "hera-render: rendering pipeline.py with the platform engine x (profile yolo)\nkaos-engine: version=0.1.0 profile=yolo\nTraceback (most recent call last):\n  File \"pipeline.py\", line 35, in <module>\n    raise AuthoringError(\nkubecore.authoring.AuthoringError: ${WHEN_ERR}\ntime=\"2026-11-12T21:58:00Z\" level=info msg=\"sub-process exited\" argo=true error=\"exit status 1\"\nError: exit status 1\n"
+run_record
+expect_eq "$ERR" "$(printf 'render: AuthoringError: %s' "$WHEN_ERR" | cut -c1-200)" "engine-record (issue 1864): the engine's error, not the executor's 'Error: exit status 1'"
+record_case Failed; pod "$DETECT_NODE" 0; pod "$RENDER_NODE" 1 "doing things\nsomething went sideways\nError: exit status 2\n"; run_record
+expect_eq "$ERR" "render: something went sideways" "engine-record: with no error line, the step's own last line, never the executor's"
+record_case Failed; pod "$DETECT_NODE" 0; pod "$RENDER_NODE" 1 "Traceback (most recent call last):\nurllib3.exceptions.ReadTimeoutError: read timed out (retried)\nkaos-engine: pipeline.py changed the engine module kubecore.authoring\nError: exit status 1\n"; run_record
+expect_eq "$ERR" "render: kaos-engine: pipeline.py changed the engine module kubecore.authoring" "engine-record: a handled traceback earlier in the log does not hide the later error"
+record_case Failed; pod "$DETECT_NODE" 0; pod "$COMPOSE_NODE" 1 "INFO[0010] RUN python -m kubecore.compose\nTraceback (most recent call last):\nkubecore.compose.ComposeError: config group model has no default\nerror building image: error building stage: failed to execute command: waiting for process to exit: exit status 1\nError: exit status 1\n"; run_record
+expect_eq "$ERR" "compose image build: ComposeError: config group model has no default" "engine-record: the compose build's own error, not kaniko's closing line"
 
 # PRD novelcore/kaos#1911 AC-01: the run was refused because the app was made before the current pipelines.
 WHAT="step 'hello-world' has no kind=. Every step declares what it does: kind= is one of ingest, transform, train, evaluate, publish, control."
