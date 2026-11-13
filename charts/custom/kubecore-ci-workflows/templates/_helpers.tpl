@@ -194,7 +194,8 @@ echo "platform enhancer: engine ${ENGINE_VERSION} (wheel sha256 $(printf %s "${E
     --raw /workspace/out/raw-workflow-template.yaml \
     --context /tmp/context.yaml \
     --output /workspace/out/workflow-template.yaml \
-    --helper-configmap /workspace/out/ckpt-helper.yaml )
+    --helper-configmap /workspace/out/ckpt-helper.yaml \
+    --form-data /tmp/form-data.json )
 python3 - /workspace/out/workflow-template.yaml /tmp/context.yaml <<'STEPTOKEOF'
 import sys
 import yaml
@@ -209,34 +210,48 @@ python3 -I /tmp/engine.py steps --wft /workspace/out/workflow-template.yaml > /t
 {{- end }}
 
 {{/*
-Run-form seal (PRD novelcore/kaos#1533, F-21): after the enhance and the dataset fill, `kubecore.run_form seal`
-composes the app's option files into the run form, stamps it (engine version, source commit, params digest) and
-writes it to the WorkflowTemplate's annotations, in place. Used by hera-enhance-commit (merge: `previous` true,
-the live gitops template, so an unchanged form keeps its commit) and hera-enhance-gate (PR: no previous).
-A pinned engine without kubecore/run_form.py logs one line and continues (rollout, D10). One that has it and
-fails the seal fails the step with its `GATE FAIL: run form: ...` text, before anything is committed
-(fail-closed). The commit comes in through the COMMIT_SHA env var, never spliced into the script, and must be
-40 lowercase hex. Not `python3 -I`: it would hide the engine directory.
-Caller: ENGINE_DIR set (platformEnhance), COMMIT_SHA in the env; `previous` also needs GITOPS_DIR.
-Usage: include "kubecore-ci-workflows.runFormSeal" (dict "previous" true)
+files/run_form.py (PRD novelcore/kaos#1533 F-21/F-22): the trusted run-form seal, written to /tmp/kaos-run-form/run_form.py.
+Chart-owned code, not the engine's: it imports nothing from the engine and runs only as `python3 -I`, so a file in
+the checkout, the output directory or the working directory is never imported. It holds no `{{`, which Argo would
+read as a template tag (tests/run-form-seal). Tested in tests/run-form-seal.
+Caller: python3 + PyYAML (tooling.toolboxImage).
+*/}}
+{{- define "kubecore-ci-workflows.runFormScript" -}}
+mkdir -p /tmp/kaos-run-form
+cat > /tmp/kaos-run-form/run_form.py <<'RUNFORMPYEOF'
+{{ .Files.Get "files/run_form.py" }}
+RUNFORMPYEOF
+{{- end }}
+
+{{/*
+Run-form seal (PRD novelcore/kaos#1533, F-21/F-22): after the enhance and the dataset fill, the trusted seal
+(`files/run_form.py`) builds the run form from data the trusted enhance wrote (/tmp/form-data.json), the step table
+(/tmp/steps.json), the context and config/_form.yaml, stamps it (engine version, source commit, params digest) and writes
+it to the WorkflowTemplate's annotations, in place. It is the only writer of `ui.kubecore.io/run-form`. Used by
+hera-enhance-commit (merge: `previous` true, the live gitops template, so an unchanged render keeps its commit) and
+hera-enhance-gate (PR: no previous). There is no skip branch: a seal that fails fails the step with its
+`GATE FAIL: run form: ...` text, before anything is committed (fail-closed). The commit comes in through the
+COMMIT_SHA env var, never spliced into the script, and must be 40 lowercase hex. Run as `python3 -I`, from any
+directory, with the arguments built in a subshell.
+Caller: ENGINE_VERSION set (platformEnhance), COMMIT_SHA in the env; `previous` also needs GITOPS_DIR.
+Usage: include "kubecore-ci-workflows.runFormSeal" (dict "previous" true "Files" .Files)
 */}}
 {{- define "kubecore-ci-workflows.runFormSeal" -}}
-if [ -f "${ENGINE_DIR}/kubecore/run_form.py" ]; then
-  case "${COMMIT_SHA:-}" in
-    *[!0-9a-f]*|"") echo "GATE FAIL: run form: the source commit is not 40 lowercase hex characters" >&2; exit 1 ;;
-  esac
-  [ "${#COMMIT_SHA}" -eq 40 ] || { echo "GATE FAIL: run form: the source commit is not 40 lowercase hex characters" >&2; exit 1; }
-  set -- --wft /workspace/out/workflow-template.yaml --source-commit "${COMMIT_SHA}"
+{{ include "kubecore-ci-workflows.runFormScript" . }}
+case "${COMMIT_SHA:-}" in
+  *[!0-9a-f]*|"") echo "GATE FAIL: run form: the source commit is not 40 lowercase hex characters" >&2; exit 1 ;;
+esac
+[ "${#COMMIT_SHA}" -eq 40 ] || { echo "GATE FAIL: run form: the source commit is not 40 lowercase hex characters" >&2; exit 1; }
+(
+  set -- --wft /workspace/out/workflow-template.yaml --context /tmp/context.yaml --form-data /tmp/form-data.json \
+    --steps /tmp/steps.json --config-dir /workspace/repo/config --engine "${ENGINE_VERSION}" --source-commit "${COMMIT_SHA}"
 {{- if .previous }}
   if [ -f "${GITOPS_DIR}/workflow-template.yaml" ]; then
     set -- "$@" --previous "${GITOPS_DIR}/workflow-template.yaml"
   fi
 {{- end }}
-  ( cd "${ENGINE_DIR}" && python3 -m kubecore.run_form seal "$@" ) || { echo "run form: the seal failed; nothing is committed" >&2; exit 1; }
-  echo "run form: sealed"
-else
-  echo "run form: the pinned engine has no kubecore/run_form.py; skipping the seal"
-fi
+  python3 -I /tmp/kaos-run-form/run_form.py seal "$@"
+) || { echo "run form: the seal failed; nothing is committed" >&2; exit 1; }
 {{- end }}
 
 {{/*

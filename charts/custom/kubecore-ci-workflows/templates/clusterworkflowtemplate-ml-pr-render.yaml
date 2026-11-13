@@ -287,7 +287,7 @@ spec:
 
         # RUN FORM (PRD novelcore/kaos#1533, F-21): the same seal as the merge build, with the PR head
         # commit and no previous template. An option file that fails to compose fails the PR check.
-{{ include "kubecore-ci-workflows.runFormSeal" (dict "previous" false) | indent 8 }}
+{{ include "kubecore-ci-workflows.runFormSeal" (dict "previous" false "Files" .Files) | indent 8 }}
 
         # GATE 1: release hygiene — the same checks the merge build enforces
         # before it commits (duplicate form params, @script templates).

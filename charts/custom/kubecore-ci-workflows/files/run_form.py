@@ -597,7 +597,7 @@ def _check_form_yaml(doc):
         if not isinstance(g, dict) or not set(g) <= {"id", "label", "tier", "order"} or not {"id", "label"} <= set(g):
             raise refuse(f"_form.yaml: {where} must have id and label, and may have tier and order")
         if not isinstance(g["id"], str) or not GROUP_ID_RE.match(g["id"]):
-            raise refuse(f"_form.yaml: {where}.id must match ^[a-z][a-z0-9-]{{0,62}}$")
+            raise refuse(f"_form.yaml: {where}.id must be a lowercase letter then up to 62 lowercase letters, digits or dashes")
         if g["id"] in FIXED_IDS:
             raise refuse(f"_form.yaml: {where}.id is a fixed group id")
         if g["id"] in seen:
