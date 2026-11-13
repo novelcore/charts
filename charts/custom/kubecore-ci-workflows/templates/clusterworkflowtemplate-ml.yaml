@@ -1814,6 +1814,7 @@ spec:
             [ "${KEY}" = "engine-last-error" ] && continue
             [ "${KEY}" = "engine-attempt" ] && continue
             [ "${KEY}" = "dataset-sha" ] && continue
+            [ "${KEY}" = "context-sha" ] && continue
             [ "${KEY}" = "wft-bytes" ] && continue
             [ "${KEY}" = "kaos-lib-package" ] && continue
             [ "${KEY}" = "kaos-lib-compat" ] && continue
