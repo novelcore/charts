@@ -1205,7 +1205,10 @@ spec:
     - name: python-overlay
       image: "{{`{{inputs.parameters.engine_image}}`}}"
       command: [sh, -c]
-      args: ["cp -a --no-preserve=ownership /usr/local/. /overlay/"]
+      # Copy the entries, not the directory itself: the volume's root belongs to root (group-writable through
+      # fsGroup), so a non-root cp cannot set its times and "cp -a /usr/local/. /overlay/" ends 1 after
+      # copying everything ("preserving times for '/overlay/.': Operation not permitted").
+      args: ["cd /usr/local && find . -mindepth 1 -maxdepth 1 -exec cp -a --no-preserve=ownership -t /overlay/ {} +"]
       {{- include "kubecore-ci-workflows.resources" .Values.tooling.heraRenderResources | nindent 6 }}
       securityContext:
         runAsNonRoot: true
