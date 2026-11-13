@@ -647,11 +647,35 @@ spec:
             # time per project, and an idle or never-run app only when used. Every
             # rebuild is paced by the project's build semaphore. Unknown use (the
             # runs cannot be listed) is never a reason to rebuild.
-            USE_RUN=$(kubectl get workflows -n "${ML_NS}" -l "workflows.argoproj.io/workflow-template=${APP}-pipeline" -o json 2>/dev/null \
-                      | jq -r 'try ([.items[].metadata.creationTimestamp | fromdateiso8601] | max | if . == null then "never" else (now - .) | floor end) catch "unknown"' 2>/dev/null) || USE_RUN=unknown
-            [ -n "$USE_RUN" ] || USE_RUN=unknown
+            # A run counts as use in either shape: the label the Argo server puts on a
+            # run submitted from the template (cheap, server-side selector), or a
+            # Workflow object whose spec.workflowTemplateRef.name is the app's template
+            # (the platform console and gateway create runs that way, with no label).
+            # The labelled list is read first; the namespace's full list (it can hold
+            # thousands of finished runs) is read only when that did not already show a
+            # hot run, because a newer unlabelled run cannot change a hot answer.
             HOT={{ int (.Values.ci.kaosLibRebuild.hotSeconds | default 86400) }}
             IDLE={{ int (.Values.ci.kaosLibRebuild.idleSeconds | default 2592000) }}
+            RUN_AGE_JQ='try ([.items[] | select(($ref == "") or (.spec.workflowTemplateRef.name == $ref)) | .metadata.creationTimestamp | fromdateiso8601] | max | if . == null then "never" else (now - .) | floor end) catch "unknown"'
+            USE_LABELLED=$(kubectl get workflows -n "${ML_NS}" -l "workflows.argoproj.io/workflow-template=${APP}-pipeline" -o json 2>/dev/null \
+                      | jq -r --arg ref "" "$RUN_AGE_JQ" 2>/dev/null) || USE_LABELLED=unknown
+            [ -n "$USE_LABELLED" ] || USE_LABELLED=unknown
+            USE_REF=unknown
+            USE_REF_NEEDED=1
+            case "$USE_LABELLED" in
+              ''|*[!0-9]*) ;;
+              *) if [ "$USE_LABELLED" -lt "$HOT" ]; then USE_REF_NEEDED=0; fi ;;
+            esac
+            if [ "$USE_REF_NEEDED" = 1 ]; then
+              USE_REF=$(kubectl get workflows -n "${ML_NS}" -o json 2>/dev/null \
+                        | jq -r --arg ref "${APP}-pipeline" "$RUN_AGE_JQ" 2>/dev/null) || USE_REF=unknown
+              [ -n "$USE_REF" ] || USE_REF=unknown
+            fi
+            # the newest run of either shape: a number beats never beats unknown
+            USE_RUN=$(printf '%s\n%s\n' "$USE_LABELLED" "$USE_REF" | awk '
+              /^[0-9]+$/ { if (!n || $1 + 0 < min + 0) min = $1; n = 1; next }
+              $1 == "never" { never = 1 }
+              END { if (n) print min; else if (never) print "never"; else print "unknown" }')
             case "$USE_RUN" in
               unknown|never)
                 echo "reconcile: KAOS-LIB STALE (${KL_HAVE:-<unrecorded>} -> ${KL_WANT}) — app use: ${USE_RUN}: not rebuilt in the background; it rebuilds when it is next used"

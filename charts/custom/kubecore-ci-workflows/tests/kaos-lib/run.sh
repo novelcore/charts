@@ -251,8 +251,9 @@ expect_eq "$REC/$COMPAT" "<absent>/<absent>" "patch-images: nothing to report le
 
 DRIFT_SRC="${BASE_TMP}/check-drift.src"; src ml-ci-reconcile check-drift > "$DRIFT_SRC"
 REF=$(printf '%s' "$SPEC" | sha256sum | cut -c1-12)
-drift_case() {  # drift_case RECORDED(-=absent) CONTEXT_SPEC(-=none); RUN_AGE = seconds since the app's last pipeline run (default 1h: hot)
+drift_case() {  # drift_case RECORDED(-=absent) CONTEXT_SPEC(-=none); RUN_AGE = seconds since the app's last LABELLED pipeline run (default 1h: hot); REF_AGE = seconds since its last run that only has spec.workflowTemplateRef (none by default)
   RUN_AGE="${RUN_AGE-3600}"; RUN_TS=""; [ -n "$RUN_AGE" ] && RUN_TS=$(ago "$RUN_AGE")
+  REF_TS=""; [ -n "${REF_AGE:-}" ] && REF_TS=$(ago "$REF_AGE")
   T=$(mktemp -d "${BASE_TMP}/drift-XXXXXX"); mkdir -p "$T/bin"; printf 'token' > "$T/token"
   context_cm "$T/gitops-context.yaml" "$2"
   CTX_SHA=$(sha256sum < "$T/gitops-context.yaml" | cut -c1-64)
@@ -268,6 +269,14 @@ case "\$*" in
   *"workflow-template=${APP}-pipeline"*)
     [ "${RUNS_UNREADABLE:-}" = 1 ] && exit 1
     if [ -n "${RUN_AGE:-}" ]; then printf '{"items": [{"metadata": {"creationTimestamp": "%s"}}]}' "${RUN_TS}"; else printf '{"items": []}'; fi ;;
+  *"get workflows -n proj-train"*)
+    # the namespace's full list: a labelled run, an unlabelled run with the template ref, other apps' runs
+    [ "${RUNS_UNREADABLE:-}" = 1 ] && exit 1
+    echo "1" >> "$T/ref-list-read"
+    jq -n --arg lab "${RUN_TS}" --arg ref "${REF_TS}" --arg app "${APP}-pipeline" \
+      '{items: ([{metadata: {creationTimestamp: "2020-01-01T00:00:00Z"}, spec: {workflowTemplateRef: {name: "other-pipeline"}}}]
+        + (if \$lab != "" then [{metadata: {creationTimestamp: \$lab, labels: {"workflows.argoproj.io/workflow-template": \$app}}, spec: {workflowTemplateRef: {name: \$app}}}] else [] end)
+        + (if \$ref != "" then [{metadata: {creationTimestamp: \$ref}, spec: {workflowTemplateRef: {name: \$app}}}] else [] end))}' ;;
   *"get workflows"*) cat "$T/workflows.json" ;;
   *"get configmap ${APP}-pipeline-images"*) cat "$T/cm.json" ;;
   *"get configmap ${APP}-pipeline-context"*) cat "$T/context.yaml" ;;
@@ -340,6 +349,23 @@ RUN_AGE="" drift_case "$OLD" "$SPEC"; run_drift
 expect_eq "$NEEDS" "false" "reconcile: STALE app that never ran: not rebuilt in the background"
 RUNS_UNREADABLE=1 drift_case "$OLD" "$SPEC"; run_drift
 expect_eq "$NEEDS" "false" "reconcile: the runs cannot be listed: unknown use is never a reason to rebuild"
+# A run counts as use by its label OR by spec.workflowTemplateRef.name (the console/gateway create runs with no label)
+RUN_AGE="" REF_AGE=3600 drift_case "$OLD" "$SPEC"; run_drift
+expect_eq "$RC/$NEEDS" "0/true" "reconcile: STALE app whose only run is unlabelled (template ref), 1h ago: rebuilt"
+expect_has "$OUT" "the app ran 3600s ago" "reconcile: ... and the age is the unlabelled run's"
+RUN_AGE="" REF_AGE=259200 drift_case "$OLD" "$SPEC"; run_drift
+expect_eq "$NEEDS" "true" "reconcile: unlabelled run 3 days ago (warm), nothing else rebuilding: rebuilt in the background"
+RUN_AGE="" REF_AGE=3456000 drift_case "$OLD" "$SPEC"; run_drift
+expect_eq "$NEEDS" "false" "reconcile: unlabelled run 40 days ago: idle, not rebuilt in the background"
+RUN_AGE=3456000 REF_AGE=3600 drift_case "$OLD" "$SPEC"; run_drift
+expect_eq "$NEEDS" "true" "reconcile: an old labelled run and a fresh unlabelled one: the fresh one counts (rebuilt)"
+RUN_AGE=3600 REF_AGE=3456000 drift_case "$OLD" "$SPEC"; run_drift
+expect_eq "$NEEDS" "true" "reconcile: a fresh labelled run and an old unlabelled one: the fresh one counts (rebuilt)"
+RUN_AGE=3600 drift_case "$OLD" "$SPEC"; run_drift
+expect_eq "$([ -f "$T/ref-list-read" ] && wc -l < "$T/ref-list-read" || echo 0)" "0" "reconcile: a hot labelled run: the namespace's full run list is not read"
+RUN_AGE="" REF_AGE="" drift_case "$OLD" "$SPEC"; run_drift
+expect_eq "$NEEDS" "false" "reconcile: no run of either shape (other apps' runs only): never used, not rebuilt"
+expect_has "$OUT" "app use: never" "reconcile: says never"
 LABEL=$(yq 'select(.metadata.name == "ml-ci-reconcile") | .spec.templates[] | select(.name == "submit-build") | .resource.manifest' "$RENDERED" \
         | yq '.metadata.labels["platform.kubecore.io/kaos-lib"]')
 expect_eq "$LABEL" "{{inputs.parameters.kaos_lib_ref}}" "reconcile: the submitted build carries the spec ref (the attempt guard's label)"
