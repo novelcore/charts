@@ -16,7 +16,8 @@
 #   helm template t charts/custom/kubecore-ci-workflows > /tmp/rendered.yaml
 #   bash charts/custom/kubecore-ci-workflows/tests/kaos-lib/run.sh /tmp/rendered.yaml
 #
-# Needs yq v4, jq, git, python3 + PyYAML. Exit status is the number of failed assertions.
+# Needs yq v4, jq, git, python3 + PyYAML. Ages are computed from the wall clock: compare them as ranges, never as exact numbers
+# (the validate image is python:3.11-bookworm, the product scripts run in alpine/k8s; both must pass). Exit status is the number of failed assertions.
 set -u
 RENDERED="$1"
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -352,7 +353,9 @@ expect_eq "$NEEDS" "false" "reconcile: the runs cannot be listed: unknown use is
 # A run counts as use by its label OR by spec.workflowTemplateRef.name (the console/gateway create runs with no label)
 RUN_AGE="" REF_AGE=3600 drift_case "$OLD" "$SPEC"; run_drift
 expect_eq "$RC/$NEEDS" "0/true" "reconcile: STALE app whose only run is unlabelled (template ref), 1h ago: rebuilt"
-expect_has "$OUT" "the app ran 3600s ago" "reconcile: ... and the age is the unlabelled run's"
+# the age is computed from the clock when the stub is written, so a second may pass before the script reads it: a range, not an exact number
+SEEN_AGE=$(printf '%s' "$OUT" | sed -n 's/.*the app ran \([0-9][0-9]*\)s ago.*/\1/p' | head -1)
+expect_eq "$([ "${SEEN_AGE:-0}" -ge 3600 ] && [ "${SEEN_AGE:-0}" -lt 3660 ] && echo yes || echo "no (${SEEN_AGE:-none})")" "yes" "reconcile: ... and the age is the unlabelled run's (3600s, give or take the clock)"
 RUN_AGE="" REF_AGE=259200 drift_case "$OLD" "$SPEC"; run_drift
 expect_eq "$NEEDS" "true" "reconcile: unlabelled run 3 days ago (warm), nothing else rebuilding: rebuilt in the background"
 RUN_AGE="" REF_AGE=3456000 drift_case "$OLD" "$SPEC"; run_drift
