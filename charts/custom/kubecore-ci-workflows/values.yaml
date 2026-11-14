@@ -374,9 +374,9 @@ ci:
   # reconcile runs queues in Argo instead of starving that pool. The chart renders the
   # ConfigMap next to the workflow controller's templates. What bounds the number is
   # slots x tooling.checkDriftResources.requests.memory on the system pool (6 x 96Mi =
-  # 576Mi at the default; the pod peaks under 100 MiB). A slot is also held while a run
-  # retries "not yet" (up to ~45 min for an app whose repository is slow to appear), so a
-  # cap that is too low throttles a mass creation of apps.
+  # 576Mi at the default; the pod peaks under 100 MiB). A slot is held for one attempt
+  # only: a run that retries "not yet" (up to ~45 min for an app whose repository is slow to
+  # appear) holds none between attempts.
   checkDrift:
     slots: 6
     configMapName: ci-check-drift-slots

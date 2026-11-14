@@ -105,7 +105,8 @@ EOF
   cat > "$T/bin/curl" <<EOF
 #!/usr/bin/env bash
 case "\$*" in
-  *"/commits/dev"*) printf '{"sha": "%s"}' "$HEAD_SHA" ;;
+  *"/commits/dev"*) out=""; prev=""; for a in "\$@"; do [ "\$prev" = "-o" ] && out="\$a"; prev="\$a"; done
+    printf '{"sha": "%s"}' "$HEAD_SHA" > "\$out"; printf 200 ;;
   *"pipeline-context.yaml"*) cat "$T/gitops-context.yaml" ;;
   *"pipeline-images.yaml"*) [ -f "$T/fixture-images.yaml" ] && cat "$T/fixture-images.yaml" || exit 22 ;;
   *) exit 22 ;;
@@ -354,7 +355,8 @@ new_case
 cat > "$T/bin/curl" <<EOF
 #!/usr/bin/env bash
 case "\$*" in
-  *"/commits/dev"*) printf '{"sha": "%s"}' "$HEAD_SHA" ;;
+  *"/commits/dev"*) out=""; prev=""; for a in "\$@"; do [ "\$prev" = "-o" ] && out="\$a"; prev="\$a"; done
+    printf '{"sha": "%s"}' "$HEAD_SHA" > "\$out"; printf 200 ;;
   *) exit 22 ;;
 esac
 EOF
