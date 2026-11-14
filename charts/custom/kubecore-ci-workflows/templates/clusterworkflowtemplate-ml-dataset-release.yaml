@@ -100,7 +100,8 @@ spec:
                         arguments: {parameters: ((.spec.workflowSpec.arguments.parameters // [])
                                                  | map(select(.name != "dataset_event"))
                                                  + [{name: "dataset_event", value: "true"}])},
-                        ttlStrategy: {secondsAfterCompletion: 3600}}}')
+                        ttlStrategy: {secondsAfterCompletion: 3600}}}' \
+          )
           # A Kubernetes API blip on one create must not drop that app's event (nothing else
           # re-sends it): three tries, then the Workflow fails loudly.
           DONE=0
