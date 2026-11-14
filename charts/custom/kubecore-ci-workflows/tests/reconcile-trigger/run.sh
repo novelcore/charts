@@ -227,8 +227,8 @@ GITOPS_CTX="$PIN_CTX" GITOPS_KL="kaos-lib==0.5.0" run_case false "$IDLE" "$HEAD_
 expect_eq "$(cat "$T/kaos_lib_ref" 2>/dev/null)" "" "backstop (not forced): a pin mark changes nothing in the hourly poll's own path (its use-based pacing)"
 
 RETRY=$(yq 'select(.kind == "ClusterWorkflowTemplate" and .metadata.name == "ml-ci-reconcile")
-    | .spec.templates[] | select(.name == "check-drift") | .retryStrategy.expression' "$RENDERED")
-expect_eq "$RETRY" "asInt(lastRetry.exitCode) == 3 || asInt(lastRetry.exitCode) == 137" "check-drift retries the force-mode not-yet (3) and a killed pod (137)"
+    | .spec.templates[] | select(.name == "check-drift-attempts") | .steps[1][0].when' "$RENDERED")
+expect_eq "$RETRY" "{{=steps.attempt.status == 'Failed' && ((steps.attempt.exitCode ?? '') == '3' || (steps.attempt.exitCode ?? '') == '137')}}" "check-drift is retried (a slot per attempt) on the force-mode not-yet (3) and a killed pod (137)"
 FORCE_DEFAULT=$(yq 'select(.kind == "ClusterWorkflowTemplate" and .metadata.name == "ml-ci-reconcile")
     | .spec.arguments.parameters[] | select(.name == "force") | .value' "$RENDERED")
 expect_eq "$FORCE_DEFAULT" "false" "force defaults to false (CronWorkflows rendered before it keep the backstop)"

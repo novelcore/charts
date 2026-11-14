@@ -127,7 +127,7 @@ spec:
     # app creation and again whenever the app's platform context changes — the
     # event-driven trigger; the CronWorkflow (force=false) is only the backstop.
     # In force mode "not yet" (repo or pipeline-images not there, a build in
-    # flight) is retried (exit 3, see check-drift's retryStrategy) instead of
+    # flight) is retried (exit 3, see check-drift-attempts) instead of
     # skipped: skipping would drop the event, and there is no next poll.
     - name: force
       value: "false"
@@ -161,7 +161,7 @@ spec:
     # build for nothing, so this step takes no lock. Only the triggers that must
     # not be dropped wait here; the hourly poll just decides in step 2.
     - - name: await-inputs
-        template: check-drift
+        template: check-drift-with-retry
         when: "{{`{{workflow.parameters.force}}`}} == true || {{`{{workflow.parameters.dataset_event}}`}} == true"
         arguments:
           parameters:
@@ -190,7 +190,7 @@ spec:
       - name: "{{`{{workflow.parameters.app_name}}`}}-build"
     steps:
     - - name: check-drift
-        template: check-drift
+        template: check-drift-with-retry
         arguments:
           parameters:
           - name: mode
@@ -206,17 +206,135 @@ spec:
           - name: kaos_lib_ref
             value: "{{`{{steps.check-drift.outputs.parameters.kaos_lib_ref}}`}}"
 
+  # check-drift-with-retry is what the callers use: the retry loop, then the verdict. A loop
+  # whose attempts ended in a REAL failure (any exit but 0, 3, 137) succeeds and hands the exit
+  # code up; this step turns it back into the failure it was, at once, not after 45 retries.
+  # Running out of the 45 retries fails the loop, hence this template, as before.
+  - name: check-drift-with-retry
+    inputs:
+      parameters:
+      - name: mode
+        value: decide
+    steps:
+    - - name: loop
+        template: check-drift-attempts
+        arguments:
+          parameters:
+          - name: mode
+            value: "{{`{{inputs.parameters.mode}}`}}"
+    - - name: verdict
+        template: exit-with-code
+        when: "{{`{{steps.loop.outputs.parameters.exit_code}}`}} != 0"
+        arguments:
+          parameters:
+          - name: code
+            value: "{{`{{steps.loop.outputs.parameters.exit_code}}`}}"
+    outputs:
+      parameters:
+      - name: needs_build
+        valueFrom:
+          parameter: "{{`{{steps.loop.outputs.parameters.needs_build}}`}}"
+      - name: head_sha
+        valueFrom:
+          parameter: "{{`{{steps.loop.outputs.parameters.head_sha}}`}}"
+      - name: kaos_lib_ref
+        valueFrom:
+          parameter: "{{`{{steps.loop.outputs.parameters.kaos_lib_ref}}`}}"
+
+  - name: check-drift-attempts
+    # THE RETRY LOOP, with no lock of its own. Argo takes a template's lock on its retry node and
+    # releases it only when that node is fulfilled (workflow/controller/operator.go, v4.0.6), so a
+    # template with both a semaphore and a retryStrategy kept its slot through every 60 s backoff:
+    # six waiting checks (a new app whose repository is slow to appear waits up to 45 minutes)
+    # starved every other one, a decide queued for a slot while holding its app's build mutex,
+    # and a pushed build of that app waited behind it with no pod. Here each attempt is one
+    # check-drift (which holds the slot while its pod runs, nothing else) and the backoff
+    # happens in this template, with no slot held.
+    # A retryStrategy cannot read the attempt's exit code on a steps template (a steps node has
+    # no exit code; lastRetry.exitCode is then "0"), so the attempt does not fail this template:
+    # it continues on failure, and `not-yet` fails it, a retry, only for exit 3 ("not yet") and
+    # 137 (the pod was killed before it decided anything: a forced event must not be dropped).
+    # Any other exit code is handed up as exit_code and fails check-drift-with-retry. Fail
+    # closed: an attempt node that ended in Error (pod deleted, node lost, outputs unreadable)
+    # fails this template and is retried; an attempt that Failed with no exit code (its pod never
+    # ran) has no exitCode to read, so `not-yet` uses an expression that tolerates it (a plain
+    # plain reference to steps.attempt.exitCode there made Argo requeue the step forever, a wedged run holding
+    # the app's build mutex) and exit_code defaults to 1, a visible failure.
+    # Budget as before: 45 retries, 60 s apart, no maxDuration (Argo counts it from the first
+    # attempt; see tests/retry-window).
+    inputs:
+      parameters:
+      - name: mode
+        value: decide
+    retryStrategy:
+      limit: 45
+      retryPolicy: OnFailure
+      backoff:
+        duration: "60s"
+        factor: 1
+    steps:
+    - - name: attempt
+        template: check-drift
+        continueOn:
+          failed: true
+        arguments:
+          parameters:
+          - name: mode
+            value: "{{`{{inputs.parameters.mode}}`}}"
+    - - name: not-yet
+        template: exit-with-code
+        when: "{{`{{=steps.attempt.status == 'Failed' && ((steps.attempt.exitCode ?? '') == '3' || (steps.attempt.exitCode ?? '') == '137')}}`}}"
+        arguments:
+          parameters:
+          - name: code
+            value: "{{`{{=steps.attempt.exitCode ?? '1'}}`}}"
+    outputs:
+      parameters:
+      # No default reads as a pass: an attempt that left no output is not "no build needed".
+      - name: needs_build
+        valueFrom:
+          parameter: "{{`{{steps.attempt.outputs.parameters.needs_build}}`}}"
+      - name: head_sha
+        valueFrom:
+          parameter: "{{`{{steps.attempt.outputs.parameters.head_sha}}`}}"
+      - name: kaos_lib_ref
+        valueFrom:
+          parameter: "{{`{{steps.attempt.outputs.parameters.kaos_lib_ref}}`}}"
+      # An attempt that failed with no exit code (its pod never ran: deadline, image) is a
+      # failure, never a 0.
+      - name: exit_code
+        valueFrom:
+          parameter: "{{`{{steps.attempt.exitCode}}`}}"
+          default: "1"
+
+  # Fails with the given exit code. The retry loop fails through it for a "not yet", and the
+  # check fails through it for a real failure; it runs only on those paths.
+  - name: exit-with-code
+    inputs:
+      parameters:
+      - name: code
+    container:
+      image: {{ .Values.tooling.kubectlImage | default "alpine/k8s:1.36.4" }}
+      # `sh -c exit` is a few hundred KiB; these pods are not under the check-drift semaphore.
+      resources:
+        requests:
+          cpu: 10m
+          memory: 16Mi
+      command: [sh, -c]
+      args: ["exit {{`{{inputs.parameters.code}}`}}"]
+
   - name: check-drift
-    # At most `ci.checkDrift.slots` check-drift pods run at once in the whole cluster (an Argo
+    # ONE ATTEMPT of the drift check (retried by check-drift-attempts). At most
+    # `ci.checkDrift.slots` of these pods run at once in the whole cluster (an Argo
     # semaphore, counted across every project's CI namespace: they all land on the one system
     # pool). A fan-out (ml-ci-dataset-rerender per app, the hourly polls, a library update)
     # QUEUES here, in Argo, with no pod: nothing for the pending-reaper to kill, nothing for the
-    # autoscaler to count, nothing starving the node. The slot is held across this template's
-    # retries (Argo takes it on the retry node), so an exit-3 "not yet" wait keeps its slot and
-    # a killed pod (137) retries without queueing again; the wait is bounded by the run's
-    # activeDeadlineSeconds. The ConfigMap is rendered by this chart, so the cap needs no other
-    # component. decide-and-submit holds the app's build mutex while this waits for a slot;
-    # slot holders never wait for a mutex, so the two cannot deadlock.
+    # autoscaler to count, nothing starving the node. The slot is taken per attempt and released
+    # when the pod ends, so a "not yet" wait holds none: the template that retries has no
+    # semaphore (Argo would keep a slot through every backoff). The wait for a slot is bounded by
+    # the run's activeDeadlineSeconds. The ConfigMap is rendered by this chart, so the cap needs
+    # no other component. decide-and-submit holds the app's build mutex while this waits for a
+    # slot; slot holders never wait for a mutex, so the two cannot deadlock.
     synchronization:
       semaphores:
       - namespace: {{ include "kubecore-ci-workflows.namespace" . }}
@@ -230,27 +348,16 @@ spec:
       # check, run under the build lock by decide-and-submit.
       - name: mode
         value: decide
-    # Exit 3 is now only force/dataset mode's "not yet" for inputs that are NOT
-    # builds (repo, pipeline-images or gitops context still arriving); a killed
-    # pod (137) is retried in every mode; every other outcome exits 0 or fails
-    # for real. Those inputs arrive within minutes: retry every minute for up to
-    # ~45 minutes. No maxDuration (Argo counts it from the first attempt; see
-    # tests/retry-window).
-    retryStrategy:
-      limit: 45
-      retryPolicy: OnFailure
-      # 3 = "not yet"; 137 = the pod was killed (OOM or a lost node) before it
-      # decided anything, which must never drop a forced event.
-      expression: "asInt(lastRetry.exitCode) == 3 || asInt(lastRetry.exitCode) == 137"
-      backoff:
-        duration: "60s"
-        factor: 1
+    # Exit 3 is only force/dataset mode's "not yet" for inputs that are NOT builds (repo,
+    # pipeline-images or gitops context still arriving); a killed pod is 137 in every mode;
+    # every other outcome exits 0 or fails for real. check-drift-attempts retries 3 and 137.
     outputs:
       parameters:
+      # No default on needs_build: a pod that exits 0 without writing it is an Argo error
+      # (retried), not "no build needed". The script writes it first, on every exit path.
       - name: needs_build
         valueFrom:
           path: /tmp/needs_build
-          default: "false"
       - name: head_sha
         valueFrom:
           path: /tmp/head_sha
