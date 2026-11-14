@@ -290,7 +290,8 @@ EOF
   cat > "$T/bin/curl" <<EOF
 #!/usr/bin/env bash
 case "\$*" in
-  *"/commits/dev"*) printf '{"sha": "%s"}' "$HEAD_SHA" ;;
+  *"/commits/dev"*) out=""; prev=""; for a in "\$@"; do [ "\$prev" = "-o" ] && out="\$a"; prev="\$a"; done
+    printf '{"sha": "%s"}' "$HEAD_SHA" > "\$out"; printf 200 ;;
   *"pipeline-context.yaml"*) cat "$T/gitops-context.yaml" ;;
   *"pipeline-images.yaml"*) if [ -f "$T/fixture-images.yaml" ]; then cat "$T/fixture-images.yaml"; else exit 22; fi ;;
   *) exit 22 ;;

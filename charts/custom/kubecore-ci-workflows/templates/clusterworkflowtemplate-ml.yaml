@@ -1368,7 +1368,8 @@ spec:
 {{ include "kubecore-ci-workflows.datasetChoicesScript" . | indent 8 }}
         # dataset-sha: what ml-ci-reconcile's DATASET DRIFT compares with the catalog later. "none" =
         # no step of this pipeline declares an input; "unread" = the catalog could not be read, the
-        # fields are free text, and the next successful check re-renders.
+        # fields are free text, and the next successful check re-renders; "no-store" = the context names
+        # no data store, nothing to read.
         rm -f /tmp/dataset-sha
         python3 - /workspace/out/workflow-template.yaml /tmp/context.yaml /var/run/secrets/kaos-lake/token /tmp/dataset-sha /tmp/steps.json <<'DSEOF'
         import importlib.util, json, sys
@@ -1384,6 +1385,12 @@ spec:
             print("datasets: no step of the pipeline declares an input")
             sys.exit(0)
         endpoint = (((yaml.safe_load(open(ctx_path)) or {}).get("lakefs") or {}).get("endpoint") or "").rstrip("/")
+        if not endpoint:
+            # An app whose context names no data store has no catalog to read: not "unread" (which
+            # ml-ci-reconcile re-renders for on every event), a fact it records as "no-store".
+            open(sha_path, "w").write("no-store")
+            print(f"datasets: the context has no data store; the fields of {', '.join(names)} stay free text")
+            sys.exit(0)
         try:
             datasets = dc.read_catalog(endpoint, token_path)
         except Exception as exc:  # noqa: BLE001
