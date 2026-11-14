@@ -303,6 +303,10 @@ DS_CM=none run_case false "$IDLE" "$HEAD_SHA" built
 expect_eq "$RC/$NEEDS" "0/false" "event, a pipeline without a dataset parameter: nothing"
 DS_CM="$OLD_DS" run_case false "$BUSY" "$HEAD_SHA" built
 expect_eq "$RC" "3" "event, a build in flight (its render may predate the release): waits (exit 3), never drops it"
+DS_CM="$OLD_DS" run_case false "$QUEUED_HEAD" "$HEAD_SHA" built
+expect_eq "$RC/$NEEDS" "0/false" "event, dataset drift but a build of HEAD is already queued: submits nothing (it renders from the current catalog when it starts)"
+DS_CM="$OLD_DS" run_case false "$QUEUED_OTHER" "$HEAD_SHA" built
+expect_eq "$RC/$NEEDS/$SHA" "0/true/$HEAD_SHA" "event, dataset drift and only a build of another commit queued: re-renders HEAD"
 run_case false "$IDLE" "" built
 expect_eq "$RC/$NEEDS" "0/false" "event, app repo unreadable: skips like the poll (the hourly poll catches up)"
 CTX_YAML=$(ctx_for 18922)
@@ -370,6 +374,35 @@ fanout_case "{\"items\":[$(cron svcapp ci-reconcile)]}"
 expect_eq "$RC/$(test -e "$T/created" && echo created || echo none)" "0/none" "only service apps: nothing, no error"
 CRONS_FAIL=1 fanout_case '{"items":[]}'
 expect_eq "$RC" "1" "an unreadable cluster fails the Workflow loudly (the hourly poll catches up)"
+
+# ── a build of the same commit in flight is never doubled (PRD novelcore/kaos#1911, chart 0.17.3) ──
+# live: one commit got ten ml-ci-build-reconciled-* in 55 minutes while its push build was queued.
+DATASET_EVENT=true run_case false "$QUEUED_HEAD" "$HEAD_SHA" unbuilt
+expect_eq "$RC/$NEEDS" "0/false" "event, HEAD never recorded but its push build is queued: submits nothing"
+expect_has "$OUT" "a build of aaaaaaa is already queued or running" "event, queued build of HEAD: says why"
+DATASET_EVENT=true run_case false "$QUEUED_ON_LOCK_HEAD" "$HEAD_SHA" unbuilt
+expect_eq "$RC/$NEEDS" "0/false" "event, a build of HEAD waiting on the lock (workflow Running): submits nothing"
+DATASET_EVENT=true run_case false "$QUEUED_OTHER" "$HEAD_SHA" unbuilt
+expect_eq "$RC/$NEEDS/$SHA" "0/true/$HEAD_SHA" "event, only a build of another commit queued: builds HEAD"
+DATASET_EVENT=true run_case false "$IDLE" "$HEAD_SHA" unbuilt
+expect_eq "$RC/$NEEDS/$SHA" "0/true/$HEAD_SHA" "event, nothing in flight, HEAD never built (lost webhook): builds HEAD"
+run_case false "$QUEUED_HEAD" "$HEAD_SHA" unbuilt
+expect_eq "$RC/$NEEDS" "0/false" "hourly poll, build of HEAD queued: submits nothing"
+run_case false "$QUEUED_ON_LOCK_HEAD" "$HEAD_SHA" unbuilt
+expect_eq "$RC/$NEEDS" "0/false" "hourly poll, build of HEAD waiting on the lock: submits nothing"
+run_case false "$IDLE" "$HEAD_SHA" unbuilt
+expect_eq "$RC/$NEEDS/$SHA" "0/true/$HEAD_SHA" "hourly poll, nothing in flight, HEAD never built: builds HEAD"
+# a reconciled build of HEAD counts like the push build
+QUEUED_RECONCILED_HEAD='{"items": [{"metadata": {"name": "ml-ci-build-reconciled-q"}, "status": {"phase": "Pending"},
+  "spec": {"arguments": {"parameters": [{"name": "app_name", "value": "app1"}, {"name": "commit_sha", "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, {"name": "event_type", "value": "reconcile"}]}}}]}'
+DATASET_EVENT=true run_case false "$QUEUED_RECONCILED_HEAD" "$HEAD_SHA" unbuilt
+expect_eq "$RC/$NEEDS" "0/false" "event, an earlier reconciled build of HEAD is queued: submits nothing"
+# a build of HEAD for ANOTHER app does not count
+QUEUED_HEAD_OTHER_APP='{"items": [{"metadata": {"name": "ml-ci-build-q"}, "status": {"phase": "Pending"},
+  "spec": {"arguments": {"parameters": [{"name": "app_name", "value": "app2"}, {"name": "commit_sha", "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}]}}}]}'
+DATASET_EVENT=true run_case false "$QUEUED_HEAD_OTHER_APP" "$HEAD_SHA" unbuilt
+expect_eq "$RC/$NEEDS" "0/true" "event, a build of the same sha for another app: builds HEAD"
+unset DATASET_EVENT
 
 echo "reconcile-trigger: ${PASSED} passed, ${FAILED} failed"
 exit "$FAILED"
