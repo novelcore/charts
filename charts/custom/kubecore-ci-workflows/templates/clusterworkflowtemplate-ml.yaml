@@ -162,6 +162,11 @@ spec:
     # (re-render, dataset, context) leaves them stale. See detect-steps.
     - name: kaos_lib_rebuild
       value: "false"
+    # dataset-only re-render ("true" only from ml-ci-reconcile's render-only submission, which enters at
+    # ml-ci-dataset-render): hera-enhance-commit re-checks before it pushes that this commit is still the
+    # app's HEAD and the last one built, so a render started for an old commit never overwrites a newer one.
+    - name: dataset_render
+      value: "false"
     - name: node_class
       value: {{ .Values.ci.defaultNodeClass | default (dig "platform.kubecore.io/nodegroup-type" "kubecorecpu" .Values.nodeSelector) | quote }}
     # pull request number when the run came from a PR ("" otherwise): the
@@ -208,6 +213,67 @@ spec:
           parameters:
           - name: locked
             value: "false"
+
+  # ml-ci-dataset-render — the entrypoint of a dataset-only re-render (PRD novelcore/kaos#1911 AC-24),
+  # submitted by ml-ci-reconcile only when the datasets are the ONLY thing that differs (the commit is
+  # built, context, engine and kaos-lib are in sync, every image the committed render references is
+  # built). It is what the unlocked render-run of ml-ci-build does for such a run, without the probe
+  # (a second clone and detect), the version, the kaos-lib status and the image record: the same
+  # clone, the same detect-steps, the SAME render-hera template with the same arguments
+  # (tests/dataset-short-path asserts it). Unlike render-run it holds the app's build mutex from the
+  # clone to the push, and hera-enhance-commit checks under it that nothing newer exists.
+  - name: ml-ci-dataset-render
+    steps:
+    # Reporting only, as in ml-ci-build: in the same group as the render so it does not delay it.
+    - - name: status-pending
+        continueOn:
+          failed: true
+        template: status
+        arguments:
+          parameters:
+          - name: state
+            value: "pending"
+          - name: description
+            value: "Re-rendering the dataset choices in Argo Workflows"
+      - name: render-run
+        template: ml-ci-dataset-run-locked
+    - - name: status
+        continueOn:
+          failed: true
+        template: status
+        arguments:
+          parameters:
+          - name: state
+            value: "success"
+          - name: description
+            value: "ML dataset choices re-rendered"
+
+  - name: ml-ci-dataset-run-locked
+    synchronization:
+      mutexes:
+      - name: "{{`{{workflow.parameters.app_name}}`}}-build"
+    steps:
+    - - name: run
+        template: ml-ci-dataset-run
+
+  - name: ml-ci-dataset-run
+    steps:
+    - - name: clone
+        template: clone
+    - - name: detect-steps
+        template: detect-steps
+    - - name: render-hera
+        template: render-hera
+        arguments:
+          parameters:
+          - name: changed_steps
+            value: "{{`{{steps.detect-steps.outputs.parameters.changed_steps}}`}}"
+          - name: engine
+            value: "{{`{{steps.detect-steps.outputs.parameters.engine}}`}}"
+          - name: engine_image
+            value: "{{`{{steps.detect-steps.outputs.parameters.engine_image}}`}}"
+          - name: engine_profile
+            value: "{{`{{steps.detect-steps.outputs.parameters.engine_profile}}`}}"
 
   # ml-ci-run-locked — ml-ci-run under the app's build mutex. Argo queues a
   # second build of the same app here (Pending node "Waiting for ... lock",
@@ -1308,6 +1374,13 @@ spec:
       # The commit the form is sealed with: read through the env var, never spliced into the script.
       - name: COMMIT_SHA
         value: "{{`{{workflow.parameters.commit_sha}}`}}"
+      # The dataset-only re-render re-checks its commit before it pushes (see below).
+      - name: DATASET_RENDER
+        value: "{{`{{workflow.parameters.dataset_render}}`}}"
+      - name: APP_REPO_URL
+        value: "{{`{{workflow.parameters.repo_url}}`}}"
+      - name: APP_REF
+        value: "{{`{{workflow.parameters.branch}}`}}"
       securityContext:
         runAsUser: 0
         runAsGroup: 0
@@ -1533,6 +1606,29 @@ spec:
         else:
             print("pipeline-images already has exactly the image-<step> keys the WFT references")
         IMGEOF
+        fi
+
+        # DATASET-ONLY RE-RENDER (ml-ci-dataset-render, under the app's build mutex): the render above
+        # was made for COMMIT_SHA, which ml-ci-reconcile saw as the app's HEAD and as built. Push it only
+        # when that still holds now, the last moment before the gitops write: a newer HEAD is rendered by
+        # the build that commit starts (it reads the current catalog), an unrecorded build of this commit
+        # is for the hourly poll's COMMIT DRIFT. Either way this render must not overwrite a newer one.
+        # An unreadable HEAD fails the run (red, retried by the next event or poll): never push unchecked.
+        if [ "${DATASET_RENDER:-false}" = "true" ]; then
+          APP_SLUG=$(printf '%s' "${APP_REPO_URL}" | sed -E 's|https://github.com/||; s|[.]git$||')
+          HEAD_NOW=$(curl -sf -H "Authorization: Bearer ${TOKEN}" -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${APP_SLUG}/commits/$(printf '%s' "${APP_REF}" | sed 's|^refs/heads/||')" | jq -r '.sha // empty') || HEAD_NOW=""
+          [ -n "$HEAD_NOW" ] || { echo "hera-enhance-commit: cannot read the HEAD of ${APP_SLUG} — nothing pushed" >&2; exit 1; }
+          LAST_NOW=""
+          [ ! -f "$IMAGES_FILE" ] || LAST_NOW=$(yq e '.data."last-built-sha" // ""' "$IMAGES_FILE")
+          if [ "$HEAD_NOW" != "$COMMIT_SHA" ]; then
+            echo "hera-enhance-commit: dataset re-render of ${COMMIT_SHA} skipped — ${APP_SLUG} is at ${HEAD_NOW} now; its build renders the current datasets"
+            exit 0
+          fi
+          if [ "$LAST_NOW" != "$COMMIT_SHA" ]; then
+            echo "hera-enhance-commit: dataset re-render of ${COMMIT_SHA} skipped — gitops records last-built-sha ${LAST_NOW:-<none>}; the hourly poll rebuilds the commit"
+            exit 0
+          fi
         fi
 
         cd /tmp/gitops

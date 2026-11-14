@@ -253,7 +253,9 @@ done
 # turns a build red, stops its gitops-notify, or skips the exit handler's run-report.
 for wf in ci-build ci-rc-build ml-ci-build; do
   N=$(yq "select(.kind == \"ClusterWorkflowTemplate\" and .metadata.name == \"$wf\") | .. | select(type == \"!!map\" and ((.template == \"status\" and (has(\"clusterScope\") | not)) or .templateRef.template == \"status\")) | .continueOn.failed" "$RENDERED" | sort | uniq -c | tr -s ' ')
-  expect_eq "$N" " 3 true" "$wf: all 3 status callers run with continueOn failed"
+  # ml-ci-build has two more callers: the pending and the success status of ml-ci-dataset-render.
+  CALLERS=3; [ "$wf" = ml-ci-build ] && CALLERS=5
+  expect_eq "$N" " ${CALLERS} true" "$wf: all ${CALLERS} status callers run with continueOn failed"
 done
 
 echo "deployment-status-retry: ${PASSED} passed, ${FAILED} failed"; exit "$FAILED"

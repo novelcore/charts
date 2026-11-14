@@ -205,6 +205,8 @@ spec:
             value: "{{`{{steps.check-drift.outputs.parameters.head_sha}}`}}"
           - name: kaos_lib_ref
             value: "{{`{{steps.check-drift.outputs.parameters.kaos_lib_ref}}`}}"
+          - name: render_only
+            value: "{{`{{steps.check-drift.outputs.parameters.render_only}}`}}"
 
   - name: check-drift
     # At most `ci.checkDrift.slots` check-drift pods run at once in the whole cluster (an Argo
@@ -261,6 +263,13 @@ spec:
         valueFrom:
           path: /tmp/kaos_lib_ref
           default: ""
+      # DATASET-ONLY RE-RENDER: "true" when the only reason to build is the dataset
+      # choices and everything else is in sync, so submit-build starts the short
+      # ml-ci-dataset-render run of ml-ci-build instead of the full one.
+      - name: render_only
+        valueFrom:
+          path: /tmp/render_only
+          default: "false"
     container:
       # kubectl + jq + curl baked in (tooling.kubectlImage, pinned). alpine/git
       # has NO kubectl: the baseline read silently produced "" on every poll, so
@@ -293,6 +302,7 @@ spec:
         # without them Argo logs "cannot save parameter" for each retried attempt.
         printf 'false' > /tmp/needs_build
         printf '' > /tmp/head_sha
+        printf 'false' > /tmp/render_only
         FORCE="{{`{{workflow.parameters.force}}`}}"
         DATASET_EVENT="{{`{{workflow.parameters.dataset_event}}`}}"
         # RETRY: the runs that must not drop their event when the state is "not
@@ -929,7 +939,40 @@ spec:
           else
             printf 'true' > /tmp/needs_build
             DS_SHOWN="${DS_LAST:-<unrecorded>}"
-            echo "reconcile: DATASET DRIFT — the live WFT was rendered with datasets ${DS_SHOWN:0:12} but the catalog is now ${DS_NOW:0:12}; submitting ml-ci-build to re-render"
+            # SHORT PATH: this block is reached only when nothing else drifted (the commit is built, the
+            # context and the engine are the ones last rendered, no kaos-lib rebuild is due), so what is
+            # left to do is the dataset choices of the form. When the images the committed render
+            # references are all built, that is a render-only run: ml-ci-build would take its unlocked
+            # render-run for it anyway (no step to build), without the probe, the version, the
+            # kaos-lib status and the image record. Anything unknown below sends the run to the full
+            # ml-ci-build, as before.
+            DS_WFT_REL="{{`{{workflow.parameters.workflow_template_path}}`}}"
+            short_path_why() {
+              [ "$KL_CTX_READ" = yes ] || { echo "gitops ${CTX_REL} unreadable"; return 0; }
+              [ -n "$ENG_KNOWN" ] || { echo "gitops ${IMAGES_REL} unreadable"; return 0; }
+              if [ -n "$KL_WANT" ] && [ "$KL_HAVE" != "none" ] && [ "$KL_HAVE" != "$KL_WANT" ]; then
+                echo "kaos-lib ${KL_HAVE:-<unrecorded>} -> ${KL_WANT} is not in sync"; return 0
+              fi
+              curl -sf -H "Authorization: Bearer ${TOKEN}" -H "Accept: application/vnd.github.raw" \
+                "https://api.github.com/repos/${GORG}/${GREPO}/contents/${DS_WFT_REL}?ref=${GBRANCH}" > /tmp/gitops-wft.yaml \
+                && [ -s /tmp/gitops-wft.yaml ] || { echo "no committed render at ${DS_WFT_REL}"; return 0; }
+              DS_KEYS=$(yq e '.. | select(tag == "!!map" and has("configMapKeyRef")) | .configMapKeyRef | select(.name == "'"${APP}"'-pipeline-images") | .key' /tmp/gitops-wft.yaml 2>/dev/null | sort -u) \
+                || { echo "the committed render cannot be read"; return 0; }
+              [ -n "$DS_KEYS" ] || { echo "the committed render references no image"; return 0; }
+              for _k in $DS_KEYS compose-and-validate; do
+                case "$(yq e ".data.\"${_k}\" // \"\"" /tmp/gitops-images.yaml)" in
+                  ""|*-latest) echo "image ${_k} is not built"; return 0 ;;
+                esac
+              done
+              return 0
+            }
+            SHORT_WHY=$(short_path_why)
+            if [ -z "$SHORT_WHY" ]; then
+              printf 'true' > /tmp/render_only
+              echo "reconcile: DATASET DRIFT — the live WFT was rendered with datasets ${DS_SHOWN:0:12} but the catalog is now ${DS_NOW:0:12}; nothing else drifted: submitting the render-only ml-ci-dataset-render run"
+            else
+              echo "reconcile: DATASET DRIFT — the live WFT was rendered with datasets ${DS_SHOWN:0:12} but the catalog is now ${DS_NOW:0:12}; submitting ml-ci-build to re-render (full path: ${SHORT_WHY})"
+            fi
             exit 0
           fi
         fi
@@ -961,6 +1004,8 @@ spec:
       - name: commit_sha
       - name: kaos_lib_ref
         value: ""
+      - name: render_only
+        value: "false"
     resource:
       action: create
       manifest: |
@@ -975,6 +1020,10 @@ spec:
             # The kaos-lib spec (sha256[:12]) this build is for: KAOS-LIB DRIFT's attempt guard.
             platform.kubecore.io/kaos-lib: "{{`{{inputs.parameters.kaos_lib_ref}}`}}"
         spec:
+          # entrypoint is on Strict templateReferencing's allowlist. The dataset-only re-render is the
+          # same ClusterWorkflowTemplate (same service account, volumes, exit handler) entered at its
+          # short render-only template.
+          entrypoint: "{{`{{=inputs.parameters.render_only == 'true' ? 'ml-ci-dataset-render' : 'ml-ci-build'}}`}}"
           workflowTemplateRef:
             name: ml-ci-build
             clusterScope: true
@@ -1016,3 +1065,7 @@ spec:
             # reconcile-submitted build leaves stale kaos-lib images alone.
             - name: kaos_lib_rebuild
               value: "{{`{{=inputs.parameters.kaos_lib_ref != '' ? 'true' : 'false'}}`}}"
+            # true only for the dataset-only re-render: its commit step re-checks, just before it
+            # pushes, that no newer commit and no unrecorded build exists (hera-enhance-commit).
+            - name: dataset_render
+              value: "{{`{{=inputs.parameters.render_only == 'true' ? 'true' : 'false'}}`}}"

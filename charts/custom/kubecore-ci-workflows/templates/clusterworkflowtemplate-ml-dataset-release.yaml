@@ -19,7 +19,8 @@ hourly backstop's check run now, not a new render path: ml-ci-reconcile compares
 the datasets the live pipeline was rendered with (dataset-sha) with the catalog
 and submits ml-ci-build to re-render on DATASET DRIFT, so an app whose datasets
 did not change costs one cheap pod, and an event that is lost is caught by the
-next hourly poll.
+next hourly poll. When the datasets are the only drift it submits ml-ci-build
+entered at ml-ci-dataset-render, the render-only run (chart 0.17.5).
 
 At most one fan-out runs at a time (this template's own mutex, below).
 
