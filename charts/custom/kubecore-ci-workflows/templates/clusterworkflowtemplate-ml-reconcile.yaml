@@ -319,7 +319,7 @@ spec:
         # (dev e2e, PRD kaos#1911). Nothing below reads a finished workflow from this list;
         # kl_last_try, which needs the finished attempts, asks for just those.
         if ! INFLIGHT=$(kubectl get workflows -n "{{`{{workflow.namespace}}`}}" -l 'workflows.argoproj.io/completed!=true' -o json 2>&1); then
-          [ "$FORCE" = "true" ] && not_yet "cannot list workflows (${INFLIGHT})"
+          [ "$RETRY" = "true" ] && not_yet "cannot list workflows (${INFLIGHT})"
           echo "reconcile: WARN cannot list workflows - in-flight state unknown, skipping this poll: ${INFLIGHT}"
           printf 'false' > /tmp/needs_build
           printf '' > /tmp/head_sha
@@ -392,8 +392,9 @@ spec:
           "https://api.github.com/repos/${SLUG}/commits/${BRANCH}" | jq -r '.sha // empty')
         if [ -z "$HEAD_SHA" ]; then
           # A transient API failure must NOT look like drift and storm builds.
-          # force: at app creation the repo may not exist yet.
-          [ "$FORCE" = "true" ] && not_yet "could not read HEAD for ${SLUG}@${BRANCH}"
+          # force: at app creation the repo may not exist yet. A dataset event: the data store
+          # announced a change once and no poll is behind it, so a GitHub blip is "not yet".
+          [ "$RETRY" = "true" ] && not_yet "could not read HEAD for ${SLUG}@${BRANCH}"
           echo "reconcile: could not read HEAD for ${SLUG}@${BRANCH} — skipping this poll"
           printf 'false' > /tmp/needs_build
           printf '' > /tmp/head_sha
@@ -453,6 +454,7 @@ spec:
                 "https://api.github.com/repos/${GORG}/${GREPO}/contents/${IMAGES_REL}?ref=${GBRANCH}" \
                 | sed -n 's/^  namespace: *"\{0,1\}\([^"]*\)"\{0,1\}$/\1/p' | head -1)
               if [ -z "${GITOPS_NS}" ]; then
+                [ "$DATASET_EVENT" = "true" ] && not_yet "${ML_NS}/${APP}-pipeline-images absent and gitops ${IMAGES_REL} unreadable"
                 echo "reconcile: WARN ${ML_NS}/${APP}-pipeline-images absent and gitops ${IMAGES_REL} unreadable — skipping this poll"
               elif [ "${GITOPS_NS}" != "${ML_NS}" ]; then
                 printf 'true' > /tmp/needs_build
@@ -460,12 +462,13 @@ spec:
                 echo "reconcile: NAMESPACE DRIFT — gitops pins ${APP}-pipeline-images to '${GITOPS_NS}' but the app now runs in '${ML_NS}'; submitting ml-ci-build to relocate it"
                 exit 0
               else
-                # force: a new app's pipeline-images is still syncing.
-                [ "$FORCE" = "true" ] && not_yet "${ML_NS}/${APP}-pipeline-images absent, gitops already targets '${ML_NS}' (ArgoCD sync pending)"
+                # force or a dataset event: a new app's pipeline-images is still syncing.
+                [ "$RETRY" = "true" ] && not_yet "${ML_NS}/${APP}-pipeline-images absent, gitops already targets '${ML_NS}' (ArgoCD sync pending)"
                 echo "reconcile: ${ML_NS}/${APP}-pipeline-images absent but gitops already targets '${ML_NS}' — waiting for ArgoCD; skipping this poll"
               fi
               ;;
             *)
+              [ "$DATASET_EVENT" = "true" ] && not_yet "cannot read ${ML_NS}/${APP}-pipeline-images (${CM})"
               echo "reconcile: cannot read ${ML_NS}/${APP}-pipeline-images — skipping this poll: ${CM}"
               ;;
           esac
@@ -906,6 +909,9 @@ spec:
         elif [ -z "$DS_LAST" ] && [ "$DATASET_EVENT" != "true" ]; then
           echo "reconcile: no dataset-sha recorded yet (rendered before it existed) — dataset drift unknown this poll"
         elif [ -z "$DS_ENDPOINT" ]; then
+          # An unreadable pipeline-context (a Kubernetes API blip, or the operator has not written the
+          # lakeFS endpoint yet) leaves no endpoint: in a dataset event that is "not yet", not "nothing to do".
+          [ "$DATASET_EVENT" = "true" ] && not_yet "no lakeFS endpoint in ${ML_NS}/${APP}-pipeline-context"
           echo "reconcile: WARN no lakeFS endpoint in ${ML_NS}/${APP}-pipeline-context — dataset drift unknown this poll"
         elif ! DS_NOW=$(python3 -I /tmp/dataset-choices.py digest "$DS_ENDPOINT" /var/run/secrets/kaos-lake/token 2>/tmp/dataset-err); then
           # The helper already tried the catalog three times. A dataset event exists because the data
@@ -956,6 +962,14 @@ spec:
             path: token
 
   - name: submit-build
+    # A Kubernetes API blip on the create must not drop the build a trigger (a dataset event
+    # among them) decided on and has no poll behind it: retry the create, bounded.
+    retryStrategy:
+      limit: 3
+      retryPolicy: Always
+      backoff:
+        duration: "10s"
+        factor: 2
     inputs:
       parameters:
       - name: commit_sha

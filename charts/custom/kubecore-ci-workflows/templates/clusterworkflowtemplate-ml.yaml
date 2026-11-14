@@ -1367,8 +1367,8 @@ spec:
         # `pipeline-version`).
 {{ include "kubecore-ci-workflows.datasetChoicesScript" . | indent 8 }}
         # dataset-sha: what ml-ci-reconcile's DATASET DRIFT compares with the catalog later. "none" =
-        # no step of this pipeline declares an input; absent = the catalog could not be read, so the
-        # record of the last good render stays.
+        # no step of this pipeline declares an input; "unread" = the catalog could not be read, the
+        # fields are free text, and the next successful check re-renders.
         rm -f /tmp/dataset-sha
         python3 - /workspace/out/workflow-template.yaml /tmp/context.yaml /var/run/secrets/kaos-lake/token /tmp/dataset-sha /tmp/steps.json <<'DSEOF'
         import importlib.util, json, sys
@@ -1387,6 +1387,10 @@ spec:
         try:
             datasets = dc.read_catalog(endpoint, token_path)
         except Exception as exc:  # noqa: BLE001
+            # The form this render commits has free-text fields, so the digest of the last good render no
+            # longer describes it: record "unread" and the next successful DATASET DRIFT check re-renders.
+            # (Keeping the old digest left a form with no picker "in sync" until the catalog next changed.)
+            open(sha_path, "w").write("unread")
             print(f"datasets: catalog not read ({type(exc).__name__}: {exc}); the fields of {', '.join(names)} stay free text")
             sys.exit(0)
         choices = dc.choices(datasets)

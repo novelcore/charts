@@ -86,11 +86,12 @@ run_case() {
   cat > "$T/bin/kubectl" <<EOF
 #!/usr/bin/env bash
 case "\$*" in
-  *"get workflows"*) printf '%s' '$2' ;;
+  *"get workflows"*) [ -z '${LIST_FAIL:-}' ] || { echo 'Unable to connect to the server' >&2; exit 1; }; printf '%s' '$2' ;;
   *"get configmap"*"pipeline-context"*)
     if [ -n '${CTX_YAML:-}' ]; then printf '%s' '${CTX_YAML:-}'; exit 0; fi
     echo 'Error from server (NotFound)'; exit 1 ;;
   *"get configmap"*)
+    if [ -n '${CM_ERR:-}' ]; then echo 'Unable to connect to the server: net/http: TLS handshake timeout'; exit 1; fi
     if [ -z '$CMJ' ]; then echo 'Error from server (NotFound): configmaps "app1-pipeline-images" not found'; exit 1; fi
     printf '%s' '$CMJ' ;;
   *) echo "stub kubectl: unexpected \$*" >&2; exit 1 ;;
@@ -101,7 +102,8 @@ EOF
 echo "\$*" >> "$T/curl.log"
 case "\$*" in
   *"/commits/"*) [ -n '$3' ] || exit 22; printf '{"sha":"%s"}' '$3' ;;
-  *"pipeline-images.yaml"*) printf 'metadata:\n  namespace: ml-proj\ndata:\n  dataset-sha: %s\n' '${GITOPS_DS:-}'
+  *"pipeline-images.yaml"*) [ -z '${GITOPS_IMG_FAIL:-}' ] || exit 22
+    printf 'metadata:\n  namespace: ml-proj\ndata:\n  dataset-sha: %s\n' '${GITOPS_DS:-}'
     [ -z '${GITOPS_KL:-}' ] || printf '  kaos-lib-package: "%s"\n' '${GITOPS_KL:-}' ;;
   *"pipeline-context.yaml"*) printf '%s' '$GITOPS_CTX' ;;
   *) exit 22 ;;
@@ -308,7 +310,27 @@ expect_eq "$RC/$NEEDS" "0/false" "event, dataset drift but a build of HEAD is al
 DS_CM="$OLD_DS" run_case false "$QUEUED_OTHER" "$HEAD_SHA" built
 expect_eq "$RC/$NEEDS/$SHA" "0/true/$HEAD_SHA" "event, dataset drift and only a build of another commit queued: re-renders HEAD"
 run_case false "$IDLE" "" built
-expect_eq "$RC/$NEEDS" "0/false" "event, app repo unreadable: skips like the poll (the hourly poll catches up)"
+expect_eq "$RC/$NEEDS/$SHA" "3/false/" "event, app repo unreadable on GitHub: not yet (exit 3), the event is not dropped"
+expect_has "$OUT" "could not read HEAD" "event, app repo unreadable: says so"
+LIST_FAIL=1 run_case false "$IDLE" "$HEAD_SHA" built
+expect_eq "$RC/$NEEDS" "3/false" "event, the Kubernetes API cannot list workflows: not yet (exit 3)"
+unset LIST_FAIL
+CM_ERR=1 run_case false "$IDLE" "$HEAD_SHA" built
+expect_eq "$RC/$NEEDS" "3/false" "event, pipeline-images unreadable (API blip, not NotFound): not yet (exit 3)"
+unset CM_ERR
+run_case false "$IDLE" "$HEAD_SHA" absent
+expect_eq "$RC/$NEEDS" "3/false" "event, pipeline-images still syncing (gitops targets this namespace): not yet (exit 3)"
+GITOPS_IMG_FAIL=1 run_case false "$IDLE" "$HEAD_SHA" absent
+expect_eq "$RC/$NEEDS" "3/false" "event, pipeline-images absent and gitops unreadable: not yet (exit 3)"
+unset GITOPS_IMG_FAIL
+CTX_YAML="computeClasses:"
+DS_CM="$OLD_DS" run_case false "$IDLE" "$HEAD_SHA" built
+expect_eq "$RC/$NEEDS" "3/false" "event, no lakeFS endpoint readable in the context (API blip or not written yet): not yet (exit 3)"
+CTX_YAML=$(ctx_for 18921)
+DS_CM=unread GITOPS_DS=unread run_case false "$IDLE" "$HEAD_SHA" built
+expect_eq "$RC/$NEEDS" "0/true" "event, the last render could not read the catalog (unread): re-renders"
+DS_CM=unread GITOPS_DS=unread run_case false "$QUEUED_ON_LOCK" "$HEAD_SHA" built
+expect_eq "$RC/$NEEDS" "0/true" "event, a build of another commit waits on the lock behind us: decides now"
 CTX_YAML=$(ctx_for 18922)
 DS_CM="$OLD_DS" run_case false "$IDLE" "$HEAD_SHA" built
 expect_eq "$RC/$NEEDS" "3/false" "event, catalog answers 503 (after its retries): not yet, exit 3 so Argo retries; the event is not dropped"
@@ -319,10 +341,20 @@ DS_CM="$OLD_DS" run_case false "$IDLE" "$HEAD_SHA" built
 expect_eq "$RC/$NEEDS" "3/false" "event, catalog unreachable: not yet (exit 3)"
 unset DATASET_EVENT
 CTX_YAML=$(ctx_for 18922)
+DS_CM=unread run_case false "$IDLE" "$HEAD_SHA" built
+expect_eq "$RC/$NEEDS" "0/false" "hourly poll, last render unread and the catalog still down: no drift, no build"
+CTX_YAML=$(ctx_for 18921)
+DS_CM=unread GITOPS_DS=unread run_case false "$IDLE" "$HEAD_SHA" built
+expect_eq "$RC/$NEEDS" "0/true" "hourly poll, last render could not read the catalog (unread) and it reads now: re-renders (the free-text form heals)"
+CTX_YAML=$(ctx_for 18922)
 DS_CM="$OLD_DS" run_case false "$IDLE" "$HEAD_SHA" built
 expect_eq "$RC/$NEEDS" "0/false" "hourly poll, catalog answers 503: no drift, no build, exit 0 as before"
 expect_has "$OUT" "dataset drift unknown" "hourly poll, unreadable catalog: says it is unknown"
 unset DATASET_EVENT CTX_YAML DS_CM GITOPS_DS
+
+SB_RETRY=$(yq 'select(.kind == "ClusterWorkflowTemplate" and .metadata.name == "ml-ci-reconcile")
+    | .spec.templates[] | select(.name == "submit-build") | .retryStrategy.limit' "$RENDERED")
+expect_eq "$SB_RETRY" "3" "submit-build retries a failed create (a Kubernetes API blip never drops the decided build)"
 
 DE_DEFAULT=$(yq 'select(.kind == "ClusterWorkflowTemplate" and .metadata.name == "ml-ci-reconcile")
     | .spec.arguments.parameters[] | select(.name == "dataset_event") | .value' "$RENDERED")
@@ -330,6 +362,12 @@ expect_eq "$DE_DEFAULT" "false" "dataset_event defaults to false (the CronWorkfl
 LAKE_AUD=$(yq 'select(.kind == "ClusterWorkflowTemplate" and .metadata.name == "ml-ci-reconcile")
     | .spec.templates[] | select(.name == "check-drift") | .volumes[] | select(.name == "kaos-lake-token") | .projected.sources[0].serviceAccountToken.audience' "$RENDERED")
 expect_eq "$LAKE_AUD" "kaos-lake" "check-drift mounts a kaos-lake audience token for the catalog"
+
+run_case false "$IDLE" "" built
+expect_eq "$RC/$NEEDS" "0/false" "hourly poll, app repo unreadable: still skips (exit 0)"
+LIST_FAIL=1 run_case false "$IDLE" "$HEAD_SHA" built
+expect_eq "$RC/$NEEDS" "0/false" "hourly poll, workflows unlistable: still skips (exit 0)"
+unset LIST_FAIL
 
 # ── ml-ci-dataset-release: the fan-out kaos-lake's event starts ──────────────
 FANOUT_SRC="${BASE_TMP}/fanout.src"
@@ -350,12 +388,15 @@ fanout_case() {
 #!/usr/bin/env bash
 case "\$*" in
   *"get cronworkflows"*) [ -z "\${CRONS_FAIL:-}" ] || { echo forbidden >&2; exit 1; }; cat "$T/crons.json" ;;
-  *"create -n ci -f -"*) cat >> "$T/created" ; echo >> "$T/created" ;;
+  *"create -n ci -f -"*)
+    n=\$(cat "$T/tries" 2>/dev/null || echo 0); echo \$((n + 1)) > "$T/tries"; body=\$(cat)
+    [ "\$((n + 1))" -gt "\${CREATE_FAILS:-0}" ] || { echo 'etcdserver: request timed out' >&2; exit 1; }
+    printf '%s\n' "\$body" >> "$T/created" ;;
   *) echo "stub kubectl: unexpected \$*" >&2; exit 1 ;;
 esac
 EOF
   chmod +x "$T/bin/kubectl"
-  sed -e "s#{{workflow.namespace}}#ci#g" "$FANOUT_SRC" > "$T/fanout.sh"
+  sed -e "s#{{workflow.namespace}}#ci#g" -e 's#sleep #: #' "$FANOUT_SRC" > "$T/fanout.sh"
   OUT=$(PATH="$T/bin:$PATH" bash "$T/fanout.sh" 2>&1); RC=$?
 }
 cron() { # NAME TEMPLATE [SUSPEND]
@@ -382,6 +423,11 @@ expect_eq "$RC" "0" "a project with no ML app: no error"
 expect_eq "$(test -e "$T/created" && echo created || echo none)" "none" "and nothing is created"
 fanout_case "{\"items\":[$(cron svcapp ci-reconcile)]}"
 expect_eq "$RC/$(test -e "$T/created" && echo created || echo none)" "0/none" "only service apps: nothing, no error"
+CREATE_FAILS=2 fanout_case "{\"items\":[$(cron mlapp ml-ci-reconcile)]}"
+expect_eq "$RC/$(cat "$T/tries")/$(grep -c . "$T/created")" "0/3/1" "fan-out, the API refuses a create twice: the third try lands, one Workflow"
+CREATE_FAILS=9 fanout_case "{\"items\":[$(cron mlapp ml-ci-reconcile),$(cron other ml-ci-reconcile)]}"
+expect_eq "$RC/$(cat "$T/tries")" "1/6" "fan-out, the API keeps refusing: three tries per app, then the Workflow fails loudly"
+unset CREATE_FAILS
 CRONS_FAIL=1 fanout_case '{"items":[]}'
 expect_eq "$RC" "1" "an unreadable cluster fails the Workflow loudly (the hourly poll catches up)"
 
