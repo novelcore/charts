@@ -252,14 +252,18 @@ spec:
     # happens in this template, with no slot held.
     # A retryStrategy cannot read the attempt's exit code on a steps template (a steps node has
     # no exit code; lastRetry.exitCode is then "0"), so the attempt does not fail this template:
-    # it continues on failure, and `not-yet` fails it, a retry, only for exit 3 ("not yet") and
-    # 137 (the pod was killed before it decided anything: a forced event must not be dropped).
-    # Any other exit code is handed up as exit_code and fails check-drift-with-retry. Fail
-    # closed: an attempt node that ended in Error (pod deleted, node lost, outputs unreadable)
-    # fails this template and is retried; an attempt that Failed with no exit code (its pod never
-    # ran) has no exitCode to read, so `not-yet` uses an expression that tolerates it (a plain
-    # plain reference to steps.attempt.exitCode there made Argo requeue the step forever, a wedged run holding
-    # the app's build mutex) and exit_code defaults to 1, a visible failure.
+    # check-drift-once always ends with a result code `rc`, and `not-yet` fails this template, a
+    # retry, only for rc 3 ("not yet") and 137 (the pod was killed before it decided anything: a
+    # forced event must not be dropped). Any other code is handed up as exit_code and fails
+    # check-drift-with-retry.
+    # NOTHING here reads steps.<name>.exitCode. Argo resolves a `when` strictly: an attempt that
+    # Failed with no exit code (its pod never ran) leaves that name out of scope, the step is
+    # requeued forever and the run is wedged holding the app's build mutex; `??` does not help.
+    # `rc` is an output of check-drift-once with a default, so it always resolves.
+    # Fail closed: a pod that left no rc (it never ran, or its whole container was killed: an
+    # out-of-memory kill takes the process that saves outputs with it) reads 137 and is retried
+    # within the budget, as 137 always was; an attempt node that ended in Error (pod deleted,
+    # node lost, outputs unreadable) fails this template and is retried. Nothing reads as 0.
     # Budget as before: 45 retries, 60 s apart, no maxDuration (Argo counts it from the first
     # attempt; see tests/retry-window).
     inputs:
@@ -274,23 +278,20 @@ spec:
         factor: 1
     steps:
     - - name: attempt
-        template: check-drift
-        continueOn:
-          failed: true
+        template: check-drift-once
         arguments:
           parameters:
           - name: mode
             value: "{{`{{inputs.parameters.mode}}`}}"
     - - name: not-yet
         template: exit-with-code
-        when: "{{`{{=steps.attempt.status == 'Failed' && ((steps.attempt.exitCode ?? '') == '3' || (steps.attempt.exitCode ?? '') == '137')}}`}}"
+        when: "{{`{{steps.attempt.outputs.parameters.rc}}`}} == 3 || {{`{{steps.attempt.outputs.parameters.rc}}`}} == 137"
         arguments:
           parameters:
           - name: code
-            value: "{{`{{=steps.attempt.exitCode ?? '1'}}`}}"
+            value: "{{`{{steps.attempt.outputs.parameters.rc}}`}}"
     outputs:
       parameters:
-      # No default reads as a pass: an attempt that left no output is not "no build needed".
       - name: needs_build
         valueFrom:
           parameter: "{{`{{steps.attempt.outputs.parameters.needs_build}}`}}"
@@ -300,12 +301,48 @@ spec:
       - name: kaos_lib_ref
         valueFrom:
           parameter: "{{`{{steps.attempt.outputs.parameters.kaos_lib_ref}}`}}"
-      # An attempt that failed with no exit code (its pod never ran: deadline, image) is a
-      # failure, never a 0.
       - name: exit_code
         valueFrom:
-          parameter: "{{`{{steps.attempt.exitCode}}`}}"
+          parameter: "{{`{{steps.attempt.outputs.parameters.rc}}`}}"
           default: "1"
+
+  # ONE ATTEMPT, with a result that always resolves. The pod may fail (continueOn) and may leave
+  # no outputs at all (it never ran); every output here has a default, so the retry loop reads
+  # plain values and never a name that is out of scope. No lock, no retryStrategy.
+  # No default reads as a pass: when the pod left nothing, needs_build is "unknown" (never
+  # "false") and rc is 137 (killed: retried by the loop, never a 0).
+  - name: check-drift-once
+    inputs:
+      parameters:
+      - name: mode
+        value: decide
+    steps:
+    - - name: run
+        template: check-drift
+        continueOn:
+          failed: true
+        arguments:
+          parameters:
+          - name: mode
+            value: "{{`{{inputs.parameters.mode}}`}}"
+    outputs:
+      parameters:
+      - name: needs_build
+        valueFrom:
+          parameter: "{{`{{steps.run.outputs.parameters.needs_build}}`}}"
+          default: "unknown"
+      - name: head_sha
+        valueFrom:
+          parameter: "{{`{{steps.run.outputs.parameters.head_sha}}`}}"
+          default: ""
+      - name: kaos_lib_ref
+        valueFrom:
+          parameter: "{{`{{steps.run.outputs.parameters.kaos_lib_ref}}`}}"
+          default: ""
+      - name: rc
+        valueFrom:
+          parameter: "{{`{{steps.run.outputs.parameters.rc}}`}}"
+          default: "137"
 
   # Fails with the given exit code. The retry loop fails through it for a "not yet", and the
   # check fails through it for a real failure; it runs only on those paths.
@@ -368,6 +405,13 @@ spec:
         valueFrom:
           path: /tmp/kaos_lib_ref
           default: ""
+      # The script's exit code, as an output (written by its EXIT trap; 137 from its first
+      # line until then, so a script killed mid-run reads as killed). The retry loop reads this,
+      # never the node's exitCode, which is absent when the pod never ran.
+      - name: rc
+        valueFrom:
+          path: /tmp/rc
+          default: "137"
     container:
       # kubectl + jq + curl baked in (tooling.kubectlImage, pinned). alpine/git
       # has NO kubectl: the baseline read silently produced "" on every poll, so
@@ -385,6 +429,9 @@ spec:
       args:
       - |
         set -eu
+        # rc output, see outputs: killed (137) until the EXIT trap records the real exit code.
+        printf '137' > /tmp/rc
+        trap 'rc=$?; printf "%s" "$rc" > /tmp/rc' EXIT
         command -v kubectl >/dev/null 2>&1 || { echo "FATAL: kubectl missing from this image" >&2; exit 1; }
 
         # IN-FLIGHT GUARD (kubecore-operator#872): never stack a new build on an

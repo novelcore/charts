@@ -228,7 +228,7 @@ expect_eq "$(cat "$T/kaos_lib_ref" 2>/dev/null)" "" "backstop (not forced): a pi
 
 RETRY=$(yq 'select(.kind == "ClusterWorkflowTemplate" and .metadata.name == "ml-ci-reconcile")
     | .spec.templates[] | select(.name == "check-drift-attempts") | .steps[1][0].when' "$RENDERED")
-expect_eq "$RETRY" "{{=steps.attempt.status == 'Failed' && ((steps.attempt.exitCode ?? '') == '3' || (steps.attempt.exitCode ?? '') == '137')}}" "check-drift is retried (a slot per attempt) on the force-mode not-yet (3) and a killed pod (137)"
+expect_eq "$RETRY" "{{steps.attempt.outputs.parameters.rc}} == 3 || {{steps.attempt.outputs.parameters.rc}} == 137" "check-drift is retried (a slot per attempt) on the force-mode not-yet (3) and a killed pod (137)"
 FORCE_DEFAULT=$(yq 'select(.kind == "ClusterWorkflowTemplate" and .metadata.name == "ml-ci-reconcile")
     | .spec.arguments.parameters[] | select(.name == "force") | .value' "$RENDERED")
 expect_eq "$FORCE_DEFAULT" "false" "force defaults to false (CronWorkflows rendered before it keep the backstop)"

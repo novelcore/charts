@@ -55,9 +55,12 @@ expect_eq "$(yq "$WF | select(.name==\"check-drift\") | .retryStrategy" "$R")" "
 RL="$WF | select(.name==\"check-drift-attempts\")"
 expect_eq "$(yq "$RL | .synchronization" "$R")" "null" "the retrying template holds no semaphore and no mutex"
 expect_eq "$(yq "$RL | .retryStrategy.limit" "$R")/$(yq "$RL | .retryStrategy.backoff.duration" "$R")/$(yq "$RL | .retryStrategy.backoff.factor" "$R")/$(yq "$RL | .retryStrategy.backoff.maxDuration" "$R")" "45/60s/1/null" "the budget is unchanged: 45 retries, 60 s apart, no maxDuration"
-expect_eq "$(yq "$RL | .steps[0][0].template" "$R")" "check-drift" "each attempt is one check-drift (one slot)"
-expect_eq "$(yq "$RL | .steps[0][0].continueOn.failed" "$R")" "true" "an attempt's exit code is read by the loop, not hidden by it"
-expect_eq "$(yq "$RL | .steps[1][0].when" "$R")" "{{=steps.attempt.status == 'Failed' && ((steps.attempt.exitCode ?? '') == '3' || (steps.attempt.exitCode ?? '') == '137')}}" "only 3 (not yet) and 137 (killed pod) fail the loop into a retry"
+ONCE="$WF | select(.name==\"check-drift-once\")"
+expect_eq "$(yq "$RL | .steps[0][0].template" "$R")" "check-drift-once" "each attempt is one check-drift-once"
+expect_eq "$(yq "$ONCE | .steps[0][0].template" "$R")/$(yq "$ONCE | .steps | length" "$R")" "check-drift/1" "check-drift-once is one check-drift (one slot)"
+expect_eq "$(yq "$ONCE | .steps[0][0].continueOn.failed" "$R")" "true" "an attempt's result code is read by the loop, not hidden by it"
+expect_eq "$(yq "$ONCE | .synchronization" "$R")/$(yq "$ONCE | .retryStrategy" "$R")" "null/null" "check-drift-once holds no lock and does not retry"
+expect_eq "$(yq "$RL | .steps[1][0].when" "$R")" "{{steps.attempt.outputs.parameters.rc}} == 3 || {{steps.attempt.outputs.parameters.rc}} == 137" "only 3 (not yet) and 137 (killed pod) fail the loop into a retry"
 expect_eq "$(yq "$WF | select(.name==\"check-drift-with-retry\") | .synchronization" "$R")" "null" "the wrapper callers use holds no lock"
 expect_eq "$(yq "$WF | select(.name==\"check-drift-with-retry\") | .retryStrategy" "$R")" "null" "the wrapper has no retryStrategy of its own"
 expect_eq "$(yq "$WF | select(.name==\"check-drift-with-retry\") | .steps[1][0].when" "$R")" "{{steps.loop.outputs.parameters.exit_code}} != 0" "a real failure (not 0, 3, 137) still fails the check, at once"
@@ -69,25 +72,37 @@ for o in needs_build head_sha kaos_lib_ref; do
   expect_eq "$(yq "$WF | select(.name==\"check-drift-with-retry\") | .outputs.parameters[] | select(.name==\"$o\") | .valueFrom.parameter" "$R")" "{{steps.loop.outputs.parameters.$o}}" "the wrapper hands $o through"
   expect_eq "$(yq "$RL | .outputs.parameters[] | select(.name==\"$o\") | .valueFrom.parameter" "$R")" "{{steps.attempt.outputs.parameters.$o}}" "the loop hands the last attempt's $o up"
 done
-# ── render: fail closed. No default in the loop may read as a pass or as "no build needed" ──
+# ── render: fail closed. Nothing reads an exit code, and no default reads as a pass ──
 # Measured live (Argo v4.0.6, lab): an attempt Error (pod deleted) fails the loop group and is retried;
-# an attempt that Failed with no exit code (its pod never ran) made a plain {{steps.attempt.exitCode}}
-# in a `when` requeue forever (a wedged run holding the app's build mutex); a pod that exits 0
-# without writing needs_build passed with the default "false". Hence the expression and no defaults.
+# an attempt that Failed with no exit code (its pod never ran) leaves steps.<name>.exitCode out of
+# scope, and Argo resolves a `when` strictly: the step was requeued for ever (a wedged run holding the
+# app's build mutex), with or without `??`. So the pod writes its exit code to the output `rc`,
+# check-drift-once gives every output a default, and the loop reads plain values.
+expect_eq "$(yq "$WF | select(.name==\"check-drift-attempts\" or .name==\"check-drift-once\" or .name==\"check-drift-with-retry\" or .name==\"decide-and-submit\" or .name==\"ml-ci-reconcile\")" "$R" | grep -v '^ *#' | grep -c 'exitCode')" "0" "no step of the loop or of its callers reads an exitCode"
+for o in needs_build head_sha kaos_lib_ref rc; do
+  expect_eq "$(yq "$ONCE | .outputs.parameters[] | select(.name==\"$o\") | .valueFrom.parameter" "$R")" "{{steps.run.outputs.parameters.$o}}" "check-drift-once hands the pod's $o up"
+  expect_eq "$(yq "$ONCE | .outputs.parameters[] | select(.name==\"$o\") | .valueFrom | has(\"default\")" "$R")" "true" "check-drift-once's $o always resolves (a default)"
+done
+expect_eq "$(yq "$ONCE | .outputs.parameters[] | select(.name==\"rc\") | .valueFrom.default" "$R")" "137" "a pod that left no result (never ran, or its container was killed) reads as killed: retried within the budget, never a pass"
+expect_eq "$(yq "$ONCE | .outputs.parameters[] | select(.name==\"needs_build\") | .valueFrom.default" "$R")" "unknown" "a pod that left nothing is not 'no build needed' and not 'build'"
+expect_eq "$(yq "$WF | select(.name==\"check-drift\") | .outputs.parameters[] | select(.name==\"rc\") | .valueFrom.path" "$R")/$(yq "$WF | select(.name==\"check-drift\") | .outputs.parameters[] | select(.name==\"rc\") | .valueFrom.default" "$R")" "/tmp/rc/137" "the check pod reports its exit code as the output rc"
 for o in needs_build head_sha kaos_lib_ref; do
-  expect_eq "$(yq "$RL | .outputs.parameters[] | select(.name==\"$o\") | .valueFrom.default" "$R")" "null" "the loop's $o has no default (a missing output is an error, retried, never 'no build needed')"
+  expect_eq "$(yq "$RL | .outputs.parameters[] | select(.name==\"$o\") | .valueFrom.default" "$R")" "null" "the loop's $o has no default"
   expect_eq "$(yq "$WF | select(.name==\"check-drift-with-retry\") | .outputs.parameters[] | select(.name==\"$o\") | .valueFrom.default" "$R")" "null" "the wrapper's $o has no default"
 done
 expect_eq "$(yq "$WF | select(.name==\"check-drift\") | .outputs.parameters[] | select(.name==\"needs_build\") | .valueFrom.default" "$R")" "null" "a check pod that exits 0 without writing needs_build is an error, not 'no build needed'"
-expect_eq "$(yq "$RL | .outputs.parameters[] | select(.name==\"exit_code\") | .valueFrom.default" "$R")" "1" "an attempt with no exit code (pod never ran) is a failure (1), never a 0"
-expect_eq "$(yq "$WF | select(.name==\"check-drift-with-retry\") | .steps[1][0].when" "$R" | grep -c 'exit_code}} != 0')" "1" "the verdict reads exit_code, which always resolves (default 1)"
-expect_eq "$(yq "$RL | .steps[1][0].when" "$R" | grep -o '?? ' | wc -l | tr -d ' ')" "2" "not-yet reads the exit code with a fallback: an unresolved plain reference would requeue the step for ever"
-expect_eq "$(yq "$RL | .steps[1][0].when" "$R" | grep -c "status == 'Failed'")" "1" "not-yet requires the attempt to have Failed (an Error node fails the group and is retried by Argo)"
-expect_eq "$(yq "$RL | .steps[1][0].arguments.parameters[0].value" "$R")" "{{=steps.attempt.exitCode ?? '1'}}" "not-yet's own code falls back to a failure"
+expect_eq "$(yq "$RL | .outputs.parameters[] | select(.name==\"exit_code\") | .valueFrom.parameter" "$R")/$(yq "$RL | .outputs.parameters[] | select(.name==\"exit_code\") | .valueFrom.default" "$R")" "{{steps.attempt.outputs.parameters.rc}}/1" "the loop hands the last attempt's rc up as exit_code (1 when unreadable, never 0)"
+expect_eq "$(yq "$WF | select(.name==\"check-drift-with-retry\") | .steps[1][0].when" "$R" | grep -c 'exit_code}} != 0')" "1" "the verdict reads exit_code, which always resolves"
+expect_eq "$(yq "$RL | .steps[1][0].arguments.parameters[0].value" "$R")" "{{steps.attempt.outputs.parameters.rc}}" "not-yet fails with the attempt's own code"
+expect_eq "$(yq "$ONCE | .steps[0][0].continueOn.error" "$R")" "null" "an attempt that ended in Error is not continued past: it fails the loop and is retried"
+# The script records its exit code on every path: 137 from its first line, the real code from its EXIT trap.
+CDS=$(yq "$WF | select(.name==\"check-drift\") | .container.args[0]" "$R")
+expect_eq "$(printf '%s\n' "$CDS" | grep -v '^ *#' | sed -n '2p' | tr -s ' ')" "printf '137' > /tmp/rc" "the script writes rc (killed) before anything can fail"
+expect_eq "$(printf '%s\n' "$CDS" | grep -v '^ *#' | sed -n '3p' | grep -c "^ *trap 'rc=\$?; printf \"%s\" \"\$rc\" > /tmp/rc' EXIT$")" "1" "its EXIT trap records the real exit code"
 expect_eq "$(yq "$RL | .steps[0][0].continueOn.error" "$R")" "null" "an attempt that ended in Error is not continued past: it fails the loop and is retried"
 expect_eq "$(yq "$RL | .retryStrategy.retryPolicy" "$R")" "OnFailure" "the loop retries on Failed nodes"
 # No default of the new loop is a pass: nothing in the loop, its wrapper or the check outputs defaults to false or 0.
-expect_eq "$(yq "$WF | select(.name==\"check-drift-attempts\" or .name==\"check-drift-with-retry\") | .outputs.parameters[].valueFrom.default" "$R" | grep -Ec '^(false|0)$')" "0" "no loop or wrapper output defaults to false or 0"
+expect_eq "$(yq "$WF | select(.name==\"check-drift-attempts\" or .name==\"check-drift-once\" or .name==\"check-drift-with-retry\") | .outputs.parameters[].valueFrom.default" "$R" | grep -Ec '^(false|0)$')" "0" "no loop or wrapper output defaults to false or 0"
 
 # The reaper only reads Pods; a node waiting for a semaphore has none.
 expect_eq "$(yq 'select(.metadata.name=="pending-reaper") | .spec.templates[].container.args[0]' "$R" | grep -c 'get pods -l')" "1" "the pending-reaper judges pods, not workflow nodes: a run waiting for a slot has no pod to kill"

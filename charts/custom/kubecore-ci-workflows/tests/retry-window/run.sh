@@ -40,7 +40,7 @@ LIMITS=$(yq 'select(.kind == "ClusterWorkflowTemplate" or .kind == "WorkflowTemp
 expect_eq "$LIMITS" "2 " "every retryStrategy is still bounded by limit 2"
 WAIT=$(yq 'select(.metadata.name == "ml-ci-reconcile") | .spec.templates[] | select(.name == "check-drift-attempts")
   | .steps[1][0].when' "$RENDERED")
-expect_eq "$WAIT" "{{=steps.attempt.status == 'Failed' && ((steps.attempt.exitCode ?? '') == '3' || (steps.attempt.exitCode ?? '') == '137')}}" "ml-ci-reconcile retries its force-mode wait and a killed pod"
+expect_eq "$WAIT" "{{steps.attempt.outputs.parameters.rc}} == 3 || {{steps.attempt.outputs.parameters.rc}} == 137" "ml-ci-reconcile retries its force-mode wait and a killed pod"
 
 echo "retry-window: ${PASSED} passed, ${FAILED} failed"
 exit "$FAILED"
