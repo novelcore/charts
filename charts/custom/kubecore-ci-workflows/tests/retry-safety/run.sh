@@ -47,6 +47,10 @@ for wf in ml-ci-build ml-ci-pr-render; do
   expect_eq "${MISSING}" "" "$wf: every step retries a preemption (limit 2, no maxDuration)"
 done
 
+# A template holding a lock must not retry: Argo keeps the lock on the retry node through every backoff.
+LOCKED_RETRY=$(yq 'select(.metadata.name == "ml-ci-reconcile") | .spec.templates[] | select(.synchronization and .retryStrategy) | .name' "$RENDERED" | tr '\n' ' ')
+expect_eq "${LOCKED_RETRY}" "" "no ml-ci-reconcile template holds a mutex or semaphore AND a retryStrategy"
+
 # ── fixtures: a bare "origin" with one commit on dev ─────────────────────────
 
 new_origin() {

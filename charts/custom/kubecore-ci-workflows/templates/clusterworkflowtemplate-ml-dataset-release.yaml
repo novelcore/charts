@@ -88,7 +88,7 @@ spec:
         fi
         FAILED=0
         for APP in $APPS; do
-          if echo "$CRONS" | jq -c --arg app "$APP" '
+          MANIFEST=$(echo "$CRONS" | jq -c --arg app "$APP" '
               .items[]
               | select(.metadata.labels["platform.kubecore.io/app"] == $app
                        and .spec.workflowSpec.workflowTemplateRef.name == "ml-ci-reconcile")
@@ -101,7 +101,16 @@ spec:
                                                  | map(select(.name != "dataset_event"))
                                                  + [{name: "dataset_event", value: "true"}])},
                         ttlStrategy: {secondsAfterCompletion: 3600}}}' \
-             | kubectl create -n "$NS" -f - ; then
+          )
+          # A Kubernetes API blip on one create must not drop that app's event (nothing else
+          # re-sends it): three tries, then the Workflow fails loudly.
+          DONE=0
+          for TRY in 1 2 3; do
+            if printf '%s\n' "$MANIFEST" | kubectl create -n "$NS" -f - ; then DONE=1; break; fi
+            echo "dataset-release: ${APP}: create failed (try ${TRY}/3)" >&2
+            [ "$TRY" = 3 ] || sleep $((TRY * 5))
+          done
+          if [ "$DONE" = 1 ]; then
             echo "dataset-release: ${APP}: dataset check submitted"
           else
             echo "dataset-release: ${APP}: could not submit the dataset check" >&2

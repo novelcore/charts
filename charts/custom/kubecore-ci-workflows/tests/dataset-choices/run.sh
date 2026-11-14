@@ -119,7 +119,7 @@ ctx 1
 out=$(run); rc=$?
 expect_eq "$rc" "0" "an unreachable catalog never fails the render"
 expect_eq "$(param)" "dataset-default@latest | " "and leaves the field free text"
-expect_eq "$(sha)" "<absent>" "and records nothing, so the last good record stays"
+expect_eq "$(sha)" "unread" "and records unread, so the next successful drift check re-renders the free-text form"
 python3 "$WORK/dataset-choices.py" digest http://127.0.0.1:1/ "$WORK/token" >/dev/null 2>&1; rc=$?
 expect_eq "$rc" "1" "the drift check's digest of an unreadable catalog fails (no drift) instead of printing one"
 case "$out" in *"catalog not read"*) PASSED=$((PASSED + 1)); echo "PASS: it says why";; *) FAILED=$((FAILED + 1)); echo "FAIL: no reason printed: $out";; esac
@@ -138,7 +138,7 @@ wft "    - {name: dataset, value: x}
 steps dataset
 run >/dev/null; rc=$?
 expect_eq "$rc" "0" "a refused token never fails the render"
-expect_eq "$(sha)" "<absent>" "and records nothing"
+expect_eq "$(sha)" "unread" "and records unread (the form is free text until a drift check re-renders it)"
 
 # A catalog with no dataset: the field stays free text, and "no dataset" is what is recorded.
 echo pod-token > "$WORK/token"
@@ -187,10 +187,13 @@ printf 'cafe' > "$WORK/sha"
 expect_eq "$(images '')" "cafe" "the render writes dataset-sha into pipeline-images"
 expect_eq "$(images '  dataset-sha: old
 ')" "cafe" "and moves it when the datasets changed"
+printf 'unread' > "$WORK/sha"
+expect_eq "$(images '  dataset-sha: old
+')" "unread" "an unreadable catalog replaces the last good record (the form has no picker now)"
+expect_eq "$(images '')" "unread" "and records it where there was none (the poll treats it as drift)"
 rm -f "$WORK/sha"
 expect_eq "$(images '  dataset-sha: old
-')" "old" "an unreadable catalog keeps the last good record"
-expect_eq "$(images '')" "<absent>" "and records nothing where there was none"
+')" "old" "a render that writes no digest keeps the last record"
 printf 'none' > "$WORK/sha"
 expect_eq "$(images '')" "none" "a pipeline whose steps declare no input records none"
 
