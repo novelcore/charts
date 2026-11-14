@@ -9,6 +9,8 @@ operator writes `engine: {version, image, wheel, wheelSha256}` into the app's gi
            pick the schema profile. Prints one JSON object (the ENGINE; the rest of the build reads only
            that). A missing or invalid block is an error: there is no other way to render.
   version  ml-ci-reconcile: the engine version the context names ("" when there is none).
+  context-sha  the hash of what can change a render or a run (see CONTEXT_UNREAD): ml-ci-build records it
+           as `context-sha`, ml-ci-reconcile compares it with the context in gitops.
   fetch    download the engine wheel, verify its sha256 and unzip it (never pip). A wheel that does not
            download or whose sha256 differs fails closed.
   stamp    mark a rendered WorkflowTemplate with the engine that produced it.
@@ -25,6 +27,7 @@ Standard library + PyYAML only (the toolbox image has both). Every input from th
 files are looked up, never imported or executed. Run as `python3 -I`.
 """
 import argparse
+import copy
 import hashlib
 import json
 import os
@@ -81,6 +84,72 @@ def load_context(path):
         return doc if isinstance(doc, dict) else {}
     except (OSError, yaml.YAMLError, TypeError, AttributeError):
         return {}
+
+
+# What the render does not read of the context (PRD novelcore/kaos#1911 AC-24). `context-sha` is the hash of the
+# context WITHOUT these: a change in one of them leaves the rendered pipeline as it is, so it must not re-render
+# an app. Everything else, a field nobody has looked at yet included, IS in the hash (a list of what is not
+# read fails safe; a list of what is read would not). A path is here only when neither the engine's render,
+# enhance and compose nor this chart nor the run reads it: tests/connections/test_context_unread.py renders with
+# each one moved and asserts the same pipeline, and fails when the engine starts to read one.
+#   hpc.scratch, hpc.home   the provider file layout of the project's HPC user: nothing in the engine reads it
+#   kaosLib.spec, .version  the library the images are built with. A platform-wide move of it is the poll's own
+#                           check (KAOS-LIB DRIFT, paced by the app's use), and what the render reads of the
+#                           library is kaosLib.support, which stays hashed. NOT when the app pins its own
+#                           (kaosLib.pinned): that move must fire the forced run, which rebuilds the images at
+#                           once (KAOS-LIB PIN), so a pinned app's whole kaosLib block is hashed.
+# Keep this in step with the k8smlapp composition's ci-sync name (kubecore-operator, `$ctxUnread`).
+CONTEXT_UNREAD = (("hpc", "scratch"), ("hpc", "home"))
+CONTEXT_UNREAD_UNLESS_PINNED = (("kaosLib", "spec"), ("kaosLib", "version"))
+
+
+def context_projection(ctx):
+    """The context without CONTEXT_UNREAD (and, when kaosLib is not the app's own pin, CONTEXT_UNREAD_UNLESS_PINNED);
+    a section left empty by that is dropped, as one the operator never wrote is absent."""
+    out = copy.deepcopy(ctx)
+    paths = list(CONTEXT_UNREAD)
+    if not (isinstance(out.get("kaosLib"), dict) and out["kaosLib"].get("pinned")):
+        paths += CONTEXT_UNREAD_UNLESS_PINNED
+    for section, key in paths:
+        body = out.get(section)
+        if isinstance(body, dict):
+            body.pop(key, None)
+            if not body:
+                del out[section]
+    return out
+
+
+def context_sha(path):
+    """sha256 of the canonical projection of the context in `path` (a ConfigMap or the bare context), or
+    "" when the file is not a context (unreadable, empty, not YAML, not a mapping)."""
+    try:
+        with open(path) as f:
+            doc = yaml.safe_load(f)
+        if isinstance(doc, dict) and doc.get("kind") == "ConfigMap":
+            data = doc.get("data") or {}
+            key = "context.yaml" if "context.yaml" in data else next(iter(data), None)
+            doc = yaml.safe_load(data[key]) if key else None
+    except (OSError, yaml.YAMLError, TypeError, AttributeError):
+        return ""
+    if not isinstance(doc, dict) or not doc:
+        return ""
+    canonical = json.dumps(_whole_numbers(context_projection(doc)), sort_keys=True, separators=(",", ":"),
+                           ensure_ascii=False, default=str)
+    # Go's json.Marshal (the composition's `toJson`) escapes these; match it byte for byte.
+    for ch, esc in (("&", "\\u0026"), ("<", "\\u003c"), (">", "\\u003e"), ("\u2028", "\\u2028"), ("\u2029", "\\u2029")):
+        canonical = canonical.replace(ch, esc)
+    return hashlib.sha256(canonical.encode()).hexdigest()
+
+
+def _whole_numbers(v):
+    """A whole float is an int, as Go prints it (7.0 -> 7), so the composition and this agree."""
+    if isinstance(v, dict):
+        return {k: _whole_numbers(x) for k, x in v.items()}
+    if isinstance(v, list):
+        return [_whole_numbers(x) for x in v]
+    if isinstance(v, float) and v.is_integer():
+        return int(v)
+    return v
 
 
 def profile_of(repo):
@@ -282,6 +351,8 @@ def main(argv=None):
     c.add_argument("--repo", required=True)
     v = sub.add_parser("version")
     v.add_argument("--context", required=True)
+    h = sub.add_parser("context-sha")
+    h.add_argument("--context", required=True)
     f = sub.add_parser("fetch")
     f.add_argument("--wheel", required=True)
     f.add_argument("--sha256", required=True)
@@ -306,6 +377,10 @@ def main(argv=None):
             print(json.dumps(engine_of(args.context, args.repo), sort_keys=True))
         elif args.cmd == "version":
             print(_version(load_context(args.context)))
+        elif args.cmd == "context-sha":
+            digest = context_sha(args.context)
+            print(digest)
+            return 0 if digest else 1
         elif args.cmd == "fetch":
             print(fetch_wheel(args.wheel, args.sha256, args.dest))
         elif args.cmd == "steps":

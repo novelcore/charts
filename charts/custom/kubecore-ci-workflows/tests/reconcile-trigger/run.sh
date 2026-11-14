@@ -112,6 +112,7 @@ EOF
       -e "s#{{inputs.parameters.mode}}#${MODE:-decide}#g" \
       -e "s#{{workflow.parameters.force}}#$1#g" \
       -e "s#{{workflow.parameters.context_sha}}#$WANT_CTX#g" \
+      -e "s#{{workflow.parameters.context_proj}}#${WANT_PROJ:-}#g" \
       -e "s#{{workflow.parameters.app_name}}#app1#g" \
       -e "s#{{workflow.parameters.project_name}}#proj#g" \
       -e "s#{{workflow.parameters.branch}}#dev#g" \

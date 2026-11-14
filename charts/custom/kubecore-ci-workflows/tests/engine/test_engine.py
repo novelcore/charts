@@ -152,6 +152,90 @@ def test_cli_context_and_version(tmp_path, capsys):
     assert engine.main(["context", "--context", write_context(tmp_path, None), "--repo", str(tmp_path)]) == engine.EXIT_NO_ENGINE
 
 
+# ---------------------------------------------------------------- context-sha (PRD novelcore/kaos#1911 AC-24)
+
+CTX = {"project": "p", "app": "a", "namespace": "ml-p", "engine": BLOCK,
+       "hpc": {"enabled": True, "provider": "meluxina", "scratch": "/s/a", "home": "/h/u", "classes": [{"name": "c"}]},
+       "kaosLib": {"spec": "kaos-lib==0.5.0", "version": "0.5.0", "support": {"version": "0.5.0"}},
+       "computeClasses": {"cpu": {"name": "cpu-small", "maxNodeCount": 4}}}
+
+
+def sha_of(tmp_path, ctx, wrap=True):
+    path = tmp_path / "ctx.yaml"
+    doc = {"kind": "ConfigMap", "data": {"context.yaml": yaml.safe_dump(ctx)}} if wrap else ctx
+    path.write_text(yaml.safe_dump(doc))
+    return engine.context_sha(str(path))
+
+
+def test_context_sha_ignores_what_the_render_does_not_read(tmp_path):
+    base = sha_of(tmp_path, CTX)
+    assert len(base) == 64
+    moved = json.loads(json.dumps(CTX))
+    moved["hpc"].update(scratch="/s/elsewhere", home="/h/other")
+    moved["kaosLib"].update(spec="kaos-lib==0.6.0", version="0.6.0")
+    assert sha_of(tmp_path, moved) == base
+
+
+def test_context_sha_of_a_pinned_app_moves_with_its_pin(tmp_path):
+    # the app's own pin must fire the forced run (KAOS-LIB PIN): its whole kaosLib block is hashed
+    pinned = json.loads(json.dumps(CTX))
+    pinned["kaosLib"]["pinned"] = True
+    base = sha_of(tmp_path, pinned)
+    assert base != sha_of(tmp_path, CTX)
+    for key, value in (("spec", "kaos-lib==0.6.0"), ("version", "0.6.0")):
+        moved = json.loads(json.dumps(pinned))
+        moved["kaosLib"][key] = value
+        assert sha_of(tmp_path, moved) != base
+
+
+def test_context_sha_ignores_formatting_comments_and_key_order(tmp_path):
+    base = sha_of(tmp_path, CTX)
+    path = tmp_path / "c.yaml"
+    body = "# a comment\n" + yaml.safe_dump(dict(reversed(list(CTX.items()))), default_flow_style=True)
+    path.write_text(yaml.safe_dump({"kind": "ConfigMap", "data": {"context.yaml": body}}))
+    assert engine.context_sha(str(path)) == base
+    assert sha_of(tmp_path, CTX, wrap=False) == base
+
+
+@pytest.mark.parametrize("path", [("project",), ("app",), ("namespace",), ("engine", "wheelSha256"), ("engine", "version"),
+                                  ("hpc", "enabled"), ("hpc", "classes"), ("kaosLib", "support"),
+                                  ("computeClasses", "cpu", "maxNodeCount")])
+def test_context_sha_moves_with_every_other_field(tmp_path, path):
+    changed = json.loads(json.dumps(CTX))
+    node = changed
+    for key in path[:-1]:
+        node = node[key]
+    node[path[-1]] = "changed"
+    assert sha_of(tmp_path, changed) != sha_of(tmp_path, CTX)
+
+
+def test_context_sha_hashes_a_field_nobody_has_looked_at(tmp_path):
+    added = dict(CTX, somethingNew={"x": 1})
+    assert sha_of(tmp_path, added) != sha_of(tmp_path, CTX)
+    assert sha_of(tmp_path, dict(CTX, hpc=dict(CTX["hpc"], newKey="v"))) != sha_of(tmp_path, CTX)
+
+
+def test_a_section_left_empty_by_the_projection_is_a_section_never_written(tmp_path):
+    only = {"app": "a", "kaosLib": {"spec": "s", "version": "1"}}
+    assert sha_of(tmp_path, only) == sha_of(tmp_path, {"app": "a"})
+    assert sha_of(tmp_path, {"app": "a", "kaosLib": {"spec": "s", "support": {"v": 1}}}) != sha_of(tmp_path, {"app": "a"})
+
+
+@pytest.mark.parametrize("text", ["", "[]", "a: [", "kind: ConfigMap\ndata: {}\n"])
+def test_context_sha_of_something_that_is_not_a_context_is_empty(tmp_path, capsys, text):
+    path = tmp_path / "bad.yaml"
+    path.write_text(text)
+    assert engine.context_sha(str(path)) == ""
+    assert engine.main(["context-sha", "--context", str(path)]) == 1
+    assert engine.context_sha(str(tmp_path / "missing.yaml")) == ""
+
+
+def test_cli_context_sha(tmp_path, capsys):
+    path = write_context(tmp_path, BLOCK, app="a")
+    assert engine.main(["context-sha", "--context", path]) == 0
+    assert capsys.readouterr().out.strip() == engine.context_sha(path)
+
+
 # ---------------------------------------------------------------- the wheel
 
 def test_fetch_verifies_and_unpacks_the_engine_only(tmp_path, served):
@@ -372,3 +456,15 @@ def test_cli_attempt_and_refused(tmp_path, capsys):
     assert engine.main(["refused", "--context", ctx, "--commit", "d" * 40, "--attempt", value]) == 1
     assert engine.main(["attempt", "--context", ctx]) == 0
     assert capsys.readouterr().out.strip().count("@") == 1
+
+
+# ── context-sha: the vector shared with the k8smlapp composition (kubecore-operator) ───────────────────────────
+# fixtures/operator-context-*.yaml are the pipeline-context ConfigMaps the composition renders; the digests are
+# the composition's own `context_proj` for them (golden-f26-below-0.16.0.yaml / the AC-24 render test there).
+# b carries `& < >`, U+2028, non-ASCII, a float and a whole float: the places Go's json and Python's differ.
+@pytest.mark.parametrize("name,digest", [
+    ("operator-context-a.yaml", "a04e43d2f5f9c48d47b3ef399cc6e811c08de6ed998505afd262316b360bbe44"),
+    ("operator-context-b.yaml", "afbbdab2b46ab417d166129473eb18e5fa869a3505b1068b0d7f1b66e02e6d11"),
+])
+def test_context_sha_equals_the_compositions(name, digest):
+    assert engine.context_sha(os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures", name)) == digest

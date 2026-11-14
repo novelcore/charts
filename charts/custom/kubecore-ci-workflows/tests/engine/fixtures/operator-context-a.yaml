@@ -1,0 +1,91 @@
+---
+# Pipeline context ConfigMap — platform truth written by the
+# k8smlapp Crossplane composition. ml-ci-build/render-wft reads
+# data.context.yaml to regenerate workflow-template.yaml from
+# kubeline.yaml v2. Managed by Crossplane; do not hand-edit.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: yolo-mlops-pipeline-context
+  namespace: ml-mlops-demo
+  labels:
+    platform.kubecore.io/project: mlops-demo
+    platform.kubecore.io/pipeline: mlops-demo-yolo-mlops
+    platform.kubecore.io/managed-by: k8smlapp-composition
+data:
+  context.yaml: |
+    project: mlops-demo
+    app: yolo-mlops
+    pipelineName: mlops-demo-yolo-mlops
+    namespace: ml-mlops-demo
+    registryUrl: zot.zot-registry.svc.cluster.local:5000
+    imageRepo: kubecore-aixpert-mlops-demo-yolo-mlops
+    lakefs:
+      endpoint: http://lakefs.ml-mlops-demo.svc.cluster.local:8000
+      repository: mlops-demo-yolo-mlops
+      # externalUrl is the browser/CLI-facing ingress; render-wft
+      # writes it into the app repo's .kubecore/dataset-config.yaml.
+      externalUrl: "https://lakefs-mlops-demo.gke-mlops.us-central1.us-central1.kubecore.io"
+      
+      adminSecret: mlops-demo-lakefs-admin
+      adminSecretKeys:
+        accessKey: accessKeyId
+        secretKey: secretAccessKey
+    # kaosLib (kaos PRD #1147): the kaos-lib package the
+    # step images install. ml-ci-build builds with
+    # --build-arg KAOS_LIB_PACKAGE=<spec> and stamps the built spec
+    # back into pipeline-images (kaos-lib-package); a spec the app
+    # has not been built with yet is rebuilt without any commit.
+    kaosLib:
+      spec: "kaos-lib==0.3.2"
+      version: "0.3.2"
+    mlflow:
+      trackingUri: http://mlflow.ml-mlops-demo.svc.cluster.local:5000
+      # externalUrl is the public ingress (PRD-1016 F-08): off-cluster
+      # runs (MeluXina Slurm jobs) reach MLflow here with a Zitadel
+      # bearer instead of the cluster-internal trackingUri.
+      externalUrl: "https://mlflow-mlops-demo.gke-mlops.us-central1.us-central1.kubecore.io"
+      svcSecret: mlops-demo-mlflow-svc
+      oidcDomain: ""
+      oidcProjectId: ""
+    # computeClasses.{cpu,gpu} are the pool's two ML compute classes
+    # (operator-selected one-per-tier from the live KubePool every
+    # reconcile → class drift propagates here automatically). render-wft
+    # routes each step to gpu iff it requests nvidia.com/gpu, else cpu,
+    # and sizes the step's requests with node headroom from machineType.
+    # Single source of truth = the KubePool; the KubeApp declares no
+    # class selection.
+    computeClasses:
+      cpu:
+        name: "cpu-standard"
+        tier: "cpu"
+        machineType: "n2-standard-4"
+        tolerationKey: "platform.kubecore.io/ml-workload"
+        tolerationValue: "cpu"
+        maxNodeCount: 4
+        diskSizeGb: 50
+        description: "n2-standard-4 (4 vCPU, 16 GiB)"
+      gpu:
+        name: "gpu-t4"
+        tier: "gpu"
+        machineType: "n1-standard-4"
+        tolerationKey: "platform.kubecore.io/ml-workload"
+        tolerationValue: "gpu"
+        maxNodeCount: 1
+        diskSizeGb: 100
+        description: "n1-standard-4 + 1x T4"
+        guestAccelerator:
+          type: "nvidia-tesla-t4"
+          count: 1
+      # all = the full catalog of every cpu/gpu class the pool
+      # declares (a pool may offer >1 cpu class, e.g. a heavy ML
+      # class + a small scale-to-zero lightweight class). render-wft
+      # lists these as the allowed values in the cpu-class/gpu-class
+      # field help so a developer can choose, not blind-type.
+    hpc:
+      enabled: false
+      provider: "meluxina"
+    checkpoints:
+      bucket: mlops-demo-yolo-mlops
+      prefix: main/checkpoints
+    serviceAccountName: argo-workflow

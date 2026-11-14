@@ -138,6 +138,11 @@ spec:
     # re-trigger it. Empty = do not wait.
     - name: context_sha
       value: ""
+    # context_proj (force mode): the same for what the render reads of that context (engine.py context-sha,
+    # which leaves out CONTEXT_UNREAD). Given, the wait compares this one, so a change of a field nobody reads
+    # that lands between the trigger and the build does not hold the trigger back. Empty = context_sha.
+    - name: context_proj
+      value: ""
     # dataset_event: set by ml-ci-dataset-release (kaos-lake saw a dataset change).
     # The poll's checks, plus: a build already in flight is waited out (exit 3,
     # retried) instead of skipping, because the in-flight render may predate the
@@ -488,6 +493,16 @@ spec:
             "https://api.github.com/repos/${GORG}/${GREPO}/contents/${CTX_REL}?ref=${GBRANCH}" | sha256sum | cut -c1-64)
           [ "$_cs" = "$(printf '' | sha256sum | cut -c1-64)" ] || printf '%s' "$_cs"
         }
+        # gitops_ctx_proj prints what the render reads of that same file (engine.py context-sha: the sha256 of
+        # the context without CONTEXT_UNREAD, comments and formatting), or nothing when it is not a context.
+        # context-sha in pipeline-images is this value; one recorded before it was this (the sha256 of the raw
+        # file) is still current while the file is the same bytes: ctx_current RECORDED RAW PROJECTION.
+        gitops_ctx_proj() {
+          curl -sf -H "Authorization: Bearer ${TOKEN}" -H "Accept: application/vnd.github.raw" \
+            "https://api.github.com/repos/${GORG}/${GREPO}/contents/${CTX_REL}?ref=${GBRANCH}" > /tmp/ctx-proj.yaml \
+            && python3 -I /tmp/engine.py context-sha --context /tmp/ctx-proj.yaml 2>/dev/null || true
+        }
+        ctx_current() { [ -n "$1" ] && { [ "$1" = "$3" ] || [ "$1" = "$2" ]; }; }
         CTX_LAST=$(echo "$CM" | jq -r '.data["context-sha"] // empty')
         # ENGINE (PRD-HPC-1461 D-80): the engine the gitops context pins (ENG_WANT), and what the gitops
         # pipeline-images records of the last engine run: the engine the render ran with (ENG_HAVE), the
@@ -561,8 +576,13 @@ spec:
 
         if [ "$FORCE" = "true" ]; then
           WANT_CTX="{{`{{workflow.parameters.context_sha}}`}}"
+          WANT_PROJ="{{`{{workflow.parameters.context_proj}}`}}"
           HAVE_CTX=""
-          if [ -n "$WANT_CTX" ]; then
+          if [ -n "$WANT_PROJ" ]; then
+            HAVE_CTX=$(gitops_ctx_sha)
+            HAVE_PROJ=$(gitops_ctx_proj)
+            [ "$HAVE_PROJ" = "$WANT_PROJ" ] || not_yet "gitops ${CTX_REL} is not the context this trigger is for yet (${HAVE_PROJ:0:12} != ${WANT_PROJ:0:12})"
+          elif [ -n "$WANT_CTX" ]; then
             HAVE_CTX=$(gitops_ctx_sha)
             [ "$HAVE_CTX" = "$WANT_CTX" ] || not_yet "gitops ${CTX_REL} is not the context this trigger is for yet (${HAVE_CTX:0:12} != ${WANT_CTX:0:12})"
           fi
@@ -637,8 +657,7 @@ spec:
           # first render of a new app.
           if [ -n "$LAST" ] && [ "$LAST" = "$HEAD_SHA" ]; then
             [ -n "$HAVE_CTX" ] || HAVE_CTX=$(gitops_ctx_sha)
-            if [ -n "$CTX_LAST" ] && [ -n "$HAVE_CTX" ] && [ "$CTX_LAST" = "$HAVE_CTX" ] \
-               && { [ -z "$WANT_CTX" ] || [ "$CTX_LAST" = "$WANT_CTX" ]; } \
+            if [ -n "$HAVE_CTX" ] && ctx_current "$CTX_LAST" "$HAVE_CTX" "$(gitops_ctx_proj)" \
                && [ -n "$ENG_WANT" ] && [ "$ENG_HAVE" = "$ENG_WANT" ] && [ "$ENG_COMPOSE" = "$ENG_WANT" ]; then
               printf 'false' > /tmp/needs_build
               echo "reconcile: FORCED but already satisfied — HEAD ${HEAD_SHA} built and rendered from the current context (${CTX_LAST:0:12}) by engine ${ENG_WANT}; nothing to do"
@@ -689,12 +708,15 @@ spec:
         # unknown, and unknown never means "submit work".
         if [ -n "$CTX_LAST" ]; then
           CTX_NOW=$(gitops_ctx_sha)
+          CTX_PROJ=$(gitops_ctx_proj)
           if [ -z "$CTX_NOW" ]; then
             echo "reconcile: gitops ${CTX_REL} unreadable — context drift unknown this poll"
-          elif [ "$CTX_NOW" != "$CTX_LAST" ] && [ "$CTX_NOW" = "$ENG_CTX" ]; then
+          elif ctx_current "$CTX_LAST" "$CTX_NOW" "$CTX_PROJ"; then
+            :
+          elif ctx_current "$ENG_CTX" "$CTX_NOW" "$CTX_PROJ"; then
             # The render of this context is already pushed to gitops and not synced to the pool yet.
             echo "reconcile: gitops ${CTX_REL} changed (${CTX_LAST:0:12} -> ${CTX_NOW:0:12}) but gitops already carries a render for it — waiting for ArgoCD"
-          elif [ "$CTX_NOW" != "$CTX_LAST" ]; then
+          else
             printf 'true' > /tmp/needs_build
             echo "reconcile: CONTEXT DRIFT — gitops ${CTX_REL} changed since the last render (${CTX_LAST:0:12} -> ${CTX_NOW:0:12}); submitting ml-ci-build to re-render"
             exit 0

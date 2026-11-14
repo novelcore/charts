@@ -243,6 +243,14 @@ Why: on a dev e2e, about 20 `check-drift` pods of `ml-ci-reconcile` ran at once 
 
 Tests: `tests/check-drift-cap/run.sh` (render guards; the script executed against a stub that refuses an unselected list), `tests/check-drift-cap/kind/run.sh` (real Argo v4.0.6: cap, queue, the reaper, forced runs, mutex).
 
+## A re-render happens only when the render's input moved (PRD novelcore/kaos#1911, AC-24, unreleased)
+
+`context-sha`, the record in `{app}-pipeline-images` that CONTEXT DRIFT, ENGINE DRIFT and the forced "already satisfied" check compare with the gitops `pipeline-context.yaml`, is no longer the sha256 of that file's bytes. It is `engine.py context-sha`: the sha256 of the context (the ConfigMap's `data.context.yaml`, or a bare context) as canonical JSON, without `hpc.scratch`, `hpc.home` and, unless the app pins its own kaos-lib (`kaosLib.pinned`), `kaosLib.spec` and `kaosLib.version` (`CONTEXT_UNREAD`, `CONTEXT_UNREAD_UNLESS_PINNED`). Comments and formatting do not count either. Those paths are listed because nothing in the render, the enhancer, the compose or the run reads them: a platform-wide move of the kaos-lib version is the poll's KAOS-LIB DRIFT (`kaosLib.support`, which the render does read, stays hashed). A pinned app's whole kaosLib block stays hashed: its move must fire the forced run, which rebuilds the images at once (KAOS-LIB PIN). The list is a deny-list on purpose: a field nobody has looked at yet is hashed, so a mistake re-renders once too often and never too rarely. `tests/connections/test_context_unread.py` renders every fixture with all of them moved and asserts the same output; it fails the day the engine starts to read one.
+
+The kubecore-operator names the ci-sync trigger by the same digest and passes it as the new `context_proj` parameter (`context_sha`, the file's own sha256, is still passed). Given `context_proj`, the forced wait compares it with the gitops file's projection, so a change of an unread field between the trigger and the build does not hold it back. The operator's Go template and `engine.py` must agree byte for byte; `tests/engine/fixtures/operator-context-*.yaml` and the digests in `test_engine.py` are the vector both repositories test (the operator's render test pins the first one).
+
+Rollout. A `context-sha` recorded by an earlier chart is the sha256 of the file; while the gitops file is the same bytes it is still current, so upgrading the chart re-renders no app. Each app's next render records the new form. An app whose file changed in an unread path only, with the old form recorded, re-renders once. When the operator is rolled out, every app's ci-sync trigger changes name once (it is named by the new digest): one forced run of `ml-ci-reconcile` per app, which finds HEAD built, the engine current and the context current and submits nothing. No build is queued against the six `ml-ci-build` slots or the `{app}-build` mutex by the rollout itself.
+
 ## Tests
 
 ```bash

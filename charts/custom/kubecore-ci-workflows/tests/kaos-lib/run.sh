@@ -311,7 +311,7 @@ attempt() {  # attempt PHASE AGE_S REF
 }
 run_drift() {
   sed -e "s#{{workflow.namespace}}#ci#g" -e "s#{{workflow.parameters.force}}#${FORCE:-false}#g" -e "s#{{inputs.parameters.mode}}#decide#g" \
-      -e "s#{{workflow.parameters.context_sha}}##g" -e "s#{{workflow.parameters.app_name}}#${APP}#g" \
+      -e "s#{{workflow.parameters.context_sha}}##g" -e "s#{{workflow.parameters.context_proj}}##g" -e "s#{{workflow.parameters.context_proj}}##g" -e "s#{{workflow.parameters.app_name}}#${APP}#g" \
       -e "s#{{workflow.parameters.project_name}}#proj#g" -e "s#{{workflow.parameters.branch}}#dev#g" \
       -e "s#{{workflow.parameters.ci_namespace}}#ci#g" -e "s#{{workflow.parameters.gitops_repository}}#proj-gitops#g" \
       -e "s#{{workflow.parameters.repo_url}}##g" -e "s#{{workflow.parameters.ml_namespace}}#proj-train#g" \

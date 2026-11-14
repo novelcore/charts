@@ -144,12 +144,13 @@ reconcile_build() {
 now_minus() { echo "${ENG}@$(( $(date +%s) - $1 ))"; }
 
 # run_drift: check-drift with the Argo placeholders filled and its fixed paths
-# moved into the sandbox; FORCE / WANT_CTX set the force and context_sha
-# parameters (default: the backstop). Sets OUT (stdout+stderr), NEEDS, RC.
+# moved into the sandbox; FORCE / WANT_CTX / WANT_PROJ set the force, context_sha and
+# context_proj parameters (default: the backstop). Sets OUT (stdout+stderr), NEEDS, RC.
 run_drift() {
   sed -e "s#{{workflow.namespace}}#ci#g" \
       -e "s#{{workflow.parameters.force}}#${FORCE:-false}#g" \
       -e "s#{{workflow.parameters.context_sha}}#${WANT_CTX:-}#g" \
+      -e "s#{{workflow.parameters.context_proj}}#${WANT_PROJ:-}#g" \
       -e "s#{{workflow.parameters.app_name}}#${APP}#g" \
       -e "s#{{workflow.parameters.project_name}}#proj#g" \
       -e "s#{{workflow.parameters.branch}}#dev#g" \
@@ -209,6 +210,47 @@ expect_has "$OUT" "CONTEXT DRIFT" "the engine bumped: reported as the context dr
 new_case; cm "$(printf 'old' | sha256sum | cut -c1-64)"; images "$ENG" "$ENG"; run_drift
 expect_eq "$RC/$NEEDS" "0/false" "the render is already pushed to gitops, the live record not synced yet: no second render"
 expect_has "$OUT" "waiting for ArgoCD" "... and says so"
+
+# ── context drift reads what the render reads (PRD kaos#1911 AC-24) ──────────
+# context-sha is engine.py's projection of the gitops context, not the file's bytes: a move of a path in
+# CONTEXT_UNREAD (the HPC scratch, the kaos-lib version) or a comment is not a context drift; any other
+# field is. A context-sha recorded by an older chart (the sha256 of the file) stays current while the file
+# is the same bytes.
+ENGINE_PY="$(cd "$(dirname "$0")/../.." && pwd)/files/engine.py"
+ctx_file() {  # $1 extra context.yaml lines -> a gitops pipeline-context ConfigMap
+  python3 - "$1" <<'PY'
+import sys, yaml
+ctx = yaml.safe_load(yaml.safe_load(__import__("os").environ["GITOPS_CONTEXT"])["data"]["context.yaml"])
+ctx.update(yaml.safe_load(sys.argv[1]) or {})
+print("# a comment\n" + yaml.safe_dump({"kind": "ConfigMap", "data": {"context.yaml": yaml.safe_dump(ctx)}}))
+PY
+}
+export GITOPS_CONTEXT
+proj_of() { python3 -I "$ENGINE_PY" context-sha --context "$1"; }
+UNREAD='{hpc: {scratch: /project/scratch/moved, home: /home/users/moved}, kaosLib: {spec: "kaos-lib==9.9.9", version: "9.9.9"}}'
+READ='{hpc: {account: p999999}}'
+ctx_file '{}' > "$BASE_TMP/g0.yaml"; ctx_file "$UNREAD" > "$BASE_TMP/g1.yaml"; ctx_file "$READ" > "$BASE_TMP/g2.yaml"
+P0=$(proj_of "$BASE_TMP/g0.yaml"); P1=$(proj_of "$BASE_TMP/g1.yaml")
+R0=$(sha256sum < "$BASE_TMP/g0.yaml" | cut -c1-64)
+[ "$P0" = "$P1" ] && { PASSED=$((PASSED + 1)); echo "PASS: fixture: moving the unread paths and a comment leaves the context-sha"; } \
+  || { FAILED=$((FAILED + 1)); echo "FAIL: fixture: the unread move changed the context-sha"; }
+
+new_case; cp "$BASE_TMP/g1.yaml" "$T/gitops-context.yaml"; cm "$P0"; images "$ENG" "$ENG" "$P0"; run_drift
+expect_eq "$RC/$NEEDS" "0/false" "only the unread paths moved (kaos-lib version, HPC scratch/home) and a comment: no re-render"
+new_case; cp "$BASE_TMP/g2.yaml" "$T/gitops-context.yaml"; cm "$P0"; images "$ENG" "$ENG" "$P0"; run_drift
+expect_eq "$RC/$NEEDS" "0/true" "a field the render reads moved: context drift, re-render"
+expect_has "$OUT" "CONTEXT DRIFT" "... and says so"
+new_case; cp "$BASE_TMP/g0.yaml" "$T/gitops-context.yaml"; cm "$R0"; images "$ENG" "$ENG" "$R0"; run_drift
+expect_eq "$RC/$NEEDS" "0/false" "context-sha recorded by the previous chart (raw file sha), file unchanged: no re-render on the chart upgrade"
+new_case; cp "$BASE_TMP/g1.yaml" "$T/gitops-context.yaml"; cm "$R0"; images "$ENG" "$ENG" "$R0"; run_drift
+expect_eq "$RC/$NEEDS" "0/true" "raw sha recorded by the previous chart and the file changed since: one re-render, which records the new form"
+
+new_case; cp "$BASE_TMP/g1.yaml" "$T/gitops-context.yaml"; cm "$P0"; images "$ENG" "$ENG" "$P0"; FORCE=true WANT_PROJ="$P0" run_drift
+expect_eq "$RC/$NEEDS" "0/false" "force for a projection the gitops file has (only unread paths differ from the trigger's): satisfied, no build"
+new_case; cp "$BASE_TMP/g2.yaml" "$T/gitops-context.yaml"; cm "$P0"; images "$ENG" "$ENG" "$P0"; FORCE=true WANT_PROJ="$P0" run_drift
+expect_eq "$RC/$NEEDS" "3/false" "force for a projection the gitops file does not have yet: waits (exit 3)"
+new_case; cp "$BASE_TMP/g0.yaml" "$T/gitops-context.yaml"; cm "$R0"; images "$ENG" "$ENG" "$R0"; FORCE=true WANT_PROJ="$P0" WANT_CTX="$R0" run_drift
+expect_eq "$RC/$NEEDS" "0/false" "force, projection given, the live record still the raw sha of the same file: satisfied"
 
 # ── one attempt per hour per engine version after a failure ──────────────────
 
