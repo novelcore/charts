@@ -41,11 +41,34 @@ expect_eq "$(yq "$WF | select(.name==\"check-drift\") | .synchronization.mutexes
 # One lock level only: decide-and-submit (mutex) must not also hold a slot while check-drift
 # asks for one, or three of them would each wait for the slot another holds.
 expect_eq "$(yq "$WF | select(.name==\"decide-and-submit\") | .synchronization.semaphores" "$R")" "null" "decide-and-submit holds no semaphore (no lock-order cycle with the app mutex)"
-expect_eq "$(yq "$WF | select(.synchronization.semaphores != null) | .name" "$R" | tr '\n' ' ')" "check-drift " "check-drift is the only template of ml-ci-reconcile with a semaphore"
+expect_eq "$(yq "$WF | select(.synchronization.semaphores != null) | .name" "$R" | tr '\n' ' ')" "check-drift " "check-drift (the one-shot) is the only template of ml-ci-reconcile with a semaphore"
 expect_eq "$(yq 'select(.metadata.name=="ml-ci-reconcile") | .spec.synchronization' "$R")" "null" "no workflow-level lock (a queued run would hold a slot while waiting for a build)"
 # A queued run must survive: no pod while it waits, the run's own deadline bounds it, and a killed pod still retries.
-expect_eq "$(yq "$WF | select(.name==\"check-drift\") | .retryStrategy.expression" "$R")" "asInt(lastRetry.exitCode) == 3 || asInt(lastRetry.exitCode) == 137" "a forced event is still retried on exit 3 and 137"
+expect_eq "$(yq "$WF | select(.name==\"check-drift-attempts\") | .retryStrategy.expression" "$R")" "null" "the retry loop retries every failure of its own (only a 'not yet' attempt fails it)"
 expect_eq "$(yq 'select(.metadata.name=="ml-ci-reconcile") | .spec.activeDeadlineSeconds' "$R")" "10800" "the wait for a slot is bounded by the run's deadline"
+# ── render: a slot per attempt, released during the backoff ──────────────────
+# Argo takes a template's lock on its RETRY node and releases it only when that node is fulfilled
+# (workflow/controller/operator.go, v4.0.6), so a template with both synchronization and
+# retryStrategy keeps its slot through every 60 s backoff: six waiting checks starved the rest.
+expect_eq "$(yq "$WF | select(.synchronization and .retryStrategy) | .name" "$R" | tr '\n' ' ')" "" "no template holds a lock AND a retryStrategy"
+expect_eq "$(yq "$WF | select(.name==\"check-drift\") | .retryStrategy" "$R")" "null" "the template holding the semaphore (check-drift, one attempt) has no retryStrategy"
+RL="$WF | select(.name==\"check-drift-attempts\")"
+expect_eq "$(yq "$RL | .synchronization" "$R")" "null" "the retrying template holds no semaphore and no mutex"
+expect_eq "$(yq "$RL | .retryStrategy.limit" "$R")/$(yq "$RL | .retryStrategy.backoff.duration" "$R")/$(yq "$RL | .retryStrategy.backoff.factor" "$R")/$(yq "$RL | .retryStrategy.backoff.maxDuration" "$R")" "45/60s/1/null" "the budget is unchanged: 45 retries, 60 s apart, no maxDuration"
+expect_eq "$(yq "$RL | .steps[0][0].template" "$R")" "check-drift" "each attempt is one check-drift (one slot)"
+expect_eq "$(yq "$RL | .steps[0][0].continueOn.failed" "$R")" "true" "an attempt's exit code is read by the loop, not hidden by it"
+expect_eq "$(yq "$RL | .steps[1][0].when" "$R")" "{{steps.attempt.exitCode}} == 3 || {{steps.attempt.exitCode}} == 137" "only 3 (not yet) and 137 (killed pod) fail the loop into a retry"
+expect_eq "$(yq "$WF | select(.name==\"check-drift-with-retry\") | .synchronization" "$R")" "null" "the wrapper callers use holds no lock"
+expect_eq "$(yq "$WF | select(.name==\"check-drift-with-retry\") | .retryStrategy" "$R")" "null" "the wrapper has no retryStrategy of its own"
+expect_eq "$(yq "$WF | select(.name==\"check-drift-with-retry\") | .steps[1][0].when" "$R")" "{{steps.loop.outputs.parameters.exit_code}} != 0" "a real failure (not 0, 3, 137) still fails the check, at once"
+expect_eq "$(yq "$WF | select(.name==\"ml-ci-reconcile\") | .steps[0][0].template" "$R")" "check-drift-with-retry" "await-inputs calls the wrapper"
+expect_eq "$(yq "$WF | select(.name==\"decide-and-submit\") | .steps[0][0].template" "$R")" "check-drift-with-retry" "decide calls the wrapper"
+expect_eq "$(yq "$WF | select(.name==\"decide-and-submit\") | .synchronization.mutexes[0].name" "$R")" "{{workflow.parameters.app_name}}-build" "the app's build mutex is unchanged"
+expect_eq "$(yq "$WF | select(.name==\"decide-and-submit\") | .steps[1][0].arguments.parameters[0].value" "$R")" "{{steps.check-drift.outputs.parameters.head_sha}}" "submit-build still reads the check's head_sha"
+for o in needs_build head_sha kaos_lib_ref; do
+  expect_eq "$(yq "$WF | select(.name==\"check-drift-with-retry\") | .outputs.parameters[] | select(.name==\"$o\") | .valueFrom.parameter" "$R")" "{{steps.loop.outputs.parameters.$o}}" "the wrapper hands $o through"
+  expect_eq "$(yq "$RL | .outputs.parameters[] | select(.name==\"$o\") | .valueFrom.parameter" "$R")" "{{steps.attempt.outputs.parameters.$o}}" "the loop hands the last attempt's $o up"
+done
 # The reaper only reads Pods; a node waiting for a semaphore has none.
 expect_eq "$(yq 'select(.metadata.name=="pending-reaper") | .spec.templates[].container.args[0]' "$R" | grep -c 'get pods -l')" "1" "the pending-reaper judges pods, not workflow nodes: a run waiting for a slot has no pod to kill"
 

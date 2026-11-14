@@ -31,16 +31,16 @@ CAPPED=$(yq 'select(.kind == "ClusterWorkflowTemplate" or .kind == "WorkflowTemp
   | .spec.templates[] | select(.retryStrategy.backoff.maxDuration) | .name' "$RENDERED" | grep -vc '^---$')
 expect_eq "$CAPPED" "0" "no workflow-template retryStrategy caps its window with maxDuration (${STRATEGIES} checked)"
 
-# ml-ci-reconcile's check-drift is the one exception: its retry is not a
+# ml-ci-reconcile's check-drift-attempts is the one exception: its retry is not a
 # preemption retry but the force-mode "not yet" wait (exit 3 only,
 # kubecore-operator#1439), bounded by its own limit instead.
 LIMITS=$(yq 'select(.kind == "ClusterWorkflowTemplate" or .kind == "WorkflowTemplate")
   | select(.metadata.name != "ml-ci-reconcile")
   | .spec.templates[] | select(.retryStrategy) | .retryStrategy.limit' "$RENDERED" | grep -v '^---$' | sort -u | tr '\n' ' ')
 expect_eq "$LIMITS" "2 " "every retryStrategy is still bounded by limit 2"
-WAIT=$(yq 'select(.metadata.name == "ml-ci-reconcile") | .spec.templates[] | select(.name == "check-drift")
-  | .retryStrategy.expression' "$RENDERED")
-expect_eq "$WAIT" "asInt(lastRetry.exitCode) == 3 || asInt(lastRetry.exitCode) == 137" "ml-ci-reconcile retries its force-mode wait and a killed pod"
+WAIT=$(yq 'select(.metadata.name == "ml-ci-reconcile") | .spec.templates[] | select(.name == "check-drift-attempts")
+  | .steps[1][0].when' "$RENDERED")
+expect_eq "$WAIT" "{{steps.attempt.exitCode}} == 3 || {{steps.attempt.exitCode}} == 137" "ml-ci-reconcile retries its force-mode wait and a killed pod"
 
 echo "retry-window: ${PASSED} passed, ${FAILED} failed"
 exit "$FAILED"

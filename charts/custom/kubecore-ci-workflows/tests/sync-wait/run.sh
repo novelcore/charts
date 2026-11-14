@@ -34,7 +34,7 @@ expect_eq "$AWAIT" "await-inputs" "non-build inputs are awaited first, before th
 # No deadlock: submit-build only creates the Workflow (a resource template) and
 # neither it nor check-drift takes a lock of its own; the queued build starts
 # when the sync's template finishes.
-for t in ml-ci-reconcile submit-build; do
+for t in ml-ci-reconcile submit-build check-drift-with-retry check-drift-attempts; do
   L=$(yq "select(.metadata.name==\"ml-ci-reconcile\") | .spec.templates[] | select(.name==\"$t\") | .synchronization" "$R")
   expect_eq "$L" "null" "$t takes no lock of its own (the input wait never blocks a build)"
 done

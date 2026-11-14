@@ -53,5 +53,7 @@ SUBMIT=$(yq 'select(.metadata.name=="ml-ci-reconcile") | .spec.templates[] | sel
   | yq '.spec.arguments.parameters[] | select(.name=="kaos_lib_rebuild") | .value')
 expect_eq "$SUBMIT" "{{=inputs.parameters.kaos_lib_ref != '' ? 'true' : 'false'}}" "only the KAOS-LIB DRIFT build (kaos_lib_ref set) is submitted with kaos_lib_rebuild=true"
 expect_eq "$(yq 'select(.metadata.name=="ml-ci-reconcile") | .spec.synchronization' "$R")" "null" "ml-ci-reconcile has no workflow-level lock"
+# Argo takes a template's lock on its retry node and keeps it through every backoff: no template may hold a lock AND retry.
+expect_eq "$(yq 'select(.metadata.name=="ml-ci-reconcile") | .spec.templates[] | select(.synchronization and .retryStrategy) | .name' "$R" | tr '\n' ' ')" "" "no ml-ci-reconcile template holds a mutex or semaphore AND a retryStrategy (the lock would be held through the backoff)"
 
 echo "build-pacing: ${PASSED} passed, ${FAILED} failed"; exit "$FAILED"
