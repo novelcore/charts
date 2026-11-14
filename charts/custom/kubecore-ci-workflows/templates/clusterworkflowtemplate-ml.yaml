@@ -574,6 +574,41 @@ spec:
         # underscores in dirs (dataset-loading ↔ steps/dataset_loading), matching the
         # authoring convention, so record both the image key (name) and the build path.
         # compose-and-validate is NOT an app step: its Dockerfile is the chart's.
+        # STEP-FOLDER-NAMES begin
+        # A step's folder name is text from the app's repository, and it becomes the step's name,
+        # its image key and a parameter of every later step. Only a plain name is accepted here,
+        # before anything is built: lower-case letters, digits, '-' and '_', starting and ending
+        # with a letter or digit, at most 63 characters. Anything else refuses the build and names
+        # the folder (shown with every other character replaced), so no later step ever receives it.
+        BAD_STEP_DIRS=""
+        for d in steps/*/; do
+          [ -f "${d}Dockerfile" ] || continue
+          base=${d%/}; base=${base#steps/}
+          case "$base" in
+            ""|*[!a-z0-9_-]*|[!a-z0-9]*|*[!a-z0-9]) ok=false ;;
+            *) ok=true; [ "${#base}" -le 63 ] || ok=false ;;
+          esac
+          [ "$ok" = "true" ] || BAD_STEP_DIRS="${BAD_STEP_DIRS}steps/$(printf '%s' "$base" | tr -c 'A-Za-z0-9_.-' '?' | cut -c1-80)
+        "
+        done
+        if [ -n "$BAD_STEP_DIRS" ]; then
+          {
+            echo "#### What to change"
+            echo ""
+            echo "A step folder has a name the platform does not accept. Nothing was built: the pipeline you could run before this commit is still the one that runs."
+            echo ""
+            echo '```'
+            printf '%s' "$BAD_STEP_DIRS" | sed 's/^ *//'
+            echo '```'
+            echo ""
+            echo "Rename it: lower-case letters, digits, '-' and '_' only, starting and ending with a letter or digit, at most 63 characters."
+            echo ""
+          } > "${REPORT_EXTRA:-/workspace/report-extra.md}"
+          echo "kaos-ci: REFUSED: a step folder name is not accepted:" >&2
+          printf '%s' "$BAD_STEP_DIRS" | sed 's/^ */  /' >&2
+          exit 1
+        fi
+        # STEP-FOLDER-NAMES end
         STEP_PAIRS=$(for d in steps/*/; do
           [ -f "${d}Dockerfile" ] || continue
           dir=${d%/}; base=$(basename "$dir")

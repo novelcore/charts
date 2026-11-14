@@ -366,5 +366,35 @@ run_seal "$R/workspace/repo"
 expect_eq "$RC" "0" "seal: a forged form and forged platform keys are replaced, not trusted"
 expect_eq "$(yq '.metadata.annotations["ui.kubecore.io/run-form"] != "FORGED" and (.metadata.labels | has("platform.kubecore.io/evil") | not) and (.spec.workflowMetadata.labelsFrom | length == 0)' "$R/workspace/out/workflow-template.yaml")" "true" "seal: ...no forged key survives"
 
+# ── detect-steps: a step folder name from the app's repository is checked before it is used ──
+# The folder name becomes the step's name, its image key and a parameter of every later step.
+NAMES="${BASE_TMP}/names.sh"
+script_of ml-ci-build detect-steps | sed -n '/STEP-FOLDER-NAMES begin/,/STEP-FOLDER-NAMES end/p' > "$NAMES"
+expect_eq "$([ "$(wc -l < "$NAMES")" -gt 10 ] && echo yes)" "yes" "detect-steps carries the step folder name check"
+DS=$(script_of ml-ci-build detect-steps)
+expect_eq "$(printf '%s\n' "$DS" | grep -n 'STEP-FOLDER-NAMES end\|STEP_PAIRS=\$(for d in steps' | head -2 | cut -d: -f2 | tr -s ' ' | cut -c1-28 | tr '\n' '|')" "# STEP-FOLDER-NAMES end|STEP_PAIRS=\$(for d in steps/|" "the check runs before the step list is built"
+names_case() {  # names_case DIR: run the check in DIR; sets RC, OUT
+  OUT=$( cd "$1" && REPORT_EXTRA="$1/report.md" sh "$NAMES" 2>&1 ); RC=$?
+}
+N=$(mktemp -d "${BASE_TMP}/names-XXXX")
+for n in model_training prepare-data a 9lives hello_world; do mkdir -p "$N/steps/$n" && : > "$N/steps/$n/Dockerfile"; done
+mkdir -p "$N/steps/No Dockerfile \$(touch $N/PWNED-nodocker)"
+names_case "$N"
+expect_eq "$RC/$([ -e "$N/report.md" ] && echo report)" "0/" "plain step folder names pass, and a folder without a Dockerfile is not a step"
+i=0
+for n in 'a b' 'x$(touch PWNED-sub)' 'y`touch PWNED-tick`' "q'; touch PWNED-quote; '" '-lead' 'trail-' '_under' 'Upper' 'dot.name' 'semi;touch PWNED-semi' "$(printf 'nl\ntouch PWNED-nl')" "$(printf 'a%.0s' $(seq 64))"; do
+  i=$((i + 1))
+  B=$(mktemp -d "${BASE_TMP}/names-bad-XXXX")
+  mkdir -p "$B/steps/train" "$B/steps/$n" && : > "$B/steps/train/Dockerfile" && : > "$B/steps/$n/Dockerfile"
+  names_case "$B"
+  expect_eq "$RC" "1" "bad step folder name $i is refused before anything is built"
+  expect_has "$(cat "$B/report.md" 2>/dev/null)" "Rename it: lower-case letters, digits" "bad step folder name $i: the client is told what to change"
+  expect_eq "$(cat "$B/report.md" 2>/dev/null | grep -c '[`$;]' | tr -d ' ')" "2" "bad step folder name $i: the report shows the name with its other characters replaced (only the two code fences remain)"
+  expect_no_pwn "$B" "bad step folder name $i: nothing in the name ran"
+done
+expect_eq "$(printf '%s' "$(printf 'a%.0s' $(seq 63))" | wc -c | tr -d ' ')" "63" "(63 characters is the longest accepted name)"
+L=$(mktemp -d "${BASE_TMP}/names-63-XXXX"); mkdir -p "$L/steps/$(printf 'a%.0s' $(seq 63))" && : > "$L/steps/$(printf 'a%.0s' $(seq 63))/Dockerfile"
+names_case "$L"; expect_eq "$RC" "0" "a 63-character step folder name passes"
+
 echo "untrusted-workspace: ${PASSED} passed, ${FAILED} failed"
 exit "$FAILED"
