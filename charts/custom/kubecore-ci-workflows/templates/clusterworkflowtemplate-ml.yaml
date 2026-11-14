@@ -1451,7 +1451,10 @@ spec:
         # replaces after build). This is what keeps D10 true on day 1.
         IMAGES_FILE="${GITOPS_DIR}/pipeline-images.yaml"
         if [ -f "$IMAGES_FILE" ]; then
-          CONTEXT_SHA=$(python3 -I /tmp/engine.py context-sha --context "$CONTEXT_PATH")
+          # A context the chart cannot hash is recorded by its bytes: that renders once and is current until it changes
+          # (ml-ci-reconcile compares the recorded value with the file's sha256 too), never a failed build, never a loop.
+          CONTEXT_SHA=$(python3 -I /tmp/engine.py context-sha --context "$CONTEXT_PATH" 2>/dev/null) \
+            || CONTEXT_SHA=$(sha256sum "$CONTEXT_PATH" | cut -c1-64)
           python3 - "$WFT_FILE" "$IMAGES_FILE" "$APP_NAME" "$CONTEXT_SHA" "$ENGINE_VERSION" /tmp/dataset-sha "$WFT_BYTES" <<'IMGEOF'
         import sys, yaml, re
         wft = yaml.safe_load(open(sys.argv[1]))

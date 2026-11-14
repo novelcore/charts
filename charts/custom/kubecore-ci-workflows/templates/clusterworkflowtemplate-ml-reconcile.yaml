@@ -131,18 +131,6 @@ spec:
     # skipped: skipping would drop the event, and there is no next poll.
     - name: force
       value: "false"
-    # context_sha (force mode): sha256 of the pipeline-context.yaml the
-    # composition just wrote to gitops. The build renders from the gitops copy,
-    # so force waits until that copy matches; a build started before the
-    # composition's commit lands would render the old context and nothing would
-    # re-trigger it. Empty = do not wait.
-    - name: context_sha
-      value: ""
-    # context_proj (force mode): the same for what the render reads of that context (engine.py context-sha,
-    # which leaves out CONTEXT_UNREAD). Given, the wait compares this one, so a change of a field nobody reads
-    # that lands between the trigger and the build does not hold the trigger back. Empty = context_sha.
-    - name: context_proj
-      value: ""
     # dataset_event: set by ml-ci-dataset-release (kaos-lake saw a dataset change).
     # The poll's checks, plus: a build already in flight is waited out (exit 3,
     # retried) instead of skipping, because the in-flight render may predate the
@@ -494,13 +482,15 @@ spec:
           [ "$_cs" = "$(printf '' | sha256sum | cut -c1-64)" ] || printf '%s' "$_cs"
         }
         # gitops_ctx_proj prints what the render reads of that same file (engine.py context-sha: the sha256 of
-        # the context without CONTEXT_UNREAD, comments and formatting), or nothing when it is not a context.
-        # context-sha in pipeline-images is this value; one recorded before it was this (the sha256 of the raw
-        # file) is still current while the file is the same bytes: ctx_current RECORDED RAW PROJECTION.
+        # the context without CONTEXT_UNREAD, comments and formatting), nothing when the file cannot be read,
+        # and "unhashable" when it is read but is not a context. context-sha in pipeline-images is this value;
+        # one recorded before it was this (the sha256 of the raw file) is still current while the file is the
+        # same bytes: ctx_current RECORDED RAW PROJECTION. "unhashable" equals no record, so a context the
+        # chart cannot hash is a context that moved (fails closed to a re-render, which records the raw sha).
         gitops_ctx_proj() {
           curl -sf -H "Authorization: Bearer ${TOKEN}" -H "Accept: application/vnd.github.raw" \
-            "https://api.github.com/repos/${GORG}/${GREPO}/contents/${CTX_REL}?ref=${GBRANCH}" > /tmp/ctx-proj.yaml \
-            && python3 -I /tmp/engine.py context-sha --context /tmp/ctx-proj.yaml 2>/dev/null || true
+            "https://api.github.com/repos/${GORG}/${GREPO}/contents/${CTX_REL}?ref=${GBRANCH}" > /tmp/ctx-proj.yaml || return 0
+          python3 -I /tmp/engine.py context-sha --context /tmp/ctx-proj.yaml 2>/dev/null || printf 'unhashable'
         }
         ctx_current() { [ -n "$1" ] && { [ "$1" = "$3" ] || [ "$1" = "$2" ]; }; }
         CTX_LAST=$(echo "$CM" | jq -r '.data["context-sha"] // empty')
@@ -575,17 +565,13 @@ spec:
         }
 
         if [ "$FORCE" = "true" ]; then
-          WANT_CTX="{{`{{workflow.parameters.context_sha}}`}}"
-          WANT_PROJ="{{`{{workflow.parameters.context_proj}}`}}"
+          # The forced run takes no hash of the context from its caller: the context is read from gitops and
+          # compared with what the last render recorded, both by this chart's own engine.py, so two
+          # implementations of the hash can never disagree here and no mismatch can hold a slot. It does not
+          # wait for the context either: a new app's context reaches the cluster with its pipeline-images (the
+          # wait above), and a gitops context older than the one this trigger is for is the poll's CONTEXT
+          # DRIFT once the new one lands.
           HAVE_CTX=""
-          if [ -n "$WANT_PROJ" ]; then
-            HAVE_CTX=$(gitops_ctx_sha)
-            HAVE_PROJ=$(gitops_ctx_proj)
-            [ "$HAVE_PROJ" = "$WANT_PROJ" ] || not_yet "gitops ${CTX_REL} is not the context this trigger is for yet (${HAVE_PROJ:0:12} != ${WANT_PROJ:0:12})"
-          elif [ -n "$WANT_CTX" ]; then
-            HAVE_CTX=$(gitops_ctx_sha)
-            [ "$HAVE_CTX" = "$WANT_CTX" ] || not_yet "gitops ${CTX_REL} is not the context this trigger is for yet (${HAVE_CTX:0:12} != ${WANT_CTX:0:12})"
-          fi
           old_app_guard
           # KAOS-LIB PIN (PRD novelcore/kaos#1911): the context this trigger is for delivers the app's
           # OWN pin (spec.ml.kaosLib; the operator marks it kaosLib.pinned) and the images do not have
@@ -643,7 +629,7 @@ spec:
           # ALREADY SATISFIED: the force exists because the webhook build of
           # HEAD may predate the context or engine this trigger is for. When
           # the last build IS HEAD and its render recorded the context-sha now
-          # in gitops (and the trigger's, when it names one) and the engine the
+          # in gitops and the engine the
           # context pins, that render used exactly the inputs a forced build would:
           # it would rebuild the same SHA and render the same WFT. Live, kaos
           # e2e a3c48d99 (2026-10-19): every ML app's first commit was built
@@ -709,7 +695,7 @@ spec:
         if [ -n "$CTX_LAST" ]; then
           CTX_NOW=$(gitops_ctx_sha)
           CTX_PROJ=$(gitops_ctx_proj)
-          if [ -z "$CTX_NOW" ]; then
+          if [ -z "$CTX_NOW" ] || [ -z "$CTX_PROJ" ]; then
             echo "reconcile: gitops ${CTX_REL} unreadable — context drift unknown this poll"
           elif ctx_current "$CTX_LAST" "$CTX_NOW" "$CTX_PROJ"; then
             :

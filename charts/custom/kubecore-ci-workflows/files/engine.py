@@ -121,7 +121,8 @@ def context_projection(ctx):
 
 def context_sha(path):
     """sha256 of the canonical projection of the context in `path` (a ConfigMap or the bare context), or
-    "" when the file is not a context (unreadable, empty, not YAML, not a mapping)."""
+    "" when the file is not a context (unreadable, empty, not YAML, not a mapping, or not representable).
+    Total: whatever YAML the file holds, this returns a digest or "", never raises."""
     try:
         with open(path) as f:
             doc = yaml.safe_load(f)
@@ -129,24 +130,43 @@ def context_sha(path):
             data = doc.get("data") or {}
             key = "context.yaml" if "context.yaml" in data else next(iter(data), None)
             doc = yaml.safe_load(data[key]) if key else None
-    except (OSError, yaml.YAMLError, TypeError, AttributeError):
+        if not isinstance(doc, dict) or not doc:
+            return ""
+        canonical = json.dumps(_canonical(context_projection(doc)), sort_keys=True, separators=(",", ":"),
+                               ensure_ascii=False, default=str)
+        # Go's json.Marshal (the composition's `toJson`) escapes these; match it byte for byte.
+        for ch, esc in (("&", "\\u0026"), ("<", "\\u003c"), (">", "\\u003e"), ("\u2028", "\\u2028"), ("\u2029", "\\u2029")):
+            canonical = canonical.replace(ch, esc)
+        return hashlib.sha256(canonical.encode()).hexdigest()
+    except Exception:  # noqa: BLE001 - a hash that cannot be made is "", and every caller treats "" as "re-render"
         return ""
-    if not isinstance(doc, dict) or not doc:
-        return ""
-    canonical = json.dumps(_whole_numbers(context_projection(doc)), sort_keys=True, separators=(",", ":"),
-                           ensure_ascii=False, default=str)
-    # Go's json.Marshal (the composition's `toJson`) escapes these; match it byte for byte.
-    for ch, esc in (("&", "\\u0026"), ("<", "\\u003c"), (">", "\\u003e"), ("\u2028", "\\u2028"), ("\u2029", "\\u2029")):
-        canonical = canonical.replace(ch, esc)
-    return hashlib.sha256(canonical.encode()).hexdigest()
 
 
-def _whole_numbers(v):
-    """A whole float is an int, as Go prints it (7.0 -> 7), so the composition and this agree."""
+def _key_text(k):
+    """The string a mapping key becomes in JSON: YAML keys are not always strings (an unquoted `on:` is True, `1:` is
+    1), and json.dumps(sort_keys=True) raises on a map that mixes types. Booleans and null are spelled as JSON."""
+    if isinstance(k, str):
+        return k
+    if k is None or isinstance(k, bool):
+        return json.dumps(k)
+    return str(k)
+
+
+def _canonical(v):
+    """The value with every mapping key a string, deterministic whatever order or types the keys have, and a whole
+    float an int, as Go prints it (7.0 -> 7), so the composition and this agree. Keys that become the same string
+    (`1` and "1") are kept apart by their type, in a fixed order, so no value is lost and the digest never depends
+    on the file's key order."""
     if isinstance(v, dict):
-        return {k: _whole_numbers(x) for k, x in v.items()}
-    if isinstance(v, list):
-        return [_whole_numbers(x) for x in v]
+        pairs = sorted(((_key_text(k), type(k).__name__, k) for k in v), key=lambda t: (t[0], t[1]))
+        out, seen = {}, set()
+        for text, tname, k in pairs:
+            name = text if text not in seen else "%s\x00%s" % (text, tname)
+            seen.add(text)
+            out[name] = _canonical(v[k])
+        return out
+    if isinstance(v, (list, tuple)):
+        return [_canonical(x) for x in v]
     if isinstance(v, float) and v.is_integer():
         return int(v)
     return v

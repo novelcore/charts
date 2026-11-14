@@ -144,13 +144,10 @@ reconcile_build() {
 now_minus() { echo "${ENG}@$(( $(date +%s) - $1 ))"; }
 
 # run_drift: check-drift with the Argo placeholders filled and its fixed paths
-# moved into the sandbox; FORCE / WANT_CTX / WANT_PROJ set the force, context_sha and
-# context_proj parameters (default: the backstop). Sets OUT (stdout+stderr), NEEDS, RC.
+# moved into the sandbox; FORCE sets the force parameter (default: the backstop). Sets OUT (stdout+stderr), NEEDS, RC.
 run_drift() {
   sed -e "s#{{workflow.namespace}}#ci#g" \
       -e "s#{{workflow.parameters.force}}#${FORCE:-false}#g" \
-      -e "s#{{workflow.parameters.context_sha}}#${WANT_CTX:-}#g" \
-      -e "s#{{workflow.parameters.context_proj}}#${WANT_PROJ:-}#g" \
       -e "s#{{workflow.parameters.app_name}}#${APP}#g" \
       -e "s#{{workflow.parameters.project_name}}#proj#g" \
       -e "s#{{workflow.parameters.branch}}#dev#g" \
@@ -245,12 +242,51 @@ expect_eq "$RC/$NEEDS" "0/false" "context-sha recorded by the previous chart (ra
 new_case; cp "$BASE_TMP/g1.yaml" "$T/gitops-context.yaml"; cm "$R0"; images "$ENG" "$ENG" "$R0"; run_drift
 expect_eq "$RC/$NEEDS" "0/true" "raw sha recorded by the previous chart and the file changed since: one re-render, which records the new form"
 
-new_case; cp "$BASE_TMP/g1.yaml" "$T/gitops-context.yaml"; cm "$P0"; images "$ENG" "$ENG" "$P0"; FORCE=true WANT_PROJ="$P0" run_drift
-expect_eq "$RC/$NEEDS" "0/false" "force for a projection the gitops file has (only unread paths differ from the trigger's): satisfied, no build"
-new_case; cp "$BASE_TMP/g2.yaml" "$T/gitops-context.yaml"; cm "$P0"; images "$ENG" "$ENG" "$P0"; FORCE=true WANT_PROJ="$P0" run_drift
-expect_eq "$RC/$NEEDS" "3/false" "force for a projection the gitops file does not have yet: waits (exit 3)"
-new_case; cp "$BASE_TMP/g0.yaml" "$T/gitops-context.yaml"; cm "$R0"; images "$ENG" "$ENG" "$R0"; FORCE=true WANT_PROJ="$P0" WANT_CTX="$R0" run_drift
-expect_eq "$RC/$NEEDS" "0/false" "force, projection given, the live record still the raw sha of the same file: satisfied"
+# The forced run takes no hash from its caller (an old operator still passes `context_sha`, a new one passes
+# nothing): it compares the gitops file with the record by engine.py alone. No case below can wait on a
+# context, whatever the caller says.
+new_case; cp "$BASE_TMP/g1.yaml" "$T/gitops-context.yaml"; cm "$P0"; images "$ENG" "$ENG" "$P0"; FORCE=true run_drift
+expect_eq "$RC/$NEEDS" "0/false" "force, only unread paths differ from the record: satisfied, no build"
+new_case; cp "$BASE_TMP/g2.yaml" "$T/gitops-context.yaml"; cm "$P0"; images "$ENG" "$ENG" "$P0"; FORCE=true run_drift
+expect_eq "$RC/$NEEDS" "0/true" "force, a field the render reads moved since the record: builds at once, never waits"
+new_case; cp "$BASE_TMP/g0.yaml" "$T/gitops-context.yaml"; cm "$R0"; images "$ENG" "$ENG" "$R0"; FORCE=true run_drift
+expect_eq "$RC/$NEEDS" "0/false" "force, record is the raw sha of the same file (chart upgrade): satisfied, no loop"
+new_case; cp "$BASE_TMP/g1.yaml" "$T/gitops-context.yaml"; cm "$R0"; images "$ENG" "$ENG" "$R0"; FORCE=true run_drift
+expect_eq "$RC/$NEEDS" "0/true" "force, raw record and the file changed since: one build, which records the new form"
+
+# A context that mixes key types (an unquoted `on:` beside a string key) is hashed, not an error.
+new_case; printf 'kind: ConfigMap\ndata:\n  context.yaml: |\n    app: x\n    on: 1\n    name: y\n    engine: {version: %s}\n' "$ENG" > "$T/gitops-context.yaml"
+PM=$(proj_of "$T/gitops-context.yaml")
+expect_eq "${#PM}" "64" "a context with mixed key types has a context-sha"
+cm "$PM"; images "$ENG" "$ENG" "$PM"; run_drift
+expect_eq "$RC/$NEEDS" "0/false" "mixed key types, recorded: no drift, no loop"
+cm "$PM"; images "$ENG" "$ENG" "$PM"; FORCE=true run_drift
+expect_eq "$RC/$NEEDS" "0/false" "mixed key types, forced: satisfied"
+
+# A context that cannot be hashed (readable, not a mapping) fails closed to a re-render, never to a wait or to "nothing".
+new_case; printf -- '- not\n- a context\n' > "$T/gitops-context.yaml"; cm "$P0"; images "$ENG" "$ENG" "$P0"; run_drift
+expect_eq "$RC/$NEEDS" "0/true" "poll, gitops context unhashable: re-render"
+expect_has "$OUT" "CONTEXT DRIFT" "... as a context drift"
+new_case; printf -- '- not\n- a context\n' > "$T/gitops-context.yaml"; cm "$P0"; images "$ENG" "$ENG" "$P0"; FORCE=true run_drift
+expect_eq "$RC/$NEEDS" "0/true" "force, gitops context unhashable: builds"
+RAWBAD=$(sha256sum < "$T/gitops-context.yaml" | cut -c1-64)
+cm "$RAWBAD"; images "$ENG" "$ENG" "$RAWBAD"; run_drift
+expect_eq "$RC/$NEEDS" "0/false" "unhashable context rendered once (recorded by its bytes): no loop"
+new_case; cp "$BASE_TMP/g0.yaml" "$T/gitops-context.yaml"; cm "$P0"; images "$ENG" "$ENG" "$P0"
+rm "$T/gitops-context.yaml"; run_drift
+expect_eq "$RC/$NEEDS" "0/false" "poll, gitops context unreadable (not a bad file): unknown, no work"
+
+# ml-ci-build records the same value: the hash, or the file's own sha256 for a context the chart cannot hash
+# (a failed hash is never an empty or a failed build, and never a value the poll reads as moved).
+RECORD_SRC="${BASE_TMP}/record-ctx.sh"
+yq 'select(.kind == "ClusterWorkflowTemplate" and .metadata.name == "ml-ci-build")
+    | .spec.templates[] | select(.name == "hera-enhance-commit") | .container.args[0]' "$RENDERED" \
+  | awk '/CONTEXT_SHA=\$\(python3/{f=1} f{print} /\|\| CONTEXT_SHA=/{exit}' | sed "s#/tmp/engine.py#${ENGINE_PY}#" > "$RECORD_SRC"
+expect_has "$(cat "$RECORD_SRC")" "|| CONTEXT_SHA=" "the build's context-sha record is found"
+record_ctx() { CONTEXT_PATH="$1" bash -e -c "$(cat "$RECORD_SRC"); printf '%s' \"\$CONTEXT_SHA\""; }
+expect_eq "$(record_ctx "$BASE_TMP/g1.yaml")" "$P0" "the build records the hash of a context"
+printf -- '- not\n- a context\n' > "$BASE_TMP/bad.yaml"
+expect_eq "$(record_ctx "$BASE_TMP/bad.yaml")" "$(sha256sum < "$BASE_TMP/bad.yaml" | cut -c1-64)" "the build records the file's sha256 for a context it cannot hash (the step does not fail)"
 
 # ── one attempt per hour per engine version after a failure ──────────────────
 
@@ -354,14 +390,8 @@ new_case; FORCE=true run_drift
 expect_eq "$RC/$NEEDS" "0/false" "force, HEAD built + rendered from the current context by the current engine: no build"
 expect_has "$OUT" "FORCED but already satisfied — HEAD ${HEAD_SHA} built and rendered from the current context (${CTX_SHA:0:12}) by engine ${ENG}; nothing to do" "force satisfied: says why"
 
-new_case; FORCE=true WANT_CTX="$CTX_SHA" run_drift
-expect_eq "$RC/$NEEDS" "0/false" "force for the context already rendered (context_sha = recorded = gitops): no build"
-
-new_case; FORCE=true WANT_CTX="$(printf 'next' | sha256sum | cut -c1-64)" run_drift
-# Still exit 3 (the await-inputs step retries it). needs_build is now written as
-# "false" BEFORE any decision (ci-sync wait change, charts#198), so the outputs
-# exist on this exit too and Argo logs no "cannot save parameter".
-expect_eq "$RC/$NEEDS" "3/false" "force for a context not yet in gitops: still waits (exit 3), output written as false"
+# A caller that still passes a context_sha (an operator older than this chart) changes nothing: the argument is
+# not declared, nothing reads it. No wait, no loop (the case above is the same run).
 
 new_case
 jq '.data["last-built-sha"] = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"' "$T/cm.json" > "$T/c.tmp" \

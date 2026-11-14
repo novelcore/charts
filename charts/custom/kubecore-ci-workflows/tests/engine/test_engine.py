@@ -230,6 +230,42 @@ def test_context_sha_of_something_that_is_not_a_context_is_empty(tmp_path, capsy
     assert engine.context_sha(str(tmp_path / "missing.yaml")) == ""
 
 
+def _raw_sha(tmp_path, text):
+    path = tmp_path / "raw.yaml"
+    path.write_text(text)
+    return engine.context_sha(str(path))
+
+
+@pytest.mark.parametrize("text", [
+    "app: a\non: 1\n",                       # an unquoted `on` is the boolean True beside a string key
+    "app: a\ntrigger: {on: 1, name: x}\n",   # nested
+    "app: a\n1: x\n",                        # an int key beside a string key
+    "app: a\nyes: 1\nno: 2\n",
+    "app: a\n? null\n: 1\n",
+    "app: a\n2026-01-02: x\n",               # a date key
+    "app: a\n1: x\n\"1\": y\n",              # keys that print the same
+])
+def test_context_sha_is_total_over_key_types(tmp_path, text):
+    digest = _raw_sha(tmp_path, text)
+    assert len(digest) == 64
+    assert _raw_sha(tmp_path, text) == digest
+
+
+def test_context_sha_of_mixed_keys_does_not_depend_on_their_order(tmp_path):
+    assert _raw_sha(tmp_path, "app: a\non: 1\nname: x\n") == _raw_sha(tmp_path, "name: x\non: 1\napp: a\n")
+    assert _raw_sha(tmp_path, "app: a\n1: x\n\"1\": y\n") == _raw_sha(tmp_path, "\"1\": y\n1: x\napp: a\n")
+    assert _raw_sha(tmp_path, "app: a\n1: x\n\"1\": y\n") != _raw_sha(tmp_path, "app: a\n1: y\n\"1\": x\n")
+    assert _raw_sha(tmp_path, "app: a\non: 1\n") != _raw_sha(tmp_path, "app: a\non: 2\n")
+
+
+def test_context_sha_never_raises(tmp_path, monkeypatch):
+    path = tmp_path / "c.yaml"
+    path.write_text("app: a\n")
+    monkeypatch.setattr(engine, "_canonical", lambda v: (_ for _ in ()).throw(RecursionError()))
+    assert engine.context_sha(str(path)) == ""
+    assert engine.main(["context-sha", "--context", str(path)]) == 1
+
+
 def test_cli_context_sha(tmp_path, capsys):
     path = write_context(tmp_path, BLOCK, app="a")
     assert engine.main(["context-sha", "--context", path]) == 0

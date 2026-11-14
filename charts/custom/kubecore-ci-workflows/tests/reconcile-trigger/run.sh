@@ -73,7 +73,6 @@ GITOPS_CTX='kind: ConfigMap  # gitops pipeline-context.yaml, raw'
 CTX_SHA=$(printf '%s' "$GITOPS_CTX" | sha256sum | cut -c1-64)
 
 run_case() {
-  WANT_CTX="${5:-}"
   T=$(mktemp -d "${BASE_TMP}/case-XXXX")
   mkdir -p "$T/bin"
   printf 'token' > "$T/token"
@@ -103,7 +102,7 @@ case "\$*" in
   *"/commits/"*) [ -n '$3' ] || exit 22; printf '{"sha":"%s"}' '$3' ;;
   *"pipeline-images.yaml"*) printf 'metadata:\n  namespace: ml-proj\ndata:\n  dataset-sha: %s\n' '${GITOPS_DS:-}'
     [ -z '${GITOPS_KL:-}' ] || printf '  kaos-lib-package: "%s"\n' '${GITOPS_KL:-}' ;;
-  *"pipeline-context.yaml"*) printf '%s' '$GITOPS_CTX' ;;
+  *"pipeline-context.yaml"*) [ -z '${CTX_GITOPS_OFF:-}' ] || exit 22; printf '%s' '$GITOPS_CTX' ;;
   *) exit 22 ;;
 esac
 EOF
@@ -111,8 +110,6 @@ EOF
   sed -e "s#{{workflow.namespace}}#ci#g" \
       -e "s#{{inputs.parameters.mode}}#${MODE:-decide}#g" \
       -e "s#{{workflow.parameters.force}}#$1#g" \
-      -e "s#{{workflow.parameters.context_sha}}#$WANT_CTX#g" \
-      -e "s#{{workflow.parameters.context_proj}}#${WANT_PROJ:-}#g" \
       -e "s#{{workflow.parameters.app_name}}#app1#g" \
       -e "s#{{workflow.parameters.project_name}}#proj#g" \
       -e "s#{{workflow.parameters.branch}}#dev#g" \
@@ -197,10 +194,10 @@ expect_eq "$RC/$NEEDS/$SHA" "0/true/$HEAD_SHA" "force, new app: builds HEAD"
 run_case true "$IDLE" "$HEAD_SHA" built
 expect_eq "$RC/$NEEDS/$SHA" "0/true/$HEAD_SHA" "force, HEAD already built (context changed): re-renders anyway"
 
-run_case true "$IDLE" "$HEAD_SHA" built "0000000000000000000000000000000000000000000000000000000000000000"
-expect_eq "$RC" "3" "force, gitops context not yet the one this trigger is for: waits (exit 3)"
-run_case true "$IDLE" "$HEAD_SHA" built "$CTX_SHA"
-expect_eq "$RC/$NEEDS" "0/true" "force, gitops context matches: builds"
+# The trigger names no context (an operator older than this chart still passes a hash, nothing reads it): a
+# forced run for a built HEAD whose gitops context is newer or older than the trigger's never waits on it.
+CTX_GITOPS_OFF=1 run_case true "$IDLE" "$HEAD_SHA" built
+expect_eq "$RC/$NEEDS" "0/true" "force, the gitops context cannot be read: unknown never waits, builds"
 
 # ── force=true, the app's OWN kaos-lib pin (PRD novelcore/kaos#1911) ──────────
 # The operator writes kaosLib.pinned: true into the gitops context only for spec.ml.kaosLib. The forced run
