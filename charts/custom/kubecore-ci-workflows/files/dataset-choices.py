@@ -6,19 +6,41 @@ what it offered) and the drift check (ml-ci-reconcile compares that digest with 
 
     python3 -I dataset-choices.py digest ENDPOINT TOKEN_FILE
 
-prints the digest of the catalog's choices, or exits 1 when the catalog cannot be read.
+prints the digest of the catalog's choices, or exits 1 when the catalog cannot be read (after up to three
+attempts when the failure is a timeout, a connection error or a 5xx).
 """
 import hashlib
 import json
 import sys
+import time
+import urllib.error
 import urllib.request
 
 
+ATTEMPTS = 3
+PAUSE = 2  # seconds; the pause before attempt n+1 is PAUSE * n
+
+
+def _transient(exc):
+    """A failure that can pass by itself: a timeout, a refused or reset connection, a 5xx. A refused token
+    (401/403), a missing catalog (404) or any other answer is final."""
+    if isinstance(exc, urllib.error.HTTPError):
+        return exc.code >= 500
+    return isinstance(exc, OSError)  # URLError, timeouts and connection errors are all OSErrors
+
+
 def read_catalog(endpoint, token_path):
-    """The catalog's datasets. Raises when it cannot be read."""
+    """The catalog's datasets. Raises when it cannot be read: a transient failure is tried ATTEMPTS times
+    (a busy data store times out exactly when many apps re-render at once), a final one at once."""
     req = urllib.request.Request(endpoint.rstrip("/") + "/kaos/v1/catalog",
                                  headers={"Authorization": "Bearer " + open(token_path).read().strip()})
-    return json.load(urllib.request.urlopen(req, timeout=20)).get("datasets") or []
+    for attempt in range(1, ATTEMPTS + 1):
+        try:
+            return json.load(urllib.request.urlopen(req, timeout=20)).get("datasets") or []
+        except Exception as exc:  # noqa: BLE001
+            if attempt == ATTEMPTS or not _transient(exc):
+                raise
+            time.sleep(PAUSE * attempt)
 
 
 def _ref(d):

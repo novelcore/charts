@@ -14,7 +14,7 @@ set -u
 HERE=$(cd "$(dirname "$0")" && pwd)
 CHART="${HERE}/../.."
 WORK=$(mktemp -d)
-trap 'kill "${SERVER:-0}" 2>/dev/null; rm -rf "$WORK"' EXIT
+trap 'kill "${SERVER:-0}" ${FLAKY:-} 2>/dev/null; rm -rf "$WORK"' EXIT
 FAILED=0
 PASSED=0
 expect_eq() {
@@ -241,6 +241,62 @@ wft "    - {name: dataset, value: dataset-gone@v1}
 run >/dev/null
 expect_eq "$(param)" "dataset-gone@v1 | bob/dataset-zeta@v1,bob/dataset-zeta@latest" "no own dataset: the fallback never picks a shared one; the shared ref is still offered"
 kill $ONLYSH 2>/dev/null
+
+# ── the catalog read retries a transient failure, never a final one ─────────
+# A fake catalog answering the first FAILS requests with CODE, then 200; every request is counted in $WORK/hits.
+cat > "$WORK/flaky.py" <<'PY'
+import http.server, json, sys
+port, code, fails, hits = int(sys.argv[1]), int(sys.argv[2]), int(sys.argv[3]), sys.argv[4]
+class H(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        n = len(open(hits).read().split()) + 1
+        open(hits, "a").write("x\n")
+        bad = n <= fails
+        self.send_response(code if bad else 200)
+        self.end_headers()
+        self.wfile.write(json.dumps({"datasets": [{"name": "dataset-cars", "versions": [{"tag": "v1"}]}]}).encode())
+    def log_message(self, *a): pass
+http.server.HTTPServer(("127.0.0.1", port), H).serve_forever()
+PY
+echo pod-token > "$WORK/token"
+flaky() { : > "$WORK/hits"; [ -z "${FLAKY:-}" ] || kill "$FLAKY" 2>/dev/null; python3 "$WORK/flaky.py" 18915 "$1" "$2" "$WORK/hits" & FLAKY=$!; sleep 1
+          OUT=$(python3 -I "$WORK/dataset-choices.py" digest http://127.0.0.1:18915/ "$WORK/token" 2>&1); RC=$?; HITS=$(wc -l < "$WORK/hits" | tr -d ' '); }
+CARS_SHA=$(python3 -c "import hashlib; print(hashlib.sha256(b'dataset-cars@latest\ndataset-cars@v1').hexdigest())")
+flaky 503 2
+expect_eq "$RC/$HITS/$OUT" "0/3/$CARS_SHA" "a catalog that answers 503 twice is read on the third attempt"
+flaky 503 1
+expect_eq "$RC/$HITS/$OUT" "0/2/$CARS_SHA" "a catalog that answers 503 once is read on the second attempt"
+flaky 503 99
+expect_eq "$RC/$HITS" "1/3" "a catalog that keeps answering 503 is tried three times, then the read fails"
+case "$OUT" in *"catalog not read (HTTPError"*) PASSED=$((PASSED + 1)); echo "PASS: and says why";; *) FAILED=$((FAILED + 1)); echo "FAIL: no reason printed: $OUT";; esac
+for code in 401 403 404; do
+  flaky $code 99
+  expect_eq "$RC/$HITS" "1/1" "a $code is final: one attempt, no retry"
+done
+: > "$WORK/hits"
+OUT=$(python3 -I "$WORK/dataset-choices.py" digest http://127.0.0.1:1/ "$WORK/token" 2>&1); RC=$?
+expect_eq "$RC" "1" "a refused connection is retried and then fails"
+kill $FLAKY 2>/dev/null
+# the timeout itself is retried: a server that never answers within the timeout, then answers
+python3 - "$WORK/dataset-choices.py" <<'PY'
+import importlib.util, io, sys, urllib.request, socket, json, time
+spec = importlib.util.spec_from_file_location("dc", sys.argv[1]); dc = importlib.util.module_from_spec(spec); spec.loader.exec_module(dc)
+calls, naps = [], []
+dc.time.sleep = naps.append
+class R(io.BytesIO):
+    def __enter__(self): return self
+    def __exit__(self, *a): pass
+def fake(req, timeout):
+    calls.append(timeout)
+    if len(calls) < 3: raise socket.timeout("timed out")
+    return R(json.dumps({"datasets": [{"name": "a"}]}).encode())
+urllib.request.urlopen = fake
+import tempfile; t = tempfile.NamedTemporaryFile("w", delete=False); t.write("tok"); t.close()
+got = dc.read_catalog("http://x", t.name)
+assert got == [{"name": "a"}] and len(calls) == 3 and naps == [2, 4], (got, calls, naps)
+print("timeouts retried: 3 calls, pauses", naps)
+PY
+expect_eq "$?" "0" "a read timeout is retried (pauses 2s then 4s), then succeeds"
 
 echo "${PASSED} passed, ${FAILED} failed"
 exit "$FAILED"

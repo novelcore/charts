@@ -311,7 +311,17 @@ run_case false "$IDLE" "" built
 expect_eq "$RC/$NEEDS" "0/false" "event, app repo unreadable: skips like the poll (the hourly poll catches up)"
 CTX_YAML=$(ctx_for 18922)
 DS_CM="$OLD_DS" run_case false "$IDLE" "$HEAD_SHA" built
-expect_eq "$RC/$NEEDS" "0/false" "event, catalog answers 503: no drift, never an error"
+expect_eq "$RC/$NEEDS" "3/false" "event, catalog answers 503 (after its retries): not yet, exit 3 so Argo retries; the event is not dropped"
+expect_has "$OUT" "dataset catalog not read" "event, unreadable catalog: says so"
+expect_has "$OUT" "retrying" "event, unreadable catalog: says it retries"
+CTX_YAML=$(ctx_for 1)
+DS_CM="$OLD_DS" run_case false "$IDLE" "$HEAD_SHA" built
+expect_eq "$RC/$NEEDS" "3/false" "event, catalog unreachable: not yet (exit 3)"
+unset DATASET_EVENT
+CTX_YAML=$(ctx_for 18922)
+DS_CM="$OLD_DS" run_case false "$IDLE" "$HEAD_SHA" built
+expect_eq "$RC/$NEEDS" "0/false" "hourly poll, catalog answers 503: no drift, no build, exit 0 as before"
+expect_has "$OUT" "dataset drift unknown" "hourly poll, unreadable catalog: says it is unknown"
 unset DATASET_EVENT CTX_YAML DS_CM GITOPS_DS
 
 DE_DEFAULT=$(yq 'select(.kind == "ClusterWorkflowTemplate" and .metadata.name == "ml-ci-reconcile")
