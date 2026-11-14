@@ -400,6 +400,29 @@ spec:
           exit 0
         fi
 
+        # SAME COMMIT IN FLIGHT (PRD novelcore/kaos#1911, chart 0.17.3): on every path but the forced
+        # one (it has its own QUEUED check below, which also weighs a kaos-lib pin), a build of this
+        # app for THIS commit that is not finished (Pending, Running, or waiting on the build lock)
+        # is the build this run would submit: it reads the context, engine, catalog and kaos-lib as
+        # they are when it starts. Submitting another one only queues a duplicate on the app's
+        # `{app}-build` mutex (live: ten ml-ci-build-reconciled-* for one commit in 55 minutes, each
+        # re-posting kubecore-ml-ci=pending while the push build waited). A build of another commit
+        # does not count. A drift newer than a build that is already RUNNING is not lost: the hourly
+        # poll (and a dataset event, which waits that build out above) decides again once it ends.
+        if [ "$FORCE" != "true" ]; then
+          SAME=$(echo "$INFLIGHT" | jq -r --arg app "$APP" --arg sha "$HEAD_SHA" '
+            [.items[] | select((.metadata.name|startswith("ml-ci-build"))
+                               and (.status.phase != "Succeeded" and .status.phase != "Failed" and .status.phase != "Error")
+                               and ([.spec.arguments.parameters[]? | select(.name=="app_name") | .value] | index($app))
+                               and ([.spec.arguments.parameters[]? | select(.name=="commit_sha") | .value] | index($sha)))
+                      | .metadata.name] | first // empty')
+          if [ -n "$SAME" ]; then
+            printf 'false' > /tmp/needs_build
+            echo "reconcile: a build of ${HEAD_SHA:0:7} is already queued or running (${SAME}) - submitting nothing"
+            exit 0
+          fi
+        fi
+
         # The images ConfigMap lives in the ML namespace (ml-{project}), NOT the
         # CI namespace. Reading the wrong one finds no baseline every time and
         # resubmits a build every 3 minutes — a storm, not a backstop.
