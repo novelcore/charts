@@ -293,23 +293,48 @@ spec:
         # without them Argo logs "cannot save parameter" for each retried attempt.
         printf 'false' > /tmp/needs_build
         printf '' > /tmp/head_sha
+        APP="{{`{{workflow.parameters.app_name}}`}}"
         FORCE="{{`{{workflow.parameters.force}}`}}"
         DATASET_EVENT="{{`{{workflow.parameters.dataset_event}}`}}"
         # RETRY: the runs that must not drop their event when the state is "not
         # yet" — force, and (for a build in flight only) a dataset event.
         RETRY=false
         [ "$FORCE" = "true" ] || [ "$DATASET_EVENT" = "true" ] && RETRY=true
+        # Which trigger this run is, for the log (a dataset event is not a force).
+        TRIGGER=force
+        [ "$DATASET_EVENT" = "true" ] && TRIGGER="dataset event"
         # not_yet MSG: retry later (exit 3) in a RETRY run; otherwise skip this
         # poll as before.
         not_yet() {
           if [ "$RETRY" = "true" ]; then
-            echo "reconcile: force: $1 — retrying"
+            echo "reconcile: ${TRIGGER}: $1 — retrying"
             exit 3
           fi
           echo "reconcile: $1 — skipping this poll"
           printf 'false' > /tmp/needs_build
           printf '' > /tmp/head_sha
           exit 0
+        }
+        # give_up MSG FIX: a condition that waiting will not change. In a RETRY run it is a VISIBLE
+        # failure (exit 1, not the retried 3): the Workflow goes red naming the app and the fix,
+        # instead of holding one of the cluster's drift slots for the whole retry window and then
+        # failing anyway. The hourly poll keeps its quiet skip (the caller falls through).
+        give_up() {
+          if [ "$RETRY" = "true" ]; then
+            echo "reconcile: FAILED (${TRIGGER}) for app ${APP}: $1 - not retrying. Fix: $2" >&2
+            exit 1
+          fi
+        }
+        # k8s_permanent TEXT: is a failed kubectl read one that will not heal by itself? A timeout,
+        # a connection error, a 5xx, etcd or throttling is transient. Forbidden, Unauthorized and
+        # the other client errors are permanent. Anything unrecognised is treated as transient: the
+        # event is never dropped on a guess (the retry window is bounded).
+        k8s_permanent() {
+          case "$1" in
+            *[Tt]imeout*|*timed\ out*|*"connection "*|*"Unable to connect"*|*"no such host"*|*EOF*|*etcdserver*|*"too many requests"*|*TooManyRequests*|*ServiceUnavailable*|*InternalError*|*"Internal error"*|*"status code 5"*) return 1 ;;
+            *Forbidden*|*Unauthorized*|*BadRequest*|*"Invalid value"*|*"(Invalid)"*|*MethodNotAllowed*|*"(Gone)"*|*"doesn't have a resource type"*) return 0 ;;
+          esac
+          return 1
         }
         # Only the UNFINISHED workflows are listed (server-side selector on the label Argo
         # keeps on every workflow; a workflow the controller has not labelled yet has none and
@@ -319,7 +344,10 @@ spec:
         # (dev e2e, PRD kaos#1911). Nothing below reads a finished workflow from this list;
         # kl_last_try, which needs the finished attempts, asks for just those.
         if ! INFLIGHT=$(kubectl get workflows -n "{{`{{workflow.namespace}}`}}" -l 'workflows.argoproj.io/completed!=true' -o json 2>&1); then
-          [ "$FORCE" = "true" ] && not_yet "cannot list workflows (${INFLIGHT})"
+          if k8s_permanent "$INFLIGHT"; then
+            give_up "cannot list workflows in {{`{{workflow.namespace}}`}}: ${INFLIGHT}" "grant this workflow's service account list on workflows in {{`{{workflow.namespace}}`}}"
+          fi
+          [ "$RETRY" = "true" ] && not_yet "cannot list workflows (${INFLIGHT})"
           echo "reconcile: WARN cannot list workflows - in-flight state unknown, skipping this poll: ${INFLIGHT}"
           printf 'false' > /tmp/needs_build
           printf '' > /tmp/head_sha
@@ -387,13 +415,26 @@ spec:
         esac
         echo "reconcile: polling ${SLUG}@${BRANCH}"
 
-        HEAD_SHA=$(curl -sf -H "Authorization: Bearer ${TOKEN}" \
+        # The HTTP status is kept: it tells a repository that is gone from a GitHub blip.
+        HEAD_HTTP=$(curl -s -o /tmp/head.json -w '%{http_code}' -H "Authorization: Bearer ${TOKEN}" \
           -H "Accept: application/vnd.github+json" \
-          "https://api.github.com/repos/${SLUG}/commits/${BRANCH}" | jq -r '.sha // empty')
+          "https://api.github.com/repos/${SLUG}/commits/${BRANCH}") || HEAD_HTTP=000
+        HEAD_SHA=""
+        [ "$HEAD_HTTP" = "200" ] && HEAD_SHA=$(jq -r '.sha // empty' /tmp/head.json 2>/dev/null || true)
         if [ -z "$HEAD_SHA" ]; then
           # A transient API failure must NOT look like drift and storm builds.
-          # force: at app creation the repo may not exist yet.
-          [ "$FORCE" = "true" ] && not_yet "could not read HEAD for ${SLUG}@${BRANCH}"
+          # force: at app creation the repo may not exist yet. A dataset event: the data store
+          # announced a change once and no poll is behind it, so a GitHub blip is "not yet" - but
+          # an app of an existing reconciler whose repository or branch is gone (404, 410, 422) or
+          # whose token is refused (401) never will be: a visible failure, not 45 minutes of a slot.
+          # (A 403 is a refusal unless GitHub says it is throttling.)
+          if [ "$DATASET_EVENT" = "true" ] && [ "$FORCE" != "true" ]; then
+            case "$HEAD_HTTP" in
+              401|404|410|422) give_up "GitHub answers ${HEAD_HTTP} for ${SLUG}@${BRANCH}" "restore the repository or branch ${SLUG}@${BRANCH} (or delete the app and its reconciler), or fix the platform's GitHub token" ;;
+              403) grep -qi 'rate limit\|abuse' /tmp/head.json 2>/dev/null || give_up "GitHub answers 403 for ${SLUG}@${BRANCH}" "grant the platform's GitHub App read access to ${SLUG}" ;;
+            esac
+          fi
+          [ "$RETRY" = "true" ] && not_yet "could not read HEAD for ${SLUG}@${BRANCH} (HTTP ${HEAD_HTTP})"
           echo "reconcile: could not read HEAD for ${SLUG}@${BRANCH} — skipping this poll"
           printf 'false' > /tmp/needs_build
           printf '' > /tmp/head_sha
@@ -453,6 +494,7 @@ spec:
                 "https://api.github.com/repos/${GORG}/${GREPO}/contents/${IMAGES_REL}?ref=${GBRANCH}" \
                 | sed -n 's/^  namespace: *"\{0,1\}\([^"]*\)"\{0,1\}$/\1/p' | head -1)
               if [ -z "${GITOPS_NS}" ]; then
+                [ "$DATASET_EVENT" = "true" ] && not_yet "${ML_NS}/${APP}-pipeline-images absent and gitops ${IMAGES_REL} unreadable"
                 echo "reconcile: WARN ${ML_NS}/${APP}-pipeline-images absent and gitops ${IMAGES_REL} unreadable — skipping this poll"
               elif [ "${GITOPS_NS}" != "${ML_NS}" ]; then
                 printf 'true' > /tmp/needs_build
@@ -460,12 +502,18 @@ spec:
                 echo "reconcile: NAMESPACE DRIFT — gitops pins ${APP}-pipeline-images to '${GITOPS_NS}' but the app now runs in '${ML_NS}'; submitting ml-ci-build to relocate it"
                 exit 0
               else
-                # force: a new app's pipeline-images is still syncing.
-                [ "$FORCE" = "true" ] && not_yet "${ML_NS}/${APP}-pipeline-images absent, gitops already targets '${ML_NS}' (ArgoCD sync pending)"
+                # force or a dataset event: a new app's pipeline-images is still syncing.
+                [ "$RETRY" = "true" ] && not_yet "${ML_NS}/${APP}-pipeline-images absent, gitops already targets '${ML_NS}' (ArgoCD sync pending)"
                 echo "reconcile: ${ML_NS}/${APP}-pipeline-images absent but gitops already targets '${ML_NS}' — waiting for ArgoCD; skipping this poll"
               fi
               ;;
             *)
+              if [ "$DATASET_EVENT" = "true" ]; then
+                if k8s_permanent "${CM}"; then
+                  give_up "cannot read ${ML_NS}/${APP}-pipeline-images: ${CM}" "grant this workflow's service account get on configmaps in ${ML_NS}"
+                fi
+                not_yet "cannot read ${ML_NS}/${APP}-pipeline-images (${CM})"
+              fi
               echo "reconcile: cannot read ${ML_NS}/${APP}-pipeline-images — skipping this poll: ${CM}"
               ;;
           esac
@@ -838,8 +886,15 @@ spec:
         # class and the form has no per-step memory field). A mismatch means the WFT predates
         # the current platform data -> rebuild to re-render it. This is
         # self-limiting: once re-rendered the two agree and it goes quiet.
-        CTX=$(kubectl get configmap "${APP}-pipeline-context" -n "${ML_NS}" \
-          -o jsonpath='{.data.context\.yaml}' 2>/dev/null || true)
+        # CTX_READ tells "the context was read" (a fact, even when it names no data store) from "the read
+        # failed" (CTX_ERR): DATASET DRIFT below acts differently on the two.
+        CTX=""; CTX_READ=no; CTX_ERR=""
+        if CTX_OUT=$(kubectl get configmap "${APP}-pipeline-context" -n "${ML_NS}" \
+          -o jsonpath='{.data.context\.yaml}' 2>&1); then
+          CTX="$CTX_OUT"; CTX_READ=yes
+        else
+          CTX_ERR="$CTX_OUT"
+        fi
         if [ -n "$CTX" ]; then
           WANT=$(echo "$CTX" | sed -n '/^computeClasses:/,/^[a-z]/p' | sed -n '/^  cpu:/,/^  [a-z]/p' \
                  | grep -E '^      memoryGiB:' | head -1 | tr -dc '0-9')
@@ -906,7 +961,19 @@ spec:
         elif [ -z "$DS_LAST" ] && [ "$DATASET_EVENT" != "true" ]; then
           echo "reconcile: no dataset-sha recorded yet (rendered before it existed) — dataset drift unknown this poll"
         elif [ -z "$DS_ENDPOINT" ]; then
-          echo "reconcile: WARN no lakeFS endpoint in ${ML_NS}/${APP}-pipeline-context — dataset drift unknown this poll"
+          if [ "$CTX_READ" = "yes" ]; then
+            # The context was read and names no data store: a fact about the app, not a blip. An event
+            # has nothing to re-render (the render records no-store for such an app).
+            echo "reconcile: ${ML_NS}/${APP}-pipeline-context has no lakeFS endpoint - the app has no data store, dataset drift does not apply"
+          else
+            # The read failed: permanent (forbidden...) is a visible failure in an event, anything else
+            # is "not yet" there, so the event is not dropped on a blip.
+            if [ "$DATASET_EVENT" = "true" ] && k8s_permanent "$CTX_ERR"; then
+              give_up "cannot read ${ML_NS}/${APP}-pipeline-context: ${CTX_ERR}" "grant this workflow's service account get on configmaps in ${ML_NS}"
+            fi
+            [ "$DATASET_EVENT" = "true" ] && not_yet "cannot read ${ML_NS}/${APP}-pipeline-context (${CTX_ERR})"
+            echo "reconcile: WARN cannot read ${ML_NS}/${APP}-pipeline-context — dataset drift unknown this poll"
+          fi
         elif ! DS_NOW=$(python3 -I /tmp/dataset-choices.py digest "$DS_ENDPOINT" /var/run/secrets/kaos-lake/token 2>/tmp/dataset-err); then
           # The helper already tried the catalog three times. A dataset event exists because the data
           # store announced a change and has no next poll to catch it up: "not yet" (exit 3, retried
@@ -956,6 +1023,14 @@ spec:
             path: token
 
   - name: submit-build
+    # A Kubernetes API blip on the create must not drop the build a trigger (a dataset event
+    # among them) decided on and has no poll behind it: retry the create, bounded.
+    retryStrategy:
+      limit: 3
+      retryPolicy: Always
+      backoff:
+        duration: "10s"
+        factor: 2
     inputs:
       parameters:
       - name: commit_sha
