@@ -508,10 +508,13 @@ expect_eq "$(yq 'select(.kind == "ClusterWorkflowTemplate" and .metadata.name ==
 fanout_case() {
   T=$(mktemp -d "${BASE_TMP}/fan-XXXX"); mkdir -p "$T/bin"
   printf '%s' "$1" > "$T/crons.json"
+  [ -z "${WFS:-}" ] || printf '%s' "$WFS" > "$T/wfs.json"
   cat > "$T/bin/kubectl" <<EOF
 #!/usr/bin/env bash
 case "\$*" in
   *"get cronworkflows"*) [ -z "\${CRONS_FAIL:-}" ] || { echo forbidden >&2; exit 1; }; cat "$T/crons.json" ;;
+  *"get workflows -n ci -l platform.kubecore.io/submitted-by=dataset-release,workflows.argoproj.io/completed!=true -o json"*)
+    [ -e "$T/wfs.json" ] || { echo 'workflows.argoproj.io is forbidden' >&2; exit 1; }; cat "$T/wfs.json" ;;
   *"create -n ci -f -"*)
     n=\$(cat "$T/tries" 2>/dev/null || echo 0); echo \$((n + 1)) > "$T/tries"; body=\$(cat)
     [ "\$((n + 1))" -gt "\${CREATE_FAILS:-0}" ] || { echo 'etcdserver: request timed out' >&2; exit 1; }
@@ -554,6 +557,47 @@ expect_eq "$RC/$(cat "$T/tries")" "1/6" "fan-out, the API keeps refusing: three 
 unset CREATE_FAILS
 CRONS_FAIL=1 fanout_case '{"items":[]}'
 expect_eq "$RC" "1" "an unreadable cluster fails the Workflow loudly (the hourly poll catches up)"
+
+# ── one waiting dataset check per app (PRD novelcore/kaos#1911 AC-24, chart 0.17.8) ──
+# live 2026-11-15: 27 dataset events in a 7-app project made 193 checks, up to 13 queued for one app.
+# wf NAME APP PHASE [DECIDE_PHASE] [DELETING]: a dataset check as the API lists it.
+wf() {
+  WF_DEL=""; WF_DECIDE=""
+  [ -z "${5:-}" ] || WF_DEL=',"deletionTimestamp":"2026-11-15T00:00:00Z"'
+  [ -z "${4:-}" ] || WF_DECIDE=$(printf ',"n1":{"displayName":"decide","phase":"%s"}' "$4")
+  printf '{"metadata":{"name":"%s","labels":{"platform.kubecore.io/app":"%s"}%s},"status":{"phase":"%s","nodes":{"n0":{"displayName":"await-inputs","phase":"Succeeded"}%s}}}' \
+    "$1" "$2" "$WF_DEL" "$3" "$WF_DECIDE"
+}
+TWO="{\"items\":[$(cron mlapp ml-ci-reconcile),$(cron other ml-ci-reconcile)]}"
+created_apps() { [ -e "$T/created" ] && jq -r '.metadata.labels["platform.kubecore.io/app"]' "$T/created" | sort | tr '\n' ' '; }
+WFS="{\"items\":[$(wf r1 mlapp Running)]}" fanout_case "$TWO"
+expect_eq "$RC/$(created_apps)" "0/other " "an app with a check that has not reached its decision gets no second one; the other app gets its own"
+expect_has "$OUT" "mlapp: covered by the waiting check r1" "...and the log names the check that covers the event"
+WFS="{\"items\":[$(wf r1 mlapp Running Pending)]}" fanout_case "$TWO"
+expect_eq "$RC/$(created_apps)" "0/other " "a check whose decision still waits for the build lock covers the event"
+WFS="{\"items\":[{\"metadata\":{\"name\":\"r0\",\"labels\":{\"platform.kubecore.io/app\":\"mlapp\"}}}]}" fanout_case "$TWO"
+expect_eq "$RC/$(created_apps)" "0/other " "a check that was just created (no status yet) covers the event"
+for ph in Running Succeeded Failed; do
+  WFS="{\"items\":[$(wf r1 mlapp Running $ph)]}" fanout_case "$TWO"
+  expect_eq "$RC/$(created_apps)" "0/mlapp other " "a check whose decision is $ph may have read the catalog already: a new check is created"
+done
+for ph in Succeeded Failed Error; do
+  WFS="{\"items\":[$(wf r1 mlapp $ph)]}" fanout_case "$TWO"
+  expect_eq "$RC/$(created_apps)" "0/mlapp other " "a $ph check covers nothing"
+done
+WFS="{\"items\":[$(wf r1 mlapp Running "" yes)]}" fanout_case "$TWO"
+expect_eq "$RC/$(created_apps)" "0/mlapp other " "a check that is being deleted covers nothing"
+WFS="{\"items\":[$(wf r1 mlapp-2 Running)]}" fanout_case "$TWO"
+expect_eq "$RC/$(created_apps)" "0/mlapp other " "a waiting check of another app (a longer name) covers nothing"
+WFS="{\"items\":[$(wf r1 mlapp Running Succeeded),$(wf r2 mlapp Running),$(wf r3 other Running Pending)]}" fanout_case "$TWO"
+expect_eq "$RC/$(created_apps)" "0/" "every app covered: nothing is created, no error"
+WFS='{"items":[]}' fanout_case "$TWO"
+expect_eq "$RC/$(created_apps)" "0/mlapp other " "no waiting check: every app gets one"
+fanout_case "$TWO"
+expect_eq "$RC/$(created_apps)" "0/mlapp other " "the waiting checks cannot be listed (a project without the right): every app gets one, as before"
+expect_has "$OUT" "the waiting checks could not be read" "...and the log says so"
+WFS='not json' fanout_case "$TWO"
+expect_eq "$RC/$(created_apps)" "0/mlapp other " "an unreadable list covers nothing"
 
 # ── a build of the same commit in flight is never doubled (PRD novelcore/kaos#1911, chart 0.17.3) ──
 # live: one commit got ten ml-ci-build-reconciled-* in 55 minutes while its push build was queued.
