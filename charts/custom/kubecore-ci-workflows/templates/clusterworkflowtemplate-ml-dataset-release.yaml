@@ -49,6 +49,7 @@ metadata:
 spec:
   serviceAccountName: dataset-release-sa
   entrypoint: fan-out
+  {{- include "kubecore-ci-workflows.systemPodSpecPatch" . | nindent 2 }}
   # One fan-out at a time per CI namespace: a second queues behind the first.
   synchronization:
     mutexes:

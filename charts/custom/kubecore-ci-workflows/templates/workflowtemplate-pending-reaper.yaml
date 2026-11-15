@@ -12,6 +12,7 @@ metadata:
 spec:
   serviceAccountName: {{ include "kubecore-ci-workflows.fullname" . }}-pending-reaper
   entrypoint: reap
+  {{- include "kubecore-ci-workflows.systemPodSpecPatch" . | nindent 2 }}
   activeDeadlineSeconds: 240
   ttlStrategy:
     secondsAfterCompletion: 600

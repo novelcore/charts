@@ -110,11 +110,26 @@ expect_eq "$(yq 'select(.metadata.name=="pending-reaper") | .spec.templates[].co
 # ── render: resources ────────────────────────────────────────────────────────
 RES=$(yq "$WF | select(.name==\"check-drift\") | .container.resources" "$R")
 expect_eq "$(printf '%s' "$RES" | yq '.limits')" "null" "check-drift has no memory limit (an OOMKill drops a forced re-render)"
-expect_eq "$(printf '%s' "$RES" | yq '.requests.memory')" "96Mi" "check-drift requests what it uses with the narrow lists (measured peak 40-75 MiB)"
+expect_eq "$(printf '%s' "$RES" | yq '.requests.memory')" "256Mi" "check-drift requests what it uses with the narrow lists (measured peak 40-75 MiB) plus the executor copy kept in memory (153 MiB)"
 # CPU: the request stands for what a running check costs its node (measured 2026-11-15: six at
 # once took a 4-vCPU system node from 0.6 to 3.9 cores busy, though their own containers used
 # 0.28 core). At 50m every check was packed onto one node and the pool never grew.
 expect_eq "$(printf '%s' "$RES" | yq '.requests.cpu')" "300m" "check-drift requests the CPU its run costs the node, so a burst spreads and the system pool grows"
+# ── render: the executor copy of system-pool pods is in memory ───────────────
+# Every Argo pod copies the 153 MiB argoexec binary into its var-run-argo emptyDir at start. On
+# the system pool that is a pd-standard boot disk (about 12 MB/s for the node): measured
+# 2026-11-15, 20 such pods in ten minutes kept one node's disk 96 % busy and a 10 s check took
+# two minutes to start. The workflows that run there patch that one volume to memory.
+PATCH='{"volumes":[{"name":"var-run-argo","emptyDir":{"medium":"Memory","sizeLimit":"512Mi"}}]}'
+for TPL in ml-ci-reconcile ci-reconcile ml-ci-dataset-release kaos-lib-bump-pr ml-autoscaler-healer pending-reaper; do
+  expect_eq "$(yq "select(.metadata.name==\"$TPL\" and (.kind==\"ClusterWorkflowTemplate\" or .kind==\"WorkflowTemplate\")) | .spec.podSpecPatch" "$R" | yq -o=json -I0 '.')" "$PATCH" "$TPL (system pool) keeps the executor copy in memory"
+  expect_eq "$(yq "select(.metadata.name==\"$TPL\" and (.kind==\"ClusterWorkflowTemplate\" or .kind==\"WorkflowTemplate\")) | .spec.templates[] | select(.podSpecPatch != null) | .name" "$R")" "" "$TPL has no template-level patch that would compete with it"
+done
+for TPL in ml-ci-build ci-build ml-ci-pr-render; do
+  expect_eq "$(yq "select(.metadata.name==\"$TPL\") | .spec.podSpecPatch" "$R")" "null" "$TPL (the project's CI pool, a faster disk) is left as it was"
+done
+expect_eq "$(helm template t "$CHART" --set github.org=acme --set github.tokenSecretName=tok --set systemPods.executorInMemory=false \
+  | yq 'select(.spec.podSpecPatch != null) | .metadata.name' | grep -c .)" "0" "systemPods.executorInMemory=false restores the disk copy everywhere"
 SLOTS=$(yq 'select(.kind=="ConfigMap" and .metadata.name=="ci-check-drift-slots") | .data.slots' "$R")
 expect_eq "$(( SLOTS * 300 <= 3400 ))" "1" "every slot at once (${SLOTS} x 300m) still fits one empty e2-standard-4 system node (about 3.4 cores after the daemonsets)"
 

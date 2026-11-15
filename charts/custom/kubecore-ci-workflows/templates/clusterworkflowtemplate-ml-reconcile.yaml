@@ -56,6 +56,7 @@ spec:
   # own serviceAccountName/volumes keep working: the Workflow's fields win.
   serviceAccountName: {{ .Values.reconciler.serviceAccountName | default "operate-workflow-sa" }}
   entrypoint: ml-ci-reconcile
+  {{- include "kubecore-ci-workflows.systemPodSpecPatch" . | nindent 2 }}
   # Workflow-level nodeSelector follows the same per-submission CI pool
   # as ml-ci-build's build-push override (PRD-962 F-09 stage 2, ML).
   # node_class's Helm-render-time default is unchanged, so a submission

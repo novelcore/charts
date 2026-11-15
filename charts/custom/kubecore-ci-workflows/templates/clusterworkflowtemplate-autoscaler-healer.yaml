@@ -62,6 +62,7 @@ spec:
   # F-26: the template owns its ServiceAccount (Strict refuses one on the Workflow).
   serviceAccountName: {{ .Values.autoscalerHealer.serviceAccountName | default "ml-compute-probe-sa" }}
   entrypoint: heal
+  {{- include "kubecore-ci-workflows.systemPodSpecPatch" . | nindent 2 }}
   ttlStrategy:
     secondsAfterCompletion: {{ .Values.workflow.ttlStrategy.secondsAfterCompletion }}
   podGC:
