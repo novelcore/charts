@@ -62,7 +62,7 @@ kaniko:
   # node, so the cpu limit is the whole node.
   #
   # Right-sized from 14 days of Cloud Monitoring history for the dev/e2e pools
-  # (308 ML build-push pods, kaos-dev-511509): per-pod CPU p95 1.99 / peak
+  # (308 ML build-push pods): per-pod CPU p95 1.99 / peak
   # 2.16 cores, working-set p95 10.1 GiB / max 10.6 GiB. CPU request 2 (was 3)
   # and NO cpu limit (platform decision 2026-11-03: size requests, never cap
   # CPU). Memory request stays 11Gi: p95+20% would be 12.1Gi, which can never
@@ -404,20 +404,30 @@ pendingReaper:
 kaosLib:
   changelogUrl: https://raw.githubusercontent.com/kaos-io/kaos-lib/main/CHANGELOG.md
   # The kaos-lib guide (the published docs of kaos-lib, written for app engineers). The chart links one of
-  # its pages: support-window.html, from a new .kaos/compat.yaml written by a bump pull request.
-  guideUrl: https://storage.googleapis.com/kaos-dev-511509-kaos-lib/docs
+  # its pages: reference.html#versions-and-upgrades, from a new .kaos/compat.yaml written by a bump pull
+  # request. Empty (the default; there is no platform address in this chart): no link. This is only the
+  # default of the kaos-lib-bump-pr `guide_url` parameter, which the operator sets from the platform's
+  # release record (kaosLib.support.addresses.docs_base). The `releases_base` parameter (where the release
+  # records live) has no value here at all: empty means no release-record notes in the bump pull request.
+  guideUrl: ""
 
-# Pipeline lint (PRD novelcore/kaos#1682 F-02): ml-ci-pr-render runs the kaos-lib linter on every
-# PR of a Hera ML app and posts the `pipeline-lint` status plus one PR comment. The linter is
-# pinned like the other tools: ONE exact kaos-lib wheel from the platform's public package index,
-# verified by sha256 and unzipped, never pip-installed (a wheel of the kaos-lib-rc or kaos-lib
-# index; the file name carries the version). Bump both values together with a kaos-lib release;
-# rulesetVersion must be the rule set of that release (the run refuses a different one, so a
-# gate and `kaosctl lint` of the same release always agree).
+# Pipeline lint (PRD novelcore/kaos#1682 F-02, PRD novelcore/kaos#2017 F-55): ml-ci-pr-render runs the
+# kaos-lib linter on every PR of a Hera ML app and posts the `pipeline-lint` status plus one PR comment.
+# The linter is the kaos-lib the PLATFORM delivers to the app: pipeline-lint-prepare clones the gitops
+# repository, reads the app's pipeline-context first and takes kaosLib.spec, which must be a registry
+# wheel with its sha256 (`name @ https://<region>-python.pkg.dev/<repo>/kaos_lib-<ver>-py3-none-any.whl#sha256=<hex>`).
+# The wheel is verified by sha256 and unzipped, never pip-installed, and the rule set (RULESET_VERSION
+# in kaos_lib/lint/constants.py) is read from the wheel, so the run and the report always agree.
+# The rule links of the report are built on kaosLib.support.addresses.docs_base + "lint/" (for a wheel
+# >= 0.5.0rc23, the first with --doc-base).
+#
+# The pin below is only the fallback for a context whose spec is not such a wheel (a git archive, a
+# `==X.Y.Z` index spec, a wheel without a sha, or no context). It is EMPTY by default: this chart names
+# no kaos-lib of any project. With no usable spec and no pin the check posts success
+# "skipped: the platform delivers no kaos-lib". Set both (a wheel URL and its sha256) to pin one.
 pipelineLint:
-  kaosLibWheelUrl: "https://europe-west1-python.pkg.dev/kaos-dev-511509/kaos-lib-rc/kaos-lib/kaos_lib-0.5.0rc11-py3-none-any.whl"
-  kaosLibWheelSha256: "8a4c54d704baadc00ab7ac827075c32c104c207f0458c55cbf852f4a6eab6c48"
-  rulesetVersion: "2.5.0"
+  kaosLibWheelUrl: ""
+  kaosLibWheelSha256: ""
 
 # Rendered WorkflowTemplate size guard (ml-ci-build hera-enhance-commit and ml-ci-pr-render
 # hera-enhance-gate): a render above this many KiB fails with a clear message. The etcd

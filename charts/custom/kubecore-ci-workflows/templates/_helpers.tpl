@@ -902,19 +902,28 @@ DATASETCHOICESEOF
 {{- end }}
 
 {{/*
-Pipeline lint (PRD novelcore/kaos#1682 F-02): the pinned kaos-lib wheel the PR gate runs.
-The wheel is NOT pip-installed: lint_fetch downloads the one pinned file from the platform's
-public package index and checks its sha256; lint_unpack unzips it. kaos_lib/lint/standalone.py
-then runs the linter with the standard library and PyYAML alone (the toolbox image has no
-requests or packaging), so the gate runs the very module `kaosctl lint` runs on a laptop.
+Pipeline lint (PRD novelcore/kaos#1682 F-02, PRD novelcore/kaos#2017 F-55): the kaos-lib wheel the PR gate runs.
+The wheel is the platform's own: `prepare` takes it from the app's pipeline-context (kaosLib.spec, a
+registry wheel with its #sha256=), else from the chart's optional pin (pipelineLint.kaosLibWheelUrl,
+empty by default), else the gate is skipped. prepare writes the choice to ${LINT_DIR}/wheel.json
+(url, sha256, ruleset, doc_base) and `run`, a separate pod, reads it with lint_load.
+The wheel is NOT pip-installed: lint_fetch downloads the one file and checks its sha256; lint_unpack
+unzips it. kaos_lib/lint/standalone.py then runs the linter with the standard library and PyYAML alone
+(the toolbox image has no requests or packaging), so the gate runs the very module `kaosctl lint` runs.
 Run it as `python3 -I "$LINT_CLI" ...` from outside the app checkout.
-Caller: python3 (tooling.toolboxImage), sha256sum; /workspace mounted.
+Caller: python3 (tooling.toolboxImage), sha256sum, jq; /workspace mounted.
 */}}
 {{- define "kubecore-ci-workflows.pipelineLintWheel" -}}
-LINT_WHEEL_URL="{{ .Values.pipelineLint.kaosLibWheelUrl }}"
-LINT_WHEEL_SHA256="{{ .Values.pipelineLint.kaosLibWheelSha256 }}"
-LINT_RULESET="{{ .Values.pipelineLint.rulesetVersion }}"
 LINT_DIR=/workspace/lint
+LINT_WHEEL_URL=""; LINT_WHEEL_SHA256=""; LINT_RULESET=""; LINT_DOC_BASE=""
+lint_load() {
+  [ -s "${LINT_DIR}/wheel.json" ] || return 1
+  LINT_WHEEL_URL=$(jq -r '.url // ""' "${LINT_DIR}/wheel.json") || return 1
+  LINT_WHEEL_SHA256=$(jq -r '.sha256 // ""' "${LINT_DIR}/wheel.json") || return 1
+  LINT_RULESET=$(jq -r '.ruleset // ""' "${LINT_DIR}/wheel.json") || return 1
+  LINT_DOC_BASE=$(jq -r '.doc_base // ""' "${LINT_DIR}/wheel.json") || return 1
+  [ -n "${LINT_WHEEL_SHA256}" ] && [ -n "${LINT_RULESET}" ]
+}
 lint_verify() {
   echo "${LINT_WHEEL_SHA256}  ${LINT_DIR}/kaos-lib.whl" | sha256sum -c - >/dev/null 2>&1
 }

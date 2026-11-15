@@ -407,8 +407,10 @@ spec:
 
   # ── pipeline-lint (PRD novelcore/kaos#1682 F-02) ───────────────────────────
   # Three pods, split by trust like hera-render / hera-enhance-gate:
-  #   prepare (token)    pending status; fetch + verify the pinned kaos-lib wheel; turn the
-  #                      gitops pipeline-context into a catalogue (classes, HPC limits and the
+  #   prepare (token)    pending status; clone the gitops repo and read the app's pipeline-context
+  #                      FIRST; fetch + verify the kaos-lib wheel the platform delivers to the app
+  #                      (kaosLib.spec; else the chart's optional pin; else skip) and read the rule
+  #                      set from it; turn the context into a catalogue (classes, HPC limits and the
   #                      platform's resumable-step record: step names, verdicts, reasons;
   #                      none of the context's endpoints or secret names)
   #   run (TOKENLESS)    unzip the wheel, lint /workspace/repo as DATA (the linter parses,
@@ -459,23 +461,18 @@ spec:
 {{ include "kubecore-ci-workflows.ghApi" . | indent 8 }}
 {{ include "kubecore-ci-workflows.pipelineLintStatus" . | indent 8 }}
         mkdir -p "${LINT_DIR}"
-        rm -f "${LINT_DIR}/failed" "${LINT_DIR}/catalogue.json"
+        rm -f "${LINT_DIR}/failed" "${LINT_DIR}/skipped" "${LINT_DIR}/wheel.json" "${LINT_DIR}/catalogue.json"
         fail() { echo "$1" > "${LINT_DIR}/failed"; echo "pipeline-lint: $1" >&2; }
 
         # The pending status first, so the check is visible while the other steps run. A
         # GitHub outage here exits 75 and the step is retried in a new pod.
         post_status pending "Checking pipeline.py" || exit $?
 
-        if [ -z "${LINT_WHEEL_URL}" ] || [ -z "${LINT_WHEEL_SHA256}" ]; then
-          fail "the chart pins no kaos-lib for the linter (pipelineLint.kaosLibWheelUrl)"; exit 0
-        fi
-        lint_fetch || { fail "the pinned kaos-lib could not be downloaded and verified"; exit 0; }
-        lint_unpack || { fail "the pinned kaos-lib could not be unpacked"; exit 0; }
-
-        # The catalogue: the project's compute classes, HPC limits and the platform's record of which
-        # steps resumed from a checkpoint (hpc.resumableSteps), from the same gitops
-        # pipeline-context the render uses. Only those facts are kept, in a file the tokenless
-        # step reads. Without a context the linter uses its built-in defaults (and says so).
+        # The gitops pipeline-context first: it names the kaos-lib the platform delivers to this app, and
+        # that is the linter's wheel (PRD novelcore/kaos#2017 F-55). The same context gives the catalogue:
+        # the project's compute classes, HPC limits and the platform's record of which steps resumed from
+        # a checkpoint (hpc.resumableSteps). Only those facts are kept, in a file the tokenless step
+        # reads. Without a context the linter uses its built-in defaults (and says so).
         GITOPS_REPO="{{`{{workflow.parameters.gitops_repository}}`}}"
         GITOPS_BRANCH="{{`{{workflow.parameters.gitops_branch}}`}}"
         APP_NAME="{{`{{workflow.parameters.app_name}}`}}"
@@ -484,7 +481,32 @@ spec:
           git_assert_no_token /tmp/gitops
           CONTEXT_PATH=$(find /tmp/gitops -path "*/${APP_NAME}/${GITOPS_BRANCH}/pipeline-context.yaml" | head -1)
         fi
-        if [ -n "${CONTEXT_PATH:-}" ] && [ -f "${CONTEXT_PATH}" ]; then
+        [ -n "${CONTEXT_PATH:-}" ] && [ -f "${CONTEXT_PATH}" ] || CONTEXT_PATH=""
+
+        # The wheel: kaosLib.spec of the context (a registry wheel with its #sha256=), else the chart's
+        # pin when it has one, else there is no kaos-lib to lint with and the check is skipped, not failed.
+{{ include "kubecore-ci-workflows.kaosLibScript" . | indent 8 }}
+        WHEEL=$(python3 -I /tmp/kaos-lib.py lint-wheel --context "${CONTEXT_PATH:-/nonexistent}" \
+          --pin-url "{{ .Values.pipelineLint.kaosLibWheelUrl }}" --pin-sha256 "{{ .Values.pipelineLint.kaosLibWheelSha256 }}") \
+          || { fail "the kaos-lib for the linter could not be chosen"; exit 0; }
+        LINT_WHEEL_URL=$(printf '%s' "${WHEEL}" | jq -r .url)
+        LINT_WHEEL_SHA256=$(printf '%s' "${WHEEL}" | jq -r .sha256)
+        LINT_DOC_BASE=$(printf '%s' "${WHEEL}" | jq -r .doc_base)
+        if [ -z "${LINT_WHEEL_URL}" ]; then
+          echo "skipped: the platform delivers no kaos-lib" > "${LINT_DIR}/skipped"
+          echo "pipeline-lint: skipped: the platform delivers no kaos-lib"; exit 0
+        fi
+        echo "pipeline-lint: kaos-lib from the $(printf '%s' "${WHEEL}" | jq -r .source): ${LINT_WHEEL_URL}"
+        lint_fetch || { fail "the kaos-lib wheel could not be downloaded and verified"; exit 0; }
+        lint_unpack || { fail "the kaos-lib wheel could not be unpacked"; exit 0; }
+        # The rule set is the wheel's own: the run insists on it, so run and report agree.
+        LINT_RULESET=$(sed -n 's/^RULESET_VERSION = "\([0-9][0-9.]*\)".*/\1/p' /tmp/kaos-lib-lint/kaos_lib/lint/constants.py 2>/dev/null | head -1)
+        [ -n "${LINT_RULESET}" ] || { fail "the kaos-lib wheel names no lint rule set (kaos_lib/lint/constants.py)"; exit 0; }
+        jq -n --arg u "${LINT_WHEEL_URL}" --arg s "${LINT_WHEEL_SHA256}" --arg r "${LINT_RULESET}" --arg d "${LINT_DOC_BASE}" \
+          '{url: $u, sha256: $s, ruleset: $r, doc_base: $d}' > "${LINT_DIR}/wheel.json" \
+          || { fail "the kaos-lib choice could not be recorded"; exit 0; }
+
+        if [ -n "${CONTEXT_PATH}" ]; then
           python3 -I "${LINT_CLI}" --context "${CONTEXT_PATH}" --export-catalogue "${LINT_DIR}/catalogue.json" \
             || { rm -f "${LINT_DIR}/catalogue.json"; echo "pipeline-lint: the platform context could not be read: built-in defaults apply"; }
         else
@@ -519,24 +541,26 @@ spec:
         SHA="{{`{{workflow.parameters.commit_sha}}`}}"
         fail() { echo "$1" > "${LINT_DIR}/failed"; echo "pipeline-lint: $1" >&2; exit 0; }
         if [ -f "${LINT_DIR}/failed" ]; then echo "pipeline-lint: skipped: $(cat "${LINT_DIR}/failed")"; exit 0; fi
-        lint_unpack || fail "the pinned kaos-lib failed verification"
+        if [ -f "${LINT_DIR}/skipped" ]; then echo "pipeline-lint: $(cat "${LINT_DIR}/skipped")"; exit 0; fi
+        lint_load || fail "the kaos-lib choice of the prepare step is missing"
+        lint_unpack || fail "the kaos-lib wheel failed verification"
         CATALOGUE=""
         [ -f "${LINT_DIR}/catalogue.json" ] && CATALOGUE="--catalogue ${LINT_DIR}/catalogue.json"
         cd /tmp
         python3 -I "${LINT_CLI}" /workspace/repo --format json --output "${LINT_DIR}/report.json" \
-          ${CATALOGUE} --expect-ruleset "${LINT_RULESET}"
+          ${CATALOGUE} --expect-ruleset "${LINT_RULESET}" ${LINT_DOC_BASE:+--doc-base "${LINT_DOC_BASE}"}
         RC=$?
         # Exit 0: no errors, 2: errors found (also when a saved report is rendered). Anything else:
         # the linter could not run.
         lint_ok() { [ "$1" = 0 ] || [ "$1" = 2 ]; }
         lint_ok "${RC}" || fail "the linter could not run (exit ${RC})"
         python3 -I "${LINT_CLI}" --from-report "${LINT_DIR}/report.json" --format markdown \
-          --file-link-base "https://github.com/${OWNER_REPO}/blob/${SHA}/" --output "${LINT_DIR}/report.md"
+          --file-link-base "https://github.com/${OWNER_REPO}/blob/${SHA}/" ${LINT_DOC_BASE:+--doc-base "${LINT_DOC_BASE}"} --output "${LINT_DIR}/report.md"
         lint_ok $? || fail "the report could not be rendered"
         python3 -I "${LINT_CLI}" --from-report "${LINT_DIR}/report.json" --format status \
           --output "${LINT_DIR}/status.txt"
         lint_ok $? || fail "the report could not be summarised"
-        python3 -I "${LINT_CLI}" --from-report "${LINT_DIR}/report.json" --format text
+        python3 -I "${LINT_CLI}" --from-report "${LINT_DIR}/report.json" --format text ${LINT_DOC_BASE:+--doc-base "${LINT_DOC_BASE}"}
         exit 0
       volumeMounts:
       - name: workspace
@@ -565,6 +589,11 @@ spec:
         [ -n "${ARGO_BASE}" ] && RUN_URL="${ARGO_BASE}/workflows/{{`{{workflow.namespace}}`}}/{{`{{workflow.name}}`}}?uid={{`{{workflow.uid}}`}}"
 {{ include "kubecore-ci-workflows.ghApi" . | indent 8 }}
 {{ include "kubecore-ci-workflows.pipelineLintStatus" . | indent 8 }}
+        # No kaos-lib is delivered to this app and the chart pins none: nothing to lint with is not a failure.
+        if [ -f "${LINT_DIR}/skipped" ]; then
+          post_status success "$(cat "${LINT_DIR}/skipped")"
+          exit $?
+        fi
         # The linter did not produce a report: say so with an `error` status (never a silent pending).
         if [ -f "${LINT_DIR}/failed" ] || [ ! -s "${LINT_DIR}/report.json" ] || [ ! -s "${LINT_DIR}/status.txt" ]; then
           WHY=$(cat "${LINT_DIR}/failed" 2>/dev/null || echo "an earlier step did not finish")

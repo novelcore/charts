@@ -508,13 +508,16 @@ PY
   expect_eq "$S" "true" "$wf: posts kaos-lib/support, reporting only"
 done
 PARAMS=$(yq 'select(.metadata.name == "kaos-lib-bump-pr") | [.spec.arguments.parameters[].name] | join(" ")' "$RENDERED" | grep -v '^---$' | grep .)
-expect_eq "$PARAMS" "app project_name repo_url branch version spec" "kaos-lib-bump-pr: the parameter contract the composition renders against"
+expect_eq "$PARAMS" "app project_name repo_url branch version spec releases_base guide_url" "kaos-lib-bump-pr: the parameter contract the composition renders against (releases_base and guide_url are new, optional)"
 REQUIRED=$(yq 'select(.metadata.name == "kaos-lib-bump-pr") | [.spec.arguments.parameters[] | select(has("value") | not) | .name] | join(" ")' "$RENDERED" | grep -v '^---$' | grep .)
 expect_eq "$REQUIRED" "app project_name version spec" "kaos-lib-bump-pr: app, project_name, version and spec are required"
 BUMP=$(src kaos-lib-bump-pr bump)
 expect_not "$BUMP" "{{workflow.parameters" "kaos-lib-bump-pr: parameters reach the script as env vars only"
 expect_has "$BUMP" "kaos-lib.py bump" "kaos-lib-bump-pr: runs the tested bump"
-expect_has "$BUMP" '--guide-url "https://storage.googleapis.com/kaos-dev-511509-kaos-lib/docs"' "kaos-lib-bump-pr: the bump is given the kaos-lib guide address (the support window page in a new compat file)"
+expect_has "$BUMP" '--guide-url "${GUIDE_URL}" --releases-base "${RELEASES_BASE}"' "kaos-lib-bump-pr: the bump is given the guide address and the releases base as data (env), never compiled in"
+expect_eq "$(yq 'select(.metadata.name == "kaos-lib-bump-pr") | .spec.arguments.parameters[] | select(.name == "releases_base") | .value' "$RENDERED" | grep -v '^---$' | grep .)" "" "kaos-lib-bump-pr: releases_base defaults to empty (no record notes), no address in the chart"
+expect_eq "$(yq 'select(.metadata.name == "kaos-lib-bump-pr") | .spec.arguments.parameters[] | select(.name == "guide_url") | .value' "$RENDERED" | grep -v '^---$' | grep .)" "" "kaos-lib-bump-pr: guide_url defaults to empty (no link), no address in the chart"
+expect_eq "$(grep -c 'support-window.html\|kaos-dev-511509' "$RENDERED")" "0" "the rendered chart names neither the dead support-window page nor the dev project"
 expect_eq "$(grep -c 'docs/kaos-lib-versions.md' "$RENDERED")" "0" "kaos-lib-bump-pr: nothing points at the page the templates no longer have"
 
 echo "kaos-lib: ${PASSED} passed, ${FAILED} failed"

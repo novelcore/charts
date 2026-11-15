@@ -49,17 +49,20 @@ INDEX_RE = re.compile(r"^" + NAME + r" ?==[0-9]+\.[0-9]+\.[0-9]+$")
 REGISTRY_RE = re.compile(r"^" + NAME + r" @ https://([a-z0-9-]+)-python\.pkg\.dev/([A-Za-z0-9._/-]+)/kaos_lib-"
                          r"([0-9]+\.[0-9]+\.[0-9]+(?:rc[0-9]+)?)-py3-none-any\.whl(?:#sha256=[0-9a-f]{64})?$")
 # Where the kaos-lib CI writes one record per release: <rc|stable>/<tag>/release.json (with `notes`).
-RELEASES_BASE = "https://storage.googleapis.com/kaos-dev-511509-kaos-lib"
+# The address is NEVER compiled in (PRD novelcore/kaos#2017 F-55): the bump job is given it (--releases-base,
+# from the platform's release record) and without it there are no record notes and no link.
 
 
 def valid_spec(spec):
     return len(spec) <= 512 and any(r.match(spec) for r in (REGISTRY_RE, RELEASE_RE, TAG_RE, COMMIT_RE, INDEX_RE))
 
 
-def registry_record_url(spec, base=RELEASES_BASE):
-    """The public release record of a registry wheel spec (its notes, sha256s), or "" for other forms."""
+def registry_record_url(spec, base=""):
+    """The public release record of a registry wheel spec (its notes, sha256s), or "" for other forms
+    and when the platform gave no releases base."""
     m = REGISTRY_RE.match(spec)
-    if not m:
+    base = (base or "").rstrip("/")
+    if not m or not base:
         return ""
     version = m.group(3)
     rel, _, rc = version.partition("rc")
@@ -71,13 +74,56 @@ def registry_record_url(spec, base=RELEASES_BASE):
 # rendered by this chart's engine gives a step one context and takes one result back, which kaos-lib reads
 # and writes from this version on.
 CONTRACT_MIN = "0.5"
-# The kaos-lib guide's page a new .kaos/compat.yaml points at, under the address the chart is given
-# (kaosLib.guideUrl).
-SUPPORT_WINDOW_PAGE = "support-window.html"
+# The kaos-lib guide's page a new .kaos/compat.yaml points at, under the address the bump job is given
+# (--guide-url, the chart's kaosLib.guideUrl, empty by default: no address, no link).
+SUPPORT_WINDOW_PAGE = "reference.html#versions-and-upgrades"
 
 
 def guide_page(guide_url, page):
-    return guide_url.rstrip("/") + "/" + page
+    base = (guide_url or "").strip().rstrip("/")
+    return f"{base}/{page}" if base else ""
+
+
+# ---------------------------------------------------------------- the PR gate's linter wheel (PRD kaos#2017 F-55)
+
+# The first kaos-lib whose linter takes --doc-base (the address its rule links are built on).
+DOC_BASE_MIN = (0, 5, 0, 23)
+WHEEL_VERSION_RE = re.compile(r"/kaos_lib-([0-9]+)\.([0-9]+)\.([0-9]+)(rc([0-9]+))?-py3-none-any\.whl(?:#|$)")
+DOCS_BASE_RE = re.compile(r"^https://[A-Za-z0-9.-]+/[A-Za-z0-9._~/-]*$")
+
+
+def wheel_version_key(url):
+    """(major, minor, patch, rc) of a kaos_lib wheel URL; a final release sorts after its rcs. None when unnamed."""
+    m = WHEEL_VERSION_RE.search(url)
+    if not m:
+        return None
+    return (int(m.group(1)), int(m.group(2)), int(m.group(3)), int(m.group(5)) if m.group(4) else 10 ** 9)
+
+
+def lint_wheel(ctx, pin_url="", pin_sha=""):
+    """Which kaos-lib wheel the PR gate lints with, from the app's pipeline context (the platform's choice).
+
+    The wheel is the context's kaosLib.spec when that is a registry wheel with its #sha256= (the form of
+    REGISTRY_RE); any other spec (or none) falls back to the chart's pin; with neither there is no wheel
+    and the gate is skipped. doc_base is addresses.docs_base + "lint/" (kaosLib.support.addresses), given
+    only for a wheel that has the --doc-base flag (>= 0.5.0rc23); else "".
+    """
+    lib = kaos_lib(ctx)
+    spec = str(lib.get("spec") or "").strip()
+    url = sha = source = ""
+    if spec and len(spec) <= 512 and REGISTRY_RE.match(spec) and "#sha256=" in spec:
+        url, _, sha = spec.partition(" @ ")[2].partition("#sha256=")
+        source = "spec"
+    elif pin_url and re.fullmatch(r"[0-9a-f]{64}", pin_sha or ""):
+        url, sha, source = pin_url, pin_sha, "pin"
+    out = {"source": source, "url": url, "sha256": sha, "doc_base": ""}
+    sup = lib.get("support") if isinstance(lib.get("support"), dict) else {}
+    addr = sup.get("addresses") if isinstance(sup.get("addresses"), dict) else {}
+    docs = str(addr.get("docs_base") or "").strip()
+    key = wheel_version_key(url) if url else None
+    if source and key and key >= DOC_BASE_MIN and DOCS_BASE_RE.match(docs):
+        out["doc_base"] = docs.rstrip("/") + "/lint/"
+    return out
 
 
 ARG_RE = re.compile(r"^\s*ARG\s+KAOS_LIB_PACKAGE(\s|=|$)", re.M)
@@ -504,12 +550,13 @@ def compat_file(current, specifier, guide_url):
     line = f'{COMPAT_KEY}: "{specifier}"'
     if current and re.search(rf"^{re.escape(COMPAT_KEY)}\s*:", current, re.M):
         return re.sub(rf"^{re.escape(COMPAT_KEY)}\s*:.*$", line, current, count=1, flags=re.M)
+    link = guide_page(guide_url, SUPPORT_WINDOW_PAGE)
     head = ("# The kaos-lib versions this app's code works with: a PEP 440 version specifier.\n"
-            f"# Written by the platform's bump pull request; see {guide_page(guide_url, SUPPORT_WINDOW_PAGE)}\n")
+            f"# Written by the platform's bump pull request{'; see ' + link if link else ''}\n")
     return (current.rstrip("\n") + "\n" if current else head) + line + "\n"
 
 
-def bump(gh, slug, base, version, spec, default_changelog, guide_url, log=print):
+def bump(gh, slug, base, version, spec, default_changelog, guide_url, log=print, releases_base=""):
     """Open the ONE bump pull request for version, close the bump pull requests it supersedes.
 
     Idempotent: a pull request ever opened for this version's branch (open, closed or merged)
@@ -557,13 +604,15 @@ def bump(gh, slug, base, version, spec, default_changelog, guide_url, log=print)
             if code not in (200, 201):
                 raise SystemExit(f"bump: cannot write {COMPAT_PATH} on {branch} (HTTP {code}): {out}")
         rel = RELEASE_RE.match(spec) or TAG_RE.match(spec)
-        record_url = registry_record_url(spec)
+        record_url = registry_record_url(spec, releases_base)
         if record_url:  # the platform registry: the release record carries the CHANGELOG section
             url = record_url
             try:
                 notes = str((json.loads(fetch(url) or "{}") or {}).get("notes") or "").strip()
             except ValueError:
                 notes = ""
+        elif REGISTRY_RE.match(spec):  # a registry wheel and no releases base: no record notes, no link
+            url, notes = "", ""
         elif rel:  # a GitHub release (asset or tag archive): its notes are the release's body
             url = f"https://github.com/{rel.group(1)}/{rel.group(2)}/releases/tag/{rel.group(3)}"
             code, r = gh.call("GET", f"/repos/{rel.group(1)}/{rel.group(2)}/releases/tags/{rel.group(3)}", ok=(200, 404))
@@ -577,7 +626,8 @@ def bump(gh, slug, base, version, spec, default_changelog, guide_url, log=print)
                 f"- **Close it** to stay on the version your images have: the platform opens no second pull request "
                 f"for {version}.\n\n"
                 + f"Package: `{spec}`\n\n## Release notes\n\n"
-                + (notes or f"No release notes for {version} were found at {url or 'the package changelog'}.")
+                + (notes or (f"No release notes for {version} were found at {url}." if url
+                           else f"The platform published no release notes for {version}."))
                 + "\n\n🤖 Opened by the KubeCore platform (kaos-lib delivery).")
         code, pr = gh.call("POST", f"/repos/{slug}/pulls",
                            {"title": f"Bump kaos-lib to {version}", "head": branch, "base": base, "body": text})
@@ -627,9 +677,13 @@ def main(argv=None):
     k.add_argument("--spec", required=True)
     k.add_argument("--recorded", default="")
     k.add_argument("--compat", default="")
+    lw = sub.add_parser("lint-wheel")
+    lw.add_argument("--context", default="")
+    lw.add_argument("--pin-url", default="")
+    lw.add_argument("--pin-sha256", default="")
     b = sub.add_parser("bump")
-    for a in ("--slug", "--base", "--version", "--spec", "--changelog-url", "--guide-url"):
-        b.add_argument(a, required=a != "--changelog-url", default="")
+    for a in ("--slug", "--base", "--version", "--spec", "--changelog-url", "--guide-url", "--releases-base"):
+        b.add_argument(a, required=a in ("--slug", "--base", "--version", "--spec"), default="")
     b.add_argument("--token-file", default="/etc/github-token/token")
     args = ap.parse_args(argv)
 
@@ -658,11 +712,13 @@ def main(argv=None):
         v = support_verdict(version, sup)
         state, prefix = status_for(v)
         json.dump({"verdict": v["verdict"], "state": state, "description": safe(prefix + v["message"])}, sys.stdout)
+    elif args.cmd == "lint-wheel":
+        json.dump(lint_wheel(load_context(args.context) if args.context else {}, args.pin_url, args.pin_sha256), sys.stdout)
     elif args.cmd == "bump":
         with open(args.token_file) as f:
             gh = GitHub(f.read().strip())
         json.dump(bump(gh, args.slug, args.base, args.version, args.spec, args.changelog_url, args.guide_url,
-                       log=lambda m: print(m, file=sys.stderr)), sys.stdout)
+                       log=lambda m: print(m, file=sys.stderr), releases_base=args.releases_base), sys.stdout)
     elif args.cmd == "contract":
         out = contract_check(args.spec.strip(), args.compat.strip())
         out["crosses"] = crosses_contract(args.recorded.strip(), args.spec.strip())
