@@ -110,6 +110,15 @@ ciSecretsPrep:
 kaosLake:
   workloadAudience: kaos-lake
 
+# The platform's own workflows on the system pool (polls, dataset checks, fan-out, reaper,
+# healer). See the helper kubecore-ci-workflows.systemPodSpecPatch for the measurement.
+systemPods:
+  # Keep Argo's executor binary (153 MiB, copied into every pod at start) in memory instead
+  # of on the node's boot disk. false restores the disk copy.
+  executorInMemory: true
+  # Upper bound of that in-memory volume. Far above the binary on purpose.
+  executorVolumeSizeLimit: 512Mi
+
 tooling:
   # kubectl + jq + curl, busybox sh. Runs the two check-drift steps. The same
   # image family as the projectmlstack composition's kubectl/jq steps. kubectl
@@ -175,10 +184,12 @@ tooling:
   # that one node and the node pool never grew; a new dataset version then took over 15
   # minutes to reach the run forms. At 300m a burst no longer fits beside the platform's own
   # pods, so the checks spread and the system pool adds a node. CPU is never limited.
+  # Memory: the pod's own peak is under 100 MiB; with systemPods.executorInMemory the executor
+  # copy (153 MiB) is the pod's memory too.
   checkDriftResources:
     requests:
       cpu: 300m
-      memory: 96Mi
+      memory: 256Mi
   # pending-reaper: lists the cluster's UNFINISHED workflows only (selector), then each running
   # one's pods. Peak 16 MiB with 2 running workflows among 150 finished ones (900 MiB when it
   # listed every workflow). No memory limit, as for clusterResources.
@@ -381,8 +392,8 @@ ci:
   # projects' CI namespaces: the pods share the one system node pool). A fan-out of
   # reconcile runs queues in Argo instead of starving that pool. The chart renders the
   # ConfigMap next to the workflow controller's templates. What bounds the number is
-  # slots x tooling.checkDriftResources.requests on the system pool (6 x 96Mi = 576Mi and
-  # 6 x 300m = 1.8 cores at the default; the pod peaks under 100 MiB). A slot is held for one attempt
+  # slots x tooling.checkDriftResources.requests on the system pool (6 x 256Mi = 1.5Gi and
+  # 6 x 300m = 1.8 cores at the default; the pod peaks under 100 MiB plus the executor copy). A slot is held for one attempt
   # only: a run that retries "not yet" (up to ~45 min for an app whose repository is slow to
   # appear) holds none between attempts.
   checkDrift:

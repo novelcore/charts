@@ -61,6 +61,7 @@ spec:
   # own serviceAccountName/volumes keep working: the Workflow's fields win.
   serviceAccountName: {{ .Values.reconciler.serviceAccountName | default "operate-workflow-sa" }}
   entrypoint: bump
+  {{- include "kubecore-ci-workflows.systemPodSpecPatch" . | nindent 2 }}
   # The system pool, as ml-ci-reconcile: the job needs only the GitHub API.
   nodeSelector:
     platform.kubecore.io/system: "true"

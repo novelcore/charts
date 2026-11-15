@@ -968,3 +968,32 @@ post_status() {
   fi
 }
 {{- end }}
+
+{{/*
+Workflow-level podSpecPatch of the workflows that run on the SYSTEM pool (the periodic
+polls, the dataset checks, the fan-out, the reaper, the healer): Argo's executor is kept in
+memory, not on the node's boot disk.
+
+Every Argo pod starts with an init container that copies the `argoexec` binary (153 MiB at
+4.0.6) into the pod's `var-run-argo` emptyDir. On the system pool that emptyDir is the boot
+disk, a pd-standard of 100 GB: about 12 MB/s of writes for the whole node. One pod start is
+13 seconds of that budget. Measured on a pool under an e2e (2026-11-15): 20 such pods in ten
+minutes on one node, its disk 96 % busy, 68 % iowait, load 22; a check whose own work takes
+10 s took two minutes to start, and a new dataset version took over 15 minutes to reach the
+run forms. With the copy in memory the same pod, on the same node at the same time, ended
+while the disk-backed one was still writing its result.
+
+The copy counts as the pod's memory (tmpfs), so the requests of these pods include it. The
+size limit bounds anything else written there; it is far above the binary so an executor
+upgrade does not meet it.
+*/}}
+{{- define "kubecore-ci-workflows.systemPodSpecPatch" -}}
+{{- if .Values.systemPods.executorInMemory }}
+podSpecPatch: |
+  volumes:
+  - name: var-run-argo
+    emptyDir:
+      medium: Memory
+      sizeLimit: {{ .Values.systemPods.executorVolumeSizeLimit }}
+{{- end }}
+{{- end }}
