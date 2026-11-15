@@ -264,7 +264,7 @@ spec:
         # submitted build. The reconciler submits one when the platform context
         # moved (mlEnvironment / namespace drift) with NO commit; re-rendering is
         # idempotent (hera-enhance-commit commits only when the output differs).
-        when: "({{`{{steps.detect-steps.outputs.parameters.has_changes}}`}} == true || {{`{{steps.detect-steps.outputs.parameters.wft_changed}}`}} == true || {{`{{workflow.parameters.event_type}}`}} == reconcile) && {{`{{workflow.parameters.branch_type}}`}} != chore"
+        when: "({{`{{steps.detect-steps.outputs.parameters.has_changes}}`}} == true || {{`{{steps.detect-steps.outputs.parameters.wft_changed}}`}} == true || {{`{{workflow.parameters.event_type}}`}} == reconcile) && {{`{{workflow.parameters.branch_type}}`}} != chore && {{`{{steps.detect-steps.outputs.parameters.superseded}}`}} != true"
         arguments:
           parameters:
           - name: changed_steps
@@ -312,7 +312,8 @@ spec:
         # last-built-sha moved: it exits early on "No changes to commit".
         # An unlocked (render-only) run records only when it built nothing, so it
         # can never mark a commit built that a locked build still owes.
-        when: "{{`{{workflow.parameters.branch_type}}`}} != chore && ({{`{{inputs.parameters.locked}}`}} == true || {{`{{steps.detect-steps.outputs.parameters.has_changes}}`}} != true)"
+        # A superseded run records nothing: last-built-sha stays on the newer commit.
+        when: "{{`{{workflow.parameters.branch_type}}`}} != chore && ({{`{{inputs.parameters.locked}}`}} == true || {{`{{steps.detect-steps.outputs.parameters.has_changes}}`}} != true) && {{`{{steps.detect-steps.outputs.parameters.superseded}}`}} != true"
         arguments:
           parameters:
           - name: image_tag
@@ -345,7 +346,7 @@ spec:
           - name: state
             value: "success"
           - name: description
-            value: "ML build succeeded"
+            value: "{{`{{steps.detect-steps.outputs.parameters.status_description}}`}}"
 
   - name: clone
 {{ include "kubecore-ci-workflows.cloneRetry" . | indent 4 }}
@@ -407,6 +408,17 @@ spec:
       - name: wft_changed
         valueFrom:
           path: /tmp/wft_changed
+      # SUPERSEDED (see the block of that name below): "true" when a NEWER commit of the branch is
+      # already built. The run then builds, renders, records and tags nothing. status_description is
+      # what the final commit status says.
+      - name: superseded
+        valueFrom:
+          path: /tmp/superseded
+          default: "false"
+      - name: status_description
+        valueFrom:
+          path: /tmp/status_description
+          default: "ML build succeeded"
       # kaos-lib delivery (PRD novelcore/kaos#1147), see the KAOS-LIB block
       # below: the --build-arg KAOS_LIB_PACKAGE value ("" = none), and the
       # pipeline-images kaos-lib-package / kaos-lib-compat report ("" = leave).
@@ -507,6 +519,7 @@ spec:
         # "image exists in the registry" — patch-images writes the versioned tag
         # there only after a successful build+push.
         UNBUILT_STEPS=""
+        SUPERSEDED=false
         GITOPS_REPO="{{`{{workflow.parameters.gitops_repository}}`}}"
         GITOPS_BRANCH="{{`{{workflow.parameters.gitops_branch}}`}}"
         APP_NAME="{{`{{workflow.parameters.app_name}}`}}"
@@ -529,6 +542,7 @@ spec:
               # touched. Kept as HEAD~1 when there is no last-built-sha yet,
               # it is not in the shallow clone, or it is not an ancestor of
               # HEAD (force-push / rewritten history).
+              # LAST-BUILT begin (the block between these two markers is executed by tests/superseded-build)
               LAST_BUILT=$(yq e '.data."last-built-sha" // ""' "$IMAGES_PATH")
               if [ -n "$LAST_BUILT" ] && git cat-file -e "${LAST_BUILT}^{commit}" 2>/dev/null \
                  && git merge-base --is-ancestor "$LAST_BUILT" HEAD 2>/dev/null \
@@ -555,9 +569,24 @@ spec:
                 # own build, moving the images under a test that expected none).
                 CHANGED_FILES=""
                 echo "HEAD ${LAST_BUILT} is already built: a reconcile rebuilds no step for its diff"
+              elif [ -n "$LAST_BUILT" ] && [ "$LAST_BUILT" != "$(git rev-parse HEAD)" ] \
+                   && [ "{{`{{workflow.parameters.event_type}}`}}" != "reconcile" ] \
+                   && git cat-file -e "${LAST_BUILT}^{commit}" 2>/dev/null \
+                   && git merge-base --is-ancestor HEAD "$LAST_BUILT" 2>/dev/null; then
+                # SUPERSEDED: the commit of this run is an ANCESTOR of the one already built. Two
+                # pushes seconds apart start two builds; the one that gets the app's build lock
+                # second may be the OLDER commit. Building it then cost a whole build (22 minutes
+                # for a 7-image app), put the app's images and last-built-sha BACK on the older
+                # commit, and made the reconciler build the head a third time (live 2026-11-14:
+                # 46 minutes before a new app's context change could render). Judged only on
+                # proof: last-built-sha is in this clone and HEAD is its ancestor. Anything else
+                # (unknown commit, rewritten history, a reconcile) builds as before.
+                SUPERSEDED=true
+                echo "SUPERSEDED: $(git rev-parse HEAD) is an ancestor of last-built-sha ${LAST_BUILT}, which is already built: nothing is built, rendered, recorded or tagged for it"
               else
                 echo "diff base stays HEAD~1 (last-built-sha ${LAST_BUILT:-unset} unusable in this clone)"
               fi
+              # LAST-BUILT end
             else
               echo "pipeline-images.yaml not found — treating all steps as unbuilt (first build)"
               IMAGES_PATH=""
@@ -731,6 +760,14 @@ spec:
           printf "false" > /tmp/has_changes
         else
           printf "true" > /tmp/has_changes
+        fi
+        printf '%s' "$SUPERSEDED" > /tmp/superseded
+        if [ "$SUPERSEDED" = "true" ]; then
+          printf '[]' > /tmp/changed_steps.json
+          printf "false" > /tmp/has_changes
+          printf "false" > /tmp/wft_changed
+          printf '' > /tmp/engine_compose
+          printf 'Not built: a newer commit of this branch (%s) is already built' "$(printf '%s' "$LAST_BUILT" | cut -c1-8)" > /tmp/status_description
         fi
         echo "has_changes=$(cat /tmp/has_changes)"
         echo "changed_steps=$(cat /tmp/changed_steps.json)"

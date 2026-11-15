@@ -57,8 +57,8 @@ expect_eq "$(printf '%s' "$ML_SCRIPTS" | grep -v '^[[:space:]]*#' | grep -c 'dat
 # every non-chore build, not only when a step image changed.
 PATCH_WHEN=$(yq 'select(.kind == "ClusterWorkflowTemplate" and .metadata.name == "ml-ci-build")
     | .spec.templates[] | select(.name == "ml-ci-run") | .steps[][] | select(.name == "patch-images") | .when' "$RENDERED")
-expect_eq "$PATCH_WHEN" "{{workflow.parameters.branch_type}} != chore && ({{inputs.parameters.locked}} == true || {{steps.detect-steps.outputs.parameters.has_changes}} != true)" \
-  "patch-images (records last-built-sha) runs on every non-chore build (an unlocked render-only run records only when it built nothing)"
+expect_eq "$PATCH_WHEN" "{{workflow.parameters.branch_type}} != chore && ({{inputs.parameters.locked}} == true || {{steps.detect-steps.outputs.parameters.has_changes}} != true) && {{steps.detect-steps.outputs.parameters.superseded}} != true" \
+  "patch-images (records last-built-sha) runs on every non-chore build (an unlocked render-only run records only when it built nothing; a superseded commit records nothing)"
 
 DRIFT_SRC="${BASE_TMP}/check-drift.src"
 yq 'select(.kind == "ClusterWorkflowTemplate" and .metadata.name == "ml-ci-reconcile")
