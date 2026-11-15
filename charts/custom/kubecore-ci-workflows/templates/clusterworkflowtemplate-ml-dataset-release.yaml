@@ -23,6 +23,11 @@ next hourly poll.
 
 At most one fan-out runs at a time (this template's own mutex, below).
 
+An app that already has a check waiting gets no second one: a check that has not
+reached its decision reads the catalog after this event, so it covers it (see
+COALESCE below). Needs `list` on workflows for dataset-release-sa; without it
+every app gets its own check, as before.
+
 The per-app Workflow is built from ONLY the CronWorkflow's workflowTemplateRef
 and arguments, plus a ttlStrategy (PRD novelcore/kaos#1533 F-26: Strict
 templateReferencing refuses a Workflow whose own spec sets serviceAccountName,
@@ -86,8 +91,41 @@ spec:
           echo "dataset-release: no ML app in ${NS} — nothing to re-render"
           exit 0
         fi
+        # COALESCE begin (the block between these two markers is executed by tests/dataset-release-coalesce)
+        # One waiting check per app is enough. A check that has not reached its decision yet reads
+        # the catalog AFTER this event, so it covers this event too; a second check for the same
+        # app only queues behind it for a drift slot and for the app's build lock. Without this, a
+        # project that released datasets every few minutes piled the checks up (live 2026-11-15:
+        # 27 events, 7 apps, 193 checks, up to 13 queued for one app, and the hourly check of an
+        # app waited 44 minutes for a slot). A check covers the event only on proof: it is not
+        # completed and its decision step does not exist yet or still waits for the build lock.
+        # A list that cannot be read (older project without the right, an API blip) covers
+        # nothing: every app gets its check, as before.
+        if WAITING=$(kubectl get workflows -n "$NS" \
+              -l 'platform.kubecore.io/submitted-by=dataset-release,workflows.argoproj.io/completed!=true' \
+              -o json 2>/dev/null) \
+           && COVERED=$(printf '%s' "$WAITING" | jq -r '
+              .items[]
+              | select((.metadata.deletionTimestamp // "") == "")
+              | select(((.status.phase // "") | IN("", "Pending", "Running")))
+              | select([(.status.nodes // {})[] | select(.displayName == "decide" and .phase != "Pending")] | length == 0)
+              | "\(.metadata.labels["platform.kubecore.io/app"] // "") \(.metadata.name)"' 2>/dev/null); then
+          :
+        else
+          echo "dataset-release: the waiting checks could not be read: every app gets its own check"
+          COVERED=""
+        fi
+        covered_by() {  # covered_by APP: the name of a waiting check of APP, or nothing
+          printf '%s\n' "$COVERED" | awk -v app="$1" '$1 == app { print $2; exit }'
+        }
+        # COALESCE end
         FAILED=0
         for APP in $APPS; do
+          BY=$(covered_by "$APP")
+          if [ -n "$BY" ]; then
+            echo "dataset-release: ${APP}: covered by the waiting check ${BY}, which has not read the catalog yet"
+            continue
+          fi
           MANIFEST=$(echo "$CRONS" | jq -c --arg app "$APP" '
               .items[]
               | select(.metadata.labels["platform.kubecore.io/app"] == $app
