@@ -1,8 +1,8 @@
 """The dataset pickers of an ML pipeline, from kaos-lake's read-only catalog (PRD novelcore/kaos#1283
 D-05, PRD novelcore/kaos#1911 D-15). Every name a step declares in `inputs=` is a form field that holds a
 dataset reference (`dataset-<name>@<version>`); each one gets the catalog's choices. One definition for
-the two places that need it: the render (hera-enhance-commit fills the fields and records the digest of
-what it offered) and the drift check (ml-ci-reconcile compares that digest with the catalog now).
+the two places that need it: the render (hera-enhance-commit sets each field's default and records the digest
+of the catalog it read) and the drift check (ml-ci-reconcile compares that digest with the catalog now).
 
     python3 -I dataset-choices.py digest ENDPOINT TOKEN_FILE
 
@@ -75,7 +75,12 @@ def input_names(table):
 
 
 def fill(wft, names, datasets):
-    """Offer the catalog's choices on the form field of every input in names; returns {field: default}.
+    """Set the default of the form field of every input in names from the catalog; returns {field: default}.
+
+    The field carries no list of choices: a list written here is one Argo enforces, so a version released
+    after the render was refused until every app had been rendered again. The form reads its choices live
+    (the field's picker is `dataset`); the run refuses a dataset or version that does not exist when it
+    starts. A list an older render wrote is removed.
 
     The default stays what the app's config says when the catalog offers it (`latest` included: it is
     resolved to a commit when the run starts). A default the catalog does not offer becomes the latest of
@@ -94,7 +99,7 @@ def fill(wft, names, datasets):
         if name not in params:
             raise KeyError(f"the pipeline declares the input '{name}' but its form has no field of that name")
         param = params[name]
-        param["enum"] = list(offered)
+        param.pop("enum", None)
         if param.get("value") not in offered:
             dataset = str(param.get("value") or "").split("@", 1)[0]
             fallback = dataset if dataset in known else (own[0]["name"] if own else "")
