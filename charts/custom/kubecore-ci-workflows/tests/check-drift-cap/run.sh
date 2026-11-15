@@ -111,6 +111,12 @@ expect_eq "$(yq 'select(.metadata.name=="pending-reaper") | .spec.templates[].co
 RES=$(yq "$WF | select(.name==\"check-drift\") | .container.resources" "$R")
 expect_eq "$(printf '%s' "$RES" | yq '.limits')" "null" "check-drift has no memory limit (an OOMKill drops a forced re-render)"
 expect_eq "$(printf '%s' "$RES" | yq '.requests.memory')" "96Mi" "check-drift requests what it uses with the narrow lists (measured peak 40-75 MiB)"
+# CPU: the request stands for what a running check costs its node (measured 2026-11-15: six at
+# once took a 4-vCPU system node from 0.6 to 3.9 cores busy, though their own containers used
+# 0.28 core). At 50m every check was packed onto one node and the pool never grew.
+expect_eq "$(printf '%s' "$RES" | yq '.requests.cpu')" "300m" "check-drift requests the CPU its run costs the node, so a burst spreads and the system pool grows"
+SLOTS=$(yq 'select(.kind=="ConfigMap" and .metadata.name=="ci-check-drift-slots") | .data.slots' "$R")
+expect_eq "$(( SLOTS * 300 <= 3400 ))" "1" "every slot at once (${SLOTS} x 300m) still fits one empty e2-standard-4 system node (about 3.4 cores after the daemonsets)"
 
 # ── the script: executed against a stub kubectl ──────────────────────────────
 SRC="$T/check-drift.src"

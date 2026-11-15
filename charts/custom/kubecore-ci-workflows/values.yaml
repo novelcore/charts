@@ -167,9 +167,17 @@ tooling:
   # 0.9 MB WorkflowTemplate read on top (before: 800 MiB, 375-590 MiB live). The request is what
   # the scheduler counts on the small system nodes; ci.checkDrift.slots bounds how many run.
   # NO memory limit, on purpose: an OOMKill drops a forced re-render (see clusterResources).
+  # CPU request: what one running check costs its NODE, not its own container. Measured on a
+  # pool under an e2e (2026-11-15): the checks' own containers used 0.28 core, but with six
+  # running at once the 4-vCPU system node went from 0.6 to 3.9 cores busy (pod starts and
+  # stops in kubelet and containerd, log shipping, the workflow controller, admission), its
+  # load reached 38 and it dropped to NotReady. At 50m the scheduler packed every check onto
+  # that one node and the node pool never grew; a new dataset version then took over 15
+  # minutes to reach the run forms. At 300m a burst no longer fits beside the platform's own
+  # pods, so the checks spread and the system pool adds a node. CPU is never limited.
   checkDriftResources:
     requests:
-      cpu: 50m
+      cpu: 300m
       memory: 96Mi
   # pending-reaper: lists the cluster's UNFINISHED workflows only (selector), then each running
   # one's pods. Peak 16 MiB with 2 running workflows among 150 finished ones (900 MiB when it
@@ -373,8 +381,8 @@ ci:
   # projects' CI namespaces: the pods share the one system node pool). A fan-out of
   # reconcile runs queues in Argo instead of starving that pool. The chart renders the
   # ConfigMap next to the workflow controller's templates. What bounds the number is
-  # slots x tooling.checkDriftResources.requests.memory on the system pool (6 x 96Mi =
-  # 576Mi at the default; the pod peaks under 100 MiB). A slot is held for one attempt
+  # slots x tooling.checkDriftResources.requests on the system pool (6 x 96Mi = 576Mi and
+  # 6 x 300m = 1.8 cores at the default; the pod peaks under 100 MiB). A slot is held for one attempt
   # only: a run that retries "not yet" (up to ~45 min for an app whose repository is slow to
   # appear) holds none between attempts.
   checkDrift:
