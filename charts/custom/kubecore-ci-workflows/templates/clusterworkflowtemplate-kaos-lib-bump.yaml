@@ -84,6 +84,13 @@ spec:
     # The target: kaosLib.bumpTo (status.ml.kaosLib.desired and its version).
     - name: version
     - name: spec
+    # Where the platform's release records live (<releases_base>/<rc|stable>/<tag>/release.json) and the address
+    # of the kaos-lib guide (docs). The operator gives them from the platform's release record
+    # (kaosLib.support.addresses). Empty: no release-record notes, no guide link. Never a default address.
+    - name: releases_base
+      value: ""
+    - name: guide_url
+      value: "{{ .Values.kaosLib.guideUrl }}"
   volumes:
   - name: github-token
     secret:
@@ -109,6 +116,10 @@ spec:
         value: "{{`{{workflow.parameters.version}}`}}"
       - name: SPEC
         value: "{{`{{workflow.parameters.spec}}`}}"
+      - name: RELEASES_BASE
+        value: "{{`{{workflow.parameters.releases_base}}`}}"
+      - name: GUIDE_URL
+        value: "{{`{{workflow.parameters.guide_url}}`}}"
       args:
       - |
         set -eu
@@ -119,7 +130,7 @@ spec:
 {{ include "kubecore-ci-workflows.kaosLibScript" . | indent 8 }}
         python3 -I /tmp/kaos-lib.py bump --slug "${SLUG}" --base "${BASE}" --version "${VERSION}" \
           --spec "${SPEC}" --changelog-url "{{ .Values.kaosLib.changelogUrl }}" \
-          --guide-url "{{ .Values.kaosLib.guideUrl }}"
+          --guide-url "${GUIDE_URL}" --releases-base "${RELEASES_BASE}"
       volumeMounts:
       - name: github-token
         mountPath: /etc/github-token

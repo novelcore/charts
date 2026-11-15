@@ -30,7 +30,8 @@ GIT = f"kubecore[zitadel] @ https://github.com/novelcore/hera-pipeline-template/
 LIB = f"kaos-lib @ https://github.com/kaos-io/kaos-lib/archive/{'b' * 40}.zip"
 WHEEL = "kaos-lib[zitadel] @ https://github.com/kaos-io/kaos-lib/releases/download/v0.3.0/kaos_lib-0.3.0-py3-none-any.whl"
 TAG = "kaos-lib[zitadel] @ https://github.com/kaos-io/kaos-lib/archive/refs/tags/v0.3.0.zip"
-AR = "https://europe-west1-python.pkg.dev/kaos-dev-511509"
+AR = "https://europe-west1-python.pkg.dev/acme-proj"
+RELEASES = "https://releases.example/kaos-lib"  # where the platform says its release records live
 REG = f"kaos-lib[zitadel] @ {AR}/kaos-lib/kaos-lib/kaos_lib-0.4.0-py3-none-any.whl#sha256={'c' * 64}"
 REG_RC = f"kaos-lib[zitadel] @ {AR}/kaos-lib-rc/kaos-lib/kaos_lib-0.4.0rc3-py3-none-any.whl"
 REG_05RC = f"kaos-lib[zitadel] @ {AR}/kaos-lib-rc/kaos-lib/kaos_lib-0.5.0rc2-py3-none-any.whl"
@@ -387,9 +388,15 @@ def test_registry_specs_outside_the_operator_pattern_are_refused(bad):
 
 
 def test_registry_record_url_names_the_channel_and_tag():
-    assert kl.registry_record_url(REG) == f"{kl.RELEASES_BASE}/stable/v0.4.0/release.json"
-    assert kl.registry_record_url(REG_RC) == f"{kl.RELEASES_BASE}/rc/v0.4.0-rc.3/release.json"
-    assert kl.registry_record_url(WHEEL) == "" and kl.registry_record_url(GIT) == ""
+    assert kl.registry_record_url(REG, RELEASES) == f"{RELEASES}/stable/v0.4.0/release.json"
+    assert kl.registry_record_url(REG_RC, RELEASES + "/") == f"{RELEASES}/rc/v0.4.0-rc.3/release.json"
+    assert kl.registry_record_url(WHEEL, RELEASES) == "" and kl.registry_record_url(GIT, RELEASES) == ""
+
+
+def test_there_is_no_compiled_in_releases_base():
+    assert not hasattr(kl, "RELEASES_BASE")
+    assert kl.registry_record_url(REG) == "" and kl.registry_record_url(REG, "") == ""
+    assert "kaos-dev" not in Path(kl.__file__).read_text()
 
 
 def test_a_deprecated_version_past_its_deadline_is_unsupported():
@@ -446,10 +453,86 @@ def test_compat_file_keeps_comments():
     assert yaml.safe_load(kl.compat_file("", ">=0.3,<0.4", GUIDE)) == {"kaos-lib": ">=0.3,<0.4"}
 
 
-def test_a_new_compat_file_points_at_the_support_window_page_of_the_guide():
+def test_a_new_compat_file_points_at_the_versions_section_of_the_guide_reference():
     text = kl.compat_file("", ">=0.5,<0.6", GUIDE)
-    assert "see https://guide.example/docs/support-window.html\n" in text
-    assert "docs/kaos-lib-versions.md" not in text
+    assert "see https://guide.example/docs/reference.html#versions-and-upgrades\n" in text
+    assert "support-window.html" not in text and "docs/kaos-lib-versions.md" not in text
+
+
+def test_a_new_compat_file_has_no_link_without_a_guide_address():
+    for guide in ("", None):
+        text = kl.compat_file("", ">=0.5,<0.6", guide)
+        assert "http" not in text and "see" not in text
+        assert yaml.safe_load(text) == {"kaos-lib": ">=0.5,<0.6"}
+
+
+# ---------------------------------------------------------------- the PR gate's linter wheel (PRD kaos#2017 F-55)
+
+LW_SHA = "d" * 64
+LW_URL = f"{AR}/kaos-lib-rc/kaos-lib/kaos_lib-0.5.0rc23-py3-none-any.whl"
+LW_SPEC = f"kaos-lib[zitadel] @ {LW_URL}#sha256={LW_SHA}"
+PIN = ("file:///pin/kaos_lib-0.5.0rc11-py3-none-any.whl", "e" * 64)
+DOCS = {"addresses": {"docs_base": "https://docs.example/docs/v0.5.0-rc.23/"}}
+
+
+def lw(spec=None, support=DOCS, pin=PIN, ctx=True):
+    lib = {}
+    if spec is not None:
+        lib["spec"] = spec
+    if support is not None:
+        lib["support"] = support
+    return kl.lint_wheel({"kaosLib": lib} if ctx else {}, *pin)
+
+
+def test_the_linter_wheel_is_the_specs_registry_wheel_with_its_sha():
+    assert lw(LW_SPEC) == {"source": "spec", "url": LW_URL, "sha256": LW_SHA,
+                           "doc_base": "https://docs.example/docs/v0.5.0-rc.23/lint/"}
+
+
+def test_a_spec_without_a_sha_is_not_usable_so_the_pin_is_used():
+    out = lw(LW_SPEC.split("#")[0])
+    assert (out["source"], out["url"], out["sha256"]) == ("pin", PIN[0], PIN[1])
+
+
+@pytest.mark.parametrize("spec", [GIT, "kaos-lib[zitadel]==0.5.0", WHEEL, TAG, "", None])
+def test_a_spec_that_is_not_a_registry_wheel_falls_back_to_the_pin(spec):
+    out = lw(spec)
+    assert (out["source"], out["url"], out["sha256"]) == ("pin", PIN[0], PIN[1])
+    assert out["doc_base"] == "", "the pin's name carries no version >= rc23, so no --doc-base"
+
+
+@pytest.mark.parametrize("spec", [GIT, "kaos-lib[zitadel]==0.5.0", LW_SPEC.split("#")[0], None])
+def test_no_usable_spec_and_no_pin_means_no_wheel(spec):
+    assert lw(spec, pin=("", ""))["source"] == "" and lw(spec, pin=("", ""))["url"] == ""
+    assert lw(spec, pin=("https://x/kaos_lib-0.5.0-py3-none-any.whl", "not-a-sha"))["source"] == ""
+
+
+def test_no_context_means_the_pin_or_nothing():
+    assert lw(ctx=False)["source"] == "pin" and lw(ctx=False, pin=("", ""))["source"] == ""
+
+
+@pytest.mark.parametrize("version,doc_base", [("0.5.0rc22", False), ("0.5.0rc23", True), ("0.5.0rc100", True),
+                                              ("0.5.0", True), ("0.4.9", False), ("0.4.0rc99", False), ("0.6.0rc1", True)])
+def test_doc_base_is_given_only_to_a_wheel_that_has_the_flag(version, doc_base):
+    url = f"{AR}/r/kaos-lib/kaos_lib-{version}-py3-none-any.whl"
+    out = lw(f"kaos-lib @ {url}#sha256={LW_SHA}")
+    assert (out["doc_base"] != "") is doc_base and out["url"] == url
+
+
+@pytest.mark.parametrize("support", [None, {}, {"addresses": {}}, {"addresses": {"docs_base": ""}},
+                                     {"addresses": {"docs_base": "http://insecure.example/d/"}},
+                                     {"addresses": {"docs_base": "https://x/d/ ; rm -rf"}}, {"addresses": "x"}])
+def test_doc_base_needs_an_https_docs_base_in_the_platform_addresses(support):
+    assert lw(LW_SPEC, support=support)["doc_base"] == ""
+
+
+def test_the_lint_wheel_command_reads_the_context_file(tmp_path):
+    p = ctx_file(tmp_path, {"spec": LW_SPEC, "support": DOCS})
+    run = lambda *a: json.loads(subprocess.run([sys.executable, "-I", str(Path(kl.__file__)), "lint-wheel", *a],
+                                               capture_output=True, text=True, check=True).stdout)
+    assert run("--context", str(p))["url"] == LW_URL
+    assert run("--context", str(tmp_path / "missing.yaml")) == {"source": "", "url": "", "sha256": "", "doc_base": ""}
+    assert run("--context", str(p), "--pin-url", PIN[0], "--pin-sha256", PIN[1])["source"] == "spec"
 
 
 # ---------------------------------------------------------------- the step contract (PRD kaos#1911)
@@ -607,9 +690,9 @@ def github(monkeypatch):
     srv.shutdown()
 
 
-def run_bump(fake, version="0.3.0", spec="kaos-lib[zitadel]==0.3.0"):
-    return kl.bump(kl.GitHub("tok", fake.api), fake.slug, "dev", version, spec, "https://changelog", GUIDE,
-                   log=lambda m: None)
+def run_bump(fake, version="0.3.0", spec="kaos-lib[zitadel]==0.3.0", releases_base=RELEASES, guide=GUIDE):
+    return kl.bump(kl.GitHub("tok", fake.api), fake.slug, "dev", version, spec, "https://changelog", guide,
+                   log=lambda m: None, releases_base=releases_base)
 
 
 def test_bump_opens_one_pull_request_with_the_new_range_and_the_release_notes(github):
@@ -670,8 +753,30 @@ def test_a_registry_wheel_takes_its_notes_from_the_release_record(github, monkey
         return json.dumps({"notes": "### Added\n- layouts"})
     monkeypatch.setattr(kl, "fetch", fetch)
     run_bump(github, version="0.4.0", spec=REG)
-    assert seen == [f"{kl.RELEASES_BASE}/stable/v0.4.0/release.json"]
+    assert seen == [f"{RELEASES}/stable/v0.4.0/release.json"]
     assert "### Added\n- layouts" in github.prs[0]["body"] and f"Package: `{REG}`" in github.prs[0]["body"]
+
+
+def test_a_registry_wheel_without_a_releases_base_has_no_record_notes_and_no_link(github, monkeypatch):
+    seen = []
+    monkeypatch.setattr(kl, "fetch", lambda url: seen.append(url) or "")
+    for base in ("", None):
+        github.prs.clear()
+        github.refs.pop("refs/heads/kaos-lib/bump-0.4.0", None)
+        out = run_bump(github, version="0.4.0", spec=REG, releases_base=base, guide="")
+        assert out["action"] == "opened"
+        body = github.prs[-1]["body"]
+        assert seen == [], "nothing is fetched: there is no address to fetch from"
+        assert "http" not in body.replace(f"Package: `{REG}`", "")
+        assert "published no release notes for 0.4.0" in body and "## Release notes" in body
+        assert "see " not in github.files[("kaos-lib/bump-0.4.0", ".kaos/compat.yaml")]
+
+
+def test_the_bump_cli_takes_releases_base_and_guide_url_and_requires_neither():
+    out = subprocess.run([sys.executable, "-I", str(Path(kl.__file__)), "bump", "--help"], capture_output=True, text=True).stdout
+    assert "--releases-base" in out and "--guide-url" in out
+    usage = out.split("\n\n")[0]
+    assert "[--releases-base" in usage.replace("\n", " ") and "[--guide-url" in usage.replace("\n", " ")
 
 
 def test_a_release_wheel_takes_its_notes_from_the_github_release(github):
@@ -700,7 +805,7 @@ def test_a_new_compat_file_of_a_bump_to_0_5_still_points_at_the_support_window(g
     github.files.clear()
     run_bump(github, version="0.5.0", spec="kaos-lib[zitadel]==0.5.0")
     assert "Before you merge" not in github.prs[0]["body"]
-    assert "support-window.html" in github.files[("kaos-lib/bump-0.5.0", ".kaos/compat.yaml")]
+    assert "reference.html#versions-and-upgrades" in github.files[("kaos-lib/bump-0.5.0", ".kaos/compat.yaml")]
 
 
 def test_the_bump_pull_request_names_no_platform_internals(github):
