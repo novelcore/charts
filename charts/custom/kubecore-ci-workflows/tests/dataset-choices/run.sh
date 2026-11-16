@@ -70,8 +70,8 @@ wft "    - {name: dataset, value: dataset-default@latest}
 "
 ctx $PORT; steps dataset
 run >/dev/null
-expect_eq "$(param)" "dataset-default@latest | $ALL" \
-  "default dataset first, versions newest first, then latest; the default stays what the app's config says (latest is resolved when the run starts)"
+expect_eq "$(param)" "dataset-default@latest | " \
+  "the field carries no written list; the default stays what the app's config says (latest is resolved when the run starts)"
 
 expect_eq "$(sha)" "$WANT_SHA" "the render records the digest of the sorted choices"
 expect_eq "$(python3 -I "$WORK/dataset-choices.py" digest "http://127.0.0.1:$PORT/" "$WORK/token")" "$WANT_SHA" \
@@ -92,9 +92,9 @@ wft "    - {name: raw, value: dataset-cars@latest}
 "
 steps "raw" "raw,labels" "extra" ""
 out=$(run)
-expect_eq "$(param raw)" "dataset-cars@latest | $ALL" "input raw: a picker, its default kept"
-expect_eq "$(param labels)" "dataset-cars@latest | $ALL" "input labels: a version the catalog does not offer becomes the latest of the same dataset"
-expect_eq "$(param extra)" "dataset-default@latest | $ALL" "input extra: a dataset the project does not have becomes the latest of the default dataset"
+expect_eq "$(param raw)" "dataset-cars@latest | " "input raw: its default kept, no written list"
+expect_eq "$(param labels)" "dataset-cars@latest | " "input labels: a version the catalog does not offer becomes the latest of the same dataset"
+expect_eq "$(param extra)" "dataset-default@latest | " "input extra: a dataset the project does not have becomes the latest of the default dataset"
 expect_eq "$(param dataset)" "free-text | " "a field named dataset that no step declares as an input is left alone"
 expect_eq "$(param train-epochs)" "3 | " "an ordinary field is left alone"
 expect_eq "$(names)" "raw,labels,extra,dataset,train-epochs,config" "the chart adds no form field and removes none (plan and pipeline-version stay the engine's to reserve)"
@@ -161,12 +161,12 @@ expect_eq "$(param)" "x | " "an empty catalog leaves the field free text"
 expect_eq "$(sha)" "$(python3 -c "import hashlib; print(hashlib.sha256(b'').hexdigest())")" "and records the digest of no choices (a later first dataset is drift)"
 kill $EMPTY 2>/dev/null
 
-# A deleted dataset leaves the enum on the next render: the choices come from the catalog alone.
+# A list written by an older render does not survive the next one.
 ctx $PORT
 wft "    - {name: dataset, value: dataset-cars@v1, enum: [dataset-gone@v1, dataset-cars@v1]}
 "
 run >/dev/null
-expect_eq "$(param | cut -d'|' -f2 | grep -c gone)" "0" "a deleted dataset's entry is gone from the enum on the next render"
+expect_eq "$(grep -c enum "$WORK/wft.yaml")" "0" "a list an older render wrote is removed"
 
 # The step table the picker reads is the one the enhance step wrote (kubecore-ci-workflows.platformEnhance).
 ENHANCE=$(awk '/name: hera-enhance-commit$/{f=1} f' "$WORK/rendered.yaml")
@@ -218,8 +218,8 @@ ctx 18913; steps dataset
 wft "    - {name: dataset, value: dataset-gone@v1}
 "
 run >/dev/null
-expect_eq "$(param)" "dataset-default@latest | $SH_ALL" \
-  "own datasets first (default first), then shared grouped by owner in catalog order; an unoffered default falls back to the own default, never a shared one"
+expect_eq "$(param)" "dataset-default@latest | " \
+  "no written list with shared datasets either; an unoffered default falls back to the own default, never a shared one"
 wft "    - {name: dataset, value: bob/dataset-zeta@v1}
 "
 run >/dev/null
@@ -242,7 +242,7 @@ ctx 18914
 wft "    - {name: dataset, value: dataset-gone@v1}
 "
 run >/dev/null
-expect_eq "$(param)" "dataset-gone@v1 | bob/dataset-zeta@v1,bob/dataset-zeta@latest" "no own dataset: the fallback never picks a shared one; the shared ref is still offered"
+expect_eq "$(param)" "dataset-gone@v1 | " "no own dataset: the fallback never picks a shared one"
 kill $ONLYSH 2>/dev/null
 
 # ── the catalog read retries a transient failure, never a final one ─────────

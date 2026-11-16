@@ -34,7 +34,6 @@ CATALOG = [
     {"name": "dataset-cars", "versions": [{"tag": "v2"}, {"tag": "v1"}]},
     {"name": "dataset-default", "default": True, "versions": [{"tag": "v3"}]},
 ]
-OFFERED = ["dataset-default@v3", "dataset-default@latest", "dataset-cars@v2", "dataset-cars@v1", "dataset-cars@latest"]
 # The form keys the platform reserves for the run itself (PRD kaos#1911, section 8.1).
 RESERVED = {"plan", "pipeline-version"}
 
@@ -63,7 +62,7 @@ def test_the_yolo_fixture_declares_what_it_produces():
 
 
 @pytest.mark.parametrize("name", HERA)
-def test_every_input_is_a_form_field_and_gets_a_picker(name):
+def test_every_input_is_a_form_field_with_a_default_and_no_written_list(name):
     wft = yaml.safe_load(golden_text("hera", name))
     before = copy.deepcopy(_params(wft))
     filled = choices.fill(wft, _inputs_of(name), CATALOG)
@@ -72,7 +71,7 @@ def test_every_input_is_a_form_field_and_gets_a_picker(name):
     assert [p["name"] for p in _params(wft)] == [p["name"] for p in before], "no field added, removed or moved"
     for field in before:
         if field["name"] in filled:
-            assert after[field["name"]]["enum"] == OFFERED
+            assert "enum" not in after[field["name"]], "no list Argo would enforce"
             assert after[field["name"]]["value"] == "dataset-default@latest", "the config's default is kept"
         else:
             assert after[field["name"]] == field, f"{field['name']} is not an input and is left alone"
