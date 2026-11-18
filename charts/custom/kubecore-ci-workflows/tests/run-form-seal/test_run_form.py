@@ -287,8 +287,8 @@ class TestBuild(Base):
         self.assertEqual((m["type"], m["label"], m["tier"]), ("text", "train: runs", "advanced"))
         self.assertEqual((p["type"], p["label"], p["tier"]), ("string", "train: at the same time", "advanced"))
 
-    def test_role_reuse_start_promote_advanced(self):
-        for n in ("reuse-from-run", "start-from-step"):
+    def test_role_reuse_start_target_promote_advanced(self):
+        for n in ("reuse-from-run", "start-from-step", "target-step"):
             f = field(self.form, n)
             self.assertEqual((f["group"], f["tier"], f["type"], f["source"]), ("rerun", "advanced", "string", "run-setting"))
         p = field(self.form, "promote-cleaned")
