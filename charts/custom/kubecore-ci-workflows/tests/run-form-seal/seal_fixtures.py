@@ -98,6 +98,7 @@ PARAMS = [
     ("report-walltime", "4h", None, "walltime", "report"),
     ("reuse-from-run", "", None, "reuse", None),
     ("start-from-step", "", None, "start", None),
+    ("target-step", "", None, "target", None),
     ("promote-cleaned", "false", ["false", "true"], "promote", "prep"),
     ("config", "", None, "advanced", None),
 ]

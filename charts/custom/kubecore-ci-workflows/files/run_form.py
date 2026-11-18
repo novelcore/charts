@@ -92,7 +92,7 @@ BARE_VALUE_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
 
 # ---- roles (engine H2) -> fields -----------------------------------------------------------------------
 ROLES = ("info", "experiment", "setting", "input", "class", "walltime", "checkpoint-every", "matrix", "parallel",
-         "reuse", "start", "promote", "advanced", "platform")
+         "reuse", "start", "target", "promote", "advanced", "platform")
 PER_STEP_ROLES = ("class", "walltime", "checkpoint-every", "matrix", "parallel", "promote")
 RAW_TYPES = ("string", "integer", "number", "boolean", "enum")
 FIXED_GROUPS = (  # id, label, tier
@@ -879,7 +879,7 @@ def build_form(wft, ctx, form_data, steps, form_yaml, raw_parts, roles, step_of,
             f.update(group="steps", source="run-setting", tier="advanced", type="text", step=step_of[n])
         elif role == "parallel":
             f.update(group="steps", source="run-setting", tier="advanced", type="string", step=step_of[n])
-        elif role in ("reuse", "start"):
+        elif role in ("reuse", "start", "target"):
             f.update(group="rerun", source="run-setting", tier="advanced", type="string")
         elif role == "promote":
             f.update(group="promote", source="run-setting", tier="advanced",
