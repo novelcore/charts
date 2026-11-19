@@ -113,7 +113,7 @@ done
 
 AUTH_FNS="${BASE_TMP}/gitauth.sh"
 yq 'select(.metadata.name == "ci-build") | .spec.templates[] | select(.name == "clone") | .container.args[0]' "$RENDERED" \
-  | awk '/^git\(\) \{/ {on=1} on {print} on && /^}/ {n++; if (n == 2) exit}' > "$AUTH_FNS"
+  | awk '/^git_once\(\) \{/ {on=1} on {print} on && /^}/ {n++; if (n == 3) exit}' > "$AUTH_FNS"
 GIT_MINOR=$(git --version | sed -E 's/^git version ([0-9]+)\.([0-9]+).*/\1 \2/')
 if [ "$(echo "$GIT_MINOR" | awk '{print ($1 > 2 || ($1 == 2 && $2 >= 31)) ? "yes" : "no"}')" = "yes" ]; then
   HDR=$(TOKEN="$TOKEN_VALUE" sh -c ". '$AUTH_FNS'; git config --get http.https://github.com/.extraheader")

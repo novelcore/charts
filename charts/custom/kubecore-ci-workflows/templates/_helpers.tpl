@@ -444,12 +444,15 @@ re-authenticates. The header is scoped to https://github.com/ only.
 git_assert_no_token DIR fails the step if DIR/.git/config holds a credential
 of any form — a guard against a future edit reintroducing the URL form.
 
+A networked call (clone, fetch, pull, push, ls-remote) that never reached the
+remote is made again by the same function (see the comment in it).
+
 Caller: TOKEN set (empty = unauthenticated git, as before).
 */}}
 {{- define "kubecore-ci-workflows.gitAuth" -}}
 # git with the GitHub App token as a per-process header (PRD 738 F-20): the
 # token never lands in .git/config. URLs below are plain https://github.com/…
-git() {
+git_once() {
   if [ -n "${TOKEN:-}" ]; then
     env GIT_CONFIG_COUNT=1 \
       GIT_CONFIG_KEY_0="http.https://github.com/.extraheader" \
@@ -458,6 +461,32 @@ git() {
   else
     env git "$@"
   fi
+}
+# A call that never reached the remote (name not resolved, no connection) is made again, up to 6 times
+# over about a minute: the pool's DNS fails for some seconds a few times a day, and a step that gave up
+# on the first try failed the whole build. Any other failure is git's own and is not repeated.
+git() {
+  case "${1:-}" in
+    clone|fetch|pull|push|ls-remote) ;;
+    *) git_once "$@"; return $? ;;
+  esac
+  _gtry=1
+  while :; do
+    _gerr=$(mktemp)
+    _grc=0
+    git_once "$@" 2>"${_gerr}" || _grc=$?
+    cat "${_gerr}" >&2
+    if [ "${_grc}" -eq 0 ] || [ "${_gtry}" -ge 6 ] \
+       || ! grep -qE 'Could not resolve host|Failed to connect to|Connection timed out' "${_gerr}"; then
+      rm -f "${_gerr}"
+      return "${_grc}"
+    fi
+    rm -f "${_gerr}"
+    _gwait=${GIT_RETRY_SLEEP:-$((1 << _gtry))}
+    echo "git ${1}: no connection to the remote (attempt ${_gtry}/6), trying again in ${_gwait}s" >&2
+    sleep "${_gwait}"
+    _gtry=$((_gtry + 1))
+  done
 }
 git_assert_no_token() {
   _gcfg="$1/.git/config"
