@@ -2201,17 +2201,30 @@ spec:
         # was invisible (e2e-suite-ml-xwrpm, 2026-10-08). Still best-effort (set +e): the
         # report must never fail the run it reports on.
         TARGET="${PR:+PR #${PR}}"; TARGET="${TARGET:-commit ${SHA}}"
-        LIST_CODE=$(curl -s -o /tmp/list.json -w '%{http_code}' -H "${AUTH}" -H "${ACCEPT}" "${LIST}")
+        # A call GitHub did not answer (000), a 5xx or a 429 is tried again, up to 5 times (2 s, then 4, 8, 16):
+        # one lost connection used to lose the whole report (e2e run of 2026-11-19: "GitHub answered 000").
+        gh() {
+          out="$1"; shift; try=1
+          while :; do
+            code=$(curl -s -o "${out}" -w '%{http_code}' "$@")
+            case "${code}" in 000|5??|429) ;; *) break ;; esac
+            [ "${try}" -ge 5 ] && break
+            echo "report: GitHub answered ${code} (attempt ${try}/5), retrying in $((1 << try))s" >&2
+            sleep "${REPORT_RETRY_SLEEP:-$((1 << try))}"; try=$((try + 1))
+          done
+          printf '%s' "${code}"
+        }
+        LIST_CODE=$(gh /tmp/list.json -H "${AUTH}" -H "${ACCEPT}" "${LIST}")
         if [ "${LIST_CODE}" != "200" ]; then
           echo "report: listing comments on ${TARGET} answered ${LIST_CODE}: $(jq -r '.message // .' /tmp/list.json 2>/dev/null | head -c 300)"
           echo '[]' > /tmp/list.json
         fi
         CID=$(jq -r --arg m "${MARKER}" '[.[]? | objects | select((.body // "") | startswith($m))] | .[0].id // empty' /tmp/list.json)
         if [ -n "${CID}" ]; then
-          CODE=$(curl -s -o /tmp/post.json -w '%{http_code}' -X PATCH -H "${AUTH}" -H "${ACCEPT}" "${EDIT}/${CID}" -d @/tmp/payload.json)
+          CODE=$(gh /tmp/post.json -X PATCH -H "${AUTH}" -H "${ACCEPT}" "${EDIT}/${CID}" -d @/tmp/payload.json)
           VERB="Updated report comment ${CID} on"
         else
-          CODE=$(curl -s -o /tmp/post.json -w '%{http_code}' -X POST -H "${AUTH}" -H "${ACCEPT}" "${CREATE}" -d @/tmp/payload.json)
+          CODE=$(gh /tmp/post.json -X POST -H "${AUTH}" -H "${ACCEPT}" "${CREATE}" -d @/tmp/payload.json)
           VERB="Posted report comment on"
         fi
         case "${CODE}" in
