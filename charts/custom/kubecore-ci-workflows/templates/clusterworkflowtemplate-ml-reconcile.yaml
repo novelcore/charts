@@ -26,19 +26,11 @@ event was lost. It is deliberately NOT a re-render trigger for platform-context
 changes — those flow operator -> XR -> composition -> ConfigMap, and the WFT
 picks them up on the next build this reconciler submits.
 
-Dataset changes (PRD novelcore/kaos#1283 D-05) are the second input of a render
-besides the commit that the poll can see: the pipeline's dataset pickers (the form
-field of every name a step declares in inputs=) are filled from kaos-lake's catalog
-at render time only. The render records a digest of the choices it offered
-(dataset-sha, in {app}-pipeline-images); DATASET DRIFT compares it with the catalog
-now and re-renders when they differ. The engine is
-the third (PRD-HPC-1461 D-80): ENGINE DRIFT compares the engine the gitops context
+The engine is the second input of a render besides the commit that the poll can see
+(PRD-HPC-1461 D-80): ENGINE DRIFT compares the engine the gitops context
 pins with the one the last render and the compose image were built on
-(engine-version, engine-compose) and re-renders when it moved. kaos-lake
-creates a `ml-ci-dataset-release` Workflow when a version is released, which
-submits this template for each ML app with dataset_event=true: the same check,
-run at once instead of at the next poll, and retried while a build is in flight.
-The fourth is the app's own kaos-lib pin (PRD novelcore/kaos#1911): the forced run fired by a context change
+(engine-version, engine-compose) and re-renders when it moved.
+The third is the app's own kaos-lib pin (PRD novelcore/kaos#1911): the forced run fired by a context change
 rebuilds the stale images at once when the context marks the spec as spec.ml.kaosLib (kaosLib.pinned) and
 gitops' pipeline-images does not record it (KAOS-LIB PIN). A platform-wide move has no mark and stays with
 the poll's KAOS-LIB DRIFT, paced by the app's use.
@@ -139,12 +131,6 @@ spec:
     # re-trigger it. Empty = do not wait.
     - name: context_sha
       value: ""
-    # dataset_event: set by ml-ci-dataset-release (kaos-lake saw a dataset change).
-    # The poll's checks, plus: a build already in flight is waited out (exit 3,
-    # retried) instead of skipping, because the in-flight render may predate the
-    # change, and a pipeline that records no dataset-sha yet counts as drifted.
-    - name: dataset_event
-      value: "false"
     - name: node_class
       value: {{ .Values.ci.defaultNodeClass | default (dig "platform.kubecore.io/nodegroup-type" "kubecorecpu" .Values.nodeSelector) | quote }}
 
@@ -163,7 +149,7 @@ spec:
     # not be dropped wait here; the hourly poll just decides in step 2.
     - - name: await-inputs
         template: check-drift-with-retry
-        when: "{{`{{workflow.parameters.force}}`}} == true || {{`{{workflow.parameters.dataset_event}}`}} == true"
+        when: "{{`{{workflow.parameters.force}}`}} == true"
         arguments:
           parameters:
           - name: mode
@@ -365,7 +351,7 @@ spec:
     # ONE ATTEMPT of the drift check (retried by check-drift-attempts). At most
     # `ci.checkDrift.slots` of these pods run at once in the whole cluster (an Argo
     # semaphore, counted across every project's CI namespace: they all land on the one system
-    # pool). A fan-out (ml-ci-dataset-rerender per app, the hourly polls, a library update)
+    # pool). A fan-out (the hourly polls, a library update)
     # QUEUES here, in Argo, with no pod: nothing for the pending-reaper to kill, nothing for the
     # autoscaler to count, nothing starving the node. The slot is taken per attempt and released
     # when the pod ends, so a "not yet" wait holds none: the template that retries has no
@@ -386,7 +372,7 @@ spec:
       # check, run under the build lock by decide-and-submit.
       - name: mode
         value: decide
-    # Exit 3 is only force/dataset mode's "not yet" for inputs that are NOT builds (repo,
+    # Exit 3 is only force mode's "not yet" for inputs that are NOT builds (repo,
     # pipeline-images or gitops context still arriving); a killed pod is 137 in every mode;
     # every other outcome exits 0 or fails for real. check-drift-attempts retries 3 and 137.
     outputs:
@@ -450,14 +436,11 @@ spec:
         printf '' > /tmp/head_sha
         APP="{{`{{workflow.parameters.app_name}}`}}"
         FORCE="{{`{{workflow.parameters.force}}`}}"
-        DATASET_EVENT="{{`{{workflow.parameters.dataset_event}}`}}"
-        # RETRY: the runs that must not drop their event when the state is "not
-        # yet" — force, and (for a build in flight only) a dataset event.
+        # RETRY: the run that must not drop its event when the state is "not yet" — force.
         RETRY=false
-        [ "$FORCE" = "true" ] || [ "$DATASET_EVENT" = "true" ] && RETRY=true
-        # Which trigger this run is, for the log (a dataset event is not a force).
+        [ "$FORCE" = "true" ] && RETRY=true
+        # Which trigger this run is, for the log.
         TRIGGER=force
-        [ "$DATASET_EVENT" = "true" ] && TRIGGER="dataset event"
         # not_yet MSG: retry later (exit 3) in a RETRY run; otherwise skip this
         # poll as before.
         not_yet() {
@@ -578,45 +561,12 @@ spec:
         [ "$HEAD_HTTP" = "200" ] && HEAD_SHA=$(jq -r '.sha // empty' /tmp/head.json 2>/dev/null || true)
         if [ -z "$HEAD_SHA" ]; then
           # A transient API failure must NOT look like drift and storm builds.
-          # force: at app creation the repo may not exist yet. A dataset event: the data store
-          # announced a change once and no poll is behind it, so a GitHub blip is "not yet" - but
-          # an app of an existing reconciler whose repository or branch is gone (404, 410, 422) or
-          # whose token is refused (401) never will be: a visible failure, not 45 minutes of a slot.
-          # (A 403 is a refusal unless GitHub says it is throttling.)
-          if [ "$DATASET_EVENT" = "true" ] && [ "$FORCE" != "true" ]; then
-            case "$HEAD_HTTP" in
-              401|404|410|422) give_up "GitHub answers ${HEAD_HTTP} for ${SLUG}@${BRANCH}" "restore the repository or branch ${SLUG}@${BRANCH} (or delete the app and its reconciler), or fix the platform's GitHub token" ;;
-              403) grep -qi 'rate limit\|abuse' /tmp/head.json 2>/dev/null || give_up "GitHub answers 403 for ${SLUG}@${BRANCH}" "grant the platform's GitHub App read access to ${SLUG}" ;;
-            esac
-          fi
+          # force: at app creation the repo may not exist yet.
           [ "$RETRY" = "true" ] && not_yet "could not read HEAD for ${SLUG}@${BRANCH} (HTTP ${HEAD_HTTP})"
           echo "reconcile: could not read HEAD for ${SLUG}@${BRANCH} — skipping this poll"
           printf 'false' > /tmp/needs_build
           printf '' > /tmp/head_sha
           exit 0
-        fi
-
-        # SAME COMMIT IN FLIGHT (PRD novelcore/kaos#1911, chart 0.17.3): on every path but the forced
-        # one (it has its own QUEUED check below, which also weighs a kaos-lib pin), a build of this
-        # app for THIS commit that is not finished (Pending, Running, or waiting on the build lock)
-        # is the build this run would submit: it reads the context, engine, catalog and kaos-lib as
-        # they are when it starts. Submitting another one only queues a duplicate on the app's
-        # `{app}-build` mutex (live: ten ml-ci-build-reconciled-* for one commit in 55 minutes, each
-        # re-posting kubecore-ml-ci=pending while the push build waited). A build of another commit
-        # does not count. A drift newer than a build that is already RUNNING is not lost: the hourly
-        # poll (and a dataset event, which waits that build out above) decides again once it ends.
-        if [ "$FORCE" != "true" ]; then
-          SAME=$(echo "$INFLIGHT" | jq -r --arg app "$APP" --arg sha "$HEAD_SHA" '
-            [.items[] | select((.metadata.name|startswith("ml-ci-build"))
-                               and (.status.phase != "Succeeded" and .status.phase != "Failed" and .status.phase != "Error")
-                               and ([.spec.arguments.parameters[]? | select(.name=="app_name") | .value] | index($app))
-                               and ([.spec.arguments.parameters[]? | select(.name=="commit_sha") | .value] | index($sha)))
-                      | .metadata.name] | first // empty')
-          if [ -n "$SAME" ]; then
-            printf 'false' > /tmp/needs_build
-            echo "reconcile: a build of ${HEAD_SHA:0:7} is already queued or running (${SAME}) - submitting nothing"
-            exit 0
-          fi
         fi
 
         # The images ConfigMap lives in the ML namespace (ml-{project}), NOT the
@@ -649,7 +599,6 @@ spec:
                 "https://api.github.com/repos/${GORG}/${GREPO}/contents/${IMAGES_REL}?ref=${GBRANCH}" \
                 | sed -n 's/^  namespace: *"\{0,1\}\([^"]*\)"\{0,1\}$/\1/p' | head -1)
               if [ -z "${GITOPS_NS}" ]; then
-                [ "$DATASET_EVENT" = "true" ] && not_yet "${ML_NS}/${APP}-pipeline-images absent and gitops ${IMAGES_REL} unreadable"
                 echo "reconcile: WARN ${ML_NS}/${APP}-pipeline-images absent and gitops ${IMAGES_REL} unreadable — skipping this poll"
               elif [ "${GITOPS_NS}" != "${ML_NS}" ]; then
                 printf 'true' > /tmp/needs_build
@@ -657,18 +606,12 @@ spec:
                 echo "reconcile: NAMESPACE DRIFT — gitops pins ${APP}-pipeline-images to '${GITOPS_NS}' but the app now runs in '${ML_NS}'; submitting ml-ci-build to relocate it"
                 exit 0
               else
-                # force or a dataset event: a new app's pipeline-images is still syncing.
+                # force: a new app's pipeline-images is still syncing.
                 [ "$RETRY" = "true" ] && not_yet "${ML_NS}/${APP}-pipeline-images absent, gitops already targets '${ML_NS}' (ArgoCD sync pending)"
                 echo "reconcile: ${ML_NS}/${APP}-pipeline-images absent but gitops already targets '${ML_NS}' — waiting for ArgoCD; skipping this poll"
               fi
               ;;
             *)
-              if [ "$DATASET_EVENT" = "true" ]; then
-                if k8s_permanent "${CM}"; then
-                  give_up "cannot read ${ML_NS}/${APP}-pipeline-images: ${CM}" "grant this workflow's service account get on configmaps in ${ML_NS}"
-                fi
-                not_yet "cannot read ${ML_NS}/${APP}-pipeline-images (${CM})"
-              fi
               echo "reconcile: cannot read ${ML_NS}/${APP}-pipeline-images — skipping this poll: ${CM}"
               ;;
           esac
@@ -798,7 +741,7 @@ spec:
           # QUEUED: a build of HEAD is already waiting on the app's build lock
           # (a webhook build created after this run began waiting, or another
           # trigger's build). It starts after this step and renders the context
-          # and datasets as they are THEN, so submitting a second one would only
+          # as they are THEN, so submitting a second one would only
           # queue a duplicate (two syncs fired at once must yield one build).
           # While a pin rebuild is due, only a queued build that rebuilds the pin counts: a push
           # build (it rebuilds a stale step as part of the build) or a reconcile build for this spec.
@@ -1041,14 +984,10 @@ spec:
         # class and the form has no per-step memory field). A mismatch means the WFT predates
         # the current platform data -> rebuild to re-render it. This is
         # self-limiting: once re-rendered the two agree and it goes quiet.
-        # CTX_READ tells "the context was read" (a fact, even when it names no data store) from "the read
-        # failed" (CTX_ERR): DATASET DRIFT below acts differently on the two.
-        CTX=""; CTX_READ=no; CTX_ERR=""
+        CTX=""
         if CTX_OUT=$(kubectl get configmap "${APP}-pipeline-context" -n "${ML_NS}" \
           -o jsonpath='{.data.context\.yaml}' 2>&1); then
-          CTX="$CTX_OUT"; CTX_READ=yes
-        else
-          CTX_ERR="$CTX_OUT"
+          CTX="$CTX_OUT"
         fi
         if [ -n "$CTX" ]; then
           WANT=$(echo "$CTX" | sed -n '/^computeClasses:/,/^[a-z]/p' | sed -n '/^  cpu:/,/^  [a-z]/p' \
@@ -1099,87 +1038,16 @@ spec:
           echo "reconcile: WARN no ${ML_NS}/${APP}-pipeline-context — context-drift check SKIPPED"
         fi
 
-        # DATASET DRIFT (PRD novelcore/kaos#1283 D-05): the dataset pickers are
-        # filled from kaos-lake's catalog at render time, so a version released (or a
-        # dataset deleted) after the last render is missing from (or still in) the
-        # live WFT with no commit and no context change. Compare the digest the
-        # last render recorded (dataset-sha) with the catalog now. Unknown never
-        # means "submit work": in the hourly poll an unreadable catalog, a context
-        # without a lakeFS endpoint, or a pipeline rendered before the record
-        # existed is no drift. In a dataset event an unreadable catalog is "not yet"
-        # (retried), because the event must not be dropped. "none" = no step of the pipeline declares an input.
-{{ include "kubecore-ci-workflows.datasetChoicesScript" . | indent 8 }}
-        DS_LAST=$(echo "$CM" | jq -r '.data["dataset-sha"] // empty')
-        DS_ENDPOINT=$(echo "${CTX:-}" | sed -n '/^lakefs:/,/^[a-z]/p' | sed -n 's/^  endpoint: *"\{0,1\}\([^"]*\)"\{0,1\}$/\1/p' | head -1)
-        if [ "$DS_LAST" = "none" ]; then
-          echo "reconcile: no step of the pipeline declares an input — dataset drift does not apply"
-        elif [ -z "$DS_LAST" ] && [ "$DATASET_EVENT" != "true" ]; then
-          echo "reconcile: no dataset-sha recorded yet (rendered before it existed) — dataset drift unknown this poll"
-        elif [ -z "$DS_ENDPOINT" ]; then
-          if [ "$CTX_READ" = "yes" ]; then
-            # The context was read and names no data store: a fact about the app, not a blip. An event
-            # has nothing to re-render (the render records no-store for such an app).
-            echo "reconcile: ${ML_NS}/${APP}-pipeline-context has no lakeFS endpoint - the app has no data store, dataset drift does not apply"
-          else
-            # The read failed: permanent (forbidden...) is a visible failure in an event, anything else
-            # is "not yet" there, so the event is not dropped on a blip.
-            if [ "$DATASET_EVENT" = "true" ] && k8s_permanent "$CTX_ERR"; then
-              give_up "cannot read ${ML_NS}/${APP}-pipeline-context: ${CTX_ERR}" "grant this workflow's service account get on configmaps in ${ML_NS}"
-            fi
-            [ "$DATASET_EVENT" = "true" ] && not_yet "cannot read ${ML_NS}/${APP}-pipeline-context (${CTX_ERR})"
-            echo "reconcile: WARN cannot read ${ML_NS}/${APP}-pipeline-context — dataset drift unknown this poll"
-          fi
-        elif ! DS_NOW=$(python3 -I /tmp/dataset-choices.py digest "$DS_ENDPOINT" /var/run/secrets/kaos-lake/token 2>/tmp/dataset-err); then
-          # The helper already tried the catalog three times. A dataset event exists because the data
-          # store announced a change and has no next poll to catch it up: "not yet" (exit 3, retried
-          # every minute) so a catalog that is busy now is read a minute later, never an event dropped.
-          # The hourly poll keeps "unknown is no drift".
-          [ "$DATASET_EVENT" = "true" ] && not_yet "dataset catalog not read ($(head -c 300 /tmp/dataset-err))"
-          echo "reconcile: WARN dataset catalog not read ($(head -c 300 /tmp/dataset-err)) — dataset drift unknown this poll"
-        elif [ "$DS_NOW" = "$DS_LAST" ]; then
-          echo "reconcile: datasets in sync (${DS_NOW:0:12})"
-        else
-          # A render that already offers the catalog's datasets may be pushed to
-          # gitops and not synced to the pool yet: the live record is behind, the
-          # work is done. Only a gitops copy that is behind too is drift.
-          DS_IMAGES_REL="$(dirname "{{`{{workflow.parameters.workflow_template_path}}`}}")/pipeline-images.yaml"
-          DS_GITOPS=$(curl -sf -H "Authorization: Bearer ${TOKEN}" -H "Accept: application/vnd.github.raw" \
-            "https://api.github.com/repos/${GORG}/${GREPO}/contents/${DS_IMAGES_REL}?ref=${GBRANCH}" \
-            | sed -n 's/^  dataset-sha: *"\{0,1\}\([^"]*\)"\{0,1\}$/\1/p' | head -1 || true)
-          if [ "$DS_GITOPS" = "$DS_NOW" ]; then
-            echo "reconcile: datasets changed (${DS_LAST:-<unrecorded>} -> ${DS_NOW:0:12}) but gitops already carries a render for them — waiting for ArgoCD"
-          else
-            printf 'true' > /tmp/needs_build
-            DS_SHOWN="${DS_LAST:-<unrecorded>}"
-            echo "reconcile: DATASET DRIFT — the live WFT was rendered with datasets ${DS_SHOWN:0:12} but the catalog is now ${DS_NOW:0:12}; submitting ml-ci-build to re-render"
-            exit 0
-          fi
-        fi
-
         printf 'false' > /tmp/needs_build
         echo "reconcile: up to date — commit built and the WFT matches the platform context"
       volumeMounts:
       - name: github-token
         mountPath: /etc/github-token
         readOnly: true
-      - name: kaos-lake-token
-        mountPath: /var/run/secrets/kaos-lake
-        readOnly: true
-    # This pod's own service-account token for kaos-lake's dataset catalog
-    # (DATASET DRIFT): audience-bound, short-lived, read-only use — the same
-    # projection as ml-ci-build's hera-enhance-commit.
-    volumes:
-    - name: kaos-lake-token
-      projected:
-        sources:
-        - serviceAccountToken:
-            audience: {{ .Values.kaosLake.workloadAudience | quote }}
-            expirationSeconds: 600
-            path: token
 
   - name: submit-build
-    # A Kubernetes API blip on the create must not drop the build a trigger (a dataset event
-    # among them) decided on and has no poll behind it: retry the create, bounded.
+    # A Kubernetes API blip on the create must not drop the build a trigger decided on
+    # and has no poll behind it: retry the create, bounded.
     retryStrategy:
       limit: 3
       retryPolicy: Always

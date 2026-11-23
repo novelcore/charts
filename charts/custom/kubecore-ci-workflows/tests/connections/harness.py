@@ -1,5 +1,5 @@
 """Golden harness for the connection envFrom renderer (kaos PRD 1034, CON-02) and for what the chart
-reads of a rendered pipeline (PRD novelcore/kaos#1911: the step table, the dataset pickers).
+reads of a rendered pipeline (PRD novelcore/kaos#1911: the step table).
 
 The fixtures are two chart-owned apps on the step contract (fixtures/apps/hera, fixtures/apps/yolo), each
 rendered ONCE by the platform pipeline engine into fixtures/hera-raw/ (`write-raw`), and enhanced by the

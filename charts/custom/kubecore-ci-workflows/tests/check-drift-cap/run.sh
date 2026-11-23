@@ -5,7 +5,7 @@
 #   bash charts/custom/kubecore-ci-workflows/tests/check-drift-cap/run.sh
 #
 # Why: ~20 check-drift pods of ml-ci-reconcile ran at once on the e2-standard-2 system nodes
-# (a fan-out of ml-ci-dataset-rerender, one per app, plus the hourly polls). Each requested
+# (the hourly polls of every app at once). Each requested
 # 208Mi and used 375-590Mi (it downloaded and parsed every finished workflow of the namespace),
 # so the node starved. Two guards:
 #   1. an Argo semaphore bounds how many check-drift pods run at once, cluster-wide; the rest
@@ -121,7 +121,7 @@ expect_eq "$(printf '%s' "$RES" | yq '.requests.cpu')" "300m" "check-drift reque
 # 2026-11-15, 20 such pods in ten minutes kept one node's disk 96 % busy and a 10 s check took
 # two minutes to start. The workflows that run there patch that one volume to memory.
 PATCH='{"volumes":[{"name":"var-run-argo","emptyDir":{"medium":"Memory","sizeLimit":"512Mi"}}]}'
-for TPL in ml-ci-reconcile ci-reconcile ml-ci-dataset-release kaos-lib-bump-pr ml-autoscaler-healer pending-reaper; do
+for TPL in ml-ci-reconcile ci-reconcile kaos-lib-bump-pr ml-autoscaler-healer pending-reaper; do
   expect_eq "$(yq "select(.metadata.name==\"$TPL\" and (.kind==\"ClusterWorkflowTemplate\" or .kind==\"WorkflowTemplate\")) | .spec.podSpecPatch" "$R" | yq -o=json -I0 '.')" "$PATCH" "$TPL (system pool) keeps the executor copy in memory"
   expect_eq "$(yq "select(.metadata.name==\"$TPL\" and (.kind==\"ClusterWorkflowTemplate\" or .kind==\"WorkflowTemplate\")) | .spec.templates[] | select(.podSpecPatch != null) | .name" "$R")" "" "$TPL has no template-level patch that would compete with it"
 done
@@ -138,7 +138,7 @@ SRC="$T/check-drift.src"
 yq "$WF | select(.name==\"check-drift\") | .container.args[0]" "$R" > "$SRC"
 subst() { # script, sandbox dir -> sandbox script
   sed -e "s#{{workflow.namespace}}#ci#g" -e "s#{{inputs.parameters.mode}}#decide#g" \
-      -e "s#{{workflow.parameters.force}}#false#g" -e "s#{{workflow.parameters.dataset_event}}#false#g" \
+      -e "s#{{workflow.parameters.force}}#false#g" \
       -e "s#{{workflow.parameters.app_name}}#app1#g" -e "s#{{workflow.parameters.project_name}}#proj#g" \
       -e "s#{{workflow.parameters.branch}}#dev#g" -e "s#{{workflow.parameters.ci_namespace}}#ci#g" \
       -e "s#{{workflow.parameters.ml_namespace}}#ml-proj#g" -e "s#{{workflow.parameters.repo_url}}##g" \

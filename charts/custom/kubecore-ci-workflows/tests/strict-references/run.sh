@@ -11,9 +11,7 @@
 # on any chart-rendered object that would break it:
 #   1. every CronWorkflow.spec.workflowSpec;
 #   2. every `kind: Workflow` manifest embedded in a resource step;
-#   3. the Workflow the dataset-release fan-out builds with jq (the jq program
-#      is EXECUTED on fixture CronWorkflows), including OQ-5: two fan-outs for
-#      one app submit Workflows that serialise on ml-ci-reconcile's
+#   3. OQ-5: two runs of ml-ci-reconcile for one app serialise on its
 #      `{app}-build` mutex;
 #   4. the reconcile templates own their ServiceAccount and a FIXED token Secret (C2a),
 #      the autoscaler healer owns its ServiceAccount (C2b);
@@ -78,7 +76,7 @@ CHECKED=$(sed -n 's/^INFO: \([0-9]*\) objects.*/\1/p' "${BASE_TMP}/walk.out")
 [ "${CHECKED:-0}" -ge 3 ] && ok "the walk found the CronWorkflow and the embedded Workflows (${CHECKED})" \
   || fail "the walk found fewer than 3 objects (${CHECKED:-0}): the test would pass vacuously"
 
-# ── 3: dataset-release fan-out (jq executed) ─────────────────────────────────
+# ── 3: OQ-5, two runs of ml-ci-reconcile for one app (the hourly poll and a forced run) ──
 tmpl() { python3 -I - "$RENDERED" "$1" <<'PY'
 import sys, yaml
 for d in yaml.safe_load_all(open(sys.argv[1])):
@@ -86,63 +84,13 @@ for d in yaml.safe_load_all(open(sys.argv[1])):
         yaml.safe_dump(d, sys.stdout); break
 PY
 }
-tmpl ml-ci-dataset-release > "${BASE_TMP}/dr.yaml"
 tmpl ml-ci-reconcile > "${BASE_TMP}/mlr.yaml"
-python3 -I - "${BASE_TMP}/dr.yaml" "${BASE_TMP}" <<'PY'
-import re, sys, yaml
-d = yaml.safe_load(open(sys.argv[1]))
-src = d["spec"]["templates"][0]["container"]["args"][0]
-m = re.search(r"jq -c --arg app \"\$APP\" '(.*?)' \\\n", src, re.S)
-open(sys.argv[2] + "/fanout.jq", "w").write(m.group(1))
-open(sys.argv[2] + "/fanout.src", "w").write(src)
-PY
-[ -s "${BASE_TMP}/fanout.jq" ] && ok "extracted the fan-out jq program" || fail "could not extract the fan-out jq program"
-
-# Fixture: one app's CronWorkflow as the k8smlapp composition renders it today,
-# WITH the fields Strict refuses (a pre-F-26 operator), to prove the fan-out
-# strips them; and as the F-26 operator renders it.
-cron() { cat <<JSON
-{"items":[{"metadata":{"name":"$1-ci-reconciler","labels":{"platform.kubecore.io/app":"$1"}},
- "spec":{"workflowSpec":{"workflowTemplateRef":{"name":"ml-ci-reconcile","clusterScope":true}$2,
-  "arguments":{"parameters":[{"name":"app_name","value":"$1"},{"name":"project_name","value":"p"}]}}}}]}
-JSON
-}
-OLD=',"serviceAccountName":"operate-workflow-sa","volumes":[{"name":"github-token","secret":{"secretName":"tok"}}],"synchronization":{"mutexes":[{"name":"x"}]}'
-ALLOWED=(arguments entrypoint shutdown suspend activeDeadlineSeconds priority ttlStrategy podGC volumeClaimGC archiveLogs workflowMetadata workflowTemplateRef metrics artifactGC)
-allow_json=$(printf '%s\n' "${ALLOWED[@]}" | jq -R . | jq -s .)
-
-for variant in old new; do
-  if [ "$variant" = old ]; then X="$OLD"; else X=""; fi
-  cron myapp "$X" | jq -c --arg app myapp -f "${BASE_TMP}/fanout.jq" > "${BASE_TMP}/wf-$variant.json" 2>"${BASE_TMP}/jq.err" \
-    || { fail "fan-out jq ($variant cron) errored" "$(cat "${BASE_TMP}/jq.err")"; continue; }
-  bad=$(jq -r --argjson a "$allow_json" '.spec | keys - $a | join(",")' "${BASE_TMP}/wf-$variant.json")
-  expect_eq "$bad" "" "fan-out Workflow ($variant cron): no field outside the Strict allowlist"
-  expect_eq "$(jq -r '.spec.workflowTemplateRef.name' "${BASE_TMP}/wf-$variant.json")" "ml-ci-reconcile" \
-    "fan-out Workflow ($variant cron): references ml-ci-reconcile"
-  expect_eq "$(jq -r '.spec.workflowTemplateRef.clusterScope' "${BASE_TMP}/wf-$variant.json")" "true" \
-    "fan-out Workflow ($variant cron): keeps clusterScope"
-  expect_eq "$(jq -r '[.spec.arguments.parameters[] | select(.name=="dataset_event")] | map(.value) | join(",")' "${BASE_TMP}/wf-$variant.json")" "true" \
-    "fan-out Workflow ($variant cron): dataset_event=true exactly once"
-  expect_eq "$(jq -r '.spec.arguments.parameters[] | select(.name=="app_name") | .value' "${BASE_TMP}/wf-$variant.json")" "myapp" \
-    "fan-out Workflow ($variant cron): the cron's own arguments are kept"
-  expect_eq "$(jq -r '.spec.ttlStrategy.secondsAfterCompletion' "${BASE_TMP}/wf-$variant.json")" "3600" \
-    "fan-out Workflow ($variant cron): ttlStrategy kept"
-done
-
-SRC_NOCOMMENT=$(grep -v '^[[:space:]]*#' "${BASE_TMP}/fanout.src")
-for w in synchronization serviceAccountName volumes; do
-  case "$(cat "${BASE_TMP}/fanout.jq")" in *"$w"*) fail "fan-out jq body mentions $w";; *) ok "fan-out jq body has no $w";; esac
-done
-: "$SRC_NOCOMMENT"
-
-# OQ-5: two concurrent fan-outs for the SAME app. Both submit a Workflow of
-# ml-ci-reconcile with the same app_name argument; ml-ci-reconcile's
+# Both submit a Workflow of ml-ci-reconcile with the same app_name argument; its
 # decide-and-submit step holds the `{app}-build` mutex (the same one ml-ci-build
-# holds), so Argo serialises them in queue order. dataset-release's own
-# per-app mutex is gone.
-python3 -I - "${BASE_TMP}/mlr.yaml" "${BASE_TMP}/wf-new.json" <<'PY' > "${BASE_TMP}/oq5.out"
-import json, sys, yaml
-t = yaml.safe_load(open(sys.argv[1])); wf = json.load(open(sys.argv[2]))
+# holds), so Argo serialises them in queue order.
+python3 -I - "${BASE_TMP}/mlr.yaml" <<'PY' > "${BASE_TMP}/oq5.out"
+import sys, yaml
+t = yaml.safe_load(open(sys.argv[1]))
 steps = {s["name"]: s for s in t["spec"]["templates"]}
 def mutex(tp):
     return [m["name"] for m in (tp.get("synchronization") or {}).get("mutexes", [])]
@@ -151,23 +99,11 @@ reach = {s["template"] for grp in steps[entry]["steps"] for s in grp}
 print("reaches-decide" if "decide-and-submit" in reach else "NO-decide")
 print("mutex=" + ",".join(mutex(steps["decide-and-submit"])))
 print("wf-level-mutex=" + ",".join(mutex(t["spec"])))
-app = [p["value"] for p in wf["spec"]["arguments"]["parameters"] if p["name"] == "app_name"][0]
-print("app=" + app)
 PY
 expect_eq "$(sed -n 1p "${BASE_TMP}/oq5.out")" "reaches-decide" "OQ-5: ml-ci-reconcile's entrypoint runs decide-and-submit"
 expect_eq "$(sed -n 2p "${BASE_TMP}/oq5.out")" 'mutex={{workflow.parameters.app_name}}-build' \
   "OQ-5: decide-and-submit holds {app}-build"
-# Two fan-outs, one app: identical template + identical app_name => identical mutex key.
-cron myapp "" | jq -c --arg app myapp -f "${BASE_TMP}/fanout.jq" > "${BASE_TMP}/wfA.json"
-cron myapp "" | jq -c --arg app myapp -f "${BASE_TMP}/fanout.jq" > "${BASE_TMP}/wfB.json"
-ka=$(jq -r '.spec.workflowTemplateRef.name + "/" + (.spec.arguments.parameters[] | select(.name=="app_name") | .value)' "${BASE_TMP}/wfA.json")
-kb=$(jq -r '.spec.workflowTemplateRef.name + "/" + (.spec.arguments.parameters[] | select(.name=="app_name") | .value)' "${BASE_TMP}/wfB.json")
-expect_eq "$ka" "$kb" "OQ-5: two fan-outs for one app submit the same template with the same app_name (one mutex key)"
-expect_eq "$ka" "ml-ci-reconcile/myapp" "OQ-5: that key resolves to myapp-build via ml-ci-reconcile"
 expect_eq "$(sed -n 3p "${BASE_TMP}/oq5.out")" "wf-level-mutex=" "OQ-5: no workflow-level mutex that would hide the per-step one"
-# dataset-release keeps ONE own mutex, on the fan-out Workflow itself (inside the template: allowed).
-expect_eq "$(python3 -I -c "import yaml,sys;d=yaml.safe_load(open(sys.argv[1]));print([m['name'] for m in d['spec']['synchronization']['mutexes']])" "${BASE_TMP}/dr.yaml")" \
-  "['dataset-release']" "dataset-release template keeps its own single fan-out mutex"
 
 # ── C1: the pending-reaper is a namespaced WorkflowTemplate ──────────────────
 python3 -I - "$RENDERED" <<'PY' > "${BASE_TMP}/reaper.out"
