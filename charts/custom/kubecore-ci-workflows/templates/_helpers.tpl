@@ -224,7 +224,7 @@ RUNFORMPYEOF
 {{- end }}
 
 {{/*
-Run-form seal (PRD novelcore/kaos#1533, F-21/F-22): after the enhance and the dataset fill, the trusted seal
+Run-form seal (PRD novelcore/kaos#1533, F-21/F-22): after the enhance, the trusted seal
 (`files/run_form.py`) builds the run form from data the trusted enhance wrote (/tmp/form-data.json), the step table
 (/tmp/steps.json), the context and config/_form.yaml, stamps it (engine version, source commit, params digest) and writes
 it to the WorkflowTemplate's annotations, in place. It is the only writer of `ui.kubecore.io/run-form`. Used by
@@ -343,7 +343,7 @@ account (ctx.serviceAccountName, else the WFT's) gets a projected, audience-boun
 token mounted read-only at /var/run/secrets/kaos-lake and KAOS_LAKE_TOKEN_FILE
 pointing at it. Returns how many templates it changed; with no audience it changes
 nothing, so existing renders stay byte-identical. The volume name and mount path
-are the ones the enhance step itself uses for the dataset catalog. Shared by
+are the ones the steps' own token uses. Shared by
 the enhance steps (platformEnhance), which cannot import it.
 */}}
 {{- define "kubecore-ci-workflows.stepToken" -}}
@@ -918,19 +918,6 @@ KAOSLIBEOF
 {{- end }}
 
 {{/*
-The dataset pickers' choices, their digest and the fill of every input's form field (PRD
-novelcore/kaos#1283 D-05, PRD novelcore/kaos#1911 D-15), shared by the
-render (hera-enhance-commit) and the drift check (ml-ci-reconcile): one definition, so the digest
-a render records is the digest the check compares. Tested in tests/dataset-choices.
-Caller: python3 (tooling.toolboxImage / tooling.kubectlImage).
-*/}}
-{{- define "kubecore-ci-workflows.datasetChoicesScript" -}}
-cat > /tmp/dataset-choices.py <<'DATASETCHOICESEOF'
-{{ .Files.Get "files/dataset-choices.py" }}
-DATASETCHOICESEOF
-{{- end }}
-
-{{/*
 Pipeline lint (PRD novelcore/kaos#1682 F-02, PRD novelcore/kaos#2017 F-55): the kaos-lib wheel the PR gate runs.
 The wheel is the platform's own: `prepare` takes it from the app's pipeline-context (kaosLib.spec, a
 registry wheel with its #sha256=), else from the chart's optional pin (pipelineLint.kaosLibWheelUrl,
@@ -1000,7 +987,7 @@ post_status() {
 
 {{/*
 Workflow-level podSpecPatch of the workflows that run on the SYSTEM pool (the periodic
-polls, the dataset checks, the fan-out, the reaper, the healer): Argo's executor is kept in
+polls, the checks, the reaper, the healer): Argo's executor is kept in
 memory, not on the node's boot disk.
 
 Every Argo pod starts with an init container that copies the `argoexec` binary (153 MiB at

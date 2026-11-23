@@ -2,10 +2,9 @@
 
 The goldens are real engine output (harness.ENGINE_REF), so these tests hold the chart's two readers to it:
 `files/engine.py steps` (the step table on the compose step; a render without one is not from an engine on
-the step contract) and `files/dataset-choices.py` (a picker on the form field of every declared input, and
-no field added or removed).
+the step contract) and the form the engine renders (every declared input is a field of its own name, and the
+platform's reserved keys are not among the fields).
 """
-import copy
 import importlib.util
 import os
 import re
@@ -25,15 +24,10 @@ def _load(name, filename):
 
 
 engine = _load("ci_engine", "engine.py")
-choices = _load("ci_dataset_choices", "dataset-choices.py")
 
 HERA = sorted(FIXTURES)
 # fixture app -> the names its steps declare in inputs= (fixtures/apps/<app>/pipeline.py)
 INPUTS = {"hera-raw/hera-app.yaml": ["dataset"], "hera-raw/yolo-app.yaml": ["calibration", "dataset"]}
-CATALOG = [
-    {"name": "dataset-cars", "versions": [{"tag": "v2"}, {"tag": "v1"}]},
-    {"name": "dataset-default", "default": True, "versions": [{"tag": "v3"}]},
-]
 # The form keys the platform reserves for the run itself (PRD kaos#1911, section 8.1).
 RESERVED = {"plan", "pipeline-version"}
 
@@ -49,7 +43,7 @@ def _params(wft):
 @pytest.mark.parametrize("name", HERA)
 def test_the_step_table_of_an_enhanced_pipeline_is_readable(name):
     table = engine.step_table(golden_path("hera", name))
-    assert choices.input_names(table) == _inputs_of(name)
+    assert sorted({n for step in table for n in step["inputs"]}) == _inputs_of(name)
     for step in table:
         assert set(step) >= {"name", "kind", "reads", "inputs", "needs", "produces"}
 
@@ -62,27 +56,13 @@ def test_the_yolo_fixture_declares_what_it_produces():
 
 
 @pytest.mark.parametrize("name", HERA)
-def test_every_input_is_a_form_field_with_a_default_and_no_written_list(name):
+def test_every_input_is_a_form_field_of_its_own_name_with_no_written_list(name):
     wft = yaml.safe_load(golden_text("hera", name))
-    before = copy.deepcopy(_params(wft))
-    filled = choices.fill(wft, _inputs_of(name), CATALOG)
-    assert sorted(filled) == _inputs_of(name)
-    after = {p["name"]: p for p in _params(wft)}
-    assert [p["name"] for p in _params(wft)] == [p["name"] for p in before], "no field added, removed or moved"
-    for field in before:
-        if field["name"] in filled:
-            assert "enum" not in after[field["name"]], "no list Argo would enforce"
-            assert after[field["name"]]["value"] == "dataset-default@latest", "the config's default is kept"
-        else:
-            assert after[field["name"]] == field, f"{field['name']} is not an input and is left alone"
-
-
-@pytest.mark.parametrize("name", HERA)
-def test_the_form_has_no_reserved_key_before_or_after_the_chart(name):
-    wft = yaml.safe_load(golden_text("hera", name))
-    assert not RESERVED & {p["name"] for p in _params(wft)}
-    choices.fill(wft, _inputs_of(name), CATALOG)
-    assert not RESERVED & {p["name"] for p in _params(wft)}
+    fields = {p["name"]: p for p in _params(wft)}
+    for field in _inputs_of(name):
+        assert field in fields, f"the engine gives the input {field} a form field of its own name"
+        assert "enum" not in fields[field], "no list Argo would enforce"
+    assert not RESERVED & set(fields), "the form has no key the platform reserves for the run"
 
 
 @pytest.mark.parametrize("name", HERA)

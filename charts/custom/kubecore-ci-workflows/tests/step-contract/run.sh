@@ -28,7 +28,7 @@
 #   OLD_APPS="<dir> <dir>"   checkouts of apps still on the old contract, e.g. a template  (optional)
 #   ENGINE_WHEEL=<the kaos_pipeline_engine wheel file of ENGINE_PYTHON's engine>         (optional): the
 #     whole render path of an app on the contract: hera-render, then hera-enhance-commit's enhance (the
-#     wheel served from localhost and verified), the step table, the pickers from a fake catalog, the gate
+#     wheel served from localhost and verified), the step table, the gate
 #
 # Needs yq v4, jq, python3 + PyYAML. Exit status is the number of failed assertions.
 set -u
@@ -214,13 +214,8 @@ else
     PORT=18931
     mkdir -p "$T/www"; cp "$ENGINE_WHEEL" "$T/www/engine.whl"
     cat > "$T/server.py" <<'PY'
-import http.server, json, sys
-CATALOG = {"datasets": [{"name": "dataset-cars", "versions": [{"tag": "v2"}]}, {"name": "dataset-default", "default": True, "versions": []}]}
+import http.server, sys
 class H(http.server.SimpleHTTPRequestHandler):
-    def do_GET(self):
-        if self.path == "/kaos/v1/catalog":
-            self.send_response(200); self.end_headers(); self.wfile.write(json.dumps(CATALOG).encode()); return
-        super().do_GET()
     def log_message(self, *a): pass
 http.server.ThreadingHTTPServer(("127.0.0.1", int(sys.argv[1])), lambda *a: H(*a, directory=sys.argv[2])).serve_forever()
 PY
@@ -232,23 +227,20 @@ ctx = yaml.safe_load(open(sys.argv[1]))
 ctx["lakefs"]["endpoint"] = f"http://127.0.0.1:{sys.argv[3]}"
 yaml.safe_dump(ctx, open(sys.argv[2], "w"), sort_keys=False)
 PY
-    printf 'pod-token' > "$T/token"
     { echo 'set -e'
       script ml-ci-build hera-enhance-commit | awk "/cat > \/tmp\/engine.py <</ {on=1} on {print} on && /^GATEEOF/ {exit}"
-    } | sed -e "s#/tmp/#$T/#g" -e "s#/workspace#$T/workspace#g" -e "s#/var/run/secrets/kaos-lake/token#$T/token#g" > "$T/enhance.sh"
+    } | sed -e "s#/tmp/#$T/#g" -e "s#/workspace#$T/workspace#g" > "$T/enhance.sh"
     ENGINE_JSON=$(jq -nc --arg w "http://127.0.0.1:${PORT}/engine.whl" --arg s "$(sha256sum "$ENGINE_WHEEL" | cut -d' ' -f1)" \
       '{version: "v0.5.0", image: "reg.example/kaos-pipeline-engine:v0.5.0", wheel: $w, wheel_sha256: $s, profile: "yolo"}')
     OUT=$(cd "$T" && env -u PYTHONPATH ENGINE_JSON="$ENGINE_JSON" sh "$T/enhance.sh" 2>&1); RC=$?
     kill "$SERVER" 2>/dev/null
-    expect_eq "$RC" "0" "real engine, the whole render path: render, enhance with the verified wheel, step table, pickers, gate"
+    expect_eq "$RC" "0" "real engine, the whole render path: render, enhance with the verified wheel, step table, gate"
     [ "$RC" = 0 ] || printf '%s\n' "$OUT" | tail -15
     expect_eq "$(jq -r '[.[] | .inputs[]] | unique | join(",")' "$T/steps.json" 2>/dev/null)" "calibration,dataset" "real engine: the step table names the inputs of the pipeline"
     WFT="$T/workspace/out/workflow-template.yaml"
     for FIELD in calibration dataset; do
-      expect_eq "$(yq ".spec.arguments.parameters[] | select(.name == \"$FIELD\") | .value + \" | \" + (.enum | join(\",\"))" "$WFT")" \
-        "dataset-default@latest | dataset-default@latest,dataset-cars@v2,dataset-cars@latest" "real engine: the field of input ${FIELD} is a picker with the catalog's choices, its default kept"
+      expect_eq "$(yq ".spec.arguments.parameters[] | select(.name == \"$FIELD\") | (.enum // [] | length)" "$WFT")" "0" "real engine: the field of input ${FIELD} carries no written list of choices"
     done
-    expect_eq "$(yq '[.spec.arguments.parameters[] | select(.enum and (.enum | contains(["dataset-cars@latest"]))) | .name] | join(",")' "$WFT")" "dataset,calibration" "real engine: no other field got the catalog's choices"
     expect_eq "$(yq '[.spec.arguments.parameters[].name | select(. == "plan" or . == "pipeline-version")] | length' "$WFT")" "0" "real engine: the form has no reserved key"
     expect_eq "$(yq '.metadata.annotations."platform.kubecore.io/engine-version"' "$WFT")" "v0.5.0" "real engine: the WorkflowTemplate is stamped with the engine"
     expect_has "$OUT" "GATE OK" "real engine: the gate passes"

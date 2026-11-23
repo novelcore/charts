@@ -51,8 +51,8 @@ ordered() { # file, then anchors in the expected order
   echo "$ok"
 }
 
-expect_eq "$(ordered "$COMMIT" 'python3 -m kubecore.enhance' "<<'DSEOF'" 'run_form.py seal' "<<'GATEEOF'" "<<'WFTSIZEEOF'" 'cp /workspace/out/workflow-template.yaml "$WFT_FILE"')" "yes" \
-  "merge build: enhance, dataset fill, seal, GATE, size guard, copy to gitops"
+expect_eq "$(ordered "$COMMIT" 'python3 -m kubecore.enhance' 'run_form.py seal' "<<'GATEEOF'" "<<'WFTSIZEEOF'" 'cp /workspace/out/workflow-template.yaml "$WFT_FILE"')" "yes" \
+  "merge build: enhance, seal, GATE, size guard, copy to gitops"
 expect_eq "$(ordered "$GATE" 'python3 -m kubecore.enhance' 'run_form.py seal' "<<'GATEEOF'")" "yes" \
   "PR render: enhance, seal, GATE"
 

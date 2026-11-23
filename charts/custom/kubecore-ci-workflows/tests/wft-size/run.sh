@@ -86,9 +86,9 @@ yaml.safe_dump({"metadata": {"name": "app1-pipeline", "namespace": "proj-train"}
                     "valueFrom": {"configMapKeyRef": {"name": "app1-pipeline-images", "key": "step-a"}}}]}}},
                open(sys.argv[1], "w"))
 PYEOF
-python3 "$WRITER" "$T/wft.yaml" "$T/images.yaml" app1 "" "" "" 251260 >/dev/null 2>&1
+python3 "$WRITER" "$T/wft.yaml" "$T/images.yaml" app1 "" "" 251260 >/dev/null 2>&1
 expect_eq "$(yq '.data["wft-bytes"]' "$T/images.yaml")" "251260" "a render records the size as wft-bytes"
-python3 "$WRITER" "$T/wft.yaml" "$T/images.yaml" app1 "" "" "" "" >/dev/null 2>&1
+python3 "$WRITER" "$T/wft.yaml" "$T/images.yaml" app1 "" "" "" >/dev/null 2>&1
 expect_eq "$(yq '.data["wft-bytes"]' "$T/images.yaml")" "251260" "wft-bytes is not pruned as a stale step key"
 # The same with the record read from template inputs (the engine after the images moved): no image is an argument.
 python3 - "$T/wft-inputs.yaml" <<'PYEOF'
@@ -99,7 +99,7 @@ yaml.safe_dump({"metadata": {"name": "app1-pipeline", "namespace": "proj-train"}
                      "valueFrom": {"configMapKeyRef": {"name": "app1-pipeline-images", "key": "step-a"}}}]}}]}},
                open(sys.argv[1], "w"))
 PYEOF
-python3 "$WRITER" "$T/wft-inputs.yaml" "$T/images.yaml" app1 "" "" "" 251261 >/dev/null 2>&1
+python3 "$WRITER" "$T/wft-inputs.yaml" "$T/images.yaml" app1 "" "" 251261 >/dev/null 2>&1
 expect_eq "$(yq '.data["wft-bytes"]' "$T/images.yaml")" "251261" "template inputs: a render records the size as wft-bytes"
 expect_eq "$(yq '.data["step-a"]' "$T/images.yaml")" "reg/app:step-a-1" "template inputs: the step's image is kept, not pruned"
 PATCH=$(yq 'select(.kind == "ClusterWorkflowTemplate" and .metadata.name == "ml-ci-build")

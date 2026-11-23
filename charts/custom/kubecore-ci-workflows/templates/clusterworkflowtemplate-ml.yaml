@@ -159,7 +159,7 @@ spec:
     # kaos-lib rebuild on a reconcile-submitted build: "true" only from the
     # reconciler's KAOS-LIB DRIFT submission. A push always rebuilds stale
     # kaos-lib images (the app is being used); any other reconcile build
-    # (re-render, dataset, context) leaves them stale. See detect-steps.
+    # (re-render, context) leaves them stale. See detect-steps.
     - name: kaos_lib_rebuild
       value: "false"
     - name: node_class
@@ -668,7 +668,7 @@ spec:
           exit 1
         fi
         # STALE, REBUILT ON USE: a reconcile-submitted build that is not the
-        # KAOS-LIB DRIFT build (a re-render, a dataset or context event) must not
+        # KAOS-LIB DRIFT build (a re-render or a context event) must not
         # rebuild every managed step because the pin moved. It keeps the recorded
         # spec for anything it does build, so the record stays true. A push, or the
         # reconciler's kaos-lib build, rebuilds as before. NOT across kaos-lib 0.5:
@@ -1393,64 +1393,7 @@ spec:
         # kubecore-ci-workflows.platformEnhance (kubecore-operator#1161, #1375, D-80).
 {{ include "kubecore-ci-workflows.platformEnhance" . | indent 8 }}
 
-        # DATASETS (PRD novelcore/kaos#1283 D-05, PRD novelcore/kaos#1911 D-15): every name a step
-        # declares in inputs= is a form field that holds a dataset reference (the step table,
-        # /tmp/steps.json). Each one gets the project's datasets as a picker: <dataset>@<version> newest
-        # first and <dataset>@latest, the default dataset first. The default stays what the app's config
-        # says. This trusted step reads kaos-lake's read-only catalog with its own projected
-        # service-account token (names and versions, never data); the untrusted render above never
-        # sees a credential. A catalog that cannot be read leaves the fields free text, never a red
-        # build. No field is added: the form's fields are the engine's (it reserves `plan` and
-        # `pipeline-version`).
-{{ include "kubecore-ci-workflows.datasetChoicesScript" . | indent 8 }}
-        # dataset-sha: what ml-ci-reconcile's DATASET DRIFT compares with the catalog later. "none" =
-        # no step of this pipeline declares an input; "unread" = the catalog could not be read, the
-        # fields are free text, and the next successful check re-renders; "no-store" = the context names
-        # no data store, nothing to read.
-        rm -f /tmp/dataset-sha
-        python3 - /workspace/out/workflow-template.yaml /tmp/context.yaml /var/run/secrets/kaos-lake/token /tmp/dataset-sha /tmp/steps.json <<'DSEOF'
-        import importlib.util, json, sys
-        import yaml
-        spec = importlib.util.spec_from_file_location("dataset_choices", "/tmp/dataset-choices.py")
-        dc = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(dc)
-        wft_path, ctx_path, token_path, sha_path, steps_path = sys.argv[1:6]
-        wft = yaml.safe_load(open(wft_path))
-        names = dc.input_names(json.load(open(steps_path)))
-        if not names:
-            open(sha_path, "w").write("none")
-            print("datasets: no step of the pipeline declares an input")
-            sys.exit(0)
-        endpoint = (((yaml.safe_load(open(ctx_path)) or {}).get("lakefs") or {}).get("endpoint") or "").rstrip("/")
-        if not endpoint:
-            # An app whose context names no data store has no catalog to read: not "unread" (which
-            # ml-ci-reconcile re-renders for on every event), a fact it records as "no-store".
-            open(sha_path, "w").write("no-store")
-            print(f"datasets: the context has no data store; the fields of {', '.join(names)} stay free text")
-            sys.exit(0)
-        try:
-            datasets = dc.read_catalog(endpoint, token_path)
-        except Exception as exc:  # noqa: BLE001
-            # The form this render commits has free-text fields, so the digest of the last good render no
-            # longer describes it: record "unread" and the next successful DATASET DRIFT check re-renders.
-            # (Keeping the old digest left a form with no picker "in sync" until the catalog next changed.)
-            open(sha_path, "w").write("unread")
-            print(f"datasets: catalog not read ({type(exc).__name__}: {exc}); the fields of {', '.join(names)} stay free text")
-            sys.exit(0)
-        choices = dc.choices(datasets)
-        open(sha_path, "w").write(dc.digest(choices))
-        if not choices:
-            print(f"datasets: the project has no dataset yet; the fields of {', '.join(names)} stay free text")
-            sys.exit(0)
-        try:
-            filled = dc.fill(wft, names, datasets)
-        except KeyError as exc:
-            sys.exit(f"GATE FAIL: {exc.args[0]}")
-        yaml.safe_dump(wft, open(wft_path, "w"), sort_keys=False)
-        print(f"datasets: {len(choices)} choices from {len(datasets)} datasets on " + ", ".join(f"{n} (default {v})" for n, v in filled.items()))
-        DSEOF
-
-        # RUN FORM (PRD novelcore/kaos#1533, F-21): seal the form after the enhance and the dataset fill, before the
+        # RUN FORM (PRD novelcore/kaos#1533, F-21): seal the form after the enhance, before the
         # GATE, the size guard and the copy. An option file that fails to compose fails the build here.
 {{ include "kubecore-ci-workflows.runFormSeal" (dict "previous" true "Files" .Files) | indent 8 }}
 
@@ -1500,7 +1443,7 @@ spec:
         IMAGES_FILE="${GITOPS_DIR}/pipeline-images.yaml"
         if [ -f "$IMAGES_FILE" ]; then
           CONTEXT_SHA=$(sha256sum "$CONTEXT_PATH" | cut -c1-64)
-          python3 - "$WFT_FILE" "$IMAGES_FILE" "$APP_NAME" "$CONTEXT_SHA" "$ENGINE_VERSION" /tmp/dataset-sha "$WFT_BYTES" <<'IMGEOF'
+          python3 - "$WFT_FILE" "$IMAGES_FILE" "$APP_NAME" "$CONTEXT_SHA" "$ENGINE_VERSION" "$WFT_BYTES" <<'IMGEOF'
         import sys, yaml, re
         wft = yaml.safe_load(open(sys.argv[1]))
         images_doc = yaml.safe_load(open(sys.argv[2]))
@@ -1514,14 +1457,9 @@ spec:
         # ml-ci-reconcile compares it with the context's engine.version and
         # re-renders when the engine moved without a push (ENGINE DRIFT).
         engine_version = sys.argv[5]
-        # dataset-sha: digest of the dataset choices this render offered ("none": no step declares
-        # an input; missing file: the catalog was unreadable, keep the record). ml-ci-reconcile
-        # compares it with the catalog and re-renders on DATASET DRIFT.
-        import os
-        dataset_sha = open(sys.argv[6]).read().strip() if len(sys.argv) > 6 and os.path.exists(sys.argv[6]) else ""
         # wft-bytes: the size of the rendered WorkflowTemplate, reported here so a pipeline growing
         # towards the size guard (wftSize.limitKiB) is visible before it fails.
-        wft_bytes = sys.argv[7] if len(sys.argv) > 7 else ""
+        wft_bytes = sys.argv[6] if len(sys.argv) > 6 else ""
         # collect the pipeline-images keys the WFT reads. Two shapes, accepted in any order of the pins: the workflow's
         # own arguments (image-<step> with valueFrom.configMapKeyRef, the engine before the images moved) and the
         # inputs of a template (the engine reads the record in compose's template: an input per step with the same
@@ -1544,6 +1482,9 @@ spec:
         # renamed step): otherwise the ConfigMap — and the image parameters the
         # submit form derives from it — keep stale entries forever
         # (kubecore-operator#1126, ml-dev-loop e2e "delete"/"rename").
+        # dataset-sha is no longer written (PRD novelcore/kaos#1911 D-73) but existing apps have it
+        # committed: it stays protected here (and in patch-images) so no app gets a pruning commit.
+        # Both places go in a later version.
         removed = [k for k in list(data) if k not in ("last-built-sha", "context-sha", "engine-version", "engine-compose", "engine-last-error", "engine-attempt", "dataset-sha", "wft-bytes", "kaos-lib-package", "kaos-lib-compat", "produced-datasets") and k not in wanted]
         for k in removed:
             del data[k]
@@ -1569,15 +1510,12 @@ spec:
         if moved:
             print(f"pipeline-images namespace {meta.get('namespace')!r} -> {wft_ns!r} (following the rendered WFT)")
             meta["namespace"] = wft_ns
-        dataset_moved = bool(dataset_sha) and data.get("dataset-sha") != dataset_sha
-        if dataset_moved:
-            data["dataset-sha"] = dataset_sha
         bytes_moved = bool(wft_bytes) and data.get("wft-bytes") != wft_bytes
         if bytes_moved:
             data["wft-bytes"] = wft_bytes
-        if added or removed or moved or context_moved or engine_moved or dataset_moved or bytes_moved:
+        if added or removed or moved or context_moved or engine_moved or bytes_moved:
             yaml.safe_dump(images_doc, open(sys.argv[2], "w"), sort_keys=False)
-            print(f"pipeline-images keys — added: {added} removed: {removed} moved: {moved} context-sha: {context_sha[:12] if context_moved else 'unchanged'} engine-version: {engine_version if engine_moved else 'unchanged'} dataset-sha: {dataset_sha[:12] if dataset_moved else 'unchanged'}")
+            print(f"pipeline-images keys — added: {added} removed: {removed} moved: {moved} context-sha: {context_sha[:12] if context_moved else 'unchanged'} engine-version: {engine_version if engine_moved else 'unchanged'}")
         else:
             print("pipeline-images already has exactly the image-<step> keys the WFT references")
         IMGEOF
@@ -1617,19 +1555,6 @@ spec:
       - name: github-token
         mountPath: /etc/github-token
         readOnly: true
-      - name: kaos-lake-token
-        mountPath: /var/run/secrets/kaos-lake
-        readOnly: true
-    # The step's own service-account token for kaos-lake's dataset catalog (PRD
-    # novelcore/kaos#1283 D-05): audience-bound, short-lived, read-only use.
-    volumes:
-    - name: kaos-lake-token
-      projected:
-        sources:
-        - serviceAccountToken:
-            audience: {{ .Values.kaosLake.workloadAudience | quote }}
-            expirationSeconds: 600
-            path: token
 
   # kaos-lib-support (PRD novelcore/kaos#1147, contract "Support window as
   # release metadata"): the commit status kaos-lib/support on the built commit,
@@ -1861,6 +1786,7 @@ spec:
             [ "${KEY}" = "engine-compose" ] && continue
             [ "${KEY}" = "engine-last-error" ] && continue
             [ "${KEY}" = "engine-attempt" ] && continue
+            # dataset-sha is no longer written; kept for apps that have it committed (a later version removes it)
             [ "${KEY}" = "dataset-sha" ] && continue
             [ "${KEY}" = "context-sha" ] && continue
             [ "${KEY}" = "wft-bytes" ] && continue
