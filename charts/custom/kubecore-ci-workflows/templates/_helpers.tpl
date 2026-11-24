@@ -452,24 +452,39 @@ Caller: TOKEN set (empty = unauthenticated git, as before).
 {{- define "kubecore-ci-workflows.gitAuth" -}}
 # git with the GitHub App token as a per-process header (PRD 738 F-20): the
 # token never lands in .git/config. URLs below are plain https://github.com/…
+# A transfer slower than 1 kB/s for 60 s is ended by git, not waited on.
+export GIT_HTTP_LOW_SPEED_LIMIT=1000 GIT_HTTP_LOW_SPEED_TIME=60
 git_once() {
   if [ -n "${TOKEN:-}" ]; then
     env GIT_CONFIG_COUNT=1 \
       GIT_CONFIG_KEY_0="http.https://github.com/.extraheader" \
       GIT_CONFIG_VALUE_0="Authorization: Basic $(printf 'x-access-token:%s' "${TOKEN}" | base64 | tr -d '\n')" \
-      git "$@"
+      ${_gcap:-} git "$@"
   else
-    env git "$@"
+    env ${_gcap:-} git "$@"
   fi
 }
-# A call that never reached the remote (name not resolved, no connection) is made again, up to 6 times
-# over about a minute: the pool's DNS fails for some seconds a few times a day, and a step that gave up
-# on the first try failed the whole build. Any other failure is git's own and is not repeated.
+# A call that never reached the remote (name not resolved, no connection, connection reset, a 5xx from
+# GitHub) is made again, up to 6 times: the pool's DNS fails for some seconds a few times a day, and a
+# step that gave up on the first try failed the whole build. Each try is ended after 150 s (git itself
+# waits 300 s for a name that does not resolve: "Resolving timed out after 300101 milliseconds", e2e
+# 2026-11-24, hera-enhance-commit, one attempt, build failed). Any other failure (login refused,
+# repository or branch not found, a rejected push) is git's own, is not repeated and keeps its message.
+# A repeated call is safe: a clone starts in a target that is not there, a push that GitHub applied
+# before the answer was lost finds nothing to send, and a push that was rejected is not repeated.
 git() {
   case "${1:-}" in
     clone|fetch|pull|push|ls-remote) ;;
     *) git_once "$@"; return $? ;;
   esac
+  _gcap=""
+  if command -v timeout >/dev/null 2>&1; then _gcap="timeout ${GIT_CALL_CAP:-150}"; fi
+  _gdst=""
+  if [ "${1}" = clone ]; then
+    for _ga in "$@"; do _gdst="${_ga}"; done
+    case "${_gdst}" in *://*) _gdst="" ;; esac
+    if [ -n "${_gdst}" ] && [ -e "${_gdst}" ]; then _gdst=""; fi
+  fi
   _gtry=1
   while :; do
     _gerr=$(mktemp)
@@ -477,11 +492,14 @@ git() {
     git_once "$@" 2>"${_gerr}" || _grc=$?
     cat "${_gerr}" >&2
     if [ "${_grc}" -eq 0 ] || [ "${_gtry}" -ge 6 ] \
-       || ! grep -qE 'Could not resolve host|Failed to connect to|Connection timed out' "${_gerr}"; then
+       || { [ "${_grc}" -ne 124 ] && ! grep -qE 'Could not resolve host|Could not resolve proxy|Resolving timed out|Failed to connect to|Connection timed out|Operation timed out|Connection refused|Connection reset|Recv failure|Send failure|Empty reply from server|SSL_ERROR_SYSCALL|TLS connect error|GnuTLS recv error|unexpected disconnect|early EOF|RPC failed|returned error: 50[0-9]|HTTP 50[0-9]' "${_gerr}"; }; then
       rm -f "${_gerr}"
+      _gcap=""
       return "${_grc}"
     fi
     rm -f "${_gerr}"
+    # a clone that failed half way leaves its target; the next try starts clean
+    if [ -n "${_gdst}" ]; then rm -rf "${_gdst}"; fi
     _gwait=${GIT_RETRY_SLEEP:-$((1 << _gtry))}
     echo "git ${1}: no connection to the remote (attempt ${_gtry}/6), trying again in ${_gwait}s" >&2
     sleep "${_gwait}"
