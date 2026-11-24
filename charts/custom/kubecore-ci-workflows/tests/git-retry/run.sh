@@ -84,6 +84,8 @@ call 1 "error: RPC failed; HTTP 502 curl 22 The requested URL returned error: 50
 expect_eq "$RC_GOT $CALLS_GOT" "0 2" "a failed push on a 502 is tried again"
 RC=124 call 1 "" fetch origin
 expect_eq "$RC_GOT $CALLS_GOT" "0 2" "a call ended by the per-call cap (124) is tried again"
+RC=143 call 1 "Terminated" fetch origin
+expect_eq "$RC_GOT $CALLS_GOT" "0 2" "a call ended by busybox timeout (143) is tried again"
 call 99 "fatal: Authentication failed for 'https://github.com/acme/a.git/'" clone https://github.com/acme/a.git /tmp/y
 expect_eq "$RC_GOT $CALLS_GOT" "128 1" "a refused login is not tried again"
 call 99 "remote: Invalid username or token. Password authentication is not supported" fetch origin

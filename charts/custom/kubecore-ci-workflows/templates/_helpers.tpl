@@ -466,9 +466,10 @@ git_once() {
 }
 # A call that never reached the remote (name not resolved, no connection, connection reset, a 5xx from
 # GitHub) is made again, up to 6 times: the pool's DNS fails for some seconds a few times a day, and a
-# step that gave up on the first try failed the whole build. Each try is ended after 150 s (git itself
-# waits 300 s for a name that does not resolve: "Resolving timed out after 300101 milliseconds", e2e
-# 2026-11-24, hera-enhance-commit, one attempt, build failed). Any other failure (login refused,
+# step that gave up on the first try failed the whole build. A try that hangs is ended after 600 s (exit 124,
+# or 143 from busybox timeout); a name that does not resolve ends by itself after curl's 300 s
+# ("Resolving timed out after 300101 milliseconds", e2e 2026-11-24, hera-enhance-commit, one attempt,
+# build failed) and is then tried again. Any other failure (login refused,
 # repository or branch not found, a rejected push) is git's own, is not repeated and keeps its message.
 # A repeated call is safe: a clone starts in a target that is not there, a push that GitHub applied
 # before the answer was lost finds nothing to send, and a push that was rejected is not repeated.
@@ -478,7 +479,7 @@ git() {
     *) git_once "$@"; return $? ;;
   esac
   _gcap=""
-  if command -v timeout >/dev/null 2>&1; then _gcap="timeout ${GIT_CALL_CAP:-150}"; fi
+  if command -v timeout >/dev/null 2>&1; then _gcap="timeout ${GIT_CALL_CAP:-600}"; fi
   _gdst=""
   if [ "${1}" = clone ]; then
     for _ga in "$@"; do _gdst="${_ga}"; done
@@ -492,7 +493,7 @@ git() {
     git_once "$@" 2>"${_gerr}" || _grc=$?
     cat "${_gerr}" >&2
     if [ "${_grc}" -eq 0 ] || [ "${_gtry}" -ge 6 ] \
-       || { [ "${_grc}" -ne 124 ] && ! grep -qE 'Could not resolve host|Could not resolve proxy|Resolving timed out|Failed to connect to|Connection timed out|Operation timed out|Connection refused|Connection reset|Recv failure|Send failure|Empty reply from server|SSL_ERROR_SYSCALL|TLS connect error|GnuTLS recv error|unexpected disconnect|early EOF|RPC failed|returned error: 50[0-9]|HTTP 50[0-9]' "${_gerr}"; }; then
+       || { [ "${_grc}" -ne 124 ] && [ "${_grc}" -ne 143 ] && ! grep -qE 'Could not resolve host|Could not resolve proxy|Resolving timed out|Failed to connect to|Connection timed out|Operation timed out|Connection refused|Connection reset|Recv failure|Send failure|Empty reply from server|SSL_ERROR_SYSCALL|TLS connect error|GnuTLS recv error|unexpected disconnect|early EOF|RPC failed|returned error: 50[0-9]|HTTP 50[0-9]' "${_gerr}"; }; then
       rm -f "${_gerr}"
       _gcap=""
       return "${_grc}"
