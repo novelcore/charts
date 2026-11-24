@@ -219,7 +219,9 @@ expect_eq "$RC/$(cat "$T/kaos_lib_ref" 2>/dev/null)" "0/" "force, the app's imag
 GITOPS_CTX="$PLATFORM_CTX" GITOPS_KL="kaos-lib==0.5.0" run_case true "$IDLE" "$HEAD_SHA" built
 expect_eq "$RC/$(cat "$T/kaos_lib_ref" 2>/dev/null)" "0/" "force, the platform's own kaos-lib moved (no pin mark): the forced run does not rebuild it (hourly pacing)"
 GITOPS_CTX="$PIN_CTX" GITOPS_KL="kaos-lib==0.5.0" run_case false "$IDLE" "$HEAD_SHA" built
-expect_eq "$(cat "$T/kaos_lib_ref" 2>/dev/null)" "" "backstop (not forced): a pin mark changes nothing in the hourly poll's own path (its use-based pacing)"
+expect_eq "$(cat "$T/kaos_lib_ref" 2>/dev/null)" "$PIN_REF" "backstop (not forced): a pinned spec the images lack is rebuilt by the poll too, with no use of the app (a forced run that read the context before it landed cannot lose the pin)"
+GITOPS_CTX="$PLATFORM_CTX" GITOPS_KL="kaos-lib==0.5.0" run_case false "$IDLE" "$HEAD_SHA" built
+expect_eq "$(cat "$T/kaos_lib_ref" 2>/dev/null)" "" "backstop (not forced): a platform-wide move (no pin mark) keeps the use-based pacing"
 
 RETRY=$(yq 'select(.kind == "ClusterWorkflowTemplate" and .metadata.name == "ml-ci-reconcile")
     | .spec.templates[] | select(.name == "check-drift-attempts") | .steps[1][0].when' "$RENDERED")

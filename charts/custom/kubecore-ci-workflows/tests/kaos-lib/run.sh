@@ -312,7 +312,7 @@ attempt() {  # attempt PHASE AGE_S REF
 }
 run_drift() {
   sed -e "s#{{workflow.namespace}}#ci#g" -e "s#{{workflow.parameters.force}}#${FORCE:-false}#g" -e "s#{{inputs.parameters.mode}}#decide#g" \
-      -e "s#{{workflow.parameters.context_sha}}##g" -e "s#{{workflow.parameters.app_name}}#${APP}#g" \
+      -e "s#{{workflow.parameters.context_sha}}#${WANT_CTX:-}#g" -e "s#{{workflow.parameters.app_name}}#${APP}#g" \
       -e "s#{{workflow.parameters.project_name}}#proj#g" -e "s#{{workflow.parameters.branch}}#dev#g" \
       -e "s#{{workflow.parameters.ci_namespace}}#ci#g" -e "s#{{workflow.parameters.gitops_repository}}#proj-gitops#g" \
       -e "s#{{workflow.parameters.repo_url}}##g" -e "s#{{workflow.parameters.ml_namespace}}#proj-train#g" \
@@ -416,6 +416,34 @@ pin_case "$OLD"; attempt Failed 7200 "$REF"; FORCE=true run_drift
 expect_eq "$NEEDS/$KREF" "true/$REF" "pin: the last attempt is over an hour old: rebuild"
 pin_case "$OLD"; attempt Failed 600 "000000000000"; FORCE=true run_drift
 expect_eq "$KREF" "$REF" "pin: a recent attempt at ANOTHER spec (the previous pin) does not hold this one back"
+# The hourly poll finds a pin the forced run missed (the operator creates the sync Workflow and writes the context in
+# one pass: the forced run may have read the context BEFORE it landed and decided "in sync", or found the app built).
+# The app is never used here (RUN_AGE="" REF_AGE=""): the poll does not wait for use when the context marks a pin.
+RUN_AGE="" REF_AGE="" PINNED=1 GIT_REC="$OLD" drift_case "$OLD" "$SPEC"; run_drift
+expect_eq "$RC/$NEEDS/$KREF" "0/true/$REF" "poll: the app pins a spec its images do not have, never used: rebuilt by the poll, labelled with its ref"
+expect_has "$OUT" "KAOS-LIB PIN" "poll: says why"
+RUN_AGE="" REF_AGE="" PINNED=1 GIT_REC="$OLD" drift_case "$OLD" "$SPEC"; jq '.data["context-sha"] = "0000"' "$T/cm.json" > "$T/c" && mv "$T/c" "$T/cm.json"; run_drift
+expect_eq "$NEEDS/$KREF" "true/$REF" "poll: the context also moved: the PIN rebuild is chosen before a plain re-render (which would leave the old spec on the images)"
+expect_has "$OUT" "KAOS-LIB PIN" "poll: ... and says so"
+RUN_AGE="" REF_AGE="" PINNED=1 GIT_REC="$SPEC" drift_case "$OLD" "$SPEC"; run_drift
+expect_eq "$NEEDS/$KREF" "false/" "poll: gitops already records the pinned spec: nothing to do"
+RUN_AGE="" REF_AGE="" PINNED=1 GIT_REC="$OLD" drift_case "$OLD" "$SPEC"; attempt Failed 600 "$REF"; run_drift
+expect_eq "$KREF" "" "poll: an attempt at this spec failed 10 min ago: not again within the hour (the guard still holds)"
+RUN_AGE="" REF_AGE="" GIT_REC="$OLD" drift_case "$OLD" "$SPEC"; run_drift
+expect_not "$OUT" "KAOS-LIB PIN" "poll: a platform-wide move (no pin mark) keeps its pacing, never the pin path"
+RUN_AGE="" REF_AGE="" PINNED=1 drift_case "$OLD" "$SPEC"; run_drift
+expect_eq "$KREF" "" "poll: gitops pipeline-images unreadable: unknown never submits a pin rebuild"
+
+# The trigger names the context it is for (context_sha): the forced run waits for it, boundedly (exit 3 is retried by the template), and decides on it.
+pin_case "$OLD"; WANT_CTX=1111111111111111111111111111111111111111111111111111111111111111 FORCE=true run_drift
+expect_eq "$RC/$NEEDS" "3/false" "forced, context_sha not in gitops yet: not yet (retried), nothing decided on the old context"
+expect_has "$OUT" "is not the context this trigger is for yet" "forced: says what it waits for"
+pin_case "$OLD"; WANT_CTX="$CTX_SHA" FORCE=true run_drift
+expect_eq "$RC/$NEEDS/$KREF" "0/true/$REF" "forced, context_sha landed: the pin is decided on that context and rebuilt"
+RETRY_LIMIT=$(yq 'select(.metadata.name == "ml-ci-reconcile") | .spec.templates[] | select(.retryStrategy != null) | .retryStrategy.limit' "$RENDERED" | grep -v '^---$' | grep . | head -1)
+expect_eq "$([ "${RETRY_LIMIT:-0}" -gt 0 ] && echo bounded)" "bounded" "the wait is bounded: the retry has a limit (${RETRY_LIMIT})"
+PREV=$(yq 'select(.metadata.name == "ml-ci-build") | .spec.templates[] | select(.name == "patch-images") | .inputs.parameters[].name' "$RENDERED" | grep -c '^kaos_lib_prev$')
+expect_eq "$PREV" "1" "patch-images takes the record this run read (kaos_lib_prev) for its compare-and-set"
 # a build of HEAD already queued on the lock: no duplicate, unless it would not rebuild the pin
 queue_build() {  # queue_build EVENT_TYPE LABEL: a Pending ml-ci-build of HEAD
   jq --arg ev "$1" --arg ref "$2" --arg head "$HEAD_SHA" --arg app "$APP" '.items += [{metadata: {name: "ml-ci-build-q", labels: (if $ref == "" then {} else {"platform.kubecore.io/kaos-lib": $ref} end)},

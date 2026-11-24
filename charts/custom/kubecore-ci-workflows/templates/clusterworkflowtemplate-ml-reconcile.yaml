@@ -705,6 +705,30 @@ spec:
             | if . == null then "" else "\(.name) (\(.phase), \(.age | floor)s ago)" end' 2>&1 || echo "unreadable"
         }
 
+        # pin_due: sets PIN_REF (the spec's ref, "" = nothing due) and PIN_HAVE. Used by the forced run AND the
+        # hourly poll, so a pin whose forced run read the gitops context BEFORE it landed (the operator creates
+        # the sync Workflow and writes the context in one pass, and nothing orders the two) is still found: by
+        # the next poll at the latest, with nobody using the app.
+        pin_due() {
+          PIN_REF=""
+          PIN_HAVE=""
+          if [ "$KL_PINNED" = "true" ] && [ -n "$KL_WANT" ] && [ -n "$ENG_KNOWN" ]; then
+            PIN_HAVE=$(yq e '.data."kaos-lib-package" // ""' /tmp/gitops-images.yaml)
+            if [ "$PIN_HAVE" = "none" ]; then
+              echo "reconcile: kaos-lib pin ${KL_WANT} delivered, but no step Dockerfile declares ARG KAOS_LIB_PACKAGE — nothing the platform can rebuild"
+            elif [ "$PIN_HAVE" = "$KL_WANT" ]; then
+              echo "reconcile: kaos-lib pin in sync (${KL_WANT})"
+            else
+              PIN_TRY=$(kl_last_try "$(printf '%s' "$KL_WANT" | sha256sum | cut -c1-12)")
+              if [ -n "$PIN_TRY" ]; then
+                echo "reconcile: KAOS-LIB PIN (${PIN_HAVE:-<unrecorded>} -> ${KL_WANT}) — not rebuilding now: an attempt at this spec ended within the hour: ${PIN_TRY}"
+              else
+                PIN_REF=$(printf '%s' "$KL_WANT" | sha256sum | cut -c1-12)
+              fi
+            fi
+          fi
+        }
+
         if [ "$FORCE" = "true" ]; then
           WANT_CTX="{{`{{workflow.parameters.context_sha}}`}}"
           HAVE_CTX=""
@@ -722,22 +746,7 @@ spec:
           # records kaos-lib-package there when it ends; the live ConfigMap trails by an ArgoCD
           # sync, which would submit the rebuild twice); unreadable or unrecorded gitops is unknown
           # and never submits work, "none" (no Dockerfile declares the ARG) has nothing to rebuild.
-          PIN_REF=""
-          if [ "$KL_PINNED" = "true" ] && [ -n "$KL_WANT" ] && [ -n "$ENG_KNOWN" ]; then
-            PIN_HAVE=$(yq e '.data."kaos-lib-package" // ""' /tmp/gitops-images.yaml)
-            if [ "$PIN_HAVE" = "none" ]; then
-              echo "reconcile: kaos-lib pin ${KL_WANT} delivered, but no step Dockerfile declares ARG KAOS_LIB_PACKAGE — nothing the platform can rebuild"
-            elif [ "$PIN_HAVE" = "$KL_WANT" ]; then
-              echo "reconcile: kaos-lib pin in sync (${KL_WANT})"
-            else
-              PIN_TRY=$(kl_last_try "$(printf '%s' "$KL_WANT" | sha256sum | cut -c1-12)")
-              if [ -n "$PIN_TRY" ]; then
-                echo "reconcile: KAOS-LIB PIN (${PIN_HAVE:-<unrecorded>} -> ${KL_WANT}) — not rebuilding now: an attempt at this spec ended within the hour: ${PIN_TRY}"
-              else
-                PIN_REF=$(printf '%s' "$KL_WANT" | sha256sum | cut -c1-12)
-              fi
-            fi
-          fi
+          pin_due
           # QUEUED: a build of HEAD is already waiting on the app's build lock
           # (a webhook build created after this run began waiting, or another
           # trigger's build). It starts after this step and renders the context
@@ -824,6 +833,19 @@ spec:
             fi
             ;;
         esac
+
+        # KAOS-LIB PIN, hourly poll: the app's own pin (spec.ml.kaosLib) the images do not have is rebuilt
+        # here whether or not the app is used, and BEFORE the CONTEXT DRIFT re-render below (a re-render
+        # that arrives first would keep the old spec on the images: a reconcile build that is not the
+        # KAOS-LIB build leaves a stale spec alone). This is what closes the race of the forced run
+        # reading the gitops context before it landed: no forced run, however early, is the only trigger.
+        pin_due
+        if [ -n "$PIN_REF" ]; then
+          printf '%s' "$PIN_REF" > /tmp/kaos_lib_ref
+          printf 'true' > /tmp/needs_build
+          echo "reconcile: KAOS-LIB PIN — the images have kaos-lib ${PIN_HAVE:-<unrecorded>} but the app pins ${KL_WANT}; submitting ml-ci-build to rebuild and re-render"
+          exit 0
+        fi
 
         # CONTEXT DRIFT (kubecore-operator#1158): the platform rewrote the gitops
         # pipeline-context.yaml (compute classes, ml-environment selector, …)

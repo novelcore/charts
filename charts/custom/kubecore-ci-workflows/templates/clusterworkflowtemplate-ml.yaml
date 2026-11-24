@@ -322,6 +322,8 @@ spec:
             value: "{{`{{steps.detect-steps.outputs.parameters.changed_steps}}`}}"
           - name: kaos_lib_record
             value: "{{`{{steps.detect-steps.outputs.parameters.kaos_lib_record}}`}}"
+          - name: kaos_lib_prev
+            value: "{{`{{steps.detect-steps.outputs.parameters.kaos_lib_prev}}`}}"
           - name: kaos_lib_compat
             value: "{{`{{steps.detect-steps.outputs.parameters.kaos_lib_compat}}`}}"
           - name: engine_compose
@@ -429,6 +431,12 @@ spec:
       - name: kaos_lib_record
         valueFrom:
           path: /tmp/kaos_lib_record
+          default: ""
+      # What the record held when this run read it: patch-images writes kaos-lib-package only
+      # over this value (compare-and-set), see the KL_RECORD write there.
+      - name: kaos_lib_prev
+        valueFrom:
+          path: /tmp/kaos_lib_prev
           default: ""
       - name: kaos_lib_compat
         valueFrom:
@@ -685,6 +693,7 @@ spec:
         fi
         jq -j '.spec' /tmp/kaos_lib.json > /tmp/kaos_lib_package
         jq -j '.record' /tmp/kaos_lib.json > /tmp/kaos_lib_record
+        printf '%s' "$KL_REC" > /tmp/kaos_lib_prev
         jq -j '.compat' /tmp/kaos_lib.json > /tmp/kaos_lib_compat
         jq -r 'if .rebuild then .managed[] else empty end' /tmp/kaos_lib.json > /tmp/kaos_lib_rebuild
         echo "kaos-lib: $(jq -r '.reason' /tmp/kaos_lib.json)"
@@ -1690,6 +1699,8 @@ spec:
       # kaos-lib report (PRD novelcore/kaos#1147, detect-steps): "" = leave.
       - name: kaos_lib_record
         value: ""
+      - name: kaos_lib_prev
+        value: ""
       - name: kaos_lib_compat
         value: ""
       # The engine version whose compose-and-validate image this build made ("" = none built): recorded
@@ -1709,6 +1720,8 @@ spec:
       env:
       - name: KL_RECORD
         value: "{{`{{inputs.parameters.kaos_lib_record}}`}}"
+      - name: KL_PREV
+        value: "{{`{{inputs.parameters.kaos_lib_prev}}`}}"
       - name: KL_COMPAT
         value: "{{`{{inputs.parameters.kaos_lib_compat}}`}}"
       - name: ENGINE_COMPOSE
@@ -1910,7 +1923,14 @@ spec:
         # reads both from this file (status.ml.kaosLib.built) and ml-ci-reconcile
         # compares kaos-lib-package with the context. Only reached when every
         # build-push succeeded, so the record never runs ahead of the images.
-        if [ -n "${KL_RECORD}" ]; then
+        # COMPARE-AND-SET: a run that moved nothing (KL_RECORD is what it READ, KL_PREV: a render-only
+        # run, which takes no build lock) must not write that value over a record another run moved in
+        # the meantime, or a finished pin rebuild is undone and rebuilt again, or never seen. Only a run
+        # that moved the spec (its images are built on KL_RECORD) writes over whatever is there.
+        KL_NOW=$(yq e '.data."kaos-lib-package" // ""' "${IMAGES_PATH}")
+        if [ -n "${KL_RECORD}" ] && [ "${KL_RECORD}" = "${KL_PREV}" ] && [ -n "${KL_NOW}" ] && [ "${KL_NOW}" != "${KL_PREV}" ]; then
+          echo "kaos-lib-package: left at ${KL_NOW} (this run read ${KL_PREV} and moved nothing; another run recorded it since)"
+        elif [ -n "${KL_RECORD}" ]; then
           echo "Recording kaos-lib-package = ${KL_RECORD}, kaos-lib-compat = ${KL_COMPAT:-<none declared>}"
           yq e -i '.data."kaos-lib-package" = strenv(KL_RECORD) | .data."kaos-lib-compat" = strenv(KL_COMPAT)' "${IMAGES_PATH}"
         fi
