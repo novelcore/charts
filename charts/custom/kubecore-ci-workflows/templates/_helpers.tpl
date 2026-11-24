@@ -519,6 +519,58 @@ git_assert_no_token() {
 {{- end }}
 
 {{/*
+A run never replaces what a NEWER commit of the app recorded (PRD novelcore/kaos#1911 AC-13).
+
+Two pushes seconds apart start two builds, and the one for the older commit can finish its render
+AFTER the newer one: its render then replaced the newer render, and nothing repaired it (last-built-sha
+read as converged). The render commits the commit it was made from (`render-sha` in the app's
+pipeline-images), and a writer asks older_than_record before it writes.
+
+older_than_record REC: exit 0 ONLY when this run's commit is a STRICT ancestor of REC (the recorded
+commit is newer: skip). Every other answer is 1 (go on, write): REC empty (nothing recorded yet), REC
+equal to this commit, this commit newer than REC, histories that diverge (force push), and any case the
+question cannot be answered (the app repository is not readable, a commit is further back than 200
+commits). The default is to write: failing the other way could leave an app without any render, which is
+worse than the stale write the guard exists for. The question is asked in a fresh repository, never in
+the tenant's checkout.
+
+The record is newer only while it is still on the app branch: after a force push that rewinds the branch
+to an older commit the recorded commit is no longer an ancestor of the branch tip, and the run writes.
+A writer that lost a push race drops its commit, resets to the fetched branch and asks again on that
+state, then writes onto it.
+
+Caller: gitAuth wrapper defined; /tmp/gitops cloned.
+*/}}
+{{- define "kubecore-ci-workflows.monotonic" -}}
+# MONOTONIC begin (executed by tests/render-monotonic)
+RUN_SHA="{{`{{workflow.parameters.commit_sha}}`}}"
+APP_REPO_URL="{{`{{workflow.parameters.repo_url}}`}}"
+APP_BRANCH=$(echo "{{`{{workflow.parameters.branch}}`}}" | sed 's|^refs/heads/||')
+older_than_record() {
+  _rec="$1"
+  if [ -z "${_rec}" ] || [ -z "${RUN_SHA}" ]; then return 1; fi
+  if [ "${_rec}" = "${RUN_SHA}" ]; then
+    echo "monotonic: ${RUN_SHA} is the recorded commit: writing" >&2; return 1
+  fi
+  rm -rf /tmp/anc
+  git init -q /tmp/anc
+  if ! _gerr=$( cd /tmp/anc && git fetch -q --depth=200 "${APP_REPO_URL}" "${_rec}" "${RUN_SHA}" "+refs/heads/${APP_BRANCH}:refs/tmp/tip" 2>&1 ); then
+    echo "monotonic: could not read ${_rec} (recorded), ${RUN_SHA} (this run) or branch ${APP_BRANCH} from the app repository, the guard cannot answer: writing. git said: $(printf '%s' "${_gerr}" | tail -1)" >&2
+    return 1
+  fi
+  if ! ( cd /tmp/anc && git merge-base --is-ancestor "${RUN_SHA}" "${_rec}" ) 2>/dev/null; then
+    echo "monotonic: ${RUN_SHA} is not older than the recorded ${_rec}: writing" >&2; return 1
+  fi
+  if ( cd /tmp/anc && git merge-base --is-ancestor "${_rec}" refs/tmp/tip ) 2>/dev/null; then
+    echo "monotonic: ${RUN_SHA} is older than the recorded ${_rec}, which is on ${APP_BRANCH}: skipping" >&2; return 0
+  fi
+  echo "monotonic: the recorded ${_rec} is no longer on ${APP_BRANCH} (history rewritten): writing" >&2
+  return 1
+}
+# MONOTONIC end
+{{- end }}
+
+{{/*
 Build pods: no Kubernetes ServiceAccount token in the build container
 (kaos PRD 738 F-20).
 
