@@ -519,6 +519,49 @@ git_assert_no_token() {
 {{- end }}
 
 {{/*
+A run never replaces what a NEWER commit of the app recorded (PRD novelcore/kaos#1911 AC-13).
+
+Two pushes seconds apart start two builds, and the one for the older commit can finish its render
+AFTER the newer one: its render then replaced the newer render, and nothing repaired it (last-built-sha
+read as converged). The render commits the commit it was made from (`render-sha` in the app's
+pipeline-images), and a writer asks older_than_record before it writes.
+
+older_than_record REC: exit 0 ONLY when this run's commit is a STRICT ancestor of REC (the recorded
+commit is newer: skip). Every other answer is 1 (go on, write): REC empty (nothing recorded yet), REC
+equal to this commit, this commit newer than REC, histories that diverge (force push), and any case the
+question cannot be answered (the app repository is not readable, a commit is further back than 200
+commits). The default is to write: failing the other way could leave an app without any render, which is
+worse than the stale write the guard exists for. The question is asked in a fresh repository, never in
+the tenant's checkout.
+
+recorded_at REF PATH KEY: data.KEY of the gitops file PATH at REF ("" when absent). A writer that lost
+a push race calls it on the fetched branch, so the guard is asked again about the state its commit would
+land on.
+
+Caller: gitAuth wrapper defined; /tmp/gitops cloned.
+*/}}
+{{- define "kubecore-ci-workflows.monotonic" -}}
+# MONOTONIC begin (executed by tests/render-monotonic)
+RUN_SHA="{{`{{workflow.parameters.commit_sha}}`}}"
+APP_REPO_URL="{{`{{workflow.parameters.repo_url}}`}}"
+older_than_record() {
+  _rec="$1"
+  if [ -z "${_rec}" ] || [ -z "${RUN_SHA}" ] || [ "${_rec}" = "${RUN_SHA}" ]; then return 1; fi
+  rm -rf /tmp/anc
+  git init -q /tmp/anc
+  if ! ( cd /tmp/anc && git fetch -q --depth=200 "${APP_REPO_URL}" "${_rec}" "${RUN_SHA}" ) >/dev/null 2>&1; then
+    echo "monotonic: ${_rec} and ${RUN_SHA} cannot both be read from the app repository: the record is not proven newer, this run writes" >&2
+    return 1
+  fi
+  ( cd /tmp/anc && git merge-base --is-ancestor "${RUN_SHA}" "${_rec}" ) 2>/dev/null
+}
+recorded_at() {
+  git -C /tmp/gitops show "$1:$2" 2>/dev/null | yq e ".data.\"$3\" // \"\"" - 2>/dev/null || true
+}
+# MONOTONIC end
+{{- end }}
+
+{{/*
 Build pods: no Kubernetes ServiceAccount token in the build container
 (kaos PRD 738 F-20).
 

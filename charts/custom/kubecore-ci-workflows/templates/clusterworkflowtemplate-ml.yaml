@@ -1365,6 +1365,7 @@ spec:
         REPO_URL="https://github.com/${ORG}/${GITOPS_REPO}.git"
         git clone --depth=1 --branch "${GITOPS_BRANCH}" "${REPO_URL}" /tmp/gitops
         git_assert_no_token /tmp/gitops
+{{ include "kubecore-ci-workflows.monotonic" . | indent 8 }}
 
         # Discover the app's gitops dir by locating pipeline-context.yaml — the
         # same discovery render-wft uses (basePath is operator-configured and not
@@ -1416,9 +1417,21 @@ spec:
         print(f"GATE OK: {len(names)} params, {len([t for t in spec['templates'] if 'container' in t])} container templates")
         GATEEOF
 
-        # Anti-churn: only re-render if this commit is newer than what produced
-        # the live WFT (mirrors render-wft's monotonic guard).
+        # MONOTONIC: a run never replaces a render made from a NEWER commit. The render records the
+        # commit it was made from (render-sha, same gitops commit as the render); this run skips when
+        # its own commit is a strict ancestor of that one (older_than_record: equal or newer writes,
+        # and so does every case that cannot be answered). Asked again after a lost push race below.
         WFT_FILE="${GITOPS_DIR}/workflow-template.yaml"
+        IMAGES_FILE="${GITOPS_DIR}/pipeline-images.yaml"
+        IMAGES_REL="${IMAGES_FILE#/tmp/gitops/}"
+        skip_superseded() {
+          echo "hera-enhance-commit: SUPERSEDED: render-sha ${1} is a newer commit than ${RUN_SHA}; its render stays, nothing of this run is written"
+          printf 'Render skipped: a newer commit (%s) was already rendered.\n' "$(printf '%s' "${1}" | cut -c1-8)" > /workspace/report-extra.md
+          exit 0
+        }
+        RECORDED_RENDER=""
+        if [ -f "$IMAGES_FILE" ]; then RECORDED_RENDER=$(yq e '.data."render-sha" // ""' "$IMAGES_FILE"); fi
+        if older_than_record "${RECORDED_RENDER}"; then skip_superseded "${RECORDED_RENDER}"; fi
         # SIZE GUARD: a render over the limit fails here, before anything is committed.
         python3 - /workspace/out/workflow-template.yaml "" <<'WFTSIZEEOF'
 {{ include "kubecore-ci-workflows.wftSizeGuard" . | indent 8 }}
@@ -1440,10 +1453,15 @@ spec:
         # not match a Hera app's step set — keep it zero-composition-change by
         # adding any missing keys as :{step}-latest placeholders that patch-images
         # replaces after build). This is what keeps D10 true on day 1.
-        IMAGES_FILE="${GITOPS_DIR}/pipeline-images.yaml"
+        CONTEXT_SHA=$(sha256sum "$CONTEXT_PATH" | cut -c1-64)
+        # The record of this render, for patch-images: when pipeline-images.yaml does not exist yet
+        # (the platform scaffolds it a little after the first render) the stamps below cannot be
+        # written here, and patch-images, which writes the file's first content, writes the keys the
+        # file lacks from this record, so the first build leaves a complete record.
+        printf 'render-sha=%s\ncontext-sha=%s\nengine-version=%s\nwft-bytes=%s\n' \
+          "${RUN_SHA}" "${CONTEXT_SHA}" "${ENGINE_VERSION}" "${WFT_BYTES}" > /workspace/out/render-stamp
         if [ -f "$IMAGES_FILE" ]; then
-          CONTEXT_SHA=$(sha256sum "$CONTEXT_PATH" | cut -c1-64)
-          python3 - "$WFT_FILE" "$IMAGES_FILE" "$APP_NAME" "$CONTEXT_SHA" "$ENGINE_VERSION" "$WFT_BYTES" <<'IMGEOF'
+          python3 - "$WFT_FILE" "$IMAGES_FILE" "$APP_NAME" "$CONTEXT_SHA" "$ENGINE_VERSION" "$WFT_BYTES" "$RUN_SHA" <<'IMGEOF'
         import sys, yaml, re
         wft = yaml.safe_load(open(sys.argv[1]))
         images_doc = yaml.safe_load(open(sys.argv[2]))
@@ -1460,6 +1478,10 @@ spec:
         # wft-bytes: the size of the rendered WorkflowTemplate, reported here so a pipeline growing
         # towards the size guard (wftSize.limitKiB) is visible before it fails.
         wft_bytes = sys.argv[6] if len(sys.argv) > 6 else ""
+        # render-sha: the app commit this render was made from; a run for an older commit skips
+        # instead of replacing it (see MONOTONIC in the shell above). Written on every render, even
+        # an unchanged one, so the record names the newest commit that has rendered.
+        render_sha = sys.argv[7] if len(sys.argv) > 7 else ""
         # collect the pipeline-images keys the WFT reads. Two shapes, accepted in any order of the pins: the workflow's
         # own arguments (image-<step> with valueFrom.configMapKeyRef, the engine before the images moved) and the
         # inputs of a template (the engine reads the record in compose's template: an input per step with the same
@@ -1485,7 +1507,7 @@ spec:
         # dataset-sha is no longer written (PRD novelcore/kaos#1911 D-73) but existing apps have it
         # committed: it stays protected here (and in patch-images) so no app gets a pruning commit.
         # Both places go in a later version.
-        removed = [k for k in list(data) if k not in ("last-built-sha", "context-sha", "engine-version", "engine-compose", "engine-last-error", "engine-attempt", "dataset-sha", "wft-bytes", "kaos-lib-package", "kaos-lib-compat", "produced-datasets") and k not in wanted]
+        removed = [k for k in list(data) if k not in ("last-built-sha", "context-sha", "engine-version", "engine-compose", "engine-last-error", "engine-attempt", "dataset-sha", "wft-bytes", "render-sha", "kaos-lib-package", "kaos-lib-compat", "produced-datasets") and k not in wanted]
         for k in removed:
             del data[k]
         context_moved = bool(context_sha) and data.get("context-sha") != context_sha
@@ -1513,7 +1535,10 @@ spec:
         bytes_moved = bool(wft_bytes) and data.get("wft-bytes") != wft_bytes
         if bytes_moved:
             data["wft-bytes"] = wft_bytes
-        if added or removed or moved or context_moved or engine_moved or bytes_moved:
+        render_moved = bool(render_sha) and data.get("render-sha") != render_sha
+        if render_moved:
+            data["render-sha"] = render_sha
+        if added or removed or moved or context_moved or engine_moved or bytes_moved or render_moved:
             yaml.safe_dump(images_doc, open(sys.argv[2], "w"), sort_keys=False)
             print(f"pipeline-images keys — added: {added} removed: {removed} moved: {moved} context-sha: {context_sha[:12] if context_moved else 'unchanged'} engine-version: {engine_version if engine_moved else 'unchanged'}")
         else:
@@ -1544,6 +1569,14 @@ spec:
             if git push 2>&1; then pushed=yes; break; fi
             echo "hera-enhance-commit: push rejected (attempt ${attempt}) — rebasing onto the latest ${GITOPS_BRANCH}"
             sleep $((attempt * 3))
+            # MONOTONIC again, on the state this commit would land on: a newer commit's render may
+            # have landed while this run rendered. Then this commit is dropped, not rebased.
+            git fetch -q origin "${GITOPS_BRANCH}"
+            RECORDED_RENDER=$(recorded_at "origin/${GITOPS_BRANCH}" "${IMAGES_REL}" render-sha)
+            if older_than_record "${RECORDED_RENDER}"; then
+              git reset -q --hard "origin/${GITOPS_BRANCH}"
+              skip_superseded "${RECORDED_RENDER}"
+            fi
             git pull --rebase origin "${GITOPS_BRANCH}" || { echo "hera-enhance-commit: rebase failed"; break; }
           done
           [ -n "$pushed" ] || { echo "hera-enhance-commit: could not push after 5 attempts"; exit 1; }
@@ -1690,6 +1723,7 @@ spec:
         REPO_URL="https://github.com/${ORG}/${GITOPS_REPO}.git"
         git clone --depth=1 --branch "${GITOPS_BRANCH}" "${REPO_URL}" /tmp/gitops
         git_assert_no_token /tmp/gitops
+{{ include "kubecore-ci-workflows.monotonic" . | indent 8 }}
         cd /tmp/gitops
 
         # pipeline-images.yaml is written by Crossplane at
@@ -1790,6 +1824,7 @@ spec:
             [ "${KEY}" = "dataset-sha" ] && continue
             [ "${KEY}" = "context-sha" ] && continue
             [ "${KEY}" = "wft-bytes" ] && continue
+            [ "${KEY}" = "render-sha" ] && continue
             [ "${KEY}" = "kaos-lib-package" ] && continue
             [ "${KEY}" = "kaos-lib-compat" ] && continue
             [ "${KEY}" = "produced-datasets" ] && continue
@@ -1826,11 +1861,30 @@ spec:
         # Per-step image tags cannot substitute: a step only rebuilds when its
         # own directory changes, so each carries its OWN sha and none of them
         # tracks HEAD.
+        # An unlocked render-only run for an OLDER commit can reach this line after the newer
+        # commit's build recorded itself: it must not move the record back (MONOTONIC).
         COMMIT_SHA="{{`{{workflow.parameters.commit_sha}}`}}"
-        if [ -n "${COMMIT_SHA}" ]; then
+        if [ -n "${COMMIT_SHA}" ] && older_than_record "$(yq e '.data."last-built-sha" // ""' "${IMAGES_PATH}")"; then
+          echo "Not recording last-built-sha = ${COMMIT_SHA}: the record names a newer commit"
+        elif [ -n "${COMMIT_SHA}" ]; then
           echo "Recording last-built-sha = ${COMMIT_SHA}"
           yq e -i ".data.\"last-built-sha\" = \"${COMMIT_SHA}\"" "${IMAGES_PATH}"
         fi
+
+        # The stamps of this run's render (render-sha, context-sha, engine-version, wft-bytes) for the
+        # keys the record still lacks: hera-enhance-commit could not write them when the file did
+        # not exist yet at render time. A key that has a value is never overwritten here.
+        # STAMPS begin (executed by tests/render-monotonic)
+        if [ -f /workspace/out/render-stamp ]; then
+          while IFS='=' read -r STAMP_KEY STAMP_VALUE; do
+            [ -n "${STAMP_KEY}" ] && [ -n "${STAMP_VALUE}" ] || continue
+            if [ -z "$(yq e ".data.\"${STAMP_KEY}\" // \"\"" "${IMAGES_PATH}")" ]; then
+              echo "Recording ${STAMP_KEY} = ${STAMP_VALUE} (the render found no record to stamp)"
+              STAMP_KEY="${STAMP_KEY}" STAMP_VALUE="${STAMP_VALUE}" yq e -i '.data[strenv(STAMP_KEY)] = strenv(STAMP_VALUE)' "${IMAGES_PATH}"
+            fi
+          done < /workspace/out/render-stamp
+        fi
+        # STAMPS end
 
         # kaos-lib report (PRD novelcore/kaos#1147): the spec every step image
         # that declares ARG KAOS_LIB_PACKAGE now has ("none" = no step does) and
@@ -1889,6 +1943,10 @@ spec:
         readOnly: true
       - name: registry-auth
         mountPath: /etc/registry-auth
+        readOnly: true
+      # The render's record of itself (render-stamp), read only.
+      - name: workspace
+        mountPath: /workspace
         readOnly: true
 
   - name: tag
