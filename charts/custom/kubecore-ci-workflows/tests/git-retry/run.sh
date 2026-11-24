@@ -19,8 +19,8 @@ expect_eq() {
 T=$(mktemp -d)
 trap 'rm -rf "$T"' EXIT
 helm template t "$CHART" --set github.org=acme > "$T/rendered.yaml" || { echo "FAIL: helm template"; exit 1; }
-# the first copy of the wrapper: from `git_once() {` to the line before `git_assert_no_token() {`
-awk '/^ *git_once\(\) \{/ && !seen {seen=1; on=1} on && /^ *git_assert_no_token\(\) \{/ {exit} on {sub(/^ +/, ""); print}' \
+# the first copy of the wrapper: from its `export GIT_HTTP_LOW_SPEED_LIMIT=` line to the line before `git_assert_no_token() {`
+awk '/^ *export GIT_HTTP_LOW_SPEED_LIMIT=/ && !seen {seen=1; on=1} on && /^ *git_assert_no_token\(\) \{/ {exit} on {sub(/^ +/, ""); print}' \
   "$T/rendered.yaml" > "$T/wrapper.sh"
 expect_eq "$(grep -c '^git() {' "$T/wrapper.sh")" "1" "the rendered chart holds the wrapper"
 
@@ -69,6 +69,47 @@ expect_eq "$RC_GOT $CALLS_GOT" "128 1" "a call that is not networked is never tr
 TOKEN_FOR_CALL="ghs_fake" call 1 "$DNS" ls-remote https://github.com/acme/app.git
 expect_eq "$RC_GOT $CALLS_GOT" "0 2" "with a token the call is tried again the same way"
 expect_eq "$(printf '%s' "$OUT_GOT$ERR_GOT" | grep -c ghs_fake)" "0" "the token is in no output"
+
+# 2026-11-24 e2e run: curl's own 300 s bound ended in "Resolving timed out after 300101 milliseconds"
+# and hera-enhance-commit failed on its one attempt. That wording, a reset, a gateway error and a
+# call that outlived the per-call cap (exit 124) are the same kind of failure: made again.
+RES="fatal: unable to access 'https://github.com/acme/gitops.git/': Resolving timed out after 300101 milliseconds"
+call 2 "$RES" clone --depth=1 https://github.com/acme/gitops.git /tmp/x
+expect_eq "$RC_GOT $CALLS_GOT" "0 3" "a clone whose name resolution timed out twice succeeds on the third call"
+call 1 "fatal: unable to access 'https://github.com/acme/a.git/': Recv failure: Connection reset by peer" fetch origin
+expect_eq "$RC_GOT $CALLS_GOT" "0 2" "a reset connection is tried again"
+call 1 "fatal: unable to access 'https://github.com/acme/a.git/': The requested URL returned error: 503" fetch origin
+expect_eq "$RC_GOT $CALLS_GOT" "0 2" "a 503 from the remote is tried again"
+call 1 "error: RPC failed; HTTP 502 curl 22 The requested URL returned error: 502" push
+expect_eq "$RC_GOT $CALLS_GOT" "0 2" "a failed push on a 502 is tried again"
+RC=124 call 1 "" fetch origin
+expect_eq "$RC_GOT $CALLS_GOT" "0 2" "a call ended by the per-call cap (124) is tried again"
+RC=143 call 1 "Terminated" fetch origin
+expect_eq "$RC_GOT $CALLS_GOT" "0 2" "a call ended by busybox timeout (143) is tried again"
+call 99 "fatal: Authentication failed for 'https://github.com/acme/a.git/'" clone https://github.com/acme/a.git /tmp/y
+expect_eq "$RC_GOT $CALLS_GOT" "128 1" "a refused login is not tried again"
+call 99 "remote: Invalid username or token. Password authentication is not supported" fetch origin
+expect_eq "$RC_GOT $CALLS_GOT" "128 1" "a refused token is not tried again"
+call 99 "fatal: Remote branch nope not found in upstream origin" clone --branch nope https://github.com/acme/a.git /tmp/y
+expect_eq "$RC_GOT $CALLS_GOT" "128 1" "a missing branch is not tried again"
+
+# a clone that failed half way leaves nothing for the next call
+rm -rf "$T/half"
+cat > "$T/bin/git" <<'STUB'
+#!/bin/sh
+# clone: the first call leaves a half made target and fails, a later call fails if the target exists
+n=$(cat "$CALLS" 2>/dev/null || echo 0); n=$((n + 1)); echo "$n" > "$CALLS"
+for a; do t=$a; done
+if [ "$n" -eq 1 ]; then mkdir -p "$t/.git"; echo "fatal: unable to access 'x': Resolving timed out after 300101 milliseconds" >&2; exit 128; fi
+if [ -e "$t" ]; then echo "fatal: destination path exists" >&2; exit 128; fi
+echo "ok"
+STUB
+call 0 "" clone https://github.com/acme/a.git "$T/half"
+expect_eq "$RC_GOT $CALLS_GOT" "0 2" "a clone is made again into a clean target"
+
+# the git defaults that end a stalled transfer
+OUT_GOT=$(cd "$T" && sh -c '. "$0"; printf "%s %s" "$GIT_HTTP_LOW_SPEED_LIMIT" "$GIT_HTTP_LOW_SPEED_TIME"' "$T/wrapper.sh")
+expect_eq "$OUT_GOT" "1000 60" "a transfer under 1 kB/s for 60 s is ended by git"
 
 echo "passed: ${PASSED}, failed: ${FAILED}"
 exit "$FAILED"
