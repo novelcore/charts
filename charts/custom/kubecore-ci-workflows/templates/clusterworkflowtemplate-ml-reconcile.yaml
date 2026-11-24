@@ -270,9 +270,6 @@ spec:
           parameters:
           - name: mode
             value: "{{`{{inputs.parameters.mode}}`}}"
-          # this retry's index (0 = first attempt): a forced run uses it to count its re-reads
-          - name: attempt
-            value: "{{`{{retries}}`}}"
     - - name: not-yet
         template: exit-with-code
         when: "{{`{{steps.attempt.outputs.parameters.rc}}`}} == 3 || {{`{{steps.attempt.outputs.parameters.rc}}`}} == 137"
@@ -306,8 +303,6 @@ spec:
       parameters:
       - name: mode
         value: decide
-      - name: attempt
-        value: "0"
     steps:
     - - name: run
         template: check-drift
@@ -317,8 +312,6 @@ spec:
           parameters:
           - name: mode
             value: "{{`{{inputs.parameters.mode}}`}}"
-          - name: attempt
-            value: "{{`{{inputs.parameters.attempt}}`}}"
     outputs:
       parameters:
       - name: needs_build
@@ -379,9 +372,6 @@ spec:
       # check, run under the build lock by decide-and-submit.
       - name: mode
         value: decide
-      # The retry index of the loop that runs this attempt (forced runs: see RE-READ below).
-      - name: attempt
-        value: "0"
     # Exit 3 is only force mode's "not yet" for inputs that are NOT builds (repo,
     # pipeline-images or gitops context still arriving); a killed pod is 137 in every mode;
     # every other outcome exits 0 or fails for real. check-drift-attempts retries 3 and 137.
@@ -715,6 +705,21 @@ spec:
             | if . == null then "" else "\(.name) (\(.phase), \(.age | floor)s ago)" end' 2>&1 || echo "unreadable"
         }
 
+        # kl_tries REF: how many finished builds this reconciler submitted for this spec (the Workflows are
+        # kept by the build's ttlStrategy: 1 day after success, 3 days after failure, so the count is "in the
+        # retention window"). Prints a number, or "unreadable".
+        kl_tries() {
+          kubectl get workflows -n "{{`{{workflow.namespace}}`}}" \
+              -l "platform.kubecore.io/app=${APP},platform.kubecore.io/submitted-by=ml-ci-reconcile,platform.kubecore.io/kaos-lib=${1}" \
+              -o json 2>/dev/null | jq -r --arg app "$APP" --arg ref "$1" '[.items[]
+                | select((.metadata.labels // {})["platform.kubecore.io/app"] == $app
+                         and (.metadata.labels // {})["platform.kubecore.io/submitted-by"] == "ml-ci-reconcile"
+                         and (.metadata.labels // {})["platform.kubecore.io/kaos-lib"] == $ref
+                         and (.status.phase == "Succeeded" or .status.phase == "Failed" or .status.phase == "Error"))] | length' 2>/dev/null \
+            || echo unreadable
+        }
+        KL_MAX_TRIES={{ int .Values.ci.kaosLibRebuild.maxPollTries }}
+
         # pin_due: sets PIN_REF (the spec's ref, "" = nothing due) and PIN_HAVE. Used by the forced run AND the
         # hourly poll, so a pin whose forced run read the gitops context BEFORE it landed (the operator creates
         # the sync Workflow and writes the context in one pass, and nothing orders the two) is still found: by
@@ -739,10 +744,9 @@ spec:
           fi
         }
 
-        # RECHECK_READS: how many times a forced run with no context_sha re-reads gitops before it
-        # concludes "nothing to do" (one place: ci.reconcileRecheckReads; the gap is the loop's 60 s backoff).
-        RECHECK_READS={{ int .Values.ci.reconcileRecheckReads }}
-        ATTEMPT="{{`{{inputs.parameters.attempt}}`}}"
+        # RECHECK_SECONDS: how long a forced run with no context_sha keeps re-reading gitops before it
+        # concludes "nothing to do" (one place: ci.reconcileRecheckSeconds). Only the UNLOCKED await step waits.
+        RECHECK_SECONDS={{ int .Values.ci.reconcileRecheckSeconds }}
         if [ "$FORCE" = "true" ]; then
           WANT_CTX="{{`{{workflow.parameters.context_sha}}`}}"
           HAVE_CTX=""
@@ -812,14 +816,23 @@ spec:
               # RE-READ: a forced run exists because the operator says the context changed, and the
               # operator creates this Workflow and writes the gitops context in one pass, with no
               # order between them: "nothing changed" right after creation may be the old context.
-              # With no context_sha to wait for, the run answers "not yet" (exit 3: the loop retries
-              # after its 60 s backoff, holding NO check-drift slot and no pod meanwhile) RECHECK_READS
-              # times, and each retry reads gitops afresh and decides again with all of the logic above.
-              # It concludes only on the last one. The retry index counts the reads (an earlier "not yet"
-              # of this run spent some of them: fewer re-reads, never more).
-              case "$ATTEMPT" in ""|*[!0-9]*) ATTEMPT=$RECHECK_READS ;; esac
-              if [ -z "$WANT_CTX" ] && [ "$ATTEMPT" -lt "$RECHECK_READS" ]; then
-                not_yet "re-read $((ATTEMPT + 1)) of ${RECHECK_READS}: nothing to do on this read (context-sha of the last render ${CTX_LAST:0:12} = gitops ${HAVE_CTX:0:12}, kaos-lib pin ${PIN_HAVE:-<none>} vs ${KL_WANT:-<none>}); reading gitops again"
+              # With no context_sha to wait for, the UNLOCKED await step (no build lock, no slot between
+              # attempts) answers "not yet" (exit 3, the loop retries 60 s later) while the Workflow is
+              # younger than RECHECK_SECONDS; every retry reads gitops afresh and runs all of the logic
+              # above again. The locked decide step never waits: it re-reads and decides once, on the
+              # state of that moment, so nothing is decided on the await step's read.
+              if [ "$MODE" = "await" ] && [ -z "$WANT_CTX" ] && [ "$RECHECK_SECONDS" -gt 0 ]; then
+                WF_BORN="{{`{{workflow.creationTimestamp}}`}}"
+                WF_AGE=""
+                case "$WF_BORN" in "") ;; *) WF_AGE=$(printf '"%s"' "$WF_BORN" | jq -r 'fromdateiso8601 | (now | floor) - .' 2>/dev/null) || WF_AGE="" ;; esac
+                case "$WF_AGE" in
+                  ""|*[!0-9-]*)
+                    echo "reconcile: WARN re-read: cannot read the Workflow's age (creationTimestamp '${WF_BORN}'): not waiting, concluding on this read" ;;
+                  *)
+                    if [ "$WF_AGE" -lt "$RECHECK_SECONDS" ]; then
+                      not_yet "re-read: nothing to do on this read, Workflow ${WF_AGE}s old of ${RECHECK_SECONDS}s (context-sha of the last render ${CTX_LAST:0:12} = gitops ${HAVE_CTX:0:12}, kaos-lib pin ${PIN_HAVE:-<none>} vs ${KL_WANT:-<none>}); reading gitops again"
+                    fi ;;
+                esac
               fi
               printf 'false' > /tmp/needs_build
               echo "reconcile: FORCED but already satisfied — HEAD ${HEAD_SHA} built and rendered from the current context (${CTX_LAST:0:12}) by engine ${ENG_WANT}; nothing to do"
@@ -866,6 +879,23 @@ spec:
         # KAOS-LIB build leaves a stale spec alone). This is what closes the race of the forced run
         # reading the gitops context before it landed: no forced run, however early, is the only trigger.
         pin_due
+        if [ -n "$PIN_REF" ]; then
+          # A pin that cannot be built (the build ends, well or not, and the images never record the wanted spec)
+          # would be tried every hour for ever by an idle app: the poll tries one spec at most KL_MAX_TRIES times
+          # per retention window of its finished builds. A push or a run of the app still builds it, and so does
+          # the forced run of a changed context. Unreadable: not rebuilt this poll (unknown never submits work).
+          PIN_TRIES=$(kl_tries "$PIN_REF")
+          case "$PIN_TRIES" in
+            ""|*[!0-9]*)
+              echo "reconcile: KAOS-LIB PIN (${PIN_HAVE:-<unrecorded>} -> ${KL_WANT}) — the finished attempts at this spec cannot be counted (${PIN_TRIES:-empty}): not rebuilding this poll"
+              PIN_REF="" ;;
+            *)
+              if [ "$KL_MAX_TRIES" -gt 0 ] && [ "$PIN_TRIES" -ge "$KL_MAX_TRIES" ]; then
+                echo "reconcile: KAOS-LIB PIN — the pinned kaos-lib version ${KL_WANT} could not be built: ${PIN_TRIES} builds at this spec ended and the images still have ${PIN_HAVE:-<unrecorded>}; the hourly poll stops trying (a push, a run of the app or a changed context still builds it). Fix: change spec.ml.kaosLib to a version that installs"
+                PIN_REF=""
+              fi ;;
+          esac
+        fi
         if [ -n "$PIN_REF" ]; then
           printf '%s' "$PIN_REF" > /tmp/kaos_lib_ref
           printf 'true' > /tmp/needs_build

@@ -311,8 +311,8 @@ attempt() {  # attempt PHASE AGE_S REF
     "$T/workflows.json" > "$T/w" && mv "$T/w" "$T/workflows.json"
 }
 run_drift() {
-  sed -e "s#{{workflow.namespace}}#ci#g" -e "s#{{workflow.parameters.force}}#${FORCE:-false}#g" -e "s#{{inputs.parameters.mode}}#decide#g" \
-      -e "s#{{workflow.parameters.context_sha}}#${WANT_CTX:-}#g" -e "s#{{inputs.parameters.attempt}}#${ATTEMPT_N:-}#g" -e "s#{{workflow.parameters.app_name}}#${APP}#g" \
+  sed -e "s#{{workflow.namespace}}#ci#g" -e "s#{{workflow.parameters.force}}#${FORCE:-false}#g" -e "s#{{inputs.parameters.mode}}#${MODE:-decide}#g" \
+      -e "s#{{workflow.parameters.context_sha}}#${WANT_CTX:-}#g" -e "s#{{workflow.creationTimestamp}}#${BORN-}#g" -e "s#{{workflow.parameters.app_name}}#${APP}#g" \
       -e "s#{{workflow.parameters.project_name}}#proj#g" -e "s#{{workflow.parameters.branch}}#dev#g" \
       -e "s#{{workflow.parameters.ci_namespace}}#ci#g" -e "s#{{workflow.parameters.gitops_repository}}#proj-gitops#g" \
       -e "s#{{workflow.parameters.repo_url}}##g" -e "s#{{workflow.parameters.ml_namespace}}#proj-train#g" \
@@ -445,29 +445,57 @@ expect_eq "$([ "${RETRY_LIMIT:-0}" -gt 0 ] && echo bounded)" "bounded" "the wait
 PREV=$(yq 'select(.metadata.name == "ml-ci-build") | .spec.templates[] | select(.name == "patch-images") | .inputs.parameters[].name' "$RENDERED" | grep -c '^kaos_lib_prev$')
 expect_eq "$PREV" "1" "patch-images takes the record this run read (kaos_lib_prev) for its compare-and-set"
 # RE-READ: a forced run with no context_sha that finds nothing to do does not conclude at once (the context it is for may not
-# have landed yet): it answers "not yet" (exit 3, the loop retries 60 s later holding no slot) on retries 0..2 and concludes on 3.
-pin_case "$SPEC"; ATTEMPT_N=0 FORCE=true run_drift
-expect_eq "$RC/$NEEDS" "3/false" "re-read: forced, nothing to do on the first read: not yet, not concluded"
-expect_has "$OUT" "re-read 1 of 3" "re-read: the log says which read and what it compared"
+# have landed yet). Only the UNLOCKED await step waits: it answers "not yet" (exit 3, the loop retries 60 s later holding no
+# slot and no build lock) while the Workflow is younger than ci.reconcileRecheckSeconds (180); the locked decide step never waits.
+pin_case "$SPEC"; MODE=await BORN=$(ago 30) FORCE=true run_drift
+expect_eq "$RC/$NEEDS" "3/false" "re-read: await step, nothing to do, Workflow 30 s old: not yet, not concluded"
+expect_has "$OUT" "Workflow 30s old of 180s" "re-read: the log says the age and the limit"
 expect_has "$OUT" "context-sha of the last render" "re-read: ... and what it compared"
-pin_case "$SPEC"; ATTEMPT_N=2 FORCE=true run_drift
-expect_eq "$RC/$NEEDS" "3/false" "re-read: the third read still waits"
-pin_case "$SPEC"; ATTEMPT_N=3 FORCE=true run_drift
-expect_eq "$RC/$NEEDS" "0/false" "re-read: after the last re-read it concludes: already satisfied"
+pin_case "$SPEC"; MODE=await BORN=$(ago 150) FORCE=true run_drift
+expect_eq "$RC" "3" "re-read: 150 s old: still waits"
+pin_case "$SPEC"; MODE=await BORN=$(ago 200) FORCE=true run_drift
+expect_eq "$RC/$NEEDS" "0/false" "re-read: 200 s old: concludes, already satisfied"
 expect_has "$OUT" "already satisfied" "re-read: says so"
-pin_case "$SPEC"; WANT_CTX="$CTX_SHA" ATTEMPT_N=0 FORCE=true run_drift
+pin_case "$SPEC"; MODE=decide BORN=$(ago 30) FORCE=true run_drift
+expect_eq "$RC/$NEEDS" "0/false" "re-read: the locked decide step never waits (it holds the app's build lock): it decides on its own fresh read"
+pin_case "$SPEC"; WANT_CTX="$CTX_SHA" MODE=await BORN=$(ago 30) FORCE=true run_drift
 expect_eq "$RC/$NEEDS" "0/false" "re-read: a trigger that names its context (it waited for it) concludes at once"
-# the context lands after the first read: read 1 sees the old one (images have it: nothing to do), read 2 sees the pin
-GIT_REC="$OLD" drift_case "$OLD" "$OLD"; ATTEMPT_N=0 FORCE=true run_drift
+pin_case "$SPEC"; MODE=await BORN="" FORCE=true run_drift
+expect_eq "$RC" "0" "re-read: no creation time: concludes"
+expect_has "$OUT" "WARN re-read: cannot read the Workflow's age" "re-read: ... loudly, not silently"
+pin_case "$SPEC"; MODE=await BORN="not-a-time" FORCE=true run_drift
+expect_has "$OUT" "WARN re-read: cannot read the Workflow's age (creationTimestamp 'not-a-time')" "re-read: an unreadable creation time is loud and names the value"
+# the context lands after the first read: read 1 sees the old one (images have it: nothing to do), a later read sees the pin
+GIT_REC="$OLD" drift_case "$OLD" "$OLD"; MODE=await BORN=$(ago 30) FORCE=true run_drift
 expect_eq "$RC/$NEEDS" "3/false" "re-read: the old context at the first read: waits"
-pin_case "$OLD"; ATTEMPT_N=1 FORCE=true run_drift
-expect_eq "$RC/$NEEDS/$KREF" "0/true/$REF" "re-read: the pin has landed at the second read: the rebuild is submitted with its kaos_lib_ref"
-pin_case "$OLD"; ATTEMPT_N=0 FORCE=true run_drift
-expect_eq "$RC/$NEEDS/$KREF" "0/true/$REF" "re-read: work at the first read: submitted at once, no wait"
-GIT_REC="$OLD" drift_case "$OLD" "$OLD"; ATTEMPT_N=0 FORCE=false run_drift
+pin_case "$OLD"; MODE=await BORN=$(ago 90) FORCE=true run_drift
+expect_eq "$RC/$NEEDS/$KREF" "0/true/$REF" "re-read: the pin has landed at a later read: acts at once"
+pin_case "$OLD"; MODE=decide BORN=$(ago 90) FORCE=true run_drift
+expect_eq "$RC/$NEEDS/$KREF" "0/true/$REF" "re-read: the locked decision re-reads and submits the rebuild with its kaos_lib_ref"
+pin_case "$OLD"; MODE=await BORN=$(ago 5) FORCE=true run_drift
+expect_eq "$RC/$NEEDS" "0/true" "re-read: work at the first read: no wait"
+GIT_REC="$OLD" drift_case "$OLD" "$OLD"; MODE=await BORN=$(ago 5) FORCE=false run_drift
 expect_eq "$RC" "0" "re-read: the hourly poll never waits"
-BACKOFF=$(yq 'select(.metadata.name == "ml-ci-reconcile") | .spec.templates[] | select(.name == "check-drift-attempts") | .retryStrategy.backoff.duration' "$RENDERED" | grep -v '^---$' | grep .)
-expect_eq "$BACKOFF" "60s" "re-read: 3 re-reads x the loop's 60 s backoff = 3 minutes in total, with no pod and no check-drift slot held between reads"
+# structure: the wait is outside the app's build lock, and nothing depends on {{retries}}
+LOCKED=$(yq 'select(.metadata.name == "ml-ci-reconcile") | .spec.templates[] | select(.synchronization.mutexes != null) | .name' "$RENDERED" | grep -v '^---$' | grep . | tr '\n' ' ')
+expect_eq "$LOCKED" "decide-and-submit " "re-read: the only template that takes the app's build mutex is decide-and-submit"
+STEPS=$(yq 'select(.metadata.name == "ml-ci-reconcile") | .spec.templates[] | select(.name == "ml-ci-reconcile") | .steps[][] | .name + ":" + .template + ":" + (.arguments.parameters[0].value // "")' "$RENDERED" | grep -v '^---$' | grep . | tr '\n' ' ')
+expect_eq "$STEPS" "await-inputs:check-drift-with-retry:await decide:decide-and-submit: " "re-read: the wait is the await-inputs step, which runs BEFORE and OUTSIDE the lock; decide runs check-drift in decide mode under the lock"
+DMODE=$(yq 'select(.metadata.name == "ml-ci-reconcile") | .spec.templates[] | select(.name == "decide-and-submit") | .steps[][] | select(.name == "check-drift") | .arguments.parameters[] | select(.name == "mode") | .value' "$RENDERED" | grep -v '^---$' | grep .)
+expect_eq "$DMODE" "decide" "re-read: the step under the lock runs in decide mode (no waiting)"
+expect_eq "$(grep -c '{{retries}}' "$RENDERED")" "0" "re-read: nothing counts on {{retries}}"
+expect_eq "$(grep -c 'reconcileRecheckReads' "$RENDERED")" "0" "re-read: the read count is gone"
+# the poll's pin rebuild is bounded for an idle app: a spec that cannot be built is not retried every hour for ever
+RUN_AGE="" REF_AGE="" PINNED=1 GIT_REC="$OLD" drift_case "$OLD" "$SPEC"; attempt Failed 7200 "$REF"; attempt Failed 7300 "$REF"; run_drift
+expect_eq "$NEEDS/$KREF" "true/$REF" "poll: two finished attempts at this spec: tried again"
+RUN_AGE="" REF_AGE="" PINNED=1 GIT_REC="$OLD" drift_case "$OLD" "$SPEC"; attempt Failed 7200 "$REF"; attempt Succeeded 7300 "$REF"; attempt Failed 7400 "$REF"; run_drift
+expect_eq "$RC/$NEEDS/$KREF" "0/false/" "poll: three finished attempts at this spec and the images still lack it: stops"
+expect_has "$OUT" "could not be built" "poll: says the pinned version could not be built"
+expect_has "$OUT" "3 builds at this spec ended" "poll: ... and how many tried"
+RUN_AGE="" REF_AGE="" PINNED=1 GIT_REC="$OLD" drift_case "$OLD" "$SPEC"; attempt Failed 7200 "000000000000"; attempt Failed 7300 "000000000000"; attempt Failed 7400 "000000000000"; run_drift
+expect_eq "$NEEDS/$KREF" "true/$REF" "poll: three attempts at ANOTHER spec do not count against this one"
+RUN_AGE="" REF_AGE="" PINNED=1 GIT_REC="$OLD" drift_case "$OLD" "$SPEC"; attempt Failed 7200 "$REF"; attempt Failed 7300 "$REF"; attempt Failed 7400 "$REF"; FORCE=true run_drift
+expect_eq "$NEEDS/$KREF" "true/$REF" "forced run: a changed context still builds the pin whatever the poll tried"
 # a build of HEAD already queued on the lock: no duplicate, unless it would not rebuild the pin
 queue_build() {  # queue_build EVENT_TYPE LABEL: a Pending ml-ci-build of HEAD
   jq --arg ev "$1" --arg ref "$2" --arg head "$HEAD_SHA" --arg app "$APP" '.items += [{metadata: {name: "ml-ci-build-q", labels: (if $ref == "" then {} else {"platform.kubecore.io/kaos-lib": $ref} end)},
