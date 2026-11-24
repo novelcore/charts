@@ -1432,6 +1432,8 @@ spec:
         skip_superseded() {
           echo "hera-enhance-commit: SUPERSEDED: render-sha ${1} is a newer commit than ${RUN_SHA}; its render stays, nothing of this run is written"
           printf 'Render skipped: a newer commit (%s) was already rendered.\n' "$(printf '%s' "${1}" | cut -c1-8)" > /workspace/report-extra.md
+          # A stamp of this run left by an earlier attempt must not reach patch-images.
+          rm -f /workspace/out/render-stamp
           exit 0
         }
         RECORDED_RENDER=""
@@ -2393,27 +2395,36 @@ spec:
 {{ include "kubecore-ci-workflows.engineScript" . | indent 8 }}
         if [ -n "${ERROR}" ]; then
           ATTEMPT=$(python3 -I /tmp/engine.py attempt --context "${CONTEXT_PATH:-/dev/null}" ${OLD_APP:+--refused-commit "${SHA}"})
-          ENGINE_ERROR="${ERROR}" ENGINE_ATTEMPT="${ATTEMPT}" \
-            yq e -i '.data."engine-last-error" = strenv(ENGINE_ERROR) | .data."engine-attempt" = strenv(ENGINE_ATTEMPT)' "${IMAGES_PATH}"
           echo "engine-record: ${ERROR}"
           MESSAGE="record the engine error"
         else
-          yq e -i 'del(.data."engine-last-error") | del(.data."engine-attempt")' "${IMAGES_PATH}"
           echo "engine-record: the engine rendered/built successfully — clearing engine-last-error"
           MESSAGE="clear the engine error"
         fi
-        git add "${IMAGES_PATH}"
-        if git diff --cached --quiet; then
-          echo "engine-record: already recorded"
-          exit 0
-        fi
-        git commit -m "ml-ci(${APP_NAME}): ${MESSAGE}"
+        # apply_record: write this run's two fields and commit. Called again on the state a rejected push
+        # is replaced with (no rebase: the neighbouring render-sha line moves on every build and a rebase
+        # of this file can conflict). Returns 1 when there is nothing to commit.
+        apply_record() {
+          [ -f "${IMAGES_PATH}" ] || return 1
+          if [ -n "${ERROR}" ]; then
+            ENGINE_ERROR="${ERROR}" ENGINE_ATTEMPT="${ATTEMPT}" \
+              yq e -i '.data."engine-last-error" = strenv(ENGINE_ERROR) | .data."engine-attempt" = strenv(ENGINE_ATTEMPT)' "${IMAGES_PATH}"
+          else
+            yq e -i 'del(.data."engine-last-error") | del(.data."engine-attempt")' "${IMAGES_PATH}"
+          fi
+          git add "${IMAGES_PATH}"
+          if git diff --cached --quiet; then return 1; fi
+          git commit -m "ml-ci(${APP_NAME}): ${MESSAGE}"
+        }
+        apply_record || { echo "engine-record: already recorded"; exit 0; }
         pushed=""
         for attempt in 1 2 3 4 5; do
           if git push 2>&1; then pushed=yes; break; fi
-          echo "engine-record: push rejected (attempt ${attempt}) — rebasing onto the latest ${GITOPS_BRANCH}"
+          echo "engine-record: push rejected (attempt ${attempt}) — writing again onto the latest ${GITOPS_BRANCH}"
           sleep $((attempt * 3))
-          git pull --rebase origin "${GITOPS_BRANCH}" || { echo "engine-record: rebase failed"; break; }
+          git fetch origin "${GITOPS_BRANCH}" || { echo "engine-record: fetch failed"; break; }
+          git reset --hard "origin/${GITOPS_BRANCH}"
+          apply_record || { echo "engine-record: already recorded"; exit 0; }
         done
         [ -n "$pushed" ] || { echo "engine-record: could not push after 5 attempts"; exit 1; }
       volumeMounts:
