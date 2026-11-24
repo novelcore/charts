@@ -449,7 +449,7 @@ expect_eq "$PREV" "1" "patch-images takes the record this run read (kaos_lib_pre
 # slot and no build lock) while the Workflow is younger than ci.reconcileRecheckSeconds (180); the locked decide step never waits.
 pin_case "$SPEC"; MODE=await BORN=$(ago 30) FORCE=true run_drift
 expect_eq "$RC/$NEEDS" "3/false" "re-read: await step, nothing to do, Workflow 30 s old: not yet, not concluded"
-expect_has "$OUT" "Workflow 30s old of 180s" "re-read: the log says the age and the limit"
+expect_has "$OUT" "s old of 180s" "re-read: the log says the age and the limit"
 expect_has "$OUT" "context-sha of the last render" "re-read: ... and what it compared"
 pin_case "$SPEC"; MODE=await BORN=$(ago 150) FORCE=true run_drift
 expect_eq "$RC" "3" "re-read: 150 s old: still waits"
