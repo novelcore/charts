@@ -395,6 +395,11 @@ ci:
     slots: 6
     configMapName: ci-check-drift-slots
     key: slots
+  # A forced ml-ci-reconcile run that was given no context_sha and finds nothing to do re-reads the
+  # gitops context this many times (one per retry of the check loop, 60 s apart, no pod and no
+  # check-drift slot held between reads) before it concludes: the operator creates the run and
+  # writes the context in one pass, so an early read may be the old context. 0 = conclude at once.
+  reconcileRecheckReads: 3
   # Upper bound (seconds) of one ml-ci-reconcile run, including its wait for the
   # app's build lock (check-drift takes the same mutex as ml-ci-build). A build
   # that never releases the lock fails the waiting run at this deadline.

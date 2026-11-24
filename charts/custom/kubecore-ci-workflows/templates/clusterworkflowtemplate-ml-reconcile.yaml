@@ -270,6 +270,9 @@ spec:
           parameters:
           - name: mode
             value: "{{`{{inputs.parameters.mode}}`}}"
+          # this retry's index (0 = first attempt): a forced run uses it to count its re-reads
+          - name: attempt
+            value: "{{`{{retries}}`}}"
     - - name: not-yet
         template: exit-with-code
         when: "{{`{{steps.attempt.outputs.parameters.rc}}`}} == 3 || {{`{{steps.attempt.outputs.parameters.rc}}`}} == 137"
@@ -303,6 +306,8 @@ spec:
       parameters:
       - name: mode
         value: decide
+      - name: attempt
+        value: "0"
     steps:
     - - name: run
         template: check-drift
@@ -312,6 +317,8 @@ spec:
           parameters:
           - name: mode
             value: "{{`{{inputs.parameters.mode}}`}}"
+          - name: attempt
+            value: "{{`{{inputs.parameters.attempt}}`}}"
     outputs:
       parameters:
       - name: needs_build
@@ -372,6 +379,9 @@ spec:
       # check, run under the build lock by decide-and-submit.
       - name: mode
         value: decide
+      # The retry index of the loop that runs this attempt (forced runs: see RE-READ below).
+      - name: attempt
+        value: "0"
     # Exit 3 is only force mode's "not yet" for inputs that are NOT builds (repo,
     # pipeline-images or gitops context still arriving); a killed pod is 137 in every mode;
     # every other outcome exits 0 or fails for real. check-drift-attempts retries 3 and 137.
@@ -729,6 +739,10 @@ spec:
           fi
         }
 
+        # RECHECK_READS: how many times a forced run with no context_sha re-reads gitops before it
+        # concludes "nothing to do" (one place: ci.reconcileRecheckReads; the gap is the loop's 60 s backoff).
+        RECHECK_READS={{ int .Values.ci.reconcileRecheckReads }}
+        ATTEMPT="{{`{{inputs.parameters.attempt}}`}}"
         if [ "$FORCE" = "true" ]; then
           WANT_CTX="{{`{{workflow.parameters.context_sha}}`}}"
           HAVE_CTX=""
@@ -795,6 +809,18 @@ spec:
             if [ -n "$CTX_LAST" ] && [ -n "$HAVE_CTX" ] && [ "$CTX_LAST" = "$HAVE_CTX" ] \
                && { [ -z "$WANT_CTX" ] || [ "$CTX_LAST" = "$WANT_CTX" ]; } \
                && [ -n "$ENG_WANT" ] && [ "$ENG_HAVE" = "$ENG_WANT" ] && [ "$ENG_COMPOSE" = "$ENG_WANT" ]; then
+              # RE-READ: a forced run exists because the operator says the context changed, and the
+              # operator creates this Workflow and writes the gitops context in one pass, with no
+              # order between them: "nothing changed" right after creation may be the old context.
+              # With no context_sha to wait for, the run answers "not yet" (exit 3: the loop retries
+              # after its 60 s backoff, holding NO check-drift slot and no pod meanwhile) RECHECK_READS
+              # times, and each retry reads gitops afresh and decides again with all of the logic above.
+              # It concludes only on the last one. The retry index counts the reads (an earlier "not yet"
+              # of this run spent some of them: fewer re-reads, never more).
+              case "$ATTEMPT" in ""|*[!0-9]*) ATTEMPT=$RECHECK_READS ;; esac
+              if [ -z "$WANT_CTX" ] && [ "$ATTEMPT" -lt "$RECHECK_READS" ]; then
+                not_yet "re-read $((ATTEMPT + 1)) of ${RECHECK_READS}: nothing to do on this read (context-sha of the last render ${CTX_LAST:0:12} = gitops ${HAVE_CTX:0:12}, kaos-lib pin ${PIN_HAVE:-<none>} vs ${KL_WANT:-<none>}); reading gitops again"
+              fi
               printf 'false' > /tmp/needs_build
               echo "reconcile: FORCED but already satisfied — HEAD ${HEAD_SHA} built and rendered from the current context (${CTX_LAST:0:12}) by engine ${ENG_WANT}; nothing to do"
               exit 0
