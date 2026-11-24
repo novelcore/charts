@@ -1417,13 +1417,18 @@ spec:
         print(f"GATE OK: {len(names)} params, {len([t for t in spec['templates'] if 'container' in t])} container templates")
         GATEEOF
 
+        # SIZE GUARD: a render over the limit fails here, before anything is committed.
+        python3 - /workspace/out/workflow-template.yaml "" <<'WFTSIZEEOF'
+{{ include "kubecore-ci-workflows.wftSizeGuard" . | indent 8 }}
+        WFTSIZEEOF
+        WFT_BYTES=$(wc -c < /workspace/out/workflow-template.yaml | tr -d ' ')
+        # WRITE begin (executed by tests/render-monotonic)
         # MONOTONIC: a run never replaces a render made from a NEWER commit. The render records the
         # commit it was made from (render-sha, same gitops commit as the render); this run skips when
         # its own commit is a strict ancestor of that one (older_than_record: equal or newer writes,
         # and so does every case that cannot be answered). Asked again after a lost push race below.
         WFT_FILE="${GITOPS_DIR}/workflow-template.yaml"
         IMAGES_FILE="${GITOPS_DIR}/pipeline-images.yaml"
-        IMAGES_REL="${IMAGES_FILE#/tmp/gitops/}"
         skip_superseded() {
           echo "hera-enhance-commit: SUPERSEDED: render-sha ${1} is a newer commit than ${RUN_SHA}; its render stays, nothing of this run is written"
           printf 'Render skipped: a newer commit (%s) was already rendered.\n' "$(printf '%s' "${1}" | cut -c1-8)" > /workspace/report-extra.md
@@ -1432,11 +1437,10 @@ spec:
         RECORDED_RENDER=""
         if [ -f "$IMAGES_FILE" ]; then RECORDED_RENDER=$(yq e '.data."render-sha" // ""' "$IMAGES_FILE"); fi
         if older_than_record "${RECORDED_RENDER}"; then skip_superseded "${RECORDED_RENDER}"; fi
-        # SIZE GUARD: a render over the limit fails here, before anything is committed.
-        python3 - /workspace/out/workflow-template.yaml "" <<'WFTSIZEEOF'
-{{ include "kubecore-ci-workflows.wftSizeGuard" . | indent 8 }}
-        WFTSIZEEOF
-        WFT_BYTES=$(wc -c < /workspace/out/workflow-template.yaml | tr -d ' ')
+        # apply_render: put this run's render into the gitops checkout. Called for the first attempt and
+        # again on the state a rejected push is replaced with, so every attempt writes onto exactly the
+        # state it pushes onto.
+        apply_render() {
         cp /workspace/out/workflow-template.yaml "$WFT_FILE"
         # The checkpoint helper source ships once per app as a ConfigMap next to the WFT
         # (the enhancer wrote it only when a step mounts it); a render that no longer needs
@@ -1545,43 +1549,51 @@ spec:
             print("pipeline-images already has exactly the image-<step> keys the WFT references")
         IMGEOF
         fi
-
+        }
+        stage_render() {
+          git add "${WFT_FILE}" "${IMAGES_FILE}" 2>/dev/null || git add "${WFT_FILE}"
+          # The helper ConfigMap: added, updated or removed with the WFT. `git add -A -- <path>` exits 128
+          # ("pathspec did not match any files") for a path that is neither on disk nor tracked, which is
+          # every app whose steps do not mount the helper (a first build, a CPU-only pipeline) — so only
+          # stage it when it exists or is tracked (a removal).
+          if [ -e "${HELPER_FILE}" ] || git ls-files --error-unmatch -- "${HELPER_FILE}" >/dev/null 2>&1; then
+            git add -A -- "${HELPER_FILE}"
+          fi
+        }
         cd /tmp/gitops
-        git add "${WFT_FILE}" "${IMAGES_FILE}" 2>/dev/null || git add "${WFT_FILE}"
-        # The helper ConfigMap: added, updated or removed with the WFT. `git add -A -- <path>` exits 128
-        # ("pathspec did not match any files") for a path that is neither on disk nor tracked, which is
-        # every app whose steps do not mount the helper (a first build, a CPU-only pipeline) — so only
-        # stage it when it exists or is tracked (a removal).
-        if [ -e "${HELPER_FILE}" ] || git ls-files --error-unmatch -- "${HELPER_FILE}" >/dev/null 2>&1; then
-          git add -A -- "${HELPER_FILE}"
-        fi
+        apply_render
+        stage_render
         if git diff --cached --quiet; then
           echo "hera-enhance-commit: rendered WFT already current — nothing to commit"
         else
-          git commit -m "ml-ci(${APP_NAME}): render WFT from pipeline.py (Hera+Hydra)"
-          # Retry rebase+push: the gitops branch has many concurrent writers
-          # (every app's CI in the project, plus Crossplane's RepositoryFile
-          # MRs). A single push loses the race whenever another commit lands
-          # first and dies "non-fast-forward" — dropping this app's render on
-          # the floor with a red build. Rebase and retry a few times instead.
+          git commit -q -m "ml-ci(${APP_NAME}): render WFT from pipeline.py (Hera+Hydra)"
+          # The gitops branch has many concurrent writers (every app's CI in the project, plus
+          # Crossplane's RepositoryFile MRs). A rejected push is NOT rebased: the commit is dropped, the
+          # branch fetched, the guard asked on that state and, when this run is not superseded, the
+          # render applied again onto it. Every attempt is "check, then write" on exactly the state it
+          # pushes onto, and nothing can conflict (every build moves render-sha).
           pushed=""
           for attempt in 1 2 3 4 5; do
             if git push 2>&1; then pushed=yes; break; fi
-            echo "hera-enhance-commit: push rejected (attempt ${attempt}) — rebasing onto the latest ${GITOPS_BRANCH}"
+            echo "hera-enhance-commit: push rejected (attempt ${attempt}) — applying the render again onto the latest ${GITOPS_BRANCH}"
             sleep $((attempt * 3))
-            # MONOTONIC again, on the state this commit would land on: a newer commit's render may
-            # have landed while this run rendered. Then this commit is dropped, not rebased.
             git fetch -q origin "${GITOPS_BRANCH}"
-            RECORDED_RENDER=$(recorded_at "origin/${GITOPS_BRANCH}" "${IMAGES_REL}" render-sha)
-            if older_than_record "${RECORDED_RENDER}"; then
-              git reset -q --hard "origin/${GITOPS_BRANCH}"
-              skip_superseded "${RECORDED_RENDER}"
+            git reset -q --hard "origin/${GITOPS_BRANCH}"
+            RECORDED_RENDER=""
+            if [ -f "$IMAGES_FILE" ]; then RECORDED_RENDER=$(yq e '.data."render-sha" // ""' "$IMAGES_FILE"); fi
+            if older_than_record "${RECORDED_RENDER}"; then skip_superseded "${RECORDED_RENDER}"; fi
+            apply_render
+            stage_render
+            if git diff --cached --quiet; then
+              echo "hera-enhance-commit: rendered WFT already current on the latest ${GITOPS_BRANCH} — nothing to commit"
+              pushed=yes; break
             fi
-            git pull --rebase origin "${GITOPS_BRANCH}" || { echo "hera-enhance-commit: rebase failed"; break; }
+            git commit -q -m "ml-ci(${APP_NAME}): render WFT from pipeline.py (Hera+Hydra)"
           done
           [ -n "$pushed" ] || { echo "hera-enhance-commit: could not push after 5 attempts"; exit 1; }
           echo "hera-enhance-commit: pushed rendered WFT to ${ORG}/${GITOPS_REPO}@${GITOPS_BRANCH}"
         fi
+        # WRITE end
       volumeMounts:
       - name: workspace
         mountPath: /workspace
@@ -1739,6 +1751,10 @@ spec:
         fi
         echo "pipeline-images discovered at ${IMAGES_PATH}"
 
+        # WRITE begin (executed by tests/render-monotonic)
+        # apply_images: every write of this run into the gitops checkout. Called for the first attempt
+        # and again on the state a rejected push is replaced with (last-built-sha asks the guard again).
+        apply_images() {
         # PRD-1124 D-07 (kubecore-operator#1124 AC-09): keep the ConfigMap in
         # the namespace the rendered WFT lives in — the WFT sits next to it in
         # gitops. Same rule as hera-enhance-commit; this covers builds that skip
@@ -1913,30 +1929,40 @@ spec:
         PRODUCED=$(python3 -I /tmp/engine.py produced --wft "$(dirname "${IMAGES_PATH}")/workflow-template.yaml")
         echo "Recording produced-datasets = ${PRODUCED:-<none>}"
         PRODUCED="${PRODUCED}" yq e -i '.data."produced-datasets" = strenv(PRODUCED)' "${IMAGES_PATH}"
+        }
 
         git config user.name "KubeCore CI"
         git config user.email "ci@kubecore.io"
+        apply_images
         git add "${IMAGES_PATH}"
         if git diff --cached --quiet; then
           echo "No changes to commit (image tags already match)"
           exit 0
         fi
-        git commit -m "ml-ci(${APP_NAME}): bump step images to ${IMAGE_TAG} in pipeline-images ConfigMap"
-        # Retry rebase+push: the gitops branch has many concurrent writers, so a
-        # single push dies "non-fast-forward" whenever another commit lands
-        # first — leaving this app's pipeline-images ConfigMap pinned to a STALE
-        # image tag while its build reported green (observed live 2026-07-16:
-        # hera-yolo's patch-images lost the race and exited 1, so its rebuilt
-        # compose image was never wired in). Rebase and retry instead.
+        git commit -q -m "ml-ci(${APP_NAME}): bump step images to ${IMAGE_TAG} in pipeline-images ConfigMap"
+        # The gitops branch has many concurrent writers, so a single push dies "non-fast-forward"
+        # whenever another commit lands first (observed live 2026-07-16: hera-yolo's patch-images lost
+        # the race and exited 1, so its rebuilt compose image was never wired in). A rejected push is
+        # not rebased: the commit is dropped, the branch fetched and every write of this run applied
+        # again onto it, last-built-sha after asking the guard on that state.
         pushed=""
         for attempt in 1 2 3 4 5; do
           if git push 2>&1; then pushed=yes; break; fi
-          echo "patch-images: push rejected (attempt ${attempt}) — rebasing onto the latest ${GITOPS_BRANCH}"
+          echo "patch-images: push rejected (attempt ${attempt}) — applying the writes again onto the latest ${GITOPS_BRANCH}"
           sleep $((attempt * 3))
-          git pull --rebase origin "${GITOPS_BRANCH}" || { echo "patch-images: rebase failed"; break; }
+          git fetch -q origin "${GITOPS_BRANCH}"
+          git reset -q --hard "origin/${GITOPS_BRANCH}"
+          apply_images
+          git add "${IMAGES_PATH}"
+          if git diff --cached --quiet; then
+            echo "patch-images: the latest ${GITOPS_BRANCH} already holds these values"
+            pushed=yes; break
+          fi
+          git commit -q -m "ml-ci(${APP_NAME}): bump step images to ${IMAGE_TAG} in pipeline-images ConfigMap"
         done
         [ -n "$pushed" ] || { echo "patch-images: could not push after 5 attempts"; exit 1; }
         echo "Pushed image-tag update to ${ORG}/${GITOPS_REPO}@${GITOPS_BRANCH}"
+        # WRITE end
       volumeMounts:
       - name: github-token
         mountPath: /etc/github-token

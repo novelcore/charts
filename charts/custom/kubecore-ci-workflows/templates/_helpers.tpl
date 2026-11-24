@@ -534,9 +534,10 @@ commits). The default is to write: failing the other way could leave an app with
 worse than the stale write the guard exists for. The question is asked in a fresh repository, never in
 the tenant's checkout.
 
-recorded_at REF PATH KEY: data.KEY of the gitops file PATH at REF ("" when absent). A writer that lost
-a push race calls it on the fetched branch, so the guard is asked again about the state its commit would
-land on.
+The record is newer only while it is still on the app branch: after a force push that rewinds the branch
+to an older commit the recorded commit is no longer an ancestor of the branch tip, and the run writes.
+A writer that lost a push race drops its commit, resets to the fetched branch and asks again on that
+state, then writes onto it.
 
 Caller: gitAuth wrapper defined; /tmp/gitops cloned.
 */}}
@@ -544,19 +545,27 @@ Caller: gitAuth wrapper defined; /tmp/gitops cloned.
 # MONOTONIC begin (executed by tests/render-monotonic)
 RUN_SHA="{{`{{workflow.parameters.commit_sha}}`}}"
 APP_REPO_URL="{{`{{workflow.parameters.repo_url}}`}}"
+APP_BRANCH=$(echo "{{`{{workflow.parameters.branch}}`}}" | sed 's|^refs/heads/||')
 older_than_record() {
   _rec="$1"
-  if [ -z "${_rec}" ] || [ -z "${RUN_SHA}" ] || [ "${_rec}" = "${RUN_SHA}" ]; then return 1; fi
+  if [ -z "${_rec}" ] || [ -z "${RUN_SHA}" ]; then return 1; fi
+  if [ "${_rec}" = "${RUN_SHA}" ]; then
+    echo "monotonic: ${RUN_SHA} is the recorded commit: writing" >&2; return 1
+  fi
   rm -rf /tmp/anc
   git init -q /tmp/anc
-  if ! ( cd /tmp/anc && git fetch -q --depth=200 "${APP_REPO_URL}" "${_rec}" "${RUN_SHA}" ) >/dev/null 2>&1; then
-    echo "monotonic: ${_rec} and ${RUN_SHA} cannot both be read from the app repository: the record is not proven newer, this run writes" >&2
+  if ! _gerr=$( cd /tmp/anc && git fetch -q --depth=200 "${APP_REPO_URL}" "${_rec}" "${RUN_SHA}" "+refs/heads/${APP_BRANCH}:refs/tmp/tip" 2>&1 ); then
+    echo "monotonic: could not read ${_rec} (recorded), ${RUN_SHA} (this run) or branch ${APP_BRANCH} from the app repository, the guard cannot answer: writing. git said: $(printf '%s' "${_gerr}" | tail -1)" >&2
     return 1
   fi
-  ( cd /tmp/anc && git merge-base --is-ancestor "${RUN_SHA}" "${_rec}" ) 2>/dev/null
-}
-recorded_at() {
-  git -C /tmp/gitops show "$1:$2" 2>/dev/null | yq e ".data.\"$3\" // \"\"" - 2>/dev/null || true
+  if ! ( cd /tmp/anc && git merge-base --is-ancestor "${RUN_SHA}" "${_rec}" ) 2>/dev/null; then
+    echo "monotonic: ${RUN_SHA} is not older than the recorded ${_rec}: writing" >&2; return 1
+  fi
+  if ( cd /tmp/anc && git merge-base --is-ancestor "${_rec}" refs/tmp/tip ) 2>/dev/null; then
+    echo "monotonic: ${RUN_SHA} is older than the recorded ${_rec}, which is on ${APP_BRANCH}: skipping" >&2; return 0
+  fi
+  echo "monotonic: the recorded ${_rec} is no longer on ${APP_BRANCH} (history rewritten): writing" >&2
+  return 1
 }
 # MONOTONIC end
 {{- end }}
