@@ -131,7 +131,7 @@ run_patch() {
   sed -e "s#/tmp/gitops#$2#g; s#/workspace#$T/wsp#g; s#{{workflow.parameters.commit_sha}}#$1#g; s#{{inputs.parameters.changed_steps}}#[]#g; s#{{workflow.parameters.build_registry_url}}##g; s#python3 -I /tmp/engine.py produced#echo ds; : #g; s#/tmp/changed.json#$T/changed.json#g" "$T/patch-write.sh" > "$T/patch-run.sh"
   PATCH_OUT=$(cd "$2" && GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t \
     IMAGES_PATH=./kubeapps/app/dev/pipeline-images.yaml APP_NAME=app IMAGE_TAG=t1 IMAGE_REPO=p/app REGISTRY=r GITOPS_BRANCH=dev ORG=acme GITOPS_REPO=g \
-    KL_RECORD= KL_COMPAT= ENGINE_COMPOSE= HOME="$T" sh -c '
+    KL_RECORD="${KLR:-}" KL_PREV="${KLP:-}" KL_COMPAT="${KLC:-}" ENGINE_COMPOSE= HOME="$T" sh -c '
       . "$1"; RUN_SHA="$2"; APP_REPO_URL="$3"; APP_BRANCH=dev; sleep() { :; }; . "$4"' sh "$T/mono.sh" "$1" "$APP" "$T/patch-run.sh" 2>&1)
   PATCH_RC=$?
 }
@@ -148,6 +148,31 @@ run_patch "$C3" "$T/cb"
 expect_eq "$PATCH_RC $(last_built)" "0 $C3" "a newer run after an older one that landed: applied again onto it, recorded, no rebase conflict"
 expect_eq "$(printf '%s' "$PATCH_OUT" | grep -c 'push rejected')" "1" "the push really was rejected"
 expect_eq "$(printf '%s' "$PATCH_OUT" | grep -c 'rebase failed')" "0" "patch-images does not rebase"
+
+# KAOS-LIB RECORD, compare-and-set (PRD novelcore/kaos#1911): a run that moved nothing writes back what IT
+# read, so a render-only run (no build lock) racing a pin rebuild must not undo the rebuild's record.
+OLDP="kaos-lib==0.2.0"; NEWP="kaos-lib==0.6.0"
+klp() { git -C "$T/seed" pull -q origin dev 2>/dev/null; yq e '.data."kaos-lib-package"+" "+.data."kaos-lib-compat"' "$T/seed/kubeapps/app/dev/pipeline-images.yaml"; }
+new_origin "$C1"; clone_gitops "$T/ca"; clone_gitops "$T/cb"
+KLR="$OLDP" KLP="$OLDP" KLC=">=0.2" run_patch "$C2" "$T/ca"
+expect_eq "$PATCH_RC $(klp)" "0 $OLDP >=0.2" "kaos-lib: a first record (nothing there) is written"
+# the pin rebuild (it moved the spec) and a render-only run that read the OLD record before the rebuild landed
+new_origin "$C1"; printf '  kaos-lib-package: "%s"\n  kaos-lib-compat: ">=0.2"\n' "$OLDP" >> "$T/seed/kubeapps/app/dev/pipeline-images.yaml"
+git -C "$T/seed" -c user.name=t -c user.email=t@t commit -qam old-record; git -C "$T/seed" push -q origin dev 2>/dev/null
+clone_gitops "$T/ca"; clone_gitops "$T/cb"
+KLR="$NEWP" KLP="$OLDP" KLC=">=0.6" run_patch "$C2" "$T/ca"
+expect_eq "$PATCH_RC $(klp)" "0 $NEWP >=0.6" "kaos-lib: the pin rebuild records the new spec"
+KLR="$OLDP" KLP="$OLDP" KLC=">=0.2" run_patch "$C2" "$T/cb"
+expect_eq "$PATCH_RC $(klp)" "0 $NEWP >=0.6" "kaos-lib: a render-only run that read the old record, its push rejected, does NOT write the old spec back over the rebuild's"
+expect_eq "$(printf '%s' "$PATCH_OUT" | grep -c 'push rejected')" "1" "kaos-lib: the race was real (the push was rejected, the writes applied again)"
+expect_eq "$(printf '%s' "$PATCH_OUT" | grep -c 'left at')" "1" "kaos-lib: the log says it left the record"
+clone_gitops "$T/cb"
+KLR="$OLDP" KLP="$OLDP" KLC=">=0.2" run_patch "$C2" "$T/cb"
+expect_eq "$PATCH_RC $(klp)" "0 $NEWP >=0.6" "kaos-lib: ... also when the rebuild had landed before the run cloned"
+
+clone_gitops "$T/cb"; git -C "$T/cb" pull -q origin dev
+KLR="$NEWP" KLP="$NEWP" KLC=">=0.6" run_patch "$C3" "$T/cb"
+expect_eq "$PATCH_RC $(klp)" "0 $NEWP >=0.6" "kaos-lib: a run that moved nothing and agrees with the record is harmless"
 
 # The record writer: render-sha moves with every render, the other stamps as before.
 printf 'metadata:\n  namespace: ns\ndata:\n  last-built-sha: "x"\n' > "$T/img.yaml"

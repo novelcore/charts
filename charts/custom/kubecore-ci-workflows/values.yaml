@@ -379,6 +379,10 @@ ci:
   kaosLibRebuild:
     hotSeconds: 86400
     idleSeconds: 2592000
+    # The hourly poll builds an app's own pin (spec.ml.kaosLib) the images lack at most this many times per
+    # retention window of the finished builds (1 day after success, 3 after failure): a pin that cannot be
+    # built is not retried every hour for ever. A push, a run or a changed context still builds. 0 = no bound.
+    maxPollTries: 3
   buildSlots:
     enabled: false
     configMapName: ci-build-slots
@@ -395,6 +399,11 @@ ci:
     slots: 6
     configMapName: ci-check-drift-slots
     key: slots
+  # A forced ml-ci-reconcile run that was given no context_sha and finds nothing to do keeps re-reading the
+  # gitops context, in its unlocked await step (60 s apart, no pod, no build lock and no check-drift slot
+  # held between reads), until the Workflow is this many seconds old: the operator creates the run and
+  # writes the context in one pass, so an early read may be the old context. 0 = conclude at once.
+  reconcileRecheckSeconds: 180
   # Upper bound (seconds) of one ml-ci-reconcile run, including its wait for the
   # app's build lock (check-drift takes the same mutex as ml-ci-build). A build
   # that never releases the lock fails the waiting run at this deadline.
