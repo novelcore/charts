@@ -210,7 +210,7 @@ expect_eq "$RC/$NEEDS" "0/true" "force, gitops context matches: builds"
 # with the hourly poll's pacing. Exhaustive cases (idle apps, attempt guard, queues): tests/kaos-lib.
 PIN_CTX=$(printf 'kaosLib:\n  spec: "kaos-lib==0.5.1"\n  version: "0.5.1"\n  pinned: true\n')
 PLATFORM_CTX=$(printf 'kaosLib:\n  spec: "kaos-lib==0.5.1"\n  version: "0.5.1"\n')
-PIN_REF=$(printf '%s' "kaos-lib==0.5.1" | sha256sum | cut -c1-12)
+PIN_REF=$(printf '%s\n%s' "kaos-lib==0.5.1" "kaos-lib==0.5.0" | sha256sum | cut -c1-12)   # the move: wanted spec + recorded package
 GITOPS_CTX="$PIN_CTX" GITOPS_KL="kaos-lib==0.5.0" run_case true "$IDLE" "$HEAD_SHA" built
 expect_eq "$RC/$NEEDS/$(cat "$T/kaos_lib_ref" 2>/dev/null)" "0/true/$PIN_REF" "force, the app pins another kaos-lib than its images have: rebuilds now (kaos_lib_ref set)"
 expect_has "$OUT" "KAOS-LIB PIN" "force, pin: says why"

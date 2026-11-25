@@ -253,7 +253,14 @@ expect_eq "$REC/$COMPAT" "<absent>/<absent>" "patch-images: nothing to report le
 # ── ml-ci-reconcile: KAOS-LIB DRIFT ──────────────────────────────────────────
 
 DRIFT_SRC="${BASE_TMP}/check-drift.src"; src ml-ci-reconcile check-drift > "$DRIFT_SRC"
-REF=$(printf '%s' "$SPEC" | sha256sum | cut -c1-12)
+# The attempt key is the MOVE (spec wanted + package the image record holds), not the destination:
+# an attempt made from another recorded state must not hold a different move back.
+attempt_key() {  # attempt_key WANTED RECORDED(empty = none)
+  printf '%s\n%s' "$1" "$2" | sha256sum | cut -c1-12
+}
+REF=$(attempt_key "$SPEC" "$OLD")
+REF_ABSENT=$(attempt_key "$SPEC" "")
+REF_OLDFORMAT=$(printf '%s' "$SPEC" | sha256sum | cut -c1-12)
 drift_case() {  # drift_case RECORDED(-=absent) CONTEXT_SPEC(-=none); RUN_AGE = seconds since the app's last LABELLED pipeline run (default 1h: hot); REF_AGE = seconds since its last run that only has spec.workflowTemplateRef (none by default)
   RUN_AGE="${RUN_AGE-3600}"; RUN_TS=""; [ -n "$RUN_AGE" ] && RUN_TS=$(ago "$RUN_AGE")
   REF_TS=""; [ -n "${REF_AGE:-}" ] && REF_TS=$(ago "$REF_AGE")
@@ -393,7 +400,7 @@ expect_eq "$NEEDS/$KREF" "true/$REF" "pin: ... and one idle for 40 days"
 RUNS_UNREADABLE=1 pin_case "$OLD"; FORCE=true run_drift
 expect_eq "$NEEDS/$KREF" "true/$REF" "pin: ... the app's use is not read at all"
 pin_case "-"; FORCE=true run_drift
-expect_eq "$NEEDS/$KREF" "true/$REF" "pin: images built before the record existed: rebuilt once"
+expect_eq "$NEEDS/$KREF" "true/$REF_ABSENT" "pin: images built before the record existed: rebuilt once"
 pin_case "$SPEC"; FORCE=true run_drift
 expect_eq "$RC/$NEEDS/$KREF" "0/false/" "pin: the images (gitops) already have the pin: nothing to rebuild (a finished rebuild never re-triggers)"
 expect_has "$OUT" "kaos-lib pin in sync" "pin: says so"
@@ -516,6 +523,41 @@ expect_has "$SUBMIT" "kaos_lib_ref != ''" "reconcile: the build submitted for a 
 LABEL=$(yq 'select(.metadata.name == "ml-ci-reconcile") | .spec.templates[] | select(.name == "submit-build") | .resource.manifest' "$RENDERED" \
         | yq '.metadata.labels["platform.kubecore.io/kaos-lib"]')
 expect_eq "$LABEL" "{{inputs.parameters.kaos_lib_ref}}" "reconcile: the submitted build carries the spec ref (the attempt guard's label)"
+
+# ── the attempt key is the move (PRD novelcore/kaos#1911 AC-24): a past attempt made from another recorded state does not count ──
+RC27="$SPEC"; RC28="kaos-lib==0.9.28"
+# back and forth: rc27 was built from the old record, the app then moved to rc28 (recorded), now rc27 is wanted again
+RUN_AGE="" REF_AGE="" PINNED=1 GIT_REC="$RC28" drift_case "$RC28" "$RC27"; attempt Succeeded 600 "$(attempt_key "$RC27" "$OLD")"; run_drift
+expect_eq "$NEEDS/$KREF" "true/$(attempt_key "$RC27" "$RC28")" "move key: poll, rc27 built earlier from another record, rc28 recorded, rc27 wanted: rebuilt at once"
+pin_case "$RC28"; attempt Succeeded 600 "$(attempt_key "$RC27" "$OLD")"; FORCE=true run_drift
+expect_eq "$NEEDS/$KREF" "true/$(attempt_key "$RC27" "$RC28")" "move key: forced run (no context_sha), same move: rebuilt through the shared pin_due"
+pin_case "$RC28"; attempt Succeeded 600 "$(attempt_key "$RC27" "$OLD")"; WANT_CTX="$CTX_SHA" FORCE=true run_drift
+expect_eq "$NEEDS/$KREF" "true/$(attempt_key "$RC27" "$RC28")" "move key: forced run naming context_sha, same move: rebuilt"
+RUN_AGE="" REF_AGE="" PINNED=1 GIT_REC="$RC28" drift_case "$RC28" "$RC27"; for a in 1 2 3; do attempt Failed $((7000 + a * 100)) "$(attempt_key "$RC27" "$OLD")"; done; run_drift
+expect_eq "$NEEDS/$KREF" "true/$(attempt_key "$RC27" "$RC28")" "move key: three attempts at the same spec from another record do not use up this move's tries"
+# a spec that never installs: the record does not change, the key stays, the guard and the bound hold
+RUN_AGE="" REF_AGE="" PINNED=1 GIT_REC="$RC28" drift_case "$RC28" "$RC27"; attempt Failed 600 "$(attempt_key "$RC27" "$RC28")"; run_drift
+expect_eq "$NEEDS/$KREF" "false/" "move key: the same move failed 10 min ago (record unchanged): the hourly guard holds"
+RUN_AGE="" REF_AGE="" PINNED=1 GIT_REC="$RC28" drift_case "$RC28" "$RC27"; for a in 1 2 3; do attempt Failed $((7000 + a * 100)) "$(attempt_key "$RC27" "$RC28")"; done; run_drift
+expect_eq "$NEEDS/$KREF" "false/" "move key: three attempts at the same move: the try bound holds"
+drift_case "$RC28" "$RC27"; attempt Failed 600 "$(attempt_key "$RC27" "$OLD")"; run_drift
+expect_eq "$NEEDS/$KREF" "true/$(attempt_key "$RC27" "$RC28")" "move key: platform-wide drift path uses the same key (another record: rebuilt)"
+drift_case "$RC28" "$RC27"; attempt Failed 600 "$(attempt_key "$RC27" "$RC28")"; run_drift
+expect_eq "$NEEDS/$KREF" "false/" "move key: platform-wide drift path, same move failed 10 min ago: held"
+# an old-format label (sha256 of the spec alone, from builds made by 0.17.19) is not matched and does not crash
+pin_case "$OLD"; attempt Failed 600 "$REF_OLDFORMAT"; FORCE=true run_drift
+expect_eq "$RC/$NEEDS/$KREF" "0/true/$REF" "move key: an old-format label is not matched: at worst one extra attempt"
+
+# the label a submitted build carries (the value written for submit-build, copied verbatim into the label, tested above) is exactly
+# what kl_last_try and kl_tries look for: a finished build labelled with it holds the next attempt, in the forced run and in the poll
+pin_case "$RC28"; FORCE=true run_drift; SUBMITTED="$KREF"; attempt Failed 600 "$SUBMITTED"; FORCE=true run_drift
+expect_eq "$SUBMITTED/$NEEDS" "$(attempt_key "$RC27" "$RC28")/false" "label round trip: forced run: the build it submitted is the attempt it then finds"
+RUN_AGE="" REF_AGE="" PINNED=1 GIT_REC="$RC28" drift_case "$RC28" "$RC27"; run_drift; SUBMITTED="$KREF"; attempt Failed 600 "$SUBMITTED"; run_drift
+expect_eq "$SUBMITTED/$NEEDS" "$(attempt_key "$RC27" "$RC28")/false" "label round trip: pin poll: the build it submitted is the attempt it then finds"
+RUN_AGE="" REF_AGE="" PINNED=1 GIT_REC="$RC28" drift_case "$RC28" "$RC27"; for a in 1 2 3; do attempt Failed $((7000 + a * 100)) "$(attempt_key "$RC27" "$RC28")"; done; run_drift
+expect_eq "$NEEDS" "false" "label round trip: pin poll: three builds with the submitted label use up the try bound"
+drift_case "$RC28" "$RC27"; run_drift; SUBMITTED="$KREF"; attempt Failed 600 "$SUBMITTED"; run_drift
+expect_eq "$SUBMITTED/$NEEDS" "$(attempt_key "$RC27" "$RC28")/false" "label round trip: platform-wide drift poll: the build it submitted is the attempt it then finds"
 
 # ── kaos-lib-support ─────────────────────────────────────────────────────────
 

@@ -720,6 +720,14 @@ spec:
         }
         KL_MAX_TRIES={{ int .Values.ci.kaosLibRebuild.maxPollTries }}
 
+        # kl_key RECORDED: the attempt key (12 hex, the label value) is the MOVE, not the destination: the
+        # spec wanted and the package the image record holds now. An attempt made from another recorded state
+        # (the app went rc27 -> rc28 -> rc27) is a different move and does not hold this one back; a spec that
+        # never installs leaves the record as it is, so its key stays and the guard and the bound work.
+        kl_key() {
+          printf '%s\n%s' "$KL_WANT" "$1" | sha256sum | cut -c1-12
+        }
+
         # pin_due: sets PIN_REF (the spec's ref, "" = nothing due) and PIN_HAVE. Used by the forced run AND the
         # hourly poll, so a pin whose forced run read the gitops context BEFORE it landed (the operator creates
         # the sync Workflow and writes the context in one pass, and nothing orders the two) is still found: by
@@ -734,11 +742,11 @@ spec:
             elif [ "$PIN_HAVE" = "$KL_WANT" ]; then
               echo "reconcile: kaos-lib pin in sync (${KL_WANT})"
             else
-              PIN_TRY=$(kl_last_try "$(printf '%s' "$KL_WANT" | sha256sum | cut -c1-12)")
+              PIN_TRY=$(kl_last_try "$(kl_key "$PIN_HAVE")")
               if [ -n "$PIN_TRY" ]; then
                 echo "reconcile: KAOS-LIB PIN (${PIN_HAVE:-<unrecorded>} -> ${KL_WANT}) — not rebuilding now: an attempt at this spec ended within the hour: ${PIN_TRY}"
               else
-                PIN_REF=$(printf '%s' "$KL_WANT" | sha256sum | cut -c1-12)
+                PIN_REF=$(kl_key "$PIN_HAVE")
               fi
             fi
           fi
@@ -958,7 +966,7 @@ spec:
         elif [ "$KL_HAVE" = "$KL_WANT" ]; then
           echo "reconcile: kaos-lib in sync (${KL_WANT})"
         else
-          KL_REF=$(printf '%s' "$KL_WANT" | sha256sum | cut -c1-12)
+          KL_REF=$(kl_key "$KL_HAVE")
           LAST_TRY=$(kl_last_try "$KL_REF")
           if [ -n "$LAST_TRY" ]; then
             echo "reconcile: KAOS-LIB DRIFT (${KL_HAVE:-<unrecorded>} -> ${KL_WANT}) — not rebuilding this poll: an attempt at this spec ended within the hour: ${LAST_TRY}"
@@ -1148,7 +1156,7 @@ spec:
           labels:
             platform.kubecore.io/app: {{`{{workflow.parameters.app_name}}`}}
             platform.kubecore.io/submitted-by: ml-ci-reconcile
-            # The kaos-lib spec (sha256[:12]) this build is for: KAOS-LIB DRIFT's attempt guard.
+            # The kaos-lib move (sha256[:12] of the wanted spec and the recorded package) this build is for: the attempt guard.
             platform.kubecore.io/kaos-lib: "{{`{{inputs.parameters.kaos_lib_ref}}`}}"
         spec:
           workflowTemplateRef:
