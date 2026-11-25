@@ -696,7 +696,7 @@ spec:
              | select((.metadata.labels // {})["platform.kubecore.io/app"] == $app
                       and (.metadata.labels // {})["platform.kubecore.io/submitted-by"] == "ml-ci-reconcile"
                       and (.metadata.labels // {})["platform.kubecore.io/kaos-lib"] == $ref
-                      and (.status.phase == "Succeeded" or .status.phase == "Failed" or .status.phase == "Error"))
+                      and (.status.phase == "Failed" or .status.phase == "Error"))
              | {name: .metadata.name, phase: .status.phase,
                 age: (now - ((.status.finishedAt // .metadata.creationTimestamp // "")
                              | try fromdateiso8601 catch now))}
@@ -705,7 +705,7 @@ spec:
             | if . == null then "" else "\(.name) (\(.phase), \(.age | floor)s ago)" end' 2>&1 || echo "unreadable"
         }
 
-        # kl_tries REF: how many finished builds this reconciler submitted for this spec (the Workflows are
+        # kl_tries REF: how many finished, not succeeded builds this reconciler submitted for this move (the Workflows are
         # kept by the build's ttlStrategy: 1 day after success, 3 days after failure, so the count is "in the
         # retention window"). Prints a number, or "unreadable".
         kl_tries() {
@@ -715,7 +715,7 @@ spec:
                 | select((.metadata.labels // {})["platform.kubecore.io/app"] == $app
                          and (.metadata.labels // {})["platform.kubecore.io/submitted-by"] == "ml-ci-reconcile"
                          and (.metadata.labels // {})["platform.kubecore.io/kaos-lib"] == $ref
-                         and (.status.phase == "Succeeded" or .status.phase == "Failed" or .status.phase == "Error"))] | length' 2>/dev/null \
+                         and (.status.phase == "Failed" or .status.phase == "Error"))] | length' 2>/dev/null \
             || echo unreadable
         }
         KL_MAX_TRIES={{ int .Values.ci.kaosLibRebuild.maxPollTries }}

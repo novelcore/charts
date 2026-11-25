@@ -495,8 +495,8 @@ expect_eq "$(grep -c 'reconcileRecheckReads' "$RENDERED")" "0" "re-read: the rea
 # the poll's pin rebuild is bounded for an idle app: a spec that cannot be built is not retried every hour for ever
 RUN_AGE="" REF_AGE="" PINNED=1 GIT_REC="$OLD" drift_case "$OLD" "$SPEC"; attempt Failed 7200 "$REF"; attempt Failed 7300 "$REF"; run_drift
 expect_eq "$NEEDS/$KREF" "true/$REF" "poll: two finished attempts at this spec: tried again"
-RUN_AGE="" REF_AGE="" PINNED=1 GIT_REC="$OLD" drift_case "$OLD" "$SPEC"; attempt Failed 7200 "$REF"; attempt Succeeded 7300 "$REF"; attempt Failed 7400 "$REF"; run_drift
-expect_eq "$RC/$NEEDS/$KREF" "0/false/" "poll: three finished attempts at this spec and the images still lack it: stops"
+RUN_AGE="" REF_AGE="" PINNED=1 GIT_REC="$OLD" drift_case "$OLD" "$SPEC"; attempt Failed 7200 "$REF"; attempt Failed 7300 "$REF"; attempt Error 7400 "$REF"; run_drift
+expect_eq "$RC/$NEEDS/$KREF" "0/false/" "poll: three failed attempts at this spec and the images still lack it: stops"
 expect_has "$OUT" "could not be built" "poll: says the pinned version could not be built"
 expect_has "$OUT" "3 builds at this spec ended" "poll: ... and how many tried"
 RUN_AGE="" REF_AGE="" PINNED=1 GIT_REC="$OLD" drift_case "$OLD" "$SPEC"; attempt Failed 7200 "000000000000"; attempt Failed 7300 "000000000000"; attempt Failed 7400 "000000000000"; run_drift
@@ -558,6 +558,30 @@ RUN_AGE="" REF_AGE="" PINNED=1 GIT_REC="$RC28" drift_case "$RC28" "$RC27"; for a
 expect_eq "$NEEDS" "false" "label round trip: pin poll: three builds with the submitted label use up the try bound"
 drift_case "$RC28" "$RC27"; run_drift; SUBMITTED="$KREF"; attempt Failed 600 "$SUBMITTED"; run_drift
 expect_eq "$SUBMITTED/$NEEDS" "$(attempt_key "$RC27" "$RC28")/false" "label round trip: platform-wide drift poll: the build it submitted is the attempt it then finds"
+
+# only a build that did NOT succeed counts (guard and bound): a Succeeded build that left the record different means something moved since
+# (a) the live sequence: a Succeeded build 33 min ago with the same key, record rc28, want rc27
+RUN_AGE="" REF_AGE="" PINNED=1 GIT_REC="$RC28" drift_case "$RC28" "$RC27"; attempt Succeeded 1980 "$(attempt_key "$RC27" "$RC28")"; run_drift
+expect_eq "$NEEDS/$KREF" "true/$(attempt_key "$RC27" "$RC28")" "succeeded only: poll, a Succeeded build of the same key 33 min ago: rebuilt at once"
+pin_case "$RC28"; attempt Succeeded 1980 "$(attempt_key "$RC27" "$RC28")"; FORCE=true run_drift
+expect_eq "$NEEDS/$KREF" "true/$(attempt_key "$RC27" "$RC28")" "succeeded only: forced run, a Succeeded build of the same key 33 min ago: rebuilt at once"
+drift_case "$RC28" "$RC27"; attempt Succeeded 1980 "$(attempt_key "$RC27" "$RC28")"; run_drift
+expect_eq "$NEEDS" "true" "succeeded only: platform-wide drift poll, a Succeeded build of the same key: rebuilt at once"
+# (b) failed builds still hold
+RUN_AGE="" REF_AGE="" PINNED=1 GIT_REC="$RC28" drift_case "$RC28" "$RC27"; attempt Failed 600 "$(attempt_key "$RC27" "$RC28")"; run_drift
+expect_eq "$NEEDS" "false" "succeeded only: a Failed build of the same key 10 min ago: guard holds"
+RUN_AGE="" REF_AGE="" PINNED=1 GIT_REC="$RC28" drift_case "$RC28" "$RC27"; attempt Error 600 "$(attempt_key "$RC27" "$RC28")"; run_drift
+expect_eq "$NEEDS" "false" "succeeded only: an Error build of the same key 10 min ago: guard holds"
+drift_case "$RC28" "$RC27"; attempt Failed 600 "$(attempt_key "$RC27" "$RC28")"; run_drift
+expect_eq "$NEEDS" "false" "succeeded only: platform-wide drift poll, a Failed build 10 min ago: guard holds"
+# (c) two Succeeded and one Failed: one try counted
+RUN_AGE="" REF_AGE="" PINNED=1 GIT_REC="$RC28" drift_case "$RC28" "$RC27"; attempt Succeeded 7200 "$(attempt_key "$RC27" "$RC28")"; attempt Succeeded 7300 "$(attempt_key "$RC27" "$RC28")"; attempt Failed 7400 "$(attempt_key "$RC27" "$RC28")"; run_drift
+expect_eq "$NEEDS" "true" "succeeded only: two Succeeded and one Failed of the same key: one try counted, below the bound"
+RUN_AGE="" REF_AGE="" PINNED=1 GIT_REC="$RC28" drift_case "$RC28" "$RC27"; attempt Failed 7200 "$(attempt_key "$RC27" "$RC28")"; attempt Failed 7300 "$(attempt_key "$RC27" "$RC28")"; attempt Succeeded 7400 "$(attempt_key "$RC27" "$RC28")"; run_drift
+expect_eq "$NEEDS" "true" "succeeded only: two Failed and one Succeeded: two tries counted, below the bound"
+# (d) a build with no phase yet (still running) is not finished: it neither holds nor counts, as before
+RUN_AGE="" REF_AGE="" PINNED=1 GIT_REC="$RC28" drift_case "$RC28" "$RC27"; jq --arg k "$(attempt_key "$RC27" "$RC28")" --arg app "$APP" '.items += [{metadata: {name: "run1", labels: {"platform.kubecore.io/app": $app, "platform.kubecore.io/submitted-by": "ml-ci-reconcile", "platform.kubecore.io/kaos-lib": $k}}, status: {}}]' "$T/workflows.json" > "$T/w" && mv "$T/w" "$T/workflows.json"; run_drift
+expect_eq "$NEEDS" "true" "succeeded only: a build with no phase yet is not a finished attempt: unchanged (not counted)"
 
 # ── kaos-lib-support ─────────────────────────────────────────────────────────
 
